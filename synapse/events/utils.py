@@ -1019,20 +1019,27 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
-    # MSC4311: Ensure the create event is available on invites and knocks.
-    # TODO: Implement the rest of MSC4311
-    if (
-        event.room_version.msc4291_room_ids_as_hashes
-        and event.type == EventTypes.Create
-        and event.get_state_key() == ""
-    ):
-        return event.get_pdu_json()
-
     return {
         "type": event.type,
         "state_key": event.state_key,
         "content": event.content,
         "sender": event.sender,
+    }
+
+
+def strip_event_dict(pdu_dict: JsonDict) -> JsonDict:
+    """Strip a PDU dict to stripped state format (4 fields only).
+
+    Used to convert full PDUs received over federation (MSC4311) to the
+    stripped state format expected by the Client-Server API.
+
+    Callers must pre-filter to ensure pdu_dict has a non-empty "type" key.
+    """
+    return {
+        "type": pdu_dict["type"],
+        "state_key": pdu_dict.get("state_key", ""),
+        "content": pdu_dict.get("content", {}),
+        "sender": pdu_dict.get("sender", ""),
     }
 
 

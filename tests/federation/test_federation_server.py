@@ -43,6 +43,7 @@ from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.server import FakeChannel
 from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
@@ -712,6 +713,132 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     #   replication, at which point the tests.handlers.room_member test
     #       test_local_users_joining_on_another_worker_contribute_to_rate_limit
     #   is probably sufficient to reassure that the bucket is updated.
+
+
+class MSC4311FederationInviteTestCase(unittest.FederatingHomeserverTestCase):
+    """MSC4311: Tests for invite_room_state validation and stripping over federation."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.local_user = self.register_user("user", "pass")
+        self.remote_room_id = f"!room:{self.OTHER_SERVER_NAME}"
+        self.remote_sender = f"@creator:{self.OTHER_SERVER_NAME}"
+
+    def _make_invite_request(
+        self,
+        invite_room_state: list,
+        room_version: str = RoomVersions.V10.identifier,
+    ) -> FakeChannel:
+        rv = KNOWN_ROOM_VERSIONS[room_version]
+        room_create_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.remote_room_id,
+                    "sender": self.remote_sender,
+                    "depth": 1,
+                    "origin_server_ts": 1,
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "content": {
+                        "creator": self.remote_sender,
+                        "room_version": room_version,
+                    },
+                    "auth_events": [],
+                    "prev_events": [],
+                },
+                rv,
+            ),
+            rv,
+        )
+        invite_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.remote_room_id,
+                    "sender": self.remote_sender,
+                    "depth": 2,
+                    "origin_server_ts": 2,
+                    "type": EventTypes.Member,
+                    "state_key": self.local_user,
+                    "content": {"membership": Membership.INVITE},
+                    "auth_events": [room_create_event.event_id],
+                    "prev_events": [room_create_event.event_id],
+                },
+                rv,
+            ),
+            rv,
+        )
+        return self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/invite/{self.remote_room_id}/{invite_event.event_id}",
+            content={
+                "event": invite_event.get_dict(),
+                "invite_room_state": invite_room_state,
+                "room_version": room_version,
+            },
+        )
+
+    def test_full_pdus_stripped_for_client(self) -> None:
+        """invite_room_state full PDUs are stripped to 4 fields for the C-S API."""
+        rv = KNOWN_ROOM_VERSIONS[RoomVersions.V12.identifier]
+        create_pdu = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.remote_room_id,
+                    "sender": self.remote_sender,
+                    "depth": 1,
+                    "origin_server_ts": 1,
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "content": {
+                        "room_version": RoomVersions.V12.identifier,
+                    },
+                    "auth_events": [],
+                    "prev_events": [],
+                },
+                rv,
+            ),
+            rv,
+        )
+        # A full PDU has signatures, hashes, etc.
+        self.assertIn("signatures", create_pdu.get_pdu_json())
+
+        channel = self._make_invite_request(
+            invite_room_state=[create_pdu.get_pdu_json()],
+            room_version=RoomVersions.V12.identifier,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Retrieve the stored invite event and verify invite_room_state is stripped.
+        store = self.hs.get_datastores().main
+        invite_memberships = self.get_success(
+            store.get_invited_rooms_for_local_user(self.local_user)
+        )
+        self.assertEqual(len(invite_memberships), 1)
+        invite_event = self.get_success(store.get_event(invite_memberships[0].event_id))
+        invite_state = invite_event.unsigned.get("invite_room_state", [])
+
+        create_events = [e for e in invite_state if e.get("type") == EventTypes.Create]
+        self.assertEqual(len(create_events), 1)
+        create = create_events[0]
+        # Must be stripped state: only these 4 fields
+        self.assertIn("type", create)
+        self.assertIn("state_key", create)
+        self.assertIn("sender", create)
+        self.assertIn("content", create)
+        self.assertNotIn("signatures", create)
+        self.assertNotIn("hashes", create)
+        self.assertNotIn("auth_events", create)
+
+    def test_missing_create_event_warns_but_accepts(self) -> None:
+        """invite_room_state without m.room.create is accepted with a warning."""
+        channel = self._make_invite_request(invite_room_state=[])
+        self.assertEqual(channel.code, 200, channel.json_body)
 
 
 class StripUnsignedFromEventsTestCase(unittest.TestCase):

@@ -72,6 +72,7 @@ from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -1350,6 +1351,27 @@ class FederationClient(FederationBase):
         """
         time_now = self._clock.time_msec()
 
+        stripped = pdu.unsigned.get("invite_room_state", [])
+        if stripped and pdu.room_version.msc4291_room_ids_as_hashes:
+            # MSC4311: upgrade stripped state to full PDUs so the receiving server
+            # can verify the room ID. Use the stripped state as a guide for which
+            # events to look up.
+            types = [
+                (e.get("type", ""), e.get("state_key", ""))
+                for e in stripped
+                if isinstance(e, dict) and e.get("type")
+            ]
+            state_filter = StateFilter.from_types(types)
+            state_ids = await self.store.get_partial_filtered_current_state_ids(
+                pdu.room_id, state_filter
+            )
+            state_events = await self.store.get_events(state_ids.values())
+            invite_room_state_pdus: list = [
+                e.get_pdu_json() for e in state_events.values()
+            ]
+        else:
+            invite_room_state_pdus = stripped
+
         try:
             return await self.transport_layer.send_invite_v2(
                 destination=destination,
@@ -1358,7 +1380,7 @@ class FederationClient(FederationBase):
                 content={
                     "event": pdu.get_pdu_json(time_now),
                     "room_version": room_version.identifier,
-                    "invite_room_state": pdu.unsigned.get("invite_room_state", []),
+                    "invite_room_state": invite_room_state_pdus,
                 },
             )
         except HttpResponseException as e:

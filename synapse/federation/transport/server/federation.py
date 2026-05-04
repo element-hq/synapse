@@ -28,10 +28,11 @@ from typing import (
     Sequence,
 )
 
-from synapse.api.constants import Direction, EduTypes
+from synapse.api.constants import Direction, EduTypes, EventTypes
 from synapse.api.errors import Codes, SynapseError
-from synapse.api.room_versions import RoomVersions
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.api.urls import FEDERATION_UNSTABLE_PREFIX, FEDERATION_V2_PREFIX
+from synapse.events.utils import strip_event_dict
 from synapse.federation.transport.server._base import (
     Authenticator,
     BaseFederationServlet,
@@ -522,9 +523,29 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
         if not isinstance(invite_room_state, list):
             invite_room_state = []
 
-        # Synapse expects invite_room_state to be in unsigned, as it is in v1
-        # API
+        room_version_obj = KNOWN_ROOM_VERSIONS.get(room_version)
+        if room_version_obj and room_version_obj.msc4291_room_ids_as_hashes:
+            # MSC4311: invite_room_state contains full PDUs. Warn if m.room.create
+            # is absent, then strip to 4-field format for C-S API storage.
+            create_event_present = any(
+                isinstance(e, dict)
+                and e.get("type") == EventTypes.Create
+                and e.get("state_key") == ""
+                for e in invite_room_state
+            )
+            if not create_event_present:
+                logger.warning(
+                    "invite_room_state from %s for room %s is missing m.room.create",
+                    origin,
+                    room_id,
+                )
+            invite_room_state = [
+                strip_event_dict(e)
+                for e in invite_room_state
+                if isinstance(e, dict) and e.get("type")
+            ]
 
+        # Synapse expects invite_room_state to be in unsigned, as it is in v1 API
         event.setdefault("unsigned", {})["invite_room_state"] = invite_room_state
 
         result = await self.handler.on_invite_request(

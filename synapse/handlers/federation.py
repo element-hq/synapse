@@ -59,6 +59,7 @@ from synapse.crypto.event_signing import compute_event_signature
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
+from synapse.events.utils import strip_event_dict
 from synapse.events.validator import EventValidator
 from synapse.federation.federation_client import InvalidResponseError
 from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
@@ -865,19 +866,37 @@ class FederationHandler:
         # further information about the room in the form of partial state events
         knock_response = await self.federation_client.send_knock(target_hosts, event)
 
-        # Store any stripped room state events in the "unsigned" key of the event.
+        # Store room state events in the "unsigned" key of the event.
         # This is a bit of a hack and is cribbing off of invites. Basically we
         # store the room state here and retrieve it again when this event appears
         # in the invitee's sync stream. It is stripped out for all other local users.
-        stripped_room_state = knock_response.get("knock_room_state")
+        knock_room_state = knock_response.get("knock_room_state")
 
-        if stripped_room_state is None:
+        if knock_room_state is None:
             raise KeyError("Missing 'knock_room_state' field in send_knock response")
 
-        if not isinstance(stripped_room_state, list):
+        if not isinstance(knock_room_state, list):
             raise TypeError("'knock_room_state' has wrong type")
 
-        event.unsigned["knock_room_state"] = stripped_room_state
+        # MSC4311: knock_room_state contains full PDUs over federation.
+        # Validate that m.room.create is present, then strip to stripped state for clients.
+        create_event_present = any(
+            isinstance(e, dict)
+            and e.get("type") == EventTypes.Create
+            and e.get("state_key") == ""
+            for e in knock_room_state
+        )
+        if not create_event_present:
+            logger.warning(
+                "knock_room_state for room %s is missing m.room.create event",
+                event.room_id,
+            )
+
+        event.unsigned["knock_room_state"] = [
+            strip_event_dict(e)
+            for e in knock_room_state
+            if isinstance(e, dict) and e.get("type")
+        ]
 
         context = EventContext.for_outlier(self._storage_controllers)
         stream_id = await self._federation_event_handler.persist_events_and_notify(

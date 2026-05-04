@@ -1151,6 +1151,42 @@ class EventsWorkerStore(SQLBaseStore):
 
         return [strip_event(e) for e in state_to_include.values()]
 
+    async def get_room_state_pdus_from_event_context(
+        self,
+        context: EventContext,
+        state_keys_to_include: StateFilter,
+        membership_user_id: str | None = None,
+    ) -> list[JsonDict]:
+        """
+        Retrieve room state events as full PDUs, for use in federation
+        invite_room_state and knock_room_state (MSC4311).
+
+        Args:
+            context: The event context to retrieve state of the room from.
+            state_keys_to_include: The state events to include, for each event type.
+            membership_user_id: An optional user ID to include the membership state
+                events of.
+
+        Returns:
+            A list of full PDU dicts representing the room state.
+        """
+        if membership_user_id:
+            types = chain(
+                state_keys_to_include.to_types(),
+                [(EventTypes.Member, membership_user_id)],
+            )
+            state_filter = StateFilter.from_types(types)
+        else:
+            state_filter = state_keys_to_include
+        selected_state_ids = await context.get_current_state_ids(state_filter)
+
+        assert selected_state_ids is not None
+
+        selected_state_ids = state_filter.filter_state(selected_state_ids)
+        state_to_include = await self.get_events(selected_state_ids.values())
+
+        return [e.get_pdu_json() for e in state_to_include.values()]
+
     def _maybe_start_fetch_thread(self) -> None:
         """Starts an event fetch thread if we are not yet at the maximum number."""
         with self._event_fetch_lock:

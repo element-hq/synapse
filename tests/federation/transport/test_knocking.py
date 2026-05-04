@@ -24,7 +24,7 @@ from typing import Any
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, JoinRules, Membership
-from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion, RoomVersions
 from synapse.events import EventBase, builder
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
@@ -43,6 +43,7 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
         hs: "HomeServer",
         room_id: str,
         sender: str,
+        room_version: str = RoomVersions.V7.identifier,
     ) -> OrderedDict:
         """Adds some state to a room. State events are those that should be sent to a knocking
         user after they knock on the room, as well as some state that *shouldn't* be sent
@@ -69,7 +70,6 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
         self.get_success(
             event_injection.inject_event(
                 hs,
-                room_version=RoomVersions.V7.identifier,
                 room_id=room_id,
                 sender=sender,
                 type="com.example.secret",
@@ -138,7 +138,6 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
             self.get_success(
                 event_injection.inject_event(
                     hs,
-                    room_version=RoomVersions.V7.identifier,
                     room_id=room_id,
                     sender=sender,
                     type=event_type,
@@ -149,11 +148,12 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
 
         # Finally, we expect to see the m.room.create event of the room as part of the
         # stripped state. We don't need to inject this event though.
+        rv_obj = KNOWN_ROOM_VERSIONS[room_version]
+        create_content: dict = {"room_version": room_version}
+        if not rv_obj.implicit_room_creator:
+            create_content["creator"] = sender
         room_state[EventTypes.Create] = {
-            "content": {
-                "creator": sender,
-                "room_version": RoomVersions.V7.identifier,
-            },
+            "content": create_content,
             "state_key": "",
         }
 
@@ -164,11 +164,11 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
         knock_room_state: list[dict],
         expected_room_state: dict,
     ) -> None:
-        """Test a list of stripped room state events received over federation against a
+        """Test a list of state events received over federation or sync against a
         dict of expected state events.
 
         Args:
-            knock_room_state: The list of room state that was received over federation.
+            knock_room_state: The list of room state events received.
             expected_room_state: A dict containing the room state we expect to see in
                 `knock_room_state`.
         """
@@ -188,9 +188,6 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
             self.assertEqual(
                 expected_room_state[event_type]["state_key"], event["state_key"]
             )
-
-            # Ensure the event has been stripped
-            self.assertNotIn("signatures", event)
 
             # Pop once we've found and processed a state event
             expected_room_state.pop(event_type)
@@ -250,17 +247,18 @@ class FederationKnockingTestCase(
 
         fake_knocking_user_id = "@user:other.example.com"
 
-        # Create a room with a room version that includes knocking
+        # Create a room with a room version that includes knocking and full PDU state
+        # (msc4291_room_ids_as_hashes required for MSC4311 full PDU knock_room_state)
         room_id = self.helper.create_room_as(
             "u1",
             is_public=False,
-            room_version=RoomVersions.V7.identifier,
+            room_version=RoomVersions.V12.identifier,
             tok=user_token,
         )
 
         # Update the join rules and add additional state to the room to check for later
         expected_room_state = self.send_example_state_events_to_room(
-            self.hs, room_id, user_id
+            self.hs, room_id, user_id, room_version=RoomVersions.V12.identifier
         )
 
         channel = self.make_signed_federation_request(
@@ -271,7 +269,7 @@ class FederationKnockingTestCase(
                 fake_knocking_user_id,
                 # Inform the remote that we support the room version of the room we're
                 # knocking on
-                RoomVersions.V7.identifier,
+                RoomVersions.V12.identifier,
             ),
         )
         self.assertEqual(200, channel.code, channel.result)
@@ -296,7 +294,7 @@ class FederationKnockingTestCase(
             self.clock,
             self.hs.hostname,
             self.hs.signing_key,
-            room_version=RoomVersions.V7,
+            room_version=RoomVersions.V12,
             event_dict=knock_event,
         )
 
@@ -317,7 +315,11 @@ class FederationKnockingTestCase(
         # Check that we got the stripped room state in return
         room_state_events = channel.json_body["knock_room_state"]
 
-        # Validate the stripped room state events
+        # Validate content/state_key of each event
         self.check_knock_room_state_against_room_state(
             room_state_events, expected_room_state
         )
+
+        # MSC4311: knock_room_state over federation must be full PDUs, not stripped state
+        for event in room_state_events:
+            self.assertIn("signatures", event)
