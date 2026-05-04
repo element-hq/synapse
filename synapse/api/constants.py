@@ -158,6 +158,8 @@ class EventTypes:
 
     PollStart: Final = "m.poll.start"
 
+    RoomPolicy: Final = "m.room.policy"
+
 
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"
@@ -325,9 +327,7 @@ class AccountDataTypes:
         "org.matrix.msc4155.invite_permission_config"
     )
     # MSC4380: Invite blocking
-    MSC4380_INVITE_PERMISSION_CONFIG: Final = (
-        "org.matrix.msc4380.invite_permission_config"
-    )
+    INVITE_PERMISSION_CONFIG: Final = "m.invite_permission_config"
     # Synapse-specific behaviour. See "Client-Server API Extensions" documentation
     # in Admin API for more information.
     SYNAPSE_ADMIN_CLIENT_CONFIG: Final = "io.element.synapse.admin_client_config"

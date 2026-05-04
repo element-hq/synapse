@@ -1,0 +1,1 @@
+Fix Synapse not backfilling new history when attempting to use a pagination token near a backward extremity.

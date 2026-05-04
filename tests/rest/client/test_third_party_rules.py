@@ -734,9 +734,9 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         self.assertTrue(args[1])
         self.assertFalse(args[2])
 
-        # Check that the profile update callback was called twice (once for the display
-        # name and once for the avatar URL), and that the "deactivation" boolean is true.
-        self.assertEqual(profile_mock.call_count, 2)
+        # Check that the profile update callback was called once
+        # and that the "deactivation" boolean is true.
+        self.assertEqual(profile_mock.call_count, 1)
         args = profile_mock.call_args[0]
         self.assertTrue(args[3])
 

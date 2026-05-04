@@ -4,6 +4,7 @@
 # Copyright 2019-2021 Matrix.org Federation C.I.C
 # Copyright 2015, 2016 OpenMarket Ltd
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -19,6 +20,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import copy
 import logging
 import random
 from typing import (
@@ -567,9 +569,58 @@ class FederationServer(FederationBase):
                 origin=origin,
                 destination=self.server_name,
                 edu_type=edu_dict["edu_type"],
-                content=edu_dict["content"],
+                # Make a deep-copy as we mutate the content down below
+                content=copy.deepcopy(edu_dict["content"]),
             )
+
             try:
+                # Server ACL's apply to `EduTypes.TYPING` per MSC4163:
+                #
+                # > For typing notifications (m.typing), the room_id field inside
+                # > content should be checked, with the typing notification ignored if
+                # > the origin of the request is a server which is forbidden by the
+                # > room's ACL. Ignoring the typing notification means that the EDU
+                # > MUST be dropped upon receipt.
+                if edu.edu_type == EduTypes.TYPING:
+                    origin_host, _ = parse_server_name(origin)
+                    room_id = edu.content["room_id"]
+                    try:
+                        await self.check_server_matches_acl(origin_host, room_id)
+                    except AuthError:
+                        logger.warning(
+                            "Ignoring typing EDU for room %s from banned server because of ACL's",
+                            room_id,
+                        )
+                        return
+
+                # Server ACL's apply to `EduTypes.RECEIPT` per MSC4163:
+                #
+                # > For read receipts (m.receipt), all receipts inside a room_id
+                # > inside content should be ignored if the origin of the request is
+                # > forbidden by the room's ACL.
+                if edu.edu_type == EduTypes.RECEIPT:
+                    origin_host, _ = parse_server_name(origin)
+                    to_remove_room_ids = set()
+                    for room_id in edu.content.keys():
+                        try:
+                            await self.check_server_matches_acl(origin_host, room_id)
+                        except AuthError:
+                            to_remove_room_ids.add(room_id)
+
+                    if to_remove_room_ids:
+                        logger.warning(
+                            "Ignoring receipts in EDU for rooms %s from banned server %s because of ACL's",
+                            to_remove_room_ids,
+                            origin_host,
+                        )
+
+                        for room_id in to_remove_room_ids:
+                            edu.content.pop(room_id)
+
+                        if not edu.content:
+                            # If we've removed all the rooms, we can just ignore the whole EDU
+                            return
+
                 await self.registry.on_edu(edu.edu_type, origin, edu.content)
             except Exception:
                 # If there was an error handling the EDU, we must reject the
@@ -682,6 +733,18 @@ class FederationServer(FederationBase):
         ).inc()
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
+
+    async def on_get_extremities_request(self, origin: str, room_id: str) -> JsonDict:
+        # Assert host in room first to hide contents of the ACL from the caller
+        await self._event_auth_handler.assert_host_in_room(room_id, origin)
+        origin_host, _ = parse_server_name(origin)
+        await self.check_server_matches_acl(origin_host, room_id)
+
+        extremities = await self.store.get_forward_extremities_for_room(room_id)
+        prev_event_ids = [event_id for event_id, _, _, _ in extremities]
+        if len(prev_event_ids) == 0:
+            raise SynapseError(500, "Room has no forward extremities")
+        return {"prev_events": prev_event_ids}
 
     async def on_make_join_request(
         self, origin: str, room_id: str, user_id: str, supported_versions: list[str]

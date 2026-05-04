@@ -13,7 +13,6 @@
 #
 
 import logging
-import typing
 from collections import ChainMap
 from enum import Enum
 from typing import (
@@ -35,6 +34,7 @@ from pydantic import ConfigDict
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -186,7 +186,7 @@ class SlidingSyncResult:
         # Should be empty for invite/knock rooms with `stripped_state`
         required_state: list[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
-        timeline_events: list[EventBase]
+        timeline_events: list[FilteredEvent]
         bundled_aggregations: dict[str, "BundledAggregations"] | None
         # Optional because it's only relevant to invite/knock rooms
         stripped_state: list[JsonDict]
@@ -793,7 +793,7 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
     # We use a ChainMap here so that we can easily track what has been updated
     # and what hasn't. Note that when we persist the per connection state this
     # will get flattened to a normal dict (via calling `.copy()`)
-    _statuses: typing.ChainMap[str, HaveSentRoom[T]]
+    _statuses: ChainMap[str, HaveSentRoom[T]]
 
     def __init__(
         self,
@@ -973,7 +973,7 @@ class MutablePerConnectionState(PerConnectionState):
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
     account_data: MutableRoomStatusMap[int]
 
-    room_configs: typing.ChainMap[str, RoomSyncConfig]
+    room_configs: ChainMap[str, RoomSyncConfig]
 
     # A map from room ID to the lazily-loaded memberships needed for the
     # request in that room.

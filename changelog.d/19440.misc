@@ -1,1 +1,0 @@
-Add log to explain when and why we freeze objects in the garbage collector.
