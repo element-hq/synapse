@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import Collection, cast
+from typing import Collection
 from unittest import TestCase
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -43,10 +43,8 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.util.clock import Clock
-from synapse.util.events import generate_fake_event_id
 
 from tests import unittest
-from tests.test_utils import event_injection
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +138,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 "content": {},
                 "room_id": room_id,
                 "sender": "@yetanotheruser:" + OTHER_SERVER,
-                "depth": cast(int, join_event["depth"]) + 1,
+                "depth": join_event.depth + 1,
                 "prev_events": [join_event.event_id],
                 "auth_events": [],
                 "origin_server_ts": self.clock.time_msec(),
@@ -192,7 +190,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 "content": {},
                 "room_id": room_id,
                 "sender": "@yetanotheruser:" + OTHER_SERVER,
-                "depth": cast(int, join_event["depth"]) + 1,
+                "depth": join_event.depth + 1,
                 "prev_events": [join_event.event_id],
                 "auth_events": [],
                 "origin_server_ts": self.clock.time_msec(),
@@ -212,121 +210,6 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         sg2 = self.get_success(self.store._get_state_group_for_event(ev.event_id))
 
         self.assertEqual(sg, sg2)
-
-    def test_backfill_with_many_backward_extremities(self) -> None:
-        """
-        Check that we can backfill with many backward extremities.
-        The goal is to make sure that when we only use a portion
-        of backwards extremities(the magic number is more than 5),
-        no errors are thrown.
-
-        Regression test, see https://github.com/matrix-org/synapse/pull/11027
-        """
-        # create the room
-        user_id = self.register_user("kermit", "test")
-        tok = self.login("kermit", "test")
-
-        room_id = self.helper.create_room_as(room_creator=user_id, tok=tok)
-        room_version = self.get_success(self.store.get_room_version(room_id))
-
-        # we need a user on the remote server to be a member, so that we can send
-        # extremity-causing events.
-        remote_server_user_id = f"@user:{self.OTHER_SERVER_NAME}"
-        self.get_success(
-            event_injection.inject_member_event(
-                self.hs, room_id, remote_server_user_id, "join"
-            )
-        )
-
-        send_result = self.helper.send(room_id, "first message", tok=tok)
-        ev1 = self.get_success(
-            self.store.get_event(send_result["event_id"], allow_none=False)
-        )
-        current_state = self.get_success(
-            self.store.get_events_as_list(
-                (
-                    self.get_success(self.store.get_partial_current_state_ids(room_id))
-                ).values()
-            )
-        )
-
-        # Create "many" backward extremities. The magic number we're trying to
-        # create more than is 5 which corresponds to the number of backward
-        # extremities we slice off in `_maybe_backfill_inner`
-        federation_event_handler = self.hs.get_federation_event_handler()
-        auth_events = [
-            ev
-            for ev in current_state
-            if (ev.type, ev.state_key)
-            in {("m.room.create", ""), ("m.room.member", remote_server_user_id)}
-        ]
-        for _ in range(8):
-            event = make_event_from_dict(
-                self.add_hashes_and_signatures_from_other_server(
-                    {
-                        "origin_server_ts": 1,
-                        "type": "m.room.message",
-                        "content": {
-                            "msgtype": "m.text",
-                            "body": "message connected to fake event",
-                        },
-                        "room_id": room_id,
-                        "sender": remote_server_user_id,
-                        "prev_events": [
-                            ev1.event_id,
-                            # We're creating an backward extremity each time thanks
-                            # to this fake event
-                            generate_fake_event_id(),
-                        ],
-                        "auth_events": [ev.event_id for ev in auth_events],
-                        "depth": ev1.depth + 1,
-                    },
-                    room_version,
-                ),
-                room_version,
-            )
-
-            # we poke this directly into _process_received_pdu, to avoid the
-            # federation handler wanting to backfill the fake event.
-            state_handler = self.hs.get_state_handler()
-            context = self.get_success(
-                state_handler.compute_event_context(
-                    event,
-                    state_ids_before_event={
-                        (e.type, e.state_key): e.event_id for e in current_state
-                    },
-                    partial_state=False,
-                )
-            )
-            self.get_success(
-                federation_event_handler._process_received_pdu(
-                    self.OTHER_SERVER_NAME,
-                    event,
-                    context,
-                )
-            )
-
-        # we should now have 8 backwards extremities.
-        backwards_extremities = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "event_backward_extremities",
-                keyvalues={"room_id": room_id},
-                retcols=["event_id"],
-            )
-        )
-        self.assertEqual(len(backwards_extremities), 8)
-
-        current_depth = 1
-        limit = 100
-
-        # Make sure backfill still works
-        self.get_success(
-            self.hs.get_federation_handler().maybe_backfill(
-                room_id,
-                current_depth,
-                limit,
-            )
-        )
 
     def test_backfill_ignores_known_events(self) -> None:
         """

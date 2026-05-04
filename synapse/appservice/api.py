@@ -40,7 +40,7 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.events import EventBase
-from synapse.events.utils import SerializeEventConfig
+from synapse.events.utils import FilteredEvent, SerializeEventConfig
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
@@ -545,7 +545,7 @@ class ApplicationServiceApi(SimpleHttpClient):
     ) -> list[JsonDict]:
         time_now = self.clock.time_msec()
         return await self._event_serializer.serialize_events(
-            list(events),
+            [FilteredEvent(event=e, membership=None) for e in events],
             time_now,
             config=SerializeEventConfig(
                 as_client_event=True,

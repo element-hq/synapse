@@ -105,6 +105,12 @@ backfill_processing_before_timer = Histogram(
 )
 
 
+NUMBER_OF_EVENTS_TO_BACKFILL = 100
+"""
+The number of events we try to backfill from other servers in a single request.
+"""
+
+
 # TODO: We can refactor this away now that there is only one backfill point again
 class _BackfillPointType(Enum):
     # a regular backwards extremity (ie, an event which we don't yet have, but which
@@ -242,7 +248,9 @@ class FederationHandler:
         Args:
             room_id: The room to backfill in.
             current_depth: The depth to check at for any upcoming backfill points.
-            limit: The max number of events to request from the remote federated server.
+            limit: The number of events that the pagination request will
+                return. This is used as part of the heuristic to decide if we
+                should back paginate.
             processing_start_time: The time when `maybe_backfill` started processing.
                 Only used for timing. If `None`, no timing observation will be made.
 
@@ -253,7 +261,9 @@ class FederationHandler:
             _BackfillPoint(event_id, depth, _BackfillPointType.BACKWARDS_EXTREMITY)
             for event_id, depth in await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=current_depth,
+                # Per the docstring, it's best to pad the `current_depth` by the
+                # number of messages you plan to backfill from these points.
+                nearby_depth=current_depth + NUMBER_OF_EVENTS_TO_BACKFILL,
                 # We only need to end up with 5 extremities combined with the
                 # insertion event extremities to make the `/backfill` request
                 # but fetch an order of magnitude more to make sure there is
@@ -297,12 +307,13 @@ class FederationHandler:
         # likely not to return anything relevant so we backfill in the background. The
         # only way, this could return something relevant is if we discover a new branch
         # of history that extends all the way back to where we are currently paginating
-        # and it's within the 100 events that are returned from `/backfill`.
+        # and it's within the `NUMBER_OF_EVENTS_TO_BACKFILL` events that are returned
+        # from `/backfill`.
         if not sorted_backfill_points and current_depth != MAX_DEPTH:
             # Check that we actually have later backfill points, if not just return.
             have_later_backfill_points = await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=MAX_DEPTH,
+                nearby_depth=MAX_DEPTH,
                 limit=1,
             )
             if not have_later_backfill_points:
@@ -462,7 +473,10 @@ class FederationHandler:
 
                 try:
                     await self._federation_event_handler.backfill(
-                        dom, room_id, limit=100, extremities=extremities_to_request
+                        dom,
+                        room_id,
+                        limit=NUMBER_OF_EVENTS_TO_BACKFILL,
+                        extremities=extremities_to_request,
                     )
                     # If this succeeded then we probably already have the
                     # appropriate stuff.
@@ -1188,7 +1202,7 @@ class FederationHandler:
         # We should assert some things.
         # FIXME: Do this in a nicer way
         assert event.type == EventTypes.Member
-        assert event.user_id == user_id
+        assert event.sender == user_id
         assert event.state_key == user_id
         assert event.room_id == room_id
         return origin, event, room_version

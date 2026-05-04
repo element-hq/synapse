@@ -47,6 +47,9 @@ impl EventFormatVersions {
     /// MSC4291 room IDs as hashes: introduced for room HydraV11
     #[classattr]
     const ROOM_V11_HYDRA_PLUS: i32 = 4;
+    /// MSC4242 state DAGs: adds prev_state_events, removes auth_events
+    #[classattr]
+    const ROOM_VMSC4242: i32 = 5;
 }
 
 /// Enum to identify the state resolution algorithms.
@@ -146,6 +149,14 @@ pub struct RoomVersion {
     ///
     /// In these room versions, we are stricter with event size validation.
     pub strict_event_byte_limits_room_versions: bool,
+    /// MSC4242: State DAGs. Creates events with prev_state_events instead of auth_events and derives
+    /// state from it. Events are always processed in causal order without any gaps in the DAG
+    /// (prev_state_events are always known), guaranteeing that processed events have a path to the
+    /// create event. This is an emergent property of state DAGs as asserting that there is a path
+    /// to the create event every time we insert an event would be prohibitively expensive.
+    /// This is similar to how doubly-linked lists can potentially not refer to previous items correctly
+    /// without verifying the list's integrity, but doing it on every insert is too expensive.
+    pub msc4242_state_dags: bool,
 }
 
 const ROOM_VERSION_V1: RoomVersion = RoomVersion {
@@ -170,6 +181,7 @@ const ROOM_VERSION_V1: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V2: RoomVersion = RoomVersion {
@@ -194,6 +206,7 @@ const ROOM_VERSION_V2: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V3: RoomVersion = RoomVersion {
@@ -218,6 +231,7 @@ const ROOM_VERSION_V3: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V4: RoomVersion = RoomVersion {
@@ -242,6 +256,7 @@ const ROOM_VERSION_V4: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V5: RoomVersion = RoomVersion {
@@ -266,6 +281,7 @@ const ROOM_VERSION_V5: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V6: RoomVersion = RoomVersion {
@@ -290,6 +306,7 @@ const ROOM_VERSION_V6: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V7: RoomVersion = RoomVersion {
@@ -314,6 +331,7 @@ const ROOM_VERSION_V7: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V8: RoomVersion = RoomVersion {
@@ -338,6 +356,7 @@ const ROOM_VERSION_V8: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V9: RoomVersion = RoomVersion {
@@ -362,6 +381,7 @@ const ROOM_VERSION_V9: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V10: RoomVersion = RoomVersion {
@@ -386,6 +406,7 @@ const ROOM_VERSION_V10: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 /// MSC3389 (Redaction changes for events with a relation) based on room version "10".
@@ -411,6 +432,7 @@ const ROOM_VERSION_MSC3389V10: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: true,
+    msc4242_state_dags: false,
 };
 
 /// MSC1767 (Extensible Events) based on room version "10".
@@ -436,6 +458,7 @@ const ROOM_VERSION_MSC1767V10: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "10".
@@ -461,6 +484,7 @@ const ROOM_VERSION_MSC3757V10: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: false,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V11: RoomVersion = RoomVersion {
@@ -485,6 +509,7 @@ const ROOM_VERSION_V11: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: true, // Changed from v10
+    msc4242_state_dags: false,
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "11".
@@ -510,6 +535,7 @@ const ROOM_VERSION_MSC3757V11: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: false,
     msc4291_room_ids_as_hashes: false,
     strict_event_byte_limits_room_versions: true,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
@@ -534,6 +560,7 @@ const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: true, // Changed from v11
     msc4291_room_ids_as_hashes: true,    // Changed from v11
     strict_event_byte_limits_room_versions: true,
+    msc4242_state_dags: false,
 };
 
 const ROOM_VERSION_V12: RoomVersion = RoomVersion {
@@ -558,6 +585,32 @@ const ROOM_VERSION_V12: RoomVersion = RoomVersion {
     msc4289_creator_power_enabled: true, // Changed from v11
     msc4291_room_ids_as_hashes: true,    // Changed from v11
     strict_event_byte_limits_room_versions: true,
+    msc4242_state_dags: false,
+};
+
+const ROOM_VERSION_MSC4242V12: RoomVersion = RoomVersion {
+    identifier: "org.matrix.msc4242.12",
+    disposition: RoomDisposition::UNSTABLE,
+    event_format: EventFormatVersions::ROOM_VMSC4242,
+    state_res: StateResolutionVersions::V2_1,
+    enforce_key_validity: true,
+    special_case_aliases_auth: false,
+    strict_canonicaljson: true,
+    limit_notifications_power_levels: true,
+    implicit_room_creator: true,
+    updated_redaction_rules: true,
+    restricted_join_rule: true,
+    restricted_join_rule_fix: true,
+    knock_join_rule: true,
+    msc3389_relation_redactions: false,
+    knock_restricted_join_rule: true,
+    enforce_int_power_levels: true,
+    msc3931_push_features: &[],
+    msc3757_enabled: false,
+    msc4289_creator_power_enabled: true,
+    msc4291_room_ids_as_hashes: true,
+    strict_event_byte_limits_room_versions: true,
+    msc4242_state_dags: true,
 };
 
 /// Helper class for managing the known room versions, and providing dict-like
@@ -800,6 +853,10 @@ impl RoomVersions {
     fn V12(py: Python<'_>) -> PyResult<Py<PyAny>> {
         ROOM_VERSION_V12.into_py_any(py)
     }
+    #[classattr]
+    fn MSC4242v12(py: Python<'_>) -> PyResult<Py<PyAny>> {
+        ROOM_VERSION_MSC4242V12.into_py_any(py)
+    }
 }
 
 /// Called when registering modules with python.
@@ -814,11 +871,12 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<RoomDisposition>()?;
 
     // Build KNOWN_EVENT_FORMAT_VERSIONS as a frozenset
-    let known_ef: [i32; 4] = [
+    let known_ef: [i32; 5] = [
         EventFormatVersions::ROOM_V1_V2,
         EventFormatVersions::ROOM_V3,
         EventFormatVersions::ROOM_V4_PLUS,
         EventFormatVersions::ROOM_V11_HYDRA_PLUS,
+        EventFormatVersions::ROOM_VMSC4242,
     ];
     let known_event_format_versions = PyFrozenSet::new(py, known_ef)?;
     child_module.add("KNOWN_EVENT_FORMAT_VERSIONS", known_event_format_versions)?;

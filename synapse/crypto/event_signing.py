@@ -27,7 +27,7 @@ from typing import Any, Callable
 
 from canonicaljson import encode_canonical_json
 from signedjson.sign import sign_json
-from signedjson.types import SigningKey
+from signedjson.types import SigningKey, VerifyKey
 from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.api.errors import Codes, SynapseError
@@ -35,7 +35,7 @@ from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
 from synapse.events.utils import prune_event, prune_event_dict
 from synapse.logging.opentracing import trace
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 
 logger = logging.getLogger(__name__)
 
@@ -192,3 +192,54 @@ def add_hashes_and_signatures(
     event_dict["signatures"] = compute_event_signature(
         room_version, event_dict, signature_name=signature_name, signing_key=signing_key
     )
+
+
+def resign_event(
+    ev: EventBase,
+    server_name: str,
+    signing_key: SigningKey,
+    time_now: int | None = None,
+) -> JsonDict:
+    """Re-sign the provided event with the given signing key. Any existing signatures on the event
+    for this server_name are removed.
+
+    If there has been no signature for this event by this server_name, the event is still re-signed.
+    If there have been signatures on this event by this server_name, the event is not re-checked for
+    validity. As such, only events that have valid signatures should be passed into this function
+    e.g. from the event_json table in the database.
+    """
+    event_dict = ev.get_pdu_json(time_now=time_now)
+    event_dict["signatures"].pop(
+        server_name, None
+    )  # remove existing signatures for this server_name
+    event_dict["signatures"].update(
+        compute_event_signature(
+            ev.room_version,
+            event_dict,
+            server_name,
+            signing_key,
+        )
+    )
+    return event_dict
+
+
+def event_needs_resigning(
+    ev: EventBase, server_name: str, verify_key: VerifyKey
+) -> bool:
+    """Check if this event needs re-signing.
+
+    This returns True if all of the following are True:
+     - the event `sender` domain matches the `server_name` provided.
+     - the event has not been already signed with this `verify_key`.
+    """
+    sender = UserID.from_string(ev.sender)
+    if sender.domain != server_name:
+        return False
+    want_key_id = verify_key.alg + ":" + verify_key.version
+    signed_with_current_key_id = ev.signatures.get(server_name, {}).get(
+        want_key_id, None
+    )
+    if signed_with_current_key_id:
+        return False
+
+    return True

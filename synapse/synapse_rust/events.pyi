@@ -38,6 +38,19 @@ class EventInternalMetadata:
     policy_server_spammy: bool
     """whether the policy server indicated that this event is spammy"""
 
+    spam_checker_spammy: bool
+    """Whether a spam checker module indicated that this event is spammy
+
+    Note that spam checkers also cause the event to be marked as soft-failed.
+
+    This flags exists for two reasons:
+        1. as debugging information
+        2. to prevent the soft-failed re-evaluation of spammy events
+           (the re-evaluation behaviour originates from MSC4354 Sticky Events)
+
+    Note that historical spammy events won't have this flag.
+    """
+
     txn_id: str
     """The transaction ID, if it was set when the event was created."""
     delay_id: str
@@ -46,6 +59,9 @@ class EventInternalMetadata:
     """The access token ID of the user who sent this event, if any."""
     device_id: str
     """The device ID of the user who sent this event, if any."""
+
+    # MSC4242 state dags
+    calculated_auth_event_ids: list[str]
 
     def get_dict(self) -> JsonDict: ...
     def is_outlier(self) -> bool: ...

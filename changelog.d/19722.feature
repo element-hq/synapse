@@ -1,0 +1,1 @@
+Partial [MSC4311](https://github.com/matrix-org/matrix-spec-proposals/pull/4311) implementation: `m.room.create` is now a required part of stripped `invite_state`/`knock_state` . Contributed by @FrenchGithubUser @Famedly.

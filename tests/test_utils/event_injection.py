@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any
+from typing import Any, Mapping
 
 import synapse.server
 from synapse.api.constants import EventTypes
@@ -63,6 +63,8 @@ async def inject_event(
     hs: synapse.server.HomeServer,
     room_version: str | None = None,
     prev_event_ids: list[str] | None = None,
+    *,
+    internal_metadata: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> EventBase:
     """Inject a generic event into a room
@@ -72,9 +74,12 @@ async def inject_event(
         room_version: the version of the room we're inserting into.
             if not specified, will be looked up
         prev_event_ids: prev_events for the event. If not specified, will be looked up
+        internal_metadata: Dict representing the event's internal metadata; see `EventBase.internal_metadata`
         kwargs: fields for the event to be created
     """
-    event, context = await create_event(hs, room_version, prev_event_ids, **kwargs)
+    event, context = await create_event(
+        hs, room_version, prev_event_ids, internal_metadata=internal_metadata, **kwargs
+    )
 
     persistence = hs.get_storage_controllers().persistence
     assert persistence is not None
@@ -88,8 +93,11 @@ async def create_event(
     hs: synapse.server.HomeServer,
     room_version: str | None = None,
     prev_event_ids: list[str] | None = None,
+    *,
+    internal_metadata: Mapping[str, Any] | None = None,
     **kwargs: Any,
 ) -> tuple[EventBase, EventContext]:
+    internal_metadata = internal_metadata or {}
     if room_version is None:
         room_version = await hs.get_datastores().main.get_room_version_id(
             kwargs["room_id"]
@@ -106,11 +114,13 @@ async def create_event(
     )
 
     # Copy over writable internal_metadata, if set
-    # Dev note: This isn't everything that's writable. `for k,v` doesn't work here :(
-    if kwargs.get("internal_metadata", {}).get("soft_failed", False):
-        event.internal_metadata.soft_failed = True
-    if kwargs.get("internal_metadata", {}).get("policy_server_spammy", False):
-        event.internal_metadata.policy_server_spammy = True
+    if internal_metadata:
+        for key, value in internal_metadata.items():
+            # Note: this calls the relevant `#[setter]` function in the (Rust) event class'
+            # internal metadata struct.
+            # Will reject unknown keys with exceptions.
+            # This is desirable for our test suite anyway.
+            setattr(event.internal_metadata, key, value)
 
     context = await unpersisted_context.persist(event)
 

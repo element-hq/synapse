@@ -249,13 +249,22 @@ class ListQuarantineChanges(RestServlet):
 
         from_id = parse_integer(request, "from", default=0)
         limit = 100  # arbitrary; not enough to cause problems (hopefully)
-        to_id = await self.store.get_current_quarantined_media_stream_id()
 
-        if to_id < from_id:
-            # The caller is trying to get future data, which isn't possible.
+        # Validate the `from` token
+        max_id = await self.store.get_max_allocated_quarantined_media_stream_id()
+        if from_id > max_id:
+            # The caller is trying to get future data, which we don't allow because
+            # we know it's an invalid state that should never happen. We could
+            # wait until we reach the token but we might as well not waste our
+            # resources on that which is why `wait_for_quarantined_media_stream_id(...)`
+            # has assertions around this.
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                "The `from` position is ahead of the currently persisted position.",
+                "The `from` token is considered invalid because it includes stream positions "
+                "greater than the furthest persisted position across all of the workers."
+                "This indicates either a Synapse programming error (as we should never hand out "
+                "invalid future tokens) or a fabricated `from` token. If you've modified the token, "
+                "you can try paginating from the beginning again.",
                 errcode=Codes.INVALID_PARAM,
             )
 
@@ -271,6 +280,7 @@ class ListQuarantineChanges(RestServlet):
                 errcode=Codes.UNKNOWN,
             )
 
+        to_id = await self.store.get_current_quarantined_media_stream_id()
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
             to_id=to_id,
