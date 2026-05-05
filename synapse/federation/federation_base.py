@@ -348,6 +348,13 @@ def event_from_pdu_json(
         # c.f. https://github.com/matrix-org/synapse/issues/8429
         unsigned = pdu_json["unsigned"]
         age = unsigned.pop("age", None)
+
+        # We check that the `age` is actually an int before using it below. We
+        # don't error here as the `age` a) doesn't affect the validity of the
+        # event, and b) is best effort anyway.
+        if not isinstance(age, int):
+            age = None
+
         unsigned.pop("age_ts", None)
         if received_time is not None and age is not None:
             unsigned["age_ts"] = received_time - int(age)
