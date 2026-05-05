@@ -371,7 +371,9 @@ class WaitingMultiLock:
                     self._increment_timeout_interval()
 
                     now_ms = self.clock.time_msec()
-                    time_spent_trying_to_lock = Duration(milliseconds=now_ms - self.start_ts_ms)
+                    time_spent_trying_to_lock = Duration(
+                        milliseconds=now_ms - self.start_ts_ms
+                    )
                     if (
                         time_spent_trying_to_lock.as_millis()
                         > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
