@@ -2089,7 +2089,6 @@ class EventCreationHandler:
                         returned_invite = await federation_handler.send_invite(
                             invitee.domain, event
                         )
-                        # event.unsigned.pop("room_state", None)
 
                         # TODO: Make sure the signatures actually are correct.
                         event.signatures.update(returned_invite.signatures.as_dict())
