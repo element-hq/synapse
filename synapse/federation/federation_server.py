@@ -482,6 +482,11 @@ class FederationServer(FederationBase):
             except SynapseError as e:
                 logger.info("Ignoring PDU for failing to deserialize: %s", e)
                 continue
+            except Exception as e:
+                # We catch all exceptions here as we don't want a single bad
+                # event to cause us to fail the whole transaction.
+                logger.exception("Error deserializing PDU: %s", e)
+                continue
 
             pdus_by_room.setdefault(room_id, []).append(event)
 
