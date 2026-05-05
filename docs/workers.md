@@ -343,7 +343,7 @@ set to `true`), the following endpoints can be handled by the worker:
     ^/_synapse/admin/v2/users/[^/]+$
     ^/_synapse/admin/v1/username_available$
     ^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
-    ^/_synapse/admin/v1/users/[^/]+/devices$
+    ^/_synapse/admin/v2/users/[^/]+/devices(/|$)
 
 Do note that these endpoints can't be handled by workers if the stabilised delegated
 authentication support is enabled (`matrix_authentication_service.enabled` set to
