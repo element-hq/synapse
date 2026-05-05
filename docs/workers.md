@@ -317,7 +317,7 @@ for the room are in flight:
 
 Additionally, the following endpoints should be included if Synapse is configured
 to use SSO (you only need to include the ones for whichever SSO provider you're
-using):
+using) and delegated authentication isn't enabled:
 
     # for all SSO providers
     ^/_matrix/client/(api/v1|r0|v3|unstable)/login/sso/redirect
