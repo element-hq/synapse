@@ -19,7 +19,7 @@ use pyo3::{
     exceptions::{PyKeyError, PyRuntimeError, PyTypeError},
     pyclass, pymethods,
     types::{PyAnyMethods, PyDict, PyList, PyListMethods},
-    Bound, FromPyObject, IntoPyObject, IntoPyObjectExt, PyAny, PyErr, PyResult, Python,
+    Bound, IntoPyObjectExt, PyAny, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
 use serde::{Deserialize, Serialize};
@@ -107,7 +107,7 @@ impl Unsigned {
     #[new]
     fn py_new(unsigned: Bound<'_, PyDict>) -> PyResult<Self> {
         let inner = UnsignedInner {
-            persisted_fields: unsigned.extract()?,
+            persisted_fields: depythonize(&unsigned)?,
             prev_content: None,
             prev_sender: None,
         };
@@ -269,31 +269,11 @@ impl Unsigned {
     }
 
     fn for_persistence<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        self.py_read()?.persisted_fields.into_pyobject(py)
+        Ok(pythonize(py, &self.py_read()?.persisted_fields)?)
     }
 
     fn for_event<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(pythonize(py, &*self.py_read()?)?)
-    }
-}
-
-impl<'py> IntoPyObject<'py> for &PersistedUnsignedFields {
-    type Target = PyAny;
-
-    type Output = Bound<'py, Self::Target>;
-
-    type Error = PyErr;
-
-    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        Ok(pythonize(py, self)?)
-    }
-}
-
-impl<'a, 'py> FromPyObject<'a, 'py> for PersistedUnsignedFields {
-    type Error = PyErr;
-
-    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        Ok(depythonize(&obj)?)
     }
 }
 
