@@ -290,6 +290,9 @@ information.
     # Unstable MSC4140 support
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$
 
+    # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
+    ^/_synapse/mas/
+
 Additionally, the following REST endpoints can be handled for GET requests:
 
     # Push rules requests
