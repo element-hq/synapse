@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 NEW_EVENT_DURING_PURGE_LOCK_NAME = "new_event_during_purge_lock"
 
 WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=60)
-WORKER_LOCK_WARN_RETRY_INTERVAL = Duration(minutes=10)
+WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION = Duration(minutes=10)
 
 
 class WorkerLocksHandler:
@@ -257,20 +257,23 @@ class WaitingLock:
                         )
                 except defer.TimeoutError:
                     # Only increment the timeout value if this was an actual timeout
+                    # (defer.TimeoutError)
                     self._increment_timeout_interval()
 
                     now_ms = self.clock.time_msec()
-                    time_spent_trying_to_lock = now_ms - self.start_ts_ms
+                    time_spent_trying_to_lock = Duration(
+                        milliseconds=now_ms - self.start_ts_ms
+                    )
                     if (
-                        time_spent_trying_to_lock
-                        > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis()
+                        time_spent_trying_to_lock.as_millis()
+                        > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
                     ):
                         logger.warning(
                             "(WaitingLock (%s, %s)) Time spent waiting to acquire lock "
                             "is getting excessive: %ss. There may be a deadlock.",
                             self.lock_name,
                             self.lock_key,
-                            time_spent_trying_to_lock,
+                            time_spent_trying_to_lock.as_secs(),
                         )
 
                 except Exception as e:
@@ -364,19 +367,20 @@ class WaitingMultiLock:
                         )
                 except defer.TimeoutError:
                     # Only increment the timeout value if this was an actual timeout
+                    # (defer.TimeoutError)
                     self._increment_timeout_interval()
 
                     now_ms = self.clock.time_msec()
-                    time_spent_trying_to_lock = now_ms - self.start_ts_ms
+                    time_spent_trying_to_lock = Duration(now_ms - self.start_ts_ms)
                     if (
-                        time_spent_trying_to_lock
-                        > WORKER_LOCK_WARN_RETRY_INTERVAL.as_millis()
+                        time_spent_trying_to_lock.as_millis()
+                        > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
                     ):
                         logger.warning(
                             "(WaitingMultiLock (%r)) Time spent waiting to acquire lock "
                             "is getting excessive: %ss. There may be a deadlock.",
                             self.lock_names,
-                            time_spent_trying_to_lock,
+                            time_spent_trying_to_lock.as_secs(),
                         )
 
                 except Exception as e:

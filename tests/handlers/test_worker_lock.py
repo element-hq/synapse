@@ -77,7 +77,7 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         # Make sure we haven't acquired the lock yet (`lock1` still holds it)
         self.assertNoResult(d2)
 
-        # Advance time by a day (some duration that would previously cause our timeout
+        # Advance time by an hour (some duration that would previously cause our timeout
         # to balloon if it weren't constrained). Max back-off (saturate)
         #
         # Note: We use `_pump_by` instead of `pump`/`advance` as the `Lock` has an
@@ -85,8 +85,8 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         # (`_RENEWAL_INTERVAL`) to renew the `Lock` and push it's "drop timeout" value
         # further out by 2 minutes (`_LOCK_TIMEOUT_MS`). The `Lock` will prematurely
         # drop if this renewal is not allowed to run, which sours the test.
-        # self.pump(amount=Duration(days=1))
-        self._pump_by(amount=Duration(days=1), by=_RENEWAL_INTERVAL)
+        # self.pump(amount=Duration(hours=1))
+        self._pump_by(amount=Duration(hours=1), by=_RENEWAL_INTERVAL)
 
         # Make sure we haven't acquired the `lock2` yet (`lock1` still holds it)
         self.assertNoResult(d2)
@@ -213,7 +213,7 @@ class WorkerLockWorkersTestCase(BaseMultiWorkerStreamTestCase):
         # Make sure we haven't acquired the lock yet (`lock1` still holds it)
         self.assertNoResult(d2)
 
-        # Advance time by a day (some duration that would previously cause our timeout
+        # Advance time by an hour (some duration that would previously cause our timeout
         # to balloon if it weren't constrained). Max back-off (saturate)
         #
         # Note: We use `_pump_by` instead of `pump`/`advance` as the `Lock` has an
@@ -221,8 +221,8 @@ class WorkerLockWorkersTestCase(BaseMultiWorkerStreamTestCase):
         # (`_RENEWAL_INTERVAL`) to renew the `Lock` and push it's "drop timeout" value
         # further out by 2 minutes (`_LOCK_TIMEOUT_MS`). The `Lock` will prematurely
         # drop if this renewal is not allowed to run, which sours the test.
-        # self.pump(amount=Duration(days=1))
-        self._pump_by(amount=Duration(days=1), by=_RENEWAL_INTERVAL)
+        # self.pump(amount=Duration(hours=1))
+        self._pump_by(amount=Duration(hours=1), by=_RENEWAL_INTERVAL)
 
         # Make sure we haven't acquired the `lock2` yet (`lock1` still holds it)
         self.assertNoResult(d2)
