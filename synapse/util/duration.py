@@ -32,6 +32,29 @@ class Duration(timedelta):
     ```
     """
 
+    # Using `__new__` because that's what `timedelta` uses
+    def __new__(
+        cls,
+        *,
+        days: float = 0,
+        seconds: float = 0,
+        microseconds: float = 0,
+        milliseconds: float = 0,
+        minutes: float = 0,
+        hours: float = 0,
+        weeks: float = 0,
+    ) -> "Duration":
+        return super().__new__(
+            cls,
+            days=days,
+            seconds=seconds,
+            microseconds=microseconds,
+            milliseconds=milliseconds,
+            minutes=minutes,
+            hours=hours,
+            weeks=weeks,
+        )
+
     def as_millis(self) -> int:
         """Returns the duration in milliseconds."""
         return int(self / _ONE_MILLISECOND)
