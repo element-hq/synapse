@@ -59,7 +59,7 @@ WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=5)
 The maximum wait time before retrying to acquire the lock.
 
 Better to retry more quickly than have workers wait around. 5 seconds is still a
-reasonable gap in time to no overwhelm the CPU/Database.
+reasonable gap in time to not overwhelm the CPU/Database.
 
 This matters most in cross-worker scenarios. When locks are on the same worker, when the
 locker holder releases, we signal to other locks (with the same name/key) that they
