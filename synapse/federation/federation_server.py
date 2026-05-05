@@ -821,7 +821,10 @@ class FederationServer(FederationBase):
         event, context = await self._on_send_membership_event(
             origin, content, Membership.JOIN, room_id
         )
-        # Collect this now, the internal metadata of event(which should have it) doesn't
+        # Snapshot the room's stream position right after persisting the join event.
+        # We use this as the upper bound when fetching forward extremities (below), so
+        # we only consider extremities that existed at or before the join rather than
+        # those introduced by concurrent writes that occur while we prepare the response.
         stream_ordering_of_join = (
             await self.store.get_current_room_stream_token_for_room_id(room_id)
         )
@@ -877,8 +880,10 @@ class FederationServer(FederationBase):
         # homeserver backfill it, the stream ordering for the missing event will be
         # "before" the join (which is what we expect).
 
-        forward_extremities = await self.store._get_forward_extremeties_for_room(
-            room_id, stream_ordering_of_join.get_max_stream_pos()
+        forward_extremities = (
+            await self.store.get_forward_extremities_for_room_at_stream_ordering(
+                room_id, stream_ordering_of_join.get_max_stream_pos()
+            )
         )
 
         if len(forward_extremities) > 1:
