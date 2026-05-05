@@ -12,7 +12,7 @@
 
 from typing import Any, Mapping
 
-from synapse.types import JsonDict
+from synapse.types import JsonDict, JsonMapping
 
 class EventInternalMetadata:
     def __init__(self, internal_metadata_dict: JsonDict): ...
@@ -187,7 +187,7 @@ class Signatures:
 class Unsigned:
     """A class representing the unsigned data of an event."""
 
-    def __init__(self, unsigned_dict: JsonDict): ...
+    def __init__(self, unsigned_dict: JsonMapping): ...
     def __getitem__(self, key: str) -> Any: ...
     """Get the value for the given key.
 

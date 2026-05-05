@@ -18,7 +18,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard};
 use pyo3::{
     exceptions::{PyKeyError, PyRuntimeError, PyTypeError},
     pyclass, pymethods,
-    types::{PyAnyMethods, PyDict, PyList, PyListMethods},
+    types::{PyAnyMethods, PyList, PyListMethods, PyMapping},
     Bound, IntoPyObjectExt, PyAny, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
@@ -105,7 +105,7 @@ impl Unsigned {
 #[pymethods]
 impl Unsigned {
     #[new]
-    fn py_new(unsigned: Bound<'_, PyDict>) -> PyResult<Self> {
+    fn py_new(unsigned: Bound<'_, PyMapping>) -> PyResult<Self> {
         let inner = depythonize(&unsigned)?;
 
         Ok(Self {
