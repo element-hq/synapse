@@ -106,11 +106,7 @@ impl Unsigned {
 impl Unsigned {
     #[new]
     fn py_new(unsigned: Bound<'_, PyDict>) -> PyResult<Self> {
-        let inner = UnsignedInner {
-            persisted_fields: depythonize(&unsigned)?,
-            prev_content: None,
-            prev_sender: None,
-        };
+        let inner = depythonize(&unsigned)?;
 
         Ok(Self {
             inner: Arc::new(RwLock::new(inner)),
