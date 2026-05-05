@@ -86,7 +86,7 @@ impl Signatures {
     }
 
     /// Get the signatures for the given server name.
-    fn __getitem__(&self, key: Bound<'_, PyAny>) -> PyResult<Option<HashMap<String, String>>> {
+    fn __getitem__(&self, key: Bound<'_, PyAny>) -> PyResult<HashMap<String, String>> {
         let Some(server_name) = key.extract::<&str>().ok() else {
             return Err(PyKeyError::new_err(key.to_string()));
         };
@@ -96,7 +96,11 @@ impl Signatures {
             .read()
             .map_err(|_| PyRuntimeError::new_err("Failed to acquire lock"))?;
 
-        Ok(signatures.get(server_name).cloned())
+        if let Some(server_sigs) = signatures.get(server_name) {
+            Ok(server_sigs.clone())
+        } else {
+            Err(PyKeyError::new_err(server_name.to_string()))
+        }
     }
 
     /// Add a signature for the given server name and key ID.
@@ -122,27 +126,25 @@ impl Signatures {
     /// Update the signatures with the given signatures.
     ///
     /// Will overwrite all existing signatures for the server names provided.
-    fn update(&self, other: Bound<'_, PyMapping>) -> PyResult<()> {
+    fn update(&self, other: &Bound<'_, PyMapping>) -> PyResult<()> {
         let mut signatures = self
             .inner
             .write()
             .map_err(|_| PyRuntimeError::new_err("Failed to acquire lock"))?;
 
-        for key in other.keys()? {
-            let value = other.get_item(&key)?;
-            let server_name = key.extract::<String>()?;
-            let server_sigs = value.cast::<PyMapping>()?;
+        for list_entry in other.items()? {
+            let (server_name, server_sigs) = list_entry.extract::<(String, Bound<PyMapping>)>()?;
 
-            let entry = signatures.entry(server_name.clone()).or_default();
-            for key in server_sigs.keys()? {
-                let value = server_sigs.get_item(&key)?;
-                let key_id = key.extract::<String>()?;
-                let signature = value.extract::<String>()?;
-
-                entry.insert(key_id, signature);
+            let mut entry = HashMap::new();
+            for list_entry in server_sigs.items()? {
+                let (key, value) = list_entry.extract::<(String, String)>()?;
+                entry.insert(key, value);
             }
 
-            if entry.is_empty() {
+            // Only insert the entry if it has at least one signature.
+            if !entry.is_empty() {
+                signatures.insert(server_name, entry);
+            } else {
                 signatures.remove(&server_name);
             }
         }
@@ -172,6 +174,8 @@ impl Signatures {
 
 #[cfg(test)]
 mod tests {
+    use pythonize::pythonize;
+
     use super::*;
 
     /// Helper that reads the inner map directly.
@@ -273,6 +277,34 @@ mod tests {
             inner.get("example.com").and_then(|m| m.get("ed25519:key2")),
             Some(&"sig2".to_string())
         );
+    }
+
+    #[test]
+    fn test_update_signatures_clobbers_existing() {
+        let sigs = create_signatures(&[("example.com", "ed25519:key1", "sig1")]);
+
+        // Create a new signatures map with a different signature for the same
+        // server.
+        let mut other = HashMap::new();
+        other.insert(
+            "example.com".to_string(),
+            make_server_sigs(&[("ed25519:key2", "sig2")]),
+        );
+
+        // Update the signatures with the new map.
+        Python::initialize();
+        Python::attach(|py| {
+            let value = pythonize(py, &other).unwrap();
+            let value = value.cast::<PyMapping>().unwrap();
+
+            sigs.update(value).unwrap();
+        });
+
+        // Check that the old signature has been replaced with the new one.
+        let inner = read_inner(&sigs);
+        assert_eq!(inner.len(), 1);
+        assert_eq!(inner["example.com"].len(), 1);
+        assert_eq!(inner["example.com"]["ed25519:key2"], "sig2");
     }
 
     #[test]

@@ -34,6 +34,7 @@ from typing import (
 )
 
 import attr
+from typing_extensions import deprecated
 from unpaddedbase64 import encode_base64
 
 from synapse.api.constants import (
@@ -66,6 +67,10 @@ dict to frozen_dicts is expensive.
 NOTE: This is overridden by the configuration by the Synapse worker apps, but
 for the sake of tests, it is set here because it cannot be configured on the
 homeserver object itself.
+
+FIXME: Because of how this option works (changing the underlying types), it causes
+subtle downstream bugs that makes type comparisons brittle, tracked by
+https://github.com/element-hq/synapse/issues/18117
 """
 
 T = TypeVar("T")
@@ -222,6 +227,9 @@ class EventBase(metaclass=abc.ABCMeta):
     # get_state_key() (and a check for None).
     state_key: DictProperty[str] = DictProperty("state_key")
     type: DictProperty[str] = DictProperty("type")
+
+    # This is a deprecated property, use `sender` instead. Only used by modules.
+    user_id: DictProperty[str] = DictProperty("sender")
 
     @property
     def event_id(self) -> str:
@@ -381,6 +389,11 @@ class EventBase(metaclass=abc.ABCMeta):
             f"outlier={self.internal_metadata.is_outlier()}"
             ">"
         )
+
+    # Using `__getitem__` is deprecated. Only used by modules.
+    @deprecated("Use attribute access instead")
+    def __getitem__(self, field: str) -> Any | None:
+        return self._dict[field]
 
 
 class FrozenEvent(EventBase):
