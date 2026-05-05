@@ -779,13 +779,26 @@ class EventsWorkerStore(SQLBaseStore):
             events.append(event)
 
             if get_prev_content:
-                if "replaces_state" in event.unsigned:
+                # The `event` here might be in the cache, and so might have
+                # already had the `prev_content` and `prev_sender` fields added
+                # to its unsigned.
+                #
+                # We check if a) we should add the previous content, and b) if
+                # we have already added it.
+                replaces_state = "replaces_state" in event.unsigned
+                has_prev = (
+                    "prev_content" in event.unsigned and "prev_sender" in event.unsigned
+                )
+                if replaces_state and not has_prev:
                     prev = await self.get_event(
                         event.unsigned["replaces_state"],
                         get_prev_content=False,
                         allow_none=True,
                     )
                     if prev:
+                        # This mutates the cached event, but that's fine as the
+                        # previous content/sender will be the same for all
+                        # requests for this event.
                         event.unsigned["prev_content"] = prev.content
                         event.unsigned["prev_sender"] = prev.sender
 
