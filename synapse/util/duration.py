@@ -32,9 +32,13 @@ class Duration(timedelta):
     ```
     """
 
-    # Using `__new__` because that's what `timedelta` uses
+    # Using `__new__` (instead of `__init__`) because that's what `timedelta` uses
     def __new__(
         cls,
+        # The whole goal of overriding `__new__` is to require keyword-only arguments.
+        # Without this, `Duration(5)` would create a duration represnting 5 *days*
+        # (timedelta's default), but callers almost certainly want to specify which unit
+        # like seconds or hours.
         *,
         days: float = 0,
         seconds: float = 0,
