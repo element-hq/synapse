@@ -345,6 +345,10 @@ set to `true`), the following endpoints can be handled by the worker:
     ^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
     ^/_synapse/admin/v1/users/[^/]+/devices$
 
+Do note that these endpoints can't be handled by workers if the stabilised delegated
+authentication support is enabled (`matrix_authentication_service.enabled` set to
+`true`).
+
 Note that a [HTTP listener](usage/configuration/config_documentation.md#listeners)
 with `client` and `federation` `resources` must be configured in the
 [`worker_listeners`](usage/configuration/config_documentation.md#worker_listeners)
