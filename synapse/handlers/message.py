@@ -2299,10 +2299,10 @@ class EventCreationHandler:
         """
         Creates and sends a dummy event into the given room, referencing the
         current forward extremities (via `prev_events`).
-        This should only be triggered when handling a remote join while there was
-        events sent during the make_join/send_join handshake. The joining
-        homeserver would otherwise not immediately know to backfill this event,
-        and would "miss it".
+        This should only be triggered when handling a remote join while events
+        were sent during the make_join/send_join handshake. The joining
+        homeserver would otherwise not immediately know to backfill those events
+        and would "miss" them.
         """
         async with self._worker_lock_handler.acquire_read_write_lock(
             NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
@@ -2312,17 +2312,10 @@ class EventCreationHandler:
             )
 
         if not dummy_event_sent:
-            # Did not find a valid user in the room, so remove from future attempts
-            # Exclusion is time limited, so the room will be rechecked in the future
-            # dependent on _DUMMY_EVENT_ROOM_EXCLUSION_EXPIRY
             logger.info(
-                "Failed to send dummy event into room %s. Will exclude it from "
-                "future attempts until cache expires",
+                "Failed to send dummy event into room %s after remote join; "
+                "no local user with permission was found",
                 room_id,
-            )
-            # This mapping is room_id -> time of last attempt(in ms)
-            self._rooms_to_exclude_from_dummy_event_insertion[room_id] = (
-                self.clock.time_msec()
             )
 
     async def _send_dummy_event_for_room(
