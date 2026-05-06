@@ -270,7 +270,6 @@ class ApplicationServicesHandler:
 
         # Notify appservices of updates in ephemeral event streams.
         # Only the following streams are currently supported.
-        # FIXME: We should use constants for these values.
         if stream_key not in (
             StreamKeyType.TYPING,
             StreamKeyType.RECEIPT,
