@@ -44,8 +44,12 @@ from synapse.api.constants import (
     StickyEvent,
 )
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import EventInternalMetadata
-from synapse.types import JsonDict, StateKey, StrCollection
+from synapse.synapse_rust.events import EventInternalMetadata, Signatures
+from synapse.types import (
+    JsonDict,
+    StateKey,
+    StrCollection,
+)
 from synapse.util.caches import intern_dict
 from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
@@ -203,7 +207,7 @@ class EventBase(metaclass=abc.ABCMeta):
         assert room_version.event_format == self.format_version
 
         self.room_version = room_version
-        self.signatures = signatures
+        self.signatures = Signatures(signatures)
         self.unsigned = unsigned
         self.rejected_reason = rejected_reason
 
@@ -255,7 +259,9 @@ class EventBase(metaclass=abc.ABCMeta):
 
     def get_dict(self) -> JsonDict:
         d = dict(self._dict)
-        d.update({"signatures": self.signatures, "unsigned": dict(self.unsigned)})
+        d.update(
+            {"signatures": self.signatures.as_dict(), "unsigned": dict(self.unsigned)}
+        )
 
         return d
 
