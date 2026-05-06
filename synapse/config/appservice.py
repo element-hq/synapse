@@ -171,9 +171,10 @@ def _load_appservice(
 
     # TODO: remove push_ephemeral handling at some point in the future. It was part of
     #  MSC2409 which changed the identifier near the end of the review cycle.
-    _push_ephemeral = as_info.get("de.sorunome.msc2409.push_ephemeral", False)
-    _receive_ephemeral = as_info.get("receive_ephemeral", False)
-    supports_ephemeral = _push_ephemeral or _receive_ephemeral
+    supports_unstable_ephemeral = as_info.get(
+        "de.sorunome.msc2409.push_ephemeral", False
+    )
+    supports_ephemeral = as_info.get("receive_ephemeral", False)
 
     # Opt-in flag for the MSC3202-specific transactional behaviour.
     # When enabled, appservice transactions contain the following information:
@@ -208,6 +209,7 @@ def _load_appservice(
         protocols=protocols,
         rate_limited=rate_limited,
         ip_range_whitelist=ip_range_whitelist,
+        supports_unstable_ephemeral=supports_unstable_ephemeral,
         supports_ephemeral=supports_ephemeral,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
         msc4190_device_management=msc4190_enabled,
