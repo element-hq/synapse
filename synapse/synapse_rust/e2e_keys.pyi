@@ -12,7 +12,7 @@ class SignatureListItem:
     target_device_id: str
     """Device ID (or master-key ID) that the signature targets."""
 
-    signature: Any
+    signature: str
     """Raw signature value."""
 
     def __init__(
@@ -20,5 +20,5 @@ class SignatureListItem:
         signing_key_id: str,
         target_user_id: str,
         target_device_id: str,
-        signature: Any,
+        signature: str,
     ) -> None: ...

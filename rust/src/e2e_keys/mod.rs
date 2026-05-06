@@ -20,7 +20,7 @@
 use pyo3::{
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, Py, PyAny, PyResult, Python,
+    Bound, PyResult, Python,
 };
 
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -38,23 +38,19 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
 /// A pending cross-signing signature.
 #[derive(Debug)]
-#[pyclass(frozen)]
+#[pyclass(frozen, get_all)]
 pub struct SignatureListItem {
     /// Full key ID of the signing key, e.g. `"ed25519:ABCDEF"`.
-    #[pyo3(get)]
     pub signing_key_id: String,
 
     /// User whose key was signed.
-    #[pyo3(get)]
     pub target_user_id: String,
 
     /// Device ID (or master-key ID) that the signature targets.
-    #[pyo3(get)]
     pub target_device_id: String,
 
     /// Raw signature value.
-    #[pyo3(get)]
-    pub signature: Py<PyAny>,
+    pub signature: String,
 }
 
 #[pymethods]
@@ -64,7 +60,7 @@ impl SignatureListItem {
         signing_key_id: String,
         target_user_id: String,
         target_device_id: String,
-        signature: Py<PyAny>,
+        signature: String,
     ) -> Self {
         Self {
             signing_key_id,
