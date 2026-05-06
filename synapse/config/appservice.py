@@ -169,7 +169,11 @@ def _load_appservice(
     if as_info.get("ip_range_whitelist"):
         ip_range_whitelist = IPSet(as_info.get("ip_range_whitelist"))
 
-    supports_ephemeral = as_info.get("de.sorunome.msc2409.push_ephemeral", False)
+    # TODO: remove push_ephemeral handling at some point in the future. It was part of
+    #  MSC2409 which changed the identifier near the end of the review cycle.
+    _push_ephemeral = as_info.get("de.sorunome.msc2409.push_ephemeral", False)
+    _receive_ephemeral = as_info.get("receive_ephemeral", False)
+    supports_ephemeral = _push_ephemeral or _receive_ephemeral
 
     # Opt-in flag for the MSC3202-specific transactional behaviour.
     # When enabled, appservice transactions contain the following information:
