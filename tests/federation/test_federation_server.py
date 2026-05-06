@@ -754,9 +754,9 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             },
         }
 
-        filtered_event2 = event_from_pdu_json(event2, RoomVersions.V1)
-        self.assertIn("age", filtered_event2.unsigned)
-        self.assertEqual(14, filtered_event2.unsigned["age"])
+        filtered_event2 = event_from_pdu_json(event2, RoomVersions.V1, received_time=20)
+        self.assertIn("age_ts", filtered_event2.unsigned)
+        self.assertEqual(6, filtered_event2.unsigned["age_ts"])
         self.assertNotIn("more warez", filtered_event2.unsigned)
         # Invite_room_state is allowed in events of type m.room.member
         self.assertIn("invite_room_state", filtered_event2.unsigned)
@@ -779,8 +779,8 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
                 "invite_room_state": [],
             },
         }
-        filtered_event3 = event_from_pdu_json(event3, RoomVersions.V1)
-        self.assertIn("age", filtered_event3.unsigned)
+        filtered_event3 = event_from_pdu_json(event3, RoomVersions.V1, received_time=20)
+        self.assertIn("age_ts", filtered_event3.unsigned)
         # Invite_room_state field is only permitted in event type m.room.member
         self.assertNotIn("invite_room_state", filtered_event3.unsigned)
         self.assertNotIn("more warez", filtered_event3.unsigned)

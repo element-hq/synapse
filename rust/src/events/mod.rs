@@ -28,12 +28,14 @@ use pyo3::{
 pub mod filter;
 mod internal_metadata;
 pub mod signatures;
+pub mod unsigned;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "events")?;
     child_module.add_class::<internal_metadata::EventInternalMetadata>()?;
     child_module.add_class::<signatures::Signatures>()?;
+    child_module.add_class::<unsigned::Unsigned>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
 
     m.add_submodule(&child_module)?;

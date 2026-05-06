@@ -2711,7 +2711,7 @@ class PersistEventsStore:
             return
 
         def event_dict(event: EventBase) -> JsonDict:
-            d = event.get_dict()
+            d = event.get_dict_for_persistence()
             d.pop("redacted", None)
             d.pop("redacted_because", None)
             return d
