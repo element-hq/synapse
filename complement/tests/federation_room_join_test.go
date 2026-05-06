@@ -39,8 +39,10 @@ func TestEventBetweenMakeJoinAndSendJoinIsNotLost(t *testing.T) {
 	// After send_join, we wait for hs1 to send us either:
 	//  - the message event itself, or
 	//  - any event whose prev_events reference the message (e.g. a dummy event)
-	// atomic.Value is used because messageEventID is written on the main goroutine
-	// and read on the HTTP handler goroutine, with no other synchronization.
+    //
+	// atomic.Value is used because messageEventID is written on the main goroutine and
+	// read on the HTTP handler goroutine, and needs synchronization (without
+	// synchronization, writes are not guaranteed to be observed by other goroutines)
 	var messageEventID atomic.Value
 	messageDiscoverableWaiter := helpers.NewWaiter()
 
