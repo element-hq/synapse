@@ -1,5 +1,3 @@
-from typing import Any
-
 class SignatureListItem:
     """A pending cross-signing signature."""
 
