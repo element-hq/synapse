@@ -824,7 +824,7 @@ mod tests {
 
         // Serialize the keys in the reverse order.
         for (c, _) in ascii_order.iter().rev() {
-            map_serializer.serialize_entry(c, &1).unwrap();
+            map_serializer.serialize_entry(c.into(), &1).unwrap();
         }
         SerializeMap::end(map_serializer).unwrap();
 
