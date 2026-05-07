@@ -128,7 +128,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
     )
 
     # Check the sender's domain has signed the event
-    if not event.signatures.get(sender_domain):
+    if sender_domain not in event.signatures:
         # We allow invites via 3pid to have a sender from a different
         # HS, as the sender must match the sender of the original
         # 3pid invite. This is checked further down with the
@@ -141,7 +141,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
         event_id_domain = get_domain_from_id(event.event_id)
 
         # Check the origin domain has signed the event
-        if not event.signatures.get(event_id_domain):
+        if event_id_domain not in event.signatures:
             raise AuthError(403, "Event not signed by sending server")
 
     is_invite_via_allow_rule = (
@@ -154,7 +154,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
         authoriser_domain = get_domain_from_id(
             event.content[EventContentFields.AUTHORISING_USER]
         )
-        if not event.signatures.get(authoriser_domain):
+        if authoriser_domain not in event.signatures:
             raise AuthError(403, "Event not signed by authorising server")
 
 

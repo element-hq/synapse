@@ -10,9 +10,9 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Mapping
+from typing import Any, Mapping
 
-from synapse.types import JsonDict
+from synapse.types import JsonDict, JsonMapping
 
 class EventInternalMetadata:
     def __init__(self, internal_metadata_dict: JsonDict): ...
@@ -154,3 +154,62 @@ def event_visible_to_server(
     Returns:
         Whether the server is allowed to see the unredacted event.
     """
+
+class Signatures:
+    """A class representing the signatures on an event."""
+
+    def __init__(self, signatures: Mapping[str, Mapping[str, str]] | None = None): ...
+    def get_signature(self, server_name: str, key_id: str) -> str | None: ...
+    """Get the signature for the given server name and key ID, if it exists."""
+
+    def __getitem__(self, server_name: str) -> Mapping[str, str]: ...
+    """Get the signatures for the given server name. Raises KeyError if there
+    are no signatures for that server."""
+
+    def __contains__(self, server_name: Any) -> bool: ...
+    """Check if there are signatures for the given server name."""
+
+    def __len__(self) -> int: ...
+    """Return the number of servers that have signatures."""
+
+    def add_signature(self, server_name: str, key_id: str, signature: str) -> None: ...
+    """Add a signature for the given server name and key ID."""
+
+    def update(self, signatures: Mapping[str, Mapping[str, str]]) -> None: ...
+    """Update the signatures with the given signatures.
+
+    Will overwrite all existing signatures for the server names provided.
+    """
+
+    def as_dict(self) -> dict[str, dict[str, str]]: ...
+    """Return a copy of the signatures as a dictionary."""
+
+class Unsigned:
+    """A class representing the unsigned data of an event."""
+
+    def __init__(self, unsigned_dict: JsonMapping): ...
+    def __getitem__(self, key: str) -> Any: ...
+    """Get the value for the given key.
+
+    Raises KeyError if the key is unset or not recognised."""
+
+    def __setitem__(self, key: str, value: Any) -> None: ...
+    """Set the value for the given key.
+
+    Raises KeyError if the key is not recognised."""
+
+    def __delitem__(self, key: str) -> None: ...
+    """Delete the value for the given key.
+
+    Raises KeyError if the key is unset or not recognised."""
+
+    def __contains__(self, key: Any) -> bool: ...
+    def get(self, key: str, default: Any = None) -> Any: ...
+    """Get the value for the given key, or ``default`` if the key is unset."""
+
+    def for_persistence(self) -> JsonDict: ...
+    """Return a dict of the fields that should be persisted to the database."""
+
+    def for_event(self) -> JsonDict: ...
+    """Return a dict of all unsigned fields, including those only kept in
+    memory, suitable for inclusion in an event."""

@@ -566,7 +566,7 @@ class PaginationHandler:
         (
             events,
             next_key,
-            _,
+            limited,
         ) = await self.store.paginate_room_events_by_topological_ordering(
             room_id=room_id,
             from_key=from_token.room_key,
@@ -645,7 +645,7 @@ class PaginationHandler:
                     (
                         events,
                         next_key,
-                        _,
+                        limited,
                     ) = await self.store.paginate_room_events_by_topological_ordering(
                         room_id=room_id,
                         from_key=from_token.room_key,
@@ -668,11 +668,12 @@ class PaginationHandler:
 
         next_token = from_token.copy_and_replace(StreamKeyType.ROOM, next_key)
 
-        # if no events are returned from pagination, that implies
-        # we have reached the end of the available events.
+        # if no events are returned from pagination (this page is empty)
+        # and there aren't any more pages (not limited),
+        # that implies we have reached the end of the available events.
         # In that case we do not return end, to tell the client
         # there is no need for further queries.
-        if not events:
+        if not limited and not events:
             return GetMessagesResult(
                 messages_chunk=[],
                 bundled_aggregations={},
