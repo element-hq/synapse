@@ -1,0 +1,1 @@
+Force keyword-only args for `Duration` (prevent footgun) so people have to specify which time unit they want to us.
