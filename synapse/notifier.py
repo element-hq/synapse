@@ -847,11 +847,18 @@ class Notifier:
         this function to ensure it's not some invalid future token. We consider a token
         invalid, if the token has positions ahead of our persisted positions in the
         database. This is important as we we don't want to wait for the stream to
-        advance in those cases (as it may never do so).
+        advance in those cases (as it may never do so) (it's a waste of time for the
+        user and server).
 
-        Previously, we would `bound_future_token(...)` within this function but that
-        leads to bad patterns upstream where people can continue to use the unbounded
-        token.
+        Previously, we would sanitize and `bound_future_token(...)` within this function
+        but that leads to bad patterns upstream where people can continue to use the
+        unbounded token.
+
+        While it was possible for older Synapse versions to erroneously give out invalid
+        future tokens, this is no longer the case and its considered a Synapse
+        programming error if this ever happens. Validation/sanitization is still
+        necessary as a user can intentionally mess with numbers in the tokens being
+        provided.
 
         Args:
             stream_token: The token to wait for. We assume the token has already been
