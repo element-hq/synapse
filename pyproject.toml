@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.152.0"
+version = "1.152.1"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
