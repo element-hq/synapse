@@ -841,6 +841,23 @@ class Notifier:
         which is behind; if the worker assembles a response up to the token, it could be
         missing data in the gap between where it's behind and the requested token.
 
+        ### Inavlid future tokens
+
+        We assume the token has already been validated/sanitized before being passed to
+        this function to ensure it's not some invalid future token. We consider a token
+        invalid, if the token has positions ahead of our persisted positions in the
+        database. This is important as we we don't want to wait for the stream to
+        advance in those cases (as it may never do so).
+
+        Previously, we would `bound_future_token(...)` within this function but that
+        leads to bad patterns upstream where people can continue to use the unbounded
+        token.
+
+        Args:
+            stream_token: The token to wait for. We assume the token has already been
+            validated/sanitized to ensure it's not some invalid future token (has a
+            stream position ahead of what is in the DB). (see details above)
+
         Returns:
             True when this worker has caught up
             False when we timed out waiting
@@ -849,23 +866,6 @@ class Notifier:
         # Return early if we are already caught up
         if stream_token.is_before_or_eq(current_token):
             return True
-
-        # Assert as we consider this a Synapse programming error. We shouldn't be
-        # handing out invalid future tokens and tokens should be validated before it
-        # reaches this point.
-        #
-        # We consider a token invalid, if the token has positions ahead of our persisted
-        # positions in the database
-        #
-        # Previously, we would bound the tokens within this function but that leads to
-        # bad patterns upstream where people can continue to use the unbounded token.
-        original_stream_token = stream_token
-        max_token = await self.event_sources.bound_future_token(stream_token)
-        assert stream_token.is_before_or_eq(max_token), (
-            f"Refusing to wait for invalid future stream token (token={original_stream_token} "
-            "that has positions ahead of our max persisted position {max_token}) "
-            "(Synapse programming error)"
-        )
 
         # Start waiting until we've caught up to the `stream_token`
         start = self.clock.time_msec()

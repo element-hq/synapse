@@ -134,32 +134,3 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         # Make sure we gave up waiting and not caught-up (False)
         wait_result = self.get_success(wait_d)
         self.assertEqual(wait_result, False)
-
-    def test_wait_for_stream_token_with_invalid_future_sync_token(
-        self,
-    ) -> None:
-        """
-        Like `test_wait_for_stream_token_with_future_sync_token`, except we
-        give a token that has a stream position ahead of what is in the DB, i.e. its
-        invalid and we shouldn't wait for the stream to advance (as it may never do so).
-
-        This can happen due to older versions of Synapse giving out stream
-        positions without persisting them in the DB, and so on restart the
-        stream would get reset back to an older position.
-        """
-        # Create a token and advance one of the streams.
-        receipt_id_gen = self.store.get_receipts_stream_id_gen()
-        current_receipt_token = MultiWriterStreamToken.from_generator(receipt_id_gen)
-        receipt_token = current_receipt_token.copy_and_advance(
-            MultiWriterStreamToken(
-                stream=current_receipt_token.get_max_stream_pos() + 1
-            )
-        )
-        token = StreamToken.START.copy_and_advance(StreamKeyType.RECEIPT, receipt_token)
-
-        # Function under test
-        wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
-
-        # Expect to fail. We expect callers to sanitize/validate the tokens they give to
-        # `wait_for_stream_token` to ensure they aren't in the future.
-        self.get_failure(wait_d, exc=AssertionError)
