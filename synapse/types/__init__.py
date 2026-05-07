@@ -1312,6 +1312,13 @@ class StreamToken:
             self_value = self.get_field(key)
             other_value = other_token.get_field(key)
 
+            logger.info(
+                "asdf key=%s self_value=%s, other_value=%s",
+                key,
+                self_value,
+                other_value,
+            )
+
             if isinstance(self_value, RoomStreamToken):
                 assert isinstance(other_value, RoomStreamToken)
                 if not self_value.is_before_or_eq(other_value):

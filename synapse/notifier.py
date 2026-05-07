@@ -47,9 +47,6 @@ from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
-from synapse.storage.util.id_generators import (
-    MultiWriterIdGenerator,
-)
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -888,70 +885,6 @@ class Notifier:
                 logger.info(
                     "Waiting for current token to reach %s; currently at %s",
                     stream_token,
-                    current_token,
-                )
-                logged = True
-
-            # TODO: be better
-            await self.clock.sleep(Duration(milliseconds=500))
-
-    async def wait_for_multi_writer_stream_token(
-        self,
-        token: MultiWriterStreamToken,
-        id_gen: MultiWriterIdGenerator,
-    ) -> bool:
-        """
-        Wait for this worker to catch up with the given stream token.
-
-        This is important to ensure that the worker has a proper view of the world
-        before trying to serve a request. For example, one worker can return a response
-        with some `next_batch` token, but then the next request goes to another worker
-        which is behind; if the worker assembles a response up to the token, it could be
-        missing data in the gap between where it's behind and the requested token.
-
-        Returns:
-            True when this worker has caught up
-            False when we timed out waiting
-        """
-        current_token = MultiWriterStreamToken.from_generator(id_gen)
-        # Return early if we are already caught up
-        if token.is_before_or_eq(current_token):
-            return True
-
-        # Assert as we consider this a Synapse programming error. We shouldn't be
-        # handing out invalid future tokens and tokens should be validated before it
-        # reaches this point.
-        #
-        # We consider a token invalid, if the token has positions ahead of our persisted
-        # positions in the database
-        #
-        # Previously, we would bound the tokens within this function but that leads to
-        # bad patterns upstream where people can continue to use the unbounded token.
-        max_persisted_position = await id_gen.get_max_allocated_token()
-        assert max_persisted_position >= token.get_max_stream_pos(), (
-            f"Refusing to wait for invalid future token (token={token} "
-            "that has positions ahead of our max persisted position {max_persisted_position}) "
-            "(Synapse programming error)"
-        )
-
-        # Start waiting until we've caught up to the `stream_token`
-        start = self.clock.time_msec()
-        logged = False
-        while True:
-            current_token = MultiWriterStreamToken.from_generator(id_gen)
-            if token.is_before_or_eq(current_token):
-                return True
-
-            now = self.clock.time_msec()
-
-            # Timed out
-            if now - start > 10_000:
-                return False
-
-            if not logged:
-                logger.info(
-                    "Waiting for current token to reach %s; currently at %s",
-                    token,
                     current_token,
                 )
                 logged = True
