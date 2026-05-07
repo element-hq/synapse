@@ -775,8 +775,8 @@ class RoomSummaryHandler:
 
         Args:
             room_id: The room ID to summarize.
-            for_federation: True if this is a summary requested over federation
-                (which includes additional fields).
+            for_federation: True if this is a summary requested over federation.
+                Unused; kept for API stability.
 
         Returns:
             The JSON dictionary for the room.
@@ -805,24 +805,21 @@ class RoomSummaryHandler:
             "encryption": stats.encryption,
         }
 
-        # Federation requests need to provide additional information so the
-        # requested server is able to filter the response appropriately.
-        if for_federation:
-            current_state_ids = (
-                await self._storage_controllers.state.get_current_state_ids(room_id)
-            )
-            room_version = await self._store.get_room_version(room_id)
+        # Include allowed_room_ids for rooms with restricted join rules so that
+        # clients can determine which memberships grant access.
+        current_state_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id
+        )
+        room_version = await self._store.get_room_version(room_id)
 
-            if await self._event_auth_handler.has_restricted_join_rules(
-                current_state_ids, room_version
-            ):
-                allowed_rooms = (
-                    await self._event_auth_handler.get_rooms_that_allow_join(
-                        current_state_ids
-                    )
-                )
-                if allowed_rooms:
-                    entry["allowed_room_ids"] = allowed_rooms
+        if await self._event_auth_handler.has_restricted_join_rules(
+            current_state_ids, room_version
+        ):
+            allowed_rooms = await self._event_auth_handler.get_rooms_that_allow_join(
+                current_state_ids
+            )
+            if allowed_rooms:
+                entry["allowed_room_ids"] = allowed_rooms
 
         # Filter out Nones – rather omit the field altogether
         room_entry = {k: v for k, v in entry.items() if v is not None}
@@ -932,7 +929,6 @@ class RoomSummaryHandler:
                 raise NotFoundError("Room not found or is not accessible")
 
             room = dict(room_entry.room)
-            room.pop("allowed_room_ids", None)
 
             # If there was a requester, add their membership.
             # We keep the membership in the local membership table unless the
