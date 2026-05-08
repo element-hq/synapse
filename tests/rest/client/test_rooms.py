@@ -59,7 +59,7 @@ from synapse.rest.client import (
     sync,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomAlias, UserID, create_requester
+from synapse.types import JsonDict, JsonMapping, RoomAlias, UserID, create_requester
 from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
@@ -1859,7 +1859,7 @@ class RoomMessagesTestCase(RoomBase):
             mock_return_value: str | bool | Codes | tuple[Codes, JsonDict] | bool = (
                 "NOT_SPAM"
             )
-            mock_content: JsonDict | None = None
+            mock_content: JsonMapping | None = None
 
             async def check_event_for_spam(
                 self,

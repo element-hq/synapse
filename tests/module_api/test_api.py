@@ -265,7 +265,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.message")
         self.assertEqual(event.room_id, room_id)
         self.assertFalse(hasattr(event, "state_key"))
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         expected_requester = create_requester(
             user_id, authenticated_entity=self.hs.hostname
@@ -301,7 +301,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.power_levels")
         self.assertEqual(event.room_id, room_id)
         self.assertEqual(event.state_key, "")
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         # Check that the event was sent
         self.event_creation_handler.create_and_send_nonmember_event.assert_called_with(
