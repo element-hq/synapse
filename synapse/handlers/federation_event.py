@@ -1166,9 +1166,10 @@ class FederationEventHandler:
             return await self._state_handler.compute_event_context(event)
 
         logger.info(
-            "Event %s is missing prev_events %s: calculating state for a "
-            "backwards extremity",
+            "_compute_event_context_with_maybe_missing_prevs: Event %s in room %s is missing prev_events %s: "
+            "calculating state for a backwards extremity",
             event_id,
+            room_id,
             shortstr(missing_prevs),
         )
         # Calculate the state after each of the previous events, and
@@ -1225,7 +1226,11 @@ class FederationEventHandler:
 
         except Exception as e:
             logger.warning(
-                "Error attempting to resolve state at missing prev_events: %s", e
+                "_compute_event_context_with_maybe_missing_prevs: Error attempting to resolve state for "
+                "event_id=%s in room_id=%s that has missing prev_events: %s",
+                event_id,
+                room_id,
+                e,
             )
             raise FederationError(
                 "ERROR",
