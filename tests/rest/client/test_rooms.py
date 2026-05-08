@@ -4941,7 +4941,6 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
@@ -5057,7 +5056,6 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
@@ -5141,7 +5139,6 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             self._storage_controllers.state.get_current_state(self.room_id)
         )
         auth_ids = [
-            new_state[("m.room.create", "")].event_id,
             new_state[("m.room.power_levels", "")].event_id,
             new_state[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
@@ -5297,7 +5294,6 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
@@ -5410,7 +5406,6 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(r[("m.room.member", bad_user)].membership, "join")
 
         auth_ids = [
-            r[("m.room.create", "")].event_id,
             r[("m.room.power_levels", "")].event_id,
             r[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
@@ -5489,7 +5484,6 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             self._storage_controllers.state.get_current_state(self.room_id)
         )
         auth_ids = [
-            new_state[("m.room.create", "")].event_id,
             new_state[("m.room.power_levels", "")].event_id,
             new_state[("m.room.member", "@remote_bad_user:other.example.com")].event_id,
         ]
