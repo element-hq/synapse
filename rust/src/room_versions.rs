@@ -164,24 +164,156 @@ pub struct RoomVersion {
 }
 
 impl RoomVersion {
-    pub const V1: RoomVersion = ROOM_VERSION_V1;
-    pub const V2: RoomVersion = ROOM_VERSION_V2;
-    pub const V3: RoomVersion = ROOM_VERSION_V3;
-    pub const V4: RoomVersion = ROOM_VERSION_V4;
-    pub const V5: RoomVersion = ROOM_VERSION_V5;
-    pub const V6: RoomVersion = ROOM_VERSION_V6;
-    pub const V7: RoomVersion = ROOM_VERSION_V7;
-    pub const V8: RoomVersion = ROOM_VERSION_V8;
-    pub const V9: RoomVersion = ROOM_VERSION_V9;
-    pub const V10: RoomVersion = ROOM_VERSION_V10;
-    pub const MSC1767V10: RoomVersion = ROOM_VERSION_MSC1767V10;
-    pub const MSC3389V10: RoomVersion = ROOM_VERSION_MSC3389V10;
-    pub const MSC3757V10: RoomVersion = ROOM_VERSION_MSC3757V10;
-    pub const V11: RoomVersion = ROOM_VERSION_V11;
-    pub const MSC3757V11: RoomVersion = ROOM_VERSION_MSC3757V11;
-    pub const HYDRA_V11: RoomVersion = ROOM_VERSION_HYDRA_V11;
-    pub const V12: RoomVersion = ROOM_VERSION_V12;
-    pub const MSC4242V12: RoomVersion = ROOM_VERSION_MSC4242V12;
+    pub const V1: RoomVersion = RoomVersion {
+        identifier: "1",
+        disposition: RoomDisposition::STABLE,
+        event_format: EventFormatVersions::ROOM_V1_V2,
+        state_res: StateResolutionVersions::V1,
+        enforce_key_validity: false,
+        special_case_aliases_auth: true,
+        strict_canonicaljson: false,
+        limit_notifications_power_levels: false,
+        implicit_room_creator: false,
+        updated_redaction_rules: false,
+        restricted_join_rule: false,
+        restricted_join_rule_fix: false,
+        knock_join_rule: false,
+        msc3389_relation_redactions: false,
+        knock_restricted_join_rule: false,
+        enforce_int_power_levels: false,
+        msc3931_push_features: &[],
+        msc3757_enabled: false,
+        msc4289_creator_power_enabled: false,
+        msc4291_room_ids_as_hashes: false,
+        strict_event_byte_limits_room_versions: false,
+        msc4242_state_dags: false,
+    };
+
+    pub const V2: RoomVersion = RoomVersion {
+        identifier: "2",
+        state_res: StateResolutionVersions::V2,
+        ..Self::V1
+    };
+
+    pub const V3: RoomVersion = RoomVersion {
+        identifier: "3",
+        event_format: EventFormatVersions::ROOM_V3,
+        ..Self::V2
+    };
+
+    pub const V4: RoomVersion = RoomVersion {
+        identifier: "4",
+        event_format: EventFormatVersions::ROOM_V4_PLUS,
+        ..Self::V3
+    };
+
+    pub const V5: RoomVersion = RoomVersion {
+        identifier: "5",
+        enforce_key_validity: true,
+        ..Self::V4
+    };
+
+    pub const V6: RoomVersion = RoomVersion {
+        identifier: "6",
+        special_case_aliases_auth: false,
+        strict_canonicaljson: true,
+        limit_notifications_power_levels: true,
+        ..Self::V5
+    };
+
+    pub const V7: RoomVersion = RoomVersion {
+        identifier: "7",
+        knock_join_rule: true,
+        ..Self::V6
+    };
+
+    pub const V8: RoomVersion = RoomVersion {
+        identifier: "8",
+        restricted_join_rule: true,
+        ..Self::V7
+    };
+
+    pub const V9: RoomVersion = RoomVersion {
+        identifier: "9",
+        restricted_join_rule_fix: true,
+        ..Self::V8
+    };
+
+    pub const V10: RoomVersion = RoomVersion {
+        identifier: "10",
+        knock_restricted_join_rule: true,
+        enforce_int_power_levels: true,
+        ..Self::V9
+    };
+
+    /// MSC3389 (Redaction changes for events with a relation) based on room version "10".
+    pub const MSC3389V10: RoomVersion = RoomVersion {
+        identifier: "org.matrix.msc3389.10",
+        disposition: RoomDisposition::UNSTABLE,
+        msc3389_relation_redactions: true,
+        strict_event_byte_limits_room_versions: true,
+        ..Self::V10
+    };
+
+    /// MSC1767 (Extensible Events) based on room version "10".
+    pub const MSC1767V10: RoomVersion = RoomVersion {
+        identifier: "org.matrix.msc1767.10",
+        disposition: RoomDisposition::UNSTABLE,
+        msc3931_push_features: &[PushRuleRoomFlag::EXTENSIBLE_EVENTS],
+        ..Self::V10
+    };
+
+    /// MSC3757 (Restricting who can overwrite a state event) based on room version "10".
+    pub const MSC3757V10: RoomVersion = RoomVersion {
+        identifier: "org.matrix.msc3757.10",
+        disposition: RoomDisposition::UNSTABLE,
+        msc3757_enabled: true,
+        ..Self::V10
+    };
+
+    pub const V11: RoomVersion = RoomVersion {
+        identifier: "11",
+        implicit_room_creator: true,   // Used by MSC3820
+        updated_redaction_rules: true, // Used by MSC3820
+        strict_event_byte_limits_room_versions: true,
+        ..Self::V10
+    };
+
+    /// MSC3757 (Restricting who can overwrite a state event) based on room version "11".
+    pub const MSC3757V11: RoomVersion = RoomVersion {
+        identifier: "org.matrix.msc3757.11",
+        disposition: RoomDisposition::UNSTABLE,
+        msc3757_enabled: true,
+        ..Self::V11
+    };
+
+    pub const HYDRA_V11: RoomVersion = RoomVersion {
+        identifier: "org.matrix.hydra.11",
+        disposition: RoomDisposition::UNSTABLE,
+        event_format: EventFormatVersions::ROOM_V11_HYDRA_PLUS,
+        state_res: StateResolutionVersions::V2_1,
+        msc4289_creator_power_enabled: true,
+        msc4291_room_ids_as_hashes: true,
+        ..Self::V11
+    };
+
+    pub const V12: RoomVersion = RoomVersion {
+        identifier: "12",
+        disposition: RoomDisposition::STABLE,
+        event_format: EventFormatVersions::ROOM_V11_HYDRA_PLUS,
+        state_res: StateResolutionVersions::V2_1,
+        msc4289_creator_power_enabled: true,
+        msc4291_room_ids_as_hashes: true,
+        ..Self::V11
+    };
+
+    pub const MSC4242V12: RoomVersion = RoomVersion {
+        identifier: "org.matrix.msc4242.12",
+        disposition: RoomDisposition::UNSTABLE,
+        event_format: EventFormatVersions::ROOM_VMSC4242,
+        msc4242_state_dags: true,
+        ..Self::V12
+    };
 }
 
 impl Display for RoomVersion {
@@ -229,157 +361,6 @@ impl<'py> IntoPyObject<'py> for &RoomVersion {
         self.clone().into_pyobject(py)
     }
 }
-
-const ROOM_VERSION_V1: RoomVersion = RoomVersion {
-    identifier: "1",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V1_V2,
-    state_res: StateResolutionVersions::V1,
-    enforce_key_validity: false,
-    special_case_aliases_auth: true,
-    strict_canonicaljson: false,
-    limit_notifications_power_levels: false,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: false,
-    restricted_join_rule_fix: false,
-    knock_join_rule: false,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
-};
-
-const ROOM_VERSION_V2: RoomVersion = RoomVersion {
-    identifier: "2",
-    state_res: StateResolutionVersions::V2,
-    ..ROOM_VERSION_V1
-};
-
-const ROOM_VERSION_V3: RoomVersion = RoomVersion {
-    identifier: "3",
-    event_format: EventFormatVersions::ROOM_V3,
-    ..ROOM_VERSION_V2
-};
-
-const ROOM_VERSION_V4: RoomVersion = RoomVersion {
-    identifier: "4",
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    ..ROOM_VERSION_V3
-};
-
-const ROOM_VERSION_V5: RoomVersion = RoomVersion {
-    identifier: "5",
-    enforce_key_validity: true,
-    ..ROOM_VERSION_V4
-};
-
-const ROOM_VERSION_V6: RoomVersion = RoomVersion {
-    identifier: "6",
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    ..ROOM_VERSION_V5
-};
-
-const ROOM_VERSION_V7: RoomVersion = RoomVersion {
-    identifier: "7",
-    knock_join_rule: true,
-    ..ROOM_VERSION_V6
-};
-
-const ROOM_VERSION_V8: RoomVersion = RoomVersion {
-    identifier: "8",
-    restricted_join_rule: true,
-    ..ROOM_VERSION_V7
-};
-
-const ROOM_VERSION_V9: RoomVersion = RoomVersion {
-    identifier: "9",
-    restricted_join_rule_fix: true,
-    ..ROOM_VERSION_V8
-};
-
-const ROOM_VERSION_V10: RoomVersion = RoomVersion {
-    identifier: "10",
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    ..ROOM_VERSION_V9
-};
-
-/// MSC3389 (Redaction changes for events with a relation) based on room version "10".
-const ROOM_VERSION_MSC3389V10: RoomVersion = RoomVersion {
-    identifier: "org.matrix.msc3389.10",
-    disposition: RoomDisposition::UNSTABLE,
-    msc3389_relation_redactions: true,
-    strict_event_byte_limits_room_versions: true,
-    ..ROOM_VERSION_V10
-};
-
-/// MSC1767 (Extensible Events) based on room version "10".
-const ROOM_VERSION_MSC1767V10: RoomVersion = RoomVersion {
-    identifier: "org.matrix.msc1767.10",
-    disposition: RoomDisposition::UNSTABLE,
-    msc3931_push_features: &[PushRuleRoomFlag::EXTENSIBLE_EVENTS],
-    ..ROOM_VERSION_V10
-};
-
-/// MSC3757 (Restricting who can overwrite a state event) based on room version "10".
-const ROOM_VERSION_MSC3757V10: RoomVersion = RoomVersion {
-    identifier: "org.matrix.msc3757.10",
-    disposition: RoomDisposition::UNSTABLE,
-    msc3757_enabled: true,
-    ..ROOM_VERSION_V10
-};
-
-const ROOM_VERSION_V11: RoomVersion = RoomVersion {
-    identifier: "11",
-    implicit_room_creator: true,   // Used by MSC3820
-    updated_redaction_rules: true, // Used by MSC3820
-    strict_event_byte_limits_room_versions: true,
-    ..ROOM_VERSION_V10
-};
-
-/// MSC3757 (Restricting who can overwrite a state event) based on room version "11".
-const ROOM_VERSION_MSC3757V11: RoomVersion = RoomVersion {
-    identifier: "org.matrix.msc3757.11",
-    disposition: RoomDisposition::UNSTABLE,
-    msc3757_enabled: true,
-    ..ROOM_VERSION_V11
-};
-
-const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
-    identifier: "org.matrix.hydra.11",
-    disposition: RoomDisposition::UNSTABLE,
-    event_format: EventFormatVersions::ROOM_V11_HYDRA_PLUS,
-    state_res: StateResolutionVersions::V2_1,
-    msc4289_creator_power_enabled: true,
-    msc4291_room_ids_as_hashes: true,
-    ..ROOM_VERSION_V11
-};
-
-const ROOM_VERSION_V12: RoomVersion = RoomVersion {
-    identifier: "12",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V11_HYDRA_PLUS,
-    state_res: StateResolutionVersions::V2_1,
-    msc4289_creator_power_enabled: true,
-    msc4291_room_ids_as_hashes: true,
-    ..ROOM_VERSION_V11
-};
-
-const ROOM_VERSION_MSC4242V12: RoomVersion = RoomVersion {
-    identifier: "org.matrix.msc4242.12",
-    disposition: RoomDisposition::UNSTABLE,
-    event_format: EventFormatVersions::ROOM_VMSC4242,
-    msc4242_state_dags: true,
-    ..ROOM_VERSION_V12
-};
 
 /// Helper class for managing the known room versions, and providing dict-like
 /// access to them for Python.
@@ -522,21 +503,21 @@ impl<'py> IntoPyObject<'py> for &KnownRoomVersionsMapping {
 /// support all experimental room versions.
 static KNOWN_ROOM_VERSIONS: LazyLock<KnownRoomVersionsMapping> = LazyLock::new(|| {
     let vec = vec![
-        ROOM_VERSION_V1,
-        ROOM_VERSION_V2,
-        ROOM_VERSION_V3,
-        ROOM_VERSION_V4,
-        ROOM_VERSION_V5,
-        ROOM_VERSION_V6,
-        ROOM_VERSION_V7,
-        ROOM_VERSION_V8,
-        ROOM_VERSION_V9,
-        ROOM_VERSION_V10,
-        ROOM_VERSION_V11,
-        ROOM_VERSION_V12,
-        ROOM_VERSION_MSC3757V10,
-        ROOM_VERSION_MSC3757V11,
-        ROOM_VERSION_HYDRA_V11,
+        RoomVersion::V1,
+        RoomVersion::V2,
+        RoomVersion::V3,
+        RoomVersion::V4,
+        RoomVersion::V5,
+        RoomVersion::V6,
+        RoomVersion::V7,
+        RoomVersion::V8,
+        RoomVersion::V9,
+        RoomVersion::V10,
+        RoomVersion::V11,
+        RoomVersion::V12,
+        RoomVersion::MSC3757V10,
+        RoomVersion::MSC3757V11,
+        RoomVersion::HYDRA_V11,
     ];
 
     KnownRoomVersionsMapping {
