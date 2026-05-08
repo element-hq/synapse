@@ -14,7 +14,11 @@
 
 //! Rust implementation of room version definitions.
 
-use std::sync::{Arc, LazyLock, RwLock};
+use std::{
+    fmt::Display,
+    str::FromStr,
+    sync::{Arc, LazyLock, RwLock},
+};
 
 use pyo3::{
     exceptions::{PyKeyError, PyRuntimeError},
@@ -37,19 +41,19 @@ pub struct EventFormatVersions {}
 impl EventFormatVersions {
     /// $id:server event id format: used for room v1 and v2
     #[classattr]
-    const ROOM_V1_V2: i32 = 1;
+    pub const ROOM_V1_V2: i32 = 1;
     /// MSC1659-style $hash event id format: used for room v3
     #[classattr]
-    const ROOM_V3: i32 = 2;
+    pub const ROOM_V3: i32 = 2;
     /// MSC1884-style $hash format: introduced for room v4
     #[classattr]
-    const ROOM_V4_PLUS: i32 = 3;
+    pub const ROOM_V4_PLUS: i32 = 3;
     /// MSC4291 room IDs as hashes: introduced for room HydraV11
     #[classattr]
-    const ROOM_V11_HYDRA_PLUS: i32 = 4;
+    pub const ROOM_V11_HYDRA_PLUS: i32 = 4;
     /// MSC4242 state DAGs: adds prev_state_events, removes auth_events
     #[classattr]
-    const ROOM_VMSC4242: i32 = 5;
+    pub const ROOM_VMSC4242: i32 = 5;
 }
 
 /// Enum to identify the state resolution algorithms.
@@ -60,13 +64,13 @@ pub struct StateResolutionVersions {}
 impl StateResolutionVersions {
     /// Room v1 state res
     #[classattr]
-    const V1: i32 = 1;
+    pub const V1: i32 = 1;
     /// MSC1442 state res: room v2 and later
     #[classattr]
-    const V2: i32 = 2;
+    pub const V2: i32 = 2;
     /// MSC4297 state res
     #[classattr]
-    const V2_1: i32 = 3;
+    pub const V2_1: i32 = 3;
 }
 
 /// Room disposition constants.
@@ -94,18 +98,18 @@ impl PushRuleRoomFlag {
 
 /// An object which describes the unique attributes of a room version.
 #[pyclass(frozen, eq, hash, get_all)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RoomVersion {
     /// The identifier for this version.
     pub identifier: &'static str,
-    /// One of the RoomDisposition constants.
+    /// One of the [`RoomDisposition`] constants.
     pub disposition: &'static str,
-    /// One of the EventFormatVersions constants.
+    /// One of the [`EventFormatVersions`] constants.
     pub event_format: i32,
-    /// One of the StateResolutionVersions constants.
+    /// One of the [`StateResolutionVersions`] constants.
     pub state_res: i32,
     pub enforce_key_validity: bool,
-    /// Before MSC2432, m.room.aliases had special auth rules and redaction rules.
+    /// Before MSC2432, `m.room.aliases` had special auth rules and redaction rules.
     pub special_case_aliases_auth: bool,
     /// Strictly enforce canonicaljson, do not allow:
     /// * Integers outside the range of [-2^53 + 1, 2^53 - 1]
@@ -159,6 +163,71 @@ pub struct RoomVersion {
     pub msc4242_state_dags: bool,
 }
 
+impl RoomVersion {
+    pub const V1: RoomVersion = ROOM_VERSION_V1;
+    pub const V2: RoomVersion = ROOM_VERSION_V2;
+    pub const V3: RoomVersion = ROOM_VERSION_V3;
+    pub const V4: RoomVersion = ROOM_VERSION_V4;
+    pub const V5: RoomVersion = ROOM_VERSION_V5;
+    pub const V6: RoomVersion = ROOM_VERSION_V6;
+    pub const V7: RoomVersion = ROOM_VERSION_V7;
+    pub const V8: RoomVersion = ROOM_VERSION_V8;
+    pub const V9: RoomVersion = ROOM_VERSION_V9;
+    pub const V10: RoomVersion = ROOM_VERSION_V10;
+    pub const MSC1767V10: RoomVersion = ROOM_VERSION_MSC1767V10;
+    pub const MSC3389V10: RoomVersion = ROOM_VERSION_MSC3389V10;
+    pub const MSC3757V10: RoomVersion = ROOM_VERSION_MSC3757V10;
+    pub const V11: RoomVersion = ROOM_VERSION_V11;
+    pub const MSC3757V11: RoomVersion = ROOM_VERSION_MSC3757V11;
+    pub const HYDRA_V11: RoomVersion = ROOM_VERSION_HYDRA_V11;
+    pub const V12: RoomVersion = ROOM_VERSION_V12;
+}
+
+impl Display for RoomVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.identifier.fmt(f)
+    }
+}
+
+impl FromStr for &RoomVersion {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "1" => Ok(&RoomVersion::V1),
+            "2" => Ok(&RoomVersion::V2),
+            "3" => Ok(&RoomVersion::V3),
+            "4" => Ok(&RoomVersion::V4),
+            "5" => Ok(&RoomVersion::V5),
+            "6" => Ok(&RoomVersion::V6),
+            "7" => Ok(&RoomVersion::V7),
+            "8" => Ok(&RoomVersion::V8),
+            "9" => Ok(&RoomVersion::V9),
+            "10" => Ok(&RoomVersion::V10),
+            "11" => Ok(&RoomVersion::V11),
+            "12" => Ok(&RoomVersion::V12),
+            "org.matrix.msc1767.10" => Ok(&RoomVersion::MSC1767V10),
+            "org.matrix.msc3389.10" => Ok(&RoomVersion::MSC3389V10),
+            "org.matrix.msc3757.10" => Ok(&RoomVersion::MSC3757V10),
+            "org.matrix.msc3757.11" => Ok(&RoomVersion::MSC3757V11),
+            "org.matrix.hydra.11" => Ok(&RoomVersion::HYDRA_V11),
+            _ => Err(anyhow::anyhow!("Unknown room version: {}", s)),
+        }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for &RoomVersion {
+    type Target = RoomVersion;
+
+    type Output = Bound<'py, RoomVersion>;
+
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.clone().into_pyobject(py)
+    }
+}
+
 const ROOM_VERSION_V1: RoomVersion = RoomVersion {
     identifier: "1",
     disposition: RoomDisposition::STABLE,
@@ -186,431 +255,127 @@ const ROOM_VERSION_V1: RoomVersion = RoomVersion {
 
 const ROOM_VERSION_V2: RoomVersion = RoomVersion {
     identifier: "2",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V1_V2,
     state_res: StateResolutionVersions::V2,
-    enforce_key_validity: false,
-    special_case_aliases_auth: true,
-    strict_canonicaljson: false,
-    limit_notifications_power_levels: false,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: false,
-    restricted_join_rule_fix: false,
-    knock_join_rule: false,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V1
 };
 
 const ROOM_VERSION_V3: RoomVersion = RoomVersion {
     identifier: "3",
-    disposition: RoomDisposition::STABLE,
     event_format: EventFormatVersions::ROOM_V3,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: false,
-    special_case_aliases_auth: true,
-    strict_canonicaljson: false,
-    limit_notifications_power_levels: false,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: false,
-    restricted_join_rule_fix: false,
-    knock_join_rule: false,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V2
 };
 
 const ROOM_VERSION_V4: RoomVersion = RoomVersion {
     identifier: "4",
-    disposition: RoomDisposition::STABLE,
     event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: false,
-    special_case_aliases_auth: true,
-    strict_canonicaljson: false,
-    limit_notifications_power_levels: false,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: false,
-    restricted_join_rule_fix: false,
-    knock_join_rule: false,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V3
 };
 
 const ROOM_VERSION_V5: RoomVersion = RoomVersion {
     identifier: "5",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
     enforce_key_validity: true,
-    special_case_aliases_auth: true,
-    strict_canonicaljson: false,
-    limit_notifications_power_levels: false,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: false,
-    restricted_join_rule_fix: false,
-    knock_join_rule: false,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V4
 };
 
 const ROOM_VERSION_V6: RoomVersion = RoomVersion {
     identifier: "6",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
     special_case_aliases_auth: false,
     strict_canonicaljson: true,
     limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: false,
-    restricted_join_rule_fix: false,
-    knock_join_rule: false,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V5
 };
 
 const ROOM_VERSION_V7: RoomVersion = RoomVersion {
     identifier: "7",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: false,
-    restricted_join_rule_fix: false,
     knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V6
 };
 
 const ROOM_VERSION_V8: RoomVersion = RoomVersion {
     identifier: "8",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
     restricted_join_rule: true,
-    restricted_join_rule_fix: false,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V7
 };
 
 const ROOM_VERSION_V9: RoomVersion = RoomVersion {
     identifier: "9",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: true,
     restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: false,
-    enforce_int_power_levels: false,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V8
 };
 
 const ROOM_VERSION_V10: RoomVersion = RoomVersion {
     identifier: "10",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
     knock_restricted_join_rule: true,
     enforce_int_power_levels: true,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V9
 };
 
 /// MSC3389 (Redaction changes for events with a relation) based on room version "10".
 const ROOM_VERSION_MSC3389V10: RoomVersion = RoomVersion {
     identifier: "org.matrix.msc3389.10",
     disposition: RoomDisposition::UNSTABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: true, // Changed from v10
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
+    msc3389_relation_redactions: true,
     strict_event_byte_limits_room_versions: true,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V10
 };
 
 /// MSC1767 (Extensible Events) based on room version "10".
 const ROOM_VERSION_MSC1767V10: RoomVersion = RoomVersion {
     identifier: "org.matrix.msc1767.10",
     disposition: RoomDisposition::UNSTABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
     msc3931_push_features: &[PushRuleRoomFlag::EXTENSIBLE_EVENTS],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V10
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "10".
 const ROOM_VERSION_MSC3757V10: RoomVersion = RoomVersion {
     identifier: "org.matrix.msc3757.10",
     disposition: RoomDisposition::UNSTABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: false,
-    updated_redaction_rules: false,
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    msc3931_push_features: &[],
     msc3757_enabled: true,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: false,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V10
 };
 
 const ROOM_VERSION_V11: RoomVersion = RoomVersion {
     identifier: "11",
-    disposition: RoomDisposition::STABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
     implicit_room_creator: true,   // Used by MSC3820
     updated_redaction_rules: true, // Used by MSC3820
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: true, // Changed from v10
-    msc4242_state_dags: false,
+    strict_event_byte_limits_room_versions: true,
+    ..ROOM_VERSION_V10
 };
 
 /// MSC3757 (Restricting who can overwrite a state event) based on room version "11".
 const ROOM_VERSION_MSC3757V11: RoomVersion = RoomVersion {
     identifier: "org.matrix.msc3757.11",
     disposition: RoomDisposition::UNSTABLE,
-    event_format: EventFormatVersions::ROOM_V4_PLUS,
-    state_res: StateResolutionVersions::V2,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: true,   // Used by MSC3820
-    updated_redaction_rules: true, // Used by MSC3820
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    msc3931_push_features: &[],
     msc3757_enabled: true,
-    msc4289_creator_power_enabled: false,
-    msc4291_room_ids_as_hashes: false,
-    strict_event_byte_limits_room_versions: true,
-    msc4242_state_dags: false,
+    ..ROOM_VERSION_V11
 };
 
 const ROOM_VERSION_HYDRA_V11: RoomVersion = RoomVersion {
     identifier: "org.matrix.hydra.11",
     disposition: RoomDisposition::UNSTABLE,
     event_format: EventFormatVersions::ROOM_V11_HYDRA_PLUS,
-    state_res: StateResolutionVersions::V2_1, // Changed from v11
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: true,   // Used by MSC3820
-    updated_redaction_rules: true, // Used by MSC3820
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: true, // Changed from v11
-    msc4291_room_ids_as_hashes: true,    // Changed from v11
-    strict_event_byte_limits_room_versions: true,
-    msc4242_state_dags: false,
+    state_res: StateResolutionVersions::V2_1,
+    msc4289_creator_power_enabled: true,
+    msc4291_room_ids_as_hashes: true,
+    ..ROOM_VERSION_V11
 };
 
 const ROOM_VERSION_V12: RoomVersion = RoomVersion {
     identifier: "12",
     disposition: RoomDisposition::STABLE,
     event_format: EventFormatVersions::ROOM_V11_HYDRA_PLUS,
-    state_res: StateResolutionVersions::V2_1, // Changed from v11
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: true,   // Used by MSC3820
-    updated_redaction_rules: true, // Used by MSC3820
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: true, // Changed from v11
-    msc4291_room_ids_as_hashes: true,    // Changed from v11
-    strict_event_byte_limits_room_versions: true,
-    msc4242_state_dags: false,
+    state_res: StateResolutionVersions::V2_1,
+    msc4289_creator_power_enabled: true,
+    msc4291_room_ids_as_hashes: true,
+    ..ROOM_VERSION_V11
 };
-
 const ROOM_VERSION_MSC4242V12: RoomVersion = RoomVersion {
     identifier: "org.matrix.msc4242.12",
     disposition: RoomDisposition::UNSTABLE,
     event_format: EventFormatVersions::ROOM_VMSC4242,
-    state_res: StateResolutionVersions::V2_1,
-    enforce_key_validity: true,
-    special_case_aliases_auth: false,
-    strict_canonicaljson: true,
-    limit_notifications_power_levels: true,
-    implicit_room_creator: true,
-    updated_redaction_rules: true,
-    restricted_join_rule: true,
-    restricted_join_rule_fix: true,
-    knock_join_rule: true,
-    msc3389_relation_redactions: false,
-    knock_restricted_join_rule: true,
-    enforce_int_power_levels: true,
-    msc3931_push_features: &[],
-    msc3757_enabled: false,
-    msc4289_creator_power_enabled: true,
-    msc4291_room_ids_as_hashes: true,
-    strict_event_byte_limits_room_versions: true,
     msc4242_state_dags: true,
+    ..ROOM_VERSION_V12
 };
 
 /// Helper class for managing the known room versions, and providing dict-like
@@ -663,7 +428,7 @@ impl KnownRoomVersionsMapping {
         versions
             .iter()
             .find(|v| v.identifier == key)
-            .copied()
+            .cloned()
             .ok_or_else(|| PyKeyError::new_err(key.to_string()))
     }
 
@@ -695,7 +460,7 @@ impl KnownRoomVersionsMapping {
         // like a Set *and* has a stable ordering). We don't depend on this, so
         // for simplicity we just return a list of the items.
         let versions = self.versions.read().unwrap();
-        Ok(versions.iter().map(|v| (v.identifier, *v)).collect())
+        Ok(versions.iter().map(|v| (v.identifier, v.clone())).collect())
     }
 
     #[pyo3(signature = (key, default=None))]
@@ -712,8 +477,8 @@ impl KnownRoomVersionsMapping {
         };
 
         let versions = self.versions.read().unwrap();
-        if let Some(version) = versions.iter().find(|v| v.identifier == key).copied() {
-            return Ok(Some(version.into_bound_py_any(py)?));
+        if let Some(version) = versions.iter().find(|v| v.identifier == key) {
+            return Ok(Some(version.clone().into_bound_py_any(py)?));
         }
 
         Ok(default)
@@ -780,78 +545,78 @@ static KNOWN_ROOM_VERSIONS: LazyLock<KnownRoomVersionsMapping> = LazyLock::new(|
 ///
 /// This should contain all room versions that we know about.
 #[pyclass(frozen)]
-pub struct RoomVersions {}
+struct RoomVersions {}
 
 #[pymethods]
 #[allow(non_snake_case)]
 impl RoomVersions {
     #[classattr]
     fn V1(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V1.into_py_any(py)
+        RoomVersion::V1.into_py_any(py)
     }
     #[classattr]
     fn V2(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V2.into_py_any(py)
+        RoomVersion::V2.into_py_any(py)
     }
     #[classattr]
     fn V3(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V3.into_py_any(py)
+        RoomVersion::V3.into_py_any(py)
     }
     #[classattr]
     fn V4(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V4.into_py_any(py)
+        RoomVersion::V4.into_py_any(py)
     }
     #[classattr]
     fn V5(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V5.into_py_any(py)
+        RoomVersion::V5.into_py_any(py)
     }
     #[classattr]
     fn V6(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V6.into_py_any(py)
+        RoomVersion::V6.into_py_any(py)
     }
     #[classattr]
     fn V7(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V7.into_py_any(py)
+        RoomVersion::V7.into_py_any(py)
     }
     #[classattr]
     fn V8(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V8.into_py_any(py)
+        RoomVersion::V8.into_py_any(py)
     }
     #[classattr]
     fn V9(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V9.into_py_any(py)
+        RoomVersion::V9.into_py_any(py)
     }
     #[classattr]
     fn V10(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V10.into_py_any(py)
+        RoomVersion::V10.into_py_any(py)
     }
     #[classattr]
     fn MSC1767v10(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_MSC1767V10.into_py_any(py)
+        RoomVersion::MSC1767V10.into_py_any(py)
     }
     #[classattr]
     fn MSC3389v10(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_MSC3389V10.into_py_any(py)
+        RoomVersion::MSC3389V10.into_py_any(py)
     }
     #[classattr]
     fn MSC3757v10(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_MSC3757V10.into_py_any(py)
+        RoomVersion::MSC3757V10.into_py_any(py)
     }
     #[classattr]
     fn V11(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V11.into_py_any(py)
+        RoomVersion::V11.into_py_any(py)
     }
     #[classattr]
     fn MSC3757v11(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_MSC3757V11.into_py_any(py)
+        RoomVersion::MSC3757V11.into_py_any(py)
     }
     #[classattr]
     fn HydraV11(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_HYDRA_V11.into_py_any(py)
+        RoomVersion::HYDRA_V11.into_py_any(py)
     }
     #[classattr]
     fn V12(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_V12.into_py_any(py)
+        RoomVersion::V12.into_py_any(py)
     }
     #[classattr]
     fn MSC4242v12(py: Python<'_>) -> PyResult<Py<PyAny>> {
