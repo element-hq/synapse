@@ -23,11 +23,10 @@
 
 - Port `Event.signatures` field to Rust. ([\#19706](https://github.com/element-hq/synapse/issues/19706))
 - Port `Event.unsigned` field to Rust. ([\#19708](https://github.com/element-hq/synapse/issues/19708))
-- Add a Rust canonical JSON serializer. ([\#19739](https://github.com/element-hq/synapse/issues/19739))
+- Add a Rust canonical JSON serializer. ([\#19739](https://github.com/element-hq/synapse/issues/19739), [\#19763](https://github.com/element-hq/synapse/issues/19763))
 - Configure Dependabot to only update Python dependencies in the lockfile, unless widening upper bounds. ([\#19743](https://github.com/element-hq/synapse/issues/19743))
 - Reduce `WORKER_LOCK_MAX_RETRY_INTERVAL` to 5 seconds to reduce idle time after lock is released. ([\#19755](https://github.com/element-hq/synapse/issues/19755))
 - Force keyword-only arguments for `Duration` so time units have to be specified. ([\#19756](https://github.com/element-hq/synapse/issues/19756))
-- Lint and format `rust/src/canonical_json.rs`. ([\#19763](https://github.com/element-hq/synapse/issues/19763))
 
 
 # Synapse 1.152.1 (2026-05-07)
