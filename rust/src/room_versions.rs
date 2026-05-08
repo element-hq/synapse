@@ -181,6 +181,7 @@ impl RoomVersion {
     pub const MSC3757V11: RoomVersion = ROOM_VERSION_MSC3757V11;
     pub const HYDRA_V11: RoomVersion = ROOM_VERSION_HYDRA_V11;
     pub const V12: RoomVersion = ROOM_VERSION_V12;
+    pub const MSC4242V12: RoomVersion = ROOM_VERSION_MSC4242V12;
 }
 
 impl Display for RoomVersion {
@@ -211,6 +212,7 @@ impl FromStr for &RoomVersion {
             "org.matrix.msc3757.10" => Ok(&RoomVersion::MSC3757V10),
             "org.matrix.msc3757.11" => Ok(&RoomVersion::MSC3757V11),
             "org.matrix.hydra.11" => Ok(&RoomVersion::HYDRA_V11),
+            "org.matrix.msc4242.12" => Ok(&RoomVersion::MSC4242V12),
             _ => Err(anyhow::anyhow!("Unknown room version: {}", s)),
         }
     }
@@ -370,6 +372,7 @@ const ROOM_VERSION_V12: RoomVersion = RoomVersion {
     msc4291_room_ids_as_hashes: true,
     ..ROOM_VERSION_V11
 };
+
 const ROOM_VERSION_MSC4242V12: RoomVersion = RoomVersion {
     identifier: "org.matrix.msc4242.12",
     disposition: RoomDisposition::UNSTABLE,
@@ -620,7 +623,7 @@ impl RoomVersions {
     }
     #[classattr]
     fn MSC4242v12(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        ROOM_VERSION_MSC4242V12.into_py_any(py)
+        RoomVersion::MSC4242V12.into_py_any(py)
     }
 }
 
