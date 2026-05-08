@@ -1166,7 +1166,7 @@ class FederationEventHandler:
             return await self._state_handler.compute_event_context(event)
 
         logger.info(
-            "_compute_event_context_with_maybe_missing_prevs: Event %s in room %s is missing prev_events %s: "
+            "_compute_event_context_with_maybe_missing_prevs(event_id=%s): Event in room %s is missing prev_events %s: "
             "calculating state for a backwards extremity",
             event_id,
             room_id,
@@ -1187,16 +1187,21 @@ class FederationEventHandler:
 
             # Ask the remote server for the states we don't
             # know about
-            for p in missing_prevs:
-                logger.info("Requesting state after missing prev_event %s", p)
+            for missing_prev in missing_prevs:
+                logger.info(
+                    "_compute_event_context_with_maybe_missing_prevs(event_id=%s): Requesting state from %s for missing prev_event %s",
+                    event_id,
+                    dest,
+                    missing_prev,
+                )
 
-                with nested_logging_context(p):
+                with nested_logging_context(missing_prev):
                     # note that if any of the missing prevs share missing state or
                     # auth events, the requests to fetch those events are deduped
                     # by the get_pdu_cache in federation_client.
                     remote_state_map = (
                         await self._get_state_ids_after_missing_prev_event(
-                            dest, room_id, p
+                            dest, room_id, missing_prev
                         )
                     )
 
@@ -1226,10 +1231,10 @@ class FederationEventHandler:
 
         except Exception as e:
             logger.warning(
-                "_compute_event_context_with_maybe_missing_prevs: Error attempting to resolve state for "
-                "event_id=%s in room_id=%s that has missing prev_events: %s",
+                "_compute_event_context_with_maybe_missing_prevs(event_id=%s): Error attempting to resolve state from "
+                "%s for missing prev_events: %s",
                 event_id,
-                room_id,
+                dest,
                 e,
             )
             raise FederationError(
