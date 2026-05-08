@@ -4799,6 +4799,9 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         self.creator = self.register_user("creator", "test")
         self.creator_tok = self.login("creator", "test")
 
+        self.good_admin = self.register_user("good_admin", "test")
+        self.good_admin_tok = self.login("good_admin", "test")
+
         self.bad_user_id = self.register_user("bad", "test")
         self.bad_tok = self.login("bad", "test")
 
@@ -5181,13 +5184,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def test_redaction_flag_ignored_for_user_if_banner_lacks_redaction_power(
         self,
     ) -> None:
-        # change power levels so creator can ban but not redact
+        # change power levels so room admin can ban but not redact. Do not use the
+        # room's creator, as the power level they hold is not consistently definable
+        # after msc4289(creator has infinite power level).
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
-            {"events_default": 0, "redact": 100, "users": {self.creator: 75}},
+            {"events_default": 0, "redact": 100, "users": {self.good_admin: 75}},
             tok=self.creator_tok,
         )
+        self.helper.join(self.room_id, self.good_admin, tok=self.good_admin_tok)
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
         # bad user sends some messages
@@ -5209,11 +5215,11 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         }
         self.helper.change_membership(
             self.room_id,
-            self.creator,
+            self.good_admin,
             self.bad_user_id,
             "ban",
             content,
-            self.creator_tok,
+            self.good_admin_tok,
         )
 
         filter = json.dumps({"types": [EventTypes.Message]})
@@ -5526,13 +5532,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def test_redaction_flag_ignored_for_user_if_kicker_lacks_redaction_power(
         self,
     ) -> None:
-        # change power levels so creator can kick but not redact
+        # change power levels so room admin can kick but not redact. Do not use the
+        # room's creator, as the power level they hold is not consistently definable
+        # after msc4289(creator has infinite power level).
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
-            {"events_default": 0, "redact": 100, "users": {self.creator: 75}},
+            {"events_default": 0, "redact": 100, "users": {self.good_admin: 75}},
             tok=self.creator_tok,
         )
+        self.helper.join(self.room_id, self.good_admin, tok=self.good_admin_tok)
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
         # bad user sends some messages
@@ -5554,11 +5563,11 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         }
         self.helper.change_membership(
             self.room_id,
-            self.creator,
+            self.good_admin,
             self.bad_user_id,
             "kick",
             content,
-            self.creator_tok,
+            self.good_admin_tok,
         )
 
         filter = json.dumps({"types": [EventTypes.Message]})
