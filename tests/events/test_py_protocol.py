@@ -16,7 +16,7 @@
 from unittest.mock import Mock
 
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase, FrozenEvent, make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.py_protocol import (
     EventProtocol,
     MSC4242Event,
@@ -46,9 +46,8 @@ class TestMetaClass(TestCase):
         NotImplementedError, but that isinstance checks on EventBase and
         FrozenEvent still work as normal.
         """
-        # EventBase and FrozenEvent should work as normal
+        # EventBase should work as normal
         self.assertFalse(isinstance(object(), EventBase))
-        self.assertFalse(isinstance(object(), FrozenEvent))
 
         with self.assertRaises(NotImplementedError):
             isinstance(object(), EventProtocol)

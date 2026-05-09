@@ -37,6 +37,7 @@ from typing import (
 
 import attr
 from prometheus_client import Gauge
+from typing_extensions import assert_never
 
 from twisted.internet import defer
 
@@ -775,6 +776,14 @@ class EventsWorkerStore(SQLBaseStore):
                     continue
                 elif redact_behaviour == EventRedactBehaviour.redact:
                     event = entry.redacted_event
+                elif redact_behaviour == EventRedactBehaviour.as_is:
+                    # Allow event through as is
+                    pass
+                else:
+                    # We (should) have covered all possible values of
+                    # redact_behaviour, so this is unreachable.
+                    assert_never(redact_behaviour)
+                    raise ValueError(f"Unknown redact_behaviour {redact_behaviour}")
 
             events.append(event)
 

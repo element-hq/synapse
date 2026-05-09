@@ -36,7 +36,6 @@ from typing import (
     Iterable,
     Sequence,
     TypeVar,
-    cast,
 )
 
 import attr
@@ -870,7 +869,7 @@ class EventsPersistenceStorageController:
         )
         new_room_dag_fwd_extrems = await self._calculate_new_extremities(
             room_id,
-            cast(list[EventPersistencePair], event_contexts),
+            event_contexts,
             existing_room_dag_fwd_extrems,
         )
         assert new_room_dag_fwd_extrems, (
@@ -889,7 +888,7 @@ class EventsPersistenceStorageController:
         ):
             (current_state, delta_ids, _) = await self._get_new_state_after_events(
                 room_id,
-                cast(list[EventPersistencePair], event_contexts),
+                event_contexts,
                 existing_state_dag_fwd_extrems,
                 new_state_dag_fwd_extrems,
                 # do not prune forward extremities in the state DAG
@@ -923,7 +922,7 @@ class EventsPersistenceStorageController:
             # extremities.
             is_still_joined = await self._is_server_still_joined(
                 room_id,
-                cast(list[EventPersistencePair], event_contexts),
+                event_contexts,
                 delta,
             )
             if not is_still_joined:
@@ -1053,7 +1052,7 @@ class EventsPersistenceStorageController:
     async def _calculate_new_extremities(
         self,
         room_id: str,
-        event_contexts: list[EventPersistencePair],
+        event_contexts: Sequence[EventPersistencePair],
         latest_event_ids: AbstractSet[str],
     ) -> set[str]:
         """Calculates the new forward extremities for a room given events to
@@ -1113,7 +1112,7 @@ class EventsPersistenceStorageController:
     async def _get_new_state_after_events(
         self,
         room_id: str,
-        events_context: list[EventPersistencePair],
+        events_context: Sequence[EventPersistencePair],
         old_latest_event_ids: AbstractSet[str],
         new_latest_event_ids: set[str],
         should_prune: bool = True,
@@ -1297,7 +1296,7 @@ class EventsPersistenceStorageController:
         new_latest_event_ids: set[str],
         resolved_state_group: int,
         event_id_to_state_group: dict[str, int],
-        events_context: list[EventPersistencePair],
+        events_context: Sequence[EventPersistencePair],
     ) -> set[str]:
         """See if we can prune any of the extremities after calculating the
         resolved state.
@@ -1434,7 +1433,7 @@ class EventsPersistenceStorageController:
     async def _is_server_still_joined(
         self,
         room_id: str,
-        ev_ctx_rm: list[EventPersistencePair],
+        ev_ctx_rm: Sequence[EventPersistencePair],
         delta: DeltaState,
     ) -> bool:
         """Check if the server will still be joined after the given events have

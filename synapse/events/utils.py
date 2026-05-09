@@ -50,7 +50,7 @@ from synapse.logging.opentracing import SynapseTags, set_tag, trace
 from synapse.synapse_rust.events import Unsigned
 from synapse.types import JsonDict, Requester
 
-from . import EventBase, FrozenEventV2, StrippedStateEvent, make_event_from_dict
+from . import EventBase, StrippedStateEvent, make_event_from_dict
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
@@ -99,36 +99,9 @@ def prune_event(event: EventBase) -> EventBase:
 
 
 def clone_event(event: EventBase) -> EventBase:
-    """Take a copy of the event.
+    """Take a copy of the event."""
 
-    This is mostly useful because it does a *shallow* copy of the `unsigned` data,
-    which means it can then be updated without corrupting the in-memory cache. Note that
-    other properties of the event, such as `content`, are *not* (currently) copied here.
-    """
-    # XXX: We rely on at least one of `event.get_dict()` and `make_event_from_dict()`
-    #   making a copy of `unsigned`. Currently, both do, though I don't really know why.
-    #   Still, as long as they do, there's not much point doing yet another copy here.
-    new_event = make_event_from_dict(
-        event.get_dict(), event.room_version, event.internal_metadata.get_dict()
-    )
-
-    # Starting FrozenEventV2, the event ID is an (expensive) hash of the event. This is
-    # lazily computed when we get the FrozenEventV2.event_id property, then cached in
-    # _event_id field. Later FrozenEvent formats all inherit from FrozenEventV2, so we
-    # can use the same logic here.
-    if isinstance(event, FrozenEventV2) and isinstance(new_event, FrozenEventV2):
-        # If we already pre-computed the event ID, use it.
-        new_event._event_id = event._event_id
-
-    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`.
-    new_event.internal_metadata.stream_ordering = (
-        event.internal_metadata.stream_ordering
-    )
-    new_event.internal_metadata.instance_name = event.internal_metadata.instance_name
-    new_event.internal_metadata.outlier = event.internal_metadata.outlier
-    new_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
-
-    return new_event
+    return event.deep_copy()
 
 
 def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDict:

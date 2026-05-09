@@ -66,6 +66,7 @@ from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
+    JsonMapping,
     MutableStateMap,
     StateKey,
     StateMap,
@@ -856,6 +857,7 @@ def get_send_level(
         power level required to send this event.
     """
 
+    power_levels_content: JsonMapping
     if power_levels_event:
         power_levels_content = power_levels_event.content
     else:
