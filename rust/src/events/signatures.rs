@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 /// A class representing the signatures on an event.
 #[pyclass(frozen, skip_from_py_object)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct Signatures {
     inner: Arc<RwLock<HashMap<String, HashMap<String, String>>>>,

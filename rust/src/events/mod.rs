@@ -18,18 +18,75 @@
  *
  */
 
-//! Classes for representing Events.
+//! Classes for representing Matrix events.
+//!
+//! # Overview
+//!
+//! A Matrix event has a JSON shape that varies by *room version*. The
+//! per-room-version shape is captured in the [`formats`] module, where
+//! [`FormattedEvent`] is a generic container parametrised by the
+//! room-version-specific portion (`EventFormatV1`, `EventFormatV2V3`,
+//! `EventFormatV4`, `EventFormatVMSC4242`). See [`formats`] for the layout
+//! of the on-the-wire JSON and how the room-version-agnostic fields are
+//! split from the version-specific ones.
+//!
+//! [`Event`] is the `pyclass` exposed to Python. It bundles a fully parsed
+//! [`FormattedEvent`] (with the version-specific part type-erased as
+//! [`formats::EventFormatEnum`]) together with the pieces of state that
+//! live alongside the event JSON in Synapse:
+//!
+//! - `event_id` — either taken from the event JSON (format v1) or derived
+//!   from the canonical-JSON hash (v2+); computed once at construction
+//!   time and cached.
+//! - `room_version` — a `'static` reference into the global room-version
+//!   table, used to drive format-dependent behaviour (e.g. where the
+//!   `redacts` field lives, which redaction rules apply).
+//! - `internal_metadata` — Synapse-internal flags that are *not* part of
+//!   the federated event (outlier status, soft-failure, stream positions,
+//!   …). These come from a separate dict at construction time.
+//! - `rejected_reason` — `None` for accepted events; otherwise a short
+//!   string describing why auth rejected the event.
+//!
+
+use std::{borrow::Cow, sync::Arc};
 
 use pyo3::{
-    types::{PyAnyMethods, PyMapping, PyModule, PyModuleMethods},
-    wrap_pyfunction, Bound, PyResult, Python,
+    exceptions::{PyAttributeError, PyKeyError, PyValueError},
+    pyclass, pymethods,
+    types::{PyAnyMethods, PyDict, PyDictMethods, PyList, PyMapping, PyModule, PyModuleMethods},
+    wrap_pyfunction, Bound, IntoPyObject, PyAny, PyResult, Python,
+};
+use pythonize::{depythonize, pythonize};
+
+use crate::events::{
+    formats::{
+        EventFormatEnum, EventFormatV1, EventFormatV2V3, EventFormatV4, EventFormatVMSC4242,
+        FormattedEvent,
+    },
+    signatures::Signatures,
+    unsigned::Unsigned,
+};
+use crate::{
+    duration::SynapseDuration,
+    events::{
+        constants::event_field::{HASHES, SIGNATURES, UNSIGNED},
+        constants::membership_field::MEMBERSHIP,
+        constants::redaction_field::REDACTS,
+        constants::unsigned_field::{AGE, AGE_TS, REDACTED_BECAUSE},
+        internal_metadata::EventInternalMetadata,
+        utils::calculate_event_id,
+    },
+    room_versions::{EventFormatVersions, RoomVersion},
 };
 
+pub mod constants;
 pub mod filter;
-mod internal_metadata;
-mod json_object;
+pub mod formats;
+pub mod internal_metadata;
+pub mod json_object;
 pub mod signatures;
 pub mod unsigned;
+pub mod utils;
 
 use json_object::JsonObject;
 
@@ -39,13 +96,14 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     PyMapping::register::<JsonObject>(py)?;
 
     let child_module = PyModule::new(py, "events")?;
-    child_module.add_class::<internal_metadata::EventInternalMetadata>()?;
-    child_module.add_class::<signatures::Signatures>()?;
-    child_module.add_class::<unsigned::Unsigned>()?;
+    child_module.add_class::<EventInternalMetadata>()?;
+    child_module.add_class::<Signatures>()?;
+    child_module.add_class::<Unsigned>()?;
     child_module.add_class::<JsonObject>()?;
     child_module.add_class::<json_object::JsonObjectKeysView>()?;
     child_module.add_class::<json_object::JsonObjectValuesView>()?;
     child_module.add_class::<json_object::JsonObjectItemsView>()?;
+    child_module.add_class::<Event>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
 
     m.add_submodule(&child_module)?;
@@ -57,4 +115,689 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
         .set_item("synapse.synapse_rust.events", child_module)?;
 
     Ok(())
+}
+
+/// The Rust-side representation of a Matrix event, exposed to Python.
+///
+/// Wraps a parsed [`FormattedEvent`] together with the per-event state
+/// that Synapse tracks outside the event JSON (event ID, internal
+/// metadata, rejection reason, and a reference to the room version that
+/// produced this event). See the module-level docs for the high-level
+/// design.
+#[pyclass(frozen, weakref)]
+pub struct Event {
+    /// The parsed event JSON.
+    fields: FormattedEvent,
+
+    /// The event ID. For format v1 this is read directly from the JSON;
+    /// for v2+ it is computed from the canonical-JSON hash at
+    /// construction time and cached here.
+    event_id: Arc<str>,
+
+    /// Synapse-internal per-event state that lives outside the federated
+    /// JSON (e.g. outlier flag, soft-failure, stream positions).
+    #[pyo3(get)]
+    internal_metadata: EventInternalMetadata,
+
+    /// The room version this event was parsed for.
+    #[pyo3(get)]
+    room_version: &'static RoomVersion,
+
+    /// `None` for accepted events; otherwise a short reason set by auth
+    /// when the event was rejected.
+    rejected_reason: Option<Box<str>>,
+}
+
+#[pymethods]
+impl Event {
+    #[new]
+    fn new_from_py<'a, 'py>(
+        py: Python<'py>,
+        event_dict: &'a Bound<'py, PyAny>,
+        room_version: &'a Bound<'py, PyAny>,
+        internal_metadata_dict: &'a Bound<'py, PyDict>,
+        rejected_reason: Option<String>,
+    ) -> PyResult<Self> {
+        let room_version: &RoomVersion = {
+            let r = room_version.getattr("identifier")?;
+            let room_version_str = r.extract::<&str>()?;
+            room_version_str
+                .parse()
+                .map_err(|e| PyValueError::new_err(format!("Unsupported room version: {}", e)))?
+        };
+
+        let rejected_reason = rejected_reason.map(String::into_boxed_str);
+
+        // Parse the event dict into a FormattedEvent, converting any failures to
+        // a `ValueError`.
+        let fields = depythonize_event_dict(room_version, event_dict).map_err(|err| {
+            let new_err = PyValueError::new_err("Failed to parse event");
+            new_err.set_cause(py, Some(err));
+            new_err
+        })?;
+
+        let internal_metadata = EventInternalMetadata::new(internal_metadata_dict)?;
+
+        let event_id = match &*fields.specific_fields {
+            EventFormatEnum::V1(format) => {
+                // V1/V2 events have the event_id in the event dict.
+                Arc::clone(&format.event_id)
+            }
+            _ => {
+                // Calculate the event ID by hashing the event JSON. This can
+                // fail if the event can't be serialized to canonical JSON (e.g.
+                // having out-of-range integers), which we report as
+                // `ValueError` as it indicates the event is invalid.
+                let event_value = serde_json::to_value(&fields).map_err(|err| {
+                    PyValueError::new_err(format!("Failed to serialize event: {}", err))
+                })?;
+                calculate_event_id(&event_value, room_version)
+                    .map_err(|err| {
+                        PyValueError::new_err(format!("Failed to calculate event_id: {}", err))
+                    })?
+                    .into()
+            }
+        };
+
+        Ok(Self {
+            fields,
+
+            event_id,
+            room_version,
+            rejected_reason,
+            internal_metadata,
+        })
+    }
+
+    /// Serializes the event into a Python dict (i.e. the same shape as if we
+    /// had parsed the event from JSON).
+    fn get_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(pythonize(py, &self.fields)?)
+    }
+
+    /// Like `get_dict`, but serializes `unsigned` in a form suitable for
+    /// persistence.
+    fn get_dict_for_persistence<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let binding = self.get_dict(py)?;
+        let dict = binding.cast::<PyDict>()?;
+
+        dict.set_item("unsigned", self.fields.unsigned.for_persistence(py)?)?;
+
+        Ok(binding)
+    }
+
+    /// Like [`Event::get_dict`], but serializes `unsigned` in a form suitable
+    /// for sending over federation.
+    #[pyo3(signature = (time_now = None))]
+    fn get_pdu_json<'py>(
+        &self,
+        py: Python<'py>,
+        time_now: Option<i64>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let obj = self.get_dict(py)?;
+        let dict = obj.cast::<PyDict>()?;
+
+        // Get or create the unsigned dict
+        if let Ok(Some(unsigned)) = dict.get_item(UNSIGNED) {
+            let unsigned = unsigned.cast::<PyDict>()?;
+
+            if let Some(time_now) = time_now {
+                if let Ok(Some(age_ts)) = unsigned.get_item(AGE_TS) {
+                    let age = time_now - age_ts.extract::<i64>()?;
+                    unsigned.set_item(AGE, age)?;
+                    unsigned.del_item(AGE_TS)?;
+                }
+            }
+
+            // This may be a frozen event
+            unsigned.del_item(REDACTED_BECAUSE).ok();
+        }
+
+        Ok(obj)
+    }
+
+    /// Like [`Event::get_dict`], except strips fields like `signatures`,
+    /// `hashes` and `unsigned` so that the result is suitable as a template for
+    /// creating new events.
+    fn get_templated_pdu_json<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        // Use get_dict but strip signatures, unsigned, and hashes — the
+        // joining/leaving/knocking server will re-sign and recalculate hashes.
+        let obj = self.get_dict(py)?;
+        let dict = obj.cast::<PyDict>()?;
+        dict.del_item(SIGNATURES).ok();
+        dict.del_item(UNSIGNED).ok();
+        dict.del_item(HASHES).ok();
+
+        Ok(obj)
+    }
+
+    #[getter]
+    fn rejected_reason(&self) -> Option<&str> {
+        self.rejected_reason.as_deref()
+    }
+
+    fn prev_event_ids(&self) -> Vec<String> {
+        match &*self.fields.specific_fields {
+            EventFormatEnum::V1(format) => format.prev_event_ids(),
+            EventFormatEnum::V2V3(format) => format.auth_prev_events.prev_events.clone(),
+            EventFormatEnum::V4(format) => format.auth_prev_events.prev_events.clone(),
+            EventFormatEnum::VMSC4242(format) => format.prev_events.clone(),
+        }
+    }
+
+    fn auth_event_ids(&self) -> PyResult<Vec<String>> {
+        match &*self.fields.specific_fields {
+            EventFormatEnum::V1(format) => Ok(format.auth_event_ids()),
+            EventFormatEnum::V2V3(format) => Ok(format.auth_event_ids()),
+            EventFormatEnum::V4(format) => Ok(format.auth_event_ids(&self.fields.common_fields)?),
+            EventFormatEnum::VMSC4242(format) => Ok(format.auth_event_ids(self)?),
+        }
+    }
+
+    #[getter]
+    fn membership<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let content = self.content();
+        let value = content.get_field(MEMBERSHIP);
+        match value {
+            Some(value) => Ok(pythonize(py, value)?),
+            None => Err(PyKeyError::new_err(MEMBERSHIP)),
+        }
+    }
+
+    fn is_state(&self) -> bool {
+        self.fields.common_fields.state_key.is_some()
+    }
+
+    fn get_state_key(&self) -> Option<&str> {
+        self.fields.common_fields.state_key.as_deref()
+    }
+
+    #[getter]
+    fn format_version(&self) -> i32 {
+        self.room_version.event_format
+    }
+
+    /// Returns a deep copy of this object, such that modifying the copy will
+    /// not affect the original.
+    fn deep_copy(&self) -> PyResult<Event> {
+        let internal_metadata = self.internal_metadata.deep_copy()?;
+
+        let new_event = Event {
+            fields: self.fields.deep_copy(),
+            internal_metadata,
+            room_version: self.room_version,
+            rejected_reason: self.rejected_reason.clone(),
+            event_id: self.event_id.clone(),
+        };
+        Ok(new_event)
+    }
+
+    /// If this event has the `msc4354_sticky` top-level field, returns a
+    /// `SynapseDuration` representing the sticky duration. Otherwise returns
+    /// `None`.
+    fn sticky_duration(&self) -> Option<SynapseDuration> {
+        const MAX_DURATION_MS: u64 = 3600 * 1000;
+
+        let sticky_obj = self.fields.common_fields.other_fields.get("msc4354_sticky");
+
+        let sticky_obj = match sticky_obj {
+            Some(serde_json::Value::Object(obj)) => obj,
+            _ => return None,
+        };
+
+        let duration_ms = match sticky_obj.get("duration_ms") {
+            Some(serde_json::Value::Number(num)) if num.is_u64() => num.as_u64().unwrap(),
+            _ => return None,
+        };
+
+        let duration_ms = std::cmp::min(duration_ms, MAX_DURATION_MS);
+
+        let duration = SynapseDuration::from_milliseconds(duration_ms);
+        Some(duration)
+    }
+
+    // Below are the methods for interacting with the event as a mapping.
+    //
+    // These are rarely used, so we take the easy approach of re-serializing the
+    // event to a Python dict and then delegating to the standard dict methods.
+
+    fn __contains__<'py>(&self, py: Python<'py>, key: &str) -> PyResult<bool> {
+        let dict = self.get_dict(py)?;
+        dict.contains(key)
+    }
+
+    /// This is deprecated in favor of `get`, but we still need to support it
+    /// for backwards compatibility with modules. This is therefore not exposed
+    /// in the type stubs.
+    fn __getitem__<'py>(&self, py: Python<'py>, key: &str) -> PyResult<Bound<'py, PyAny>> {
+        let dict = self.get_dict(py)?;
+        if dict.contains(key)? {
+            dict.get_item(key)
+        } else {
+            Err(PyKeyError::new_err(key.to_owned()))
+        }
+    }
+
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let dict = self.get_dict(py)?;
+        if dict.contains(key)? {
+            dict.get_item(key)
+        } else {
+            Ok(default.into_pyobject(py)?)
+        }
+    }
+
+    fn items<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let dict = self.get_dict(py)?;
+        let dict = dict.cast::<PyDict>()?;
+        Ok(dict.items())
+    }
+
+    fn keys<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let dict = self.get_dict(py)?;
+        let dict = dict.cast::<PyDict>()?;
+        Ok(dict.keys())
+    }
+
+    // Below are the getters for the top-level fields on Matrix events.
+
+    #[getter]
+    fn event_id(&self) -> &str {
+        &self.event_id
+    }
+
+    #[getter]
+    fn room_id(&self) -> PyResult<Cow<'_, str>> {
+        match &*self.fields.specific_fields {
+            EventFormatEnum::V1(format) => Ok(format.room_id.as_ref().into()),
+            EventFormatEnum::V2V3(format) => Ok(format.room_id.as_ref().into()),
+            EventFormatEnum::V4(format) => {
+                Ok(format.room_id(&self.event_id, &self.fields.common_fields)?)
+            }
+            EventFormatEnum::VMSC4242(format) => {
+                Ok(format.room_id(&self.event_id, &self.fields.common_fields)?)
+            }
+        }
+    }
+
+    #[getter]
+    fn signatures(&self) -> Signatures {
+        self.fields.signatures.clone()
+    }
+
+    #[getter]
+    fn content(&self) -> JsonObject {
+        self.fields.common_fields.content.clone()
+    }
+
+    #[getter]
+    fn depth(&self) -> i64 {
+        self.fields.common_fields.depth
+    }
+
+    #[getter]
+    fn hashes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (key, value) in &self.fields.common_fields.hashes {
+            dict.set_item(&**key, &**value)?;
+        }
+        Ok(dict)
+    }
+
+    #[getter]
+    fn origin_server_ts(&self) -> i64 {
+        self.fields.common_fields.origin_server_ts
+    }
+
+    #[getter]
+    fn sender(&self) -> &str {
+        &self.fields.common_fields.sender
+    }
+
+    /// Deprecated alias for `sender`. Kept for backwards compatibility with
+    /// modules and tests that still read `event.user_id`. This is therefore not
+    /// exposed in the type stubs.
+    #[getter]
+    fn user_id(&self) -> &str {
+        &self.fields.common_fields.sender
+    }
+
+    #[getter(state_key)]
+    fn state_key_attr(&self) -> PyResult<&str> {
+        let Some(state_key) = self.fields.common_fields.state_key.as_deref() else {
+            return Err(PyAttributeError::new_err("state_key"));
+        };
+        Ok(state_key)
+    }
+
+    #[getter]
+    fn r#type(&self) -> &str {
+        &self.fields.common_fields.type_
+    }
+
+    #[getter]
+    fn unsigned(&self) -> Unsigned {
+        self.fields.unsigned.clone()
+    }
+
+    #[getter]
+    fn prev_state_events(&self) -> PyResult<Vec<String>> {
+        // `prev_state_events` should only be called after validating the event
+        // is of a format that supports MSC4242, so we return an AttributeError
+        // for formats that don't support it.
+        match &*self.fields.specific_fields {
+            EventFormatEnum::V1(_) | EventFormatEnum::V2V3(_) | EventFormatEnum::V4(_) => {
+                Err(PyAttributeError::new_err("prev_state_events"))
+            }
+            EventFormatEnum::VMSC4242(format) => Ok(format.prev_state_events.clone()),
+        }
+    }
+
+    #[getter]
+    fn redacts<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        let common = &self.fields.common_fields;
+        let value = if self.room_version.updated_redaction_rules {
+            common.content.object.get(REDACTS)
+        } else {
+            common.other_fields.get(REDACTS)
+        };
+        value
+            .map(|v| pythonize(py, v).map_err(Into::into))
+            .transpose()
+    }
+}
+
+fn depythonize_event_dict(
+    room_version: &RoomVersion,
+    event_dict: &Bound<'_, PyAny>,
+) -> PyResult<FormattedEvent> {
+    let formatted_event: FormattedEvent = match room_version.event_format {
+        EventFormatVersions::ROOM_V1_V2 => {
+            let event_format: FormattedEvent<EventFormatV1> = depythonize(event_dict)?;
+
+            event_format.into()
+        }
+        EventFormatVersions::ROOM_V3 | EventFormatVersions::ROOM_V4_PLUS => {
+            let event_format: FormattedEvent<EventFormatV2V3> = depythonize(event_dict)?;
+            event_format.into()
+        }
+        EventFormatVersions::ROOM_V11_HYDRA_PLUS => {
+            let event_format: FormattedEvent<EventFormatV4> = depythonize(event_dict)?;
+            event_format
+                .specific_fields
+                .validate(&event_format.common_fields)?;
+            event_format.into()
+        }
+        EventFormatVersions::ROOM_VMSC4242 => {
+            let event_format: FormattedEvent<EventFormatVMSC4242> = depythonize(event_dict)?;
+            event_format
+                .specific_fields
+                .validate(&event_format.common_fields)?;
+            event_format.into()
+        }
+        _ => {
+            return Err(PyValueError::new_err(format!(
+                "Unsupported room version: {}",
+                room_version
+            )))
+        }
+    };
+
+    Ok(formatted_event)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::events::{
+        constants::event_type::M_ROOM_CREATE,
+        formats::{EventFormatV1, EventFormatV2V3, EventFormatV4, EventFormatVMSC4242},
+    };
+
+    #[test]
+    fn test_basic_v3_roundtrip() {
+        let json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.create","sender":"@anon-20260225_142731-20:localhost:8800","content":{"room_version":"10","creator":"@anon-20260225_142731-20:localhost:8800"},"depth":1,"room_id":"!qVoJSympOqdUQRUfiC:localhost:8800","state_key":"","origin_server_ts":1772029657149,"hashes":{"sha256":"RIDkn4CrExGMOfRZlHl//1weAro5QC/q2D76YcyAUqk"},"signatures":{"localhost:8800":{"ed25519:a_GMSl":"GU7WmvI2Kd5kLrXKrWpRbUfEiVKGgH0sxQNEpBMMvgF3QhHN25AubVMmIClht5r/c+Iihb1xsq1j5Sw+RGfiDg"}},"unsigned":{"age_ts":1772029657149}}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatV2V3> = serde_json::from_str(json).unwrap();
+        let parsed_value = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(&*event.common_fields.type_, M_ROOM_CREATE);
+
+        assert_eq!(
+            &*event.specific_fields.room_id,
+            "!qVoJSympOqdUQRUfiC:localhost:8800"
+        );
+
+        assert_eq!(event_value, parsed_value);
+    }
+
+    #[test]
+    fn test_room_id_for_create_event() {
+        let json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.create","sender":"@erikj:jki.re","content":{"room_version":"12","predecessor":{"room_id":"!VuNGkDTdbMOOxSmuDa:jki.re"}},"depth":1,"state_key":"","origin_server_ts":1775568141481,"hashes":{"sha256":"qBX+glsKvogXFrvsEN0eh13pO2kpuE6o/b4yREPtOqw"},"signatures":{"jki.re":{"ed25519:auto":"n/4gHQRagk3r1r24L/7a+oaMMf9cysVfQRYdjpDZcf4ppkVym33rhTW18Vy4zMa1L5nsWLkxsBvbrRRDYUOhBQ"}},"unsigned":{"age_ts":1775568141481}}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
+
+        let event_id = calculate_event_id(&event_value, &RoomVersion::V12).unwrap();
+
+        assert_eq!(
+            &*event
+                .specific_fields
+                .room_id(&event_id, &event.common_fields)
+                .unwrap(),
+            "!BeXKh925K_M46DwsuJFR0EyBpE1P7CFUDGuWW4xw55Y"
+        );
+    }
+
+    #[test]
+    fn test_basic_v1_roundtrip() {
+        let json = r#"{"auth_events":[["$auth1:localhost",{"sha256":"abc"}],["$auth2:localhost",{"sha256":"def"}]],"prev_events":[["$prev1:localhost",{"sha256":"ghi"}]],"type":"m.room.message","sender":"@user:localhost","content":{"body":"hello","msgtype":"m.text"},"depth":5,"room_id":"!room:localhost","event_id":"$event1:localhost","origin_server_ts":1234567890,"hashes":{"sha256":"base64hash"},"signatures":{"localhost":{"ed25519:key":"sig"}},"unsigned":{}}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatV1> = serde_json::from_str(json).unwrap();
+        let parsed_value = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(&*event.common_fields.type_, "m.room.message");
+        assert_eq!(&*event.specific_fields.room_id, "!room:localhost");
+        assert_eq!(&*event.specific_fields.event_id, "$event1:localhost");
+
+        // Check auth/prev event extraction
+        let auth_ids = event.specific_fields.auth_event_ids();
+        assert_eq!(auth_ids, vec!["$auth1:localhost", "$auth2:localhost"]);
+
+        let prev_ids = event.specific_fields.prev_event_ids();
+        assert_eq!(prev_ids, vec!["$prev1:localhost"]);
+
+        assert_eq!(event_value, parsed_value);
+    }
+
+    #[test]
+    fn test_basic_v4_roundtrip_with_room_id() {
+        // A regular (non-create) V4 event has an explicit room_id.
+        let json = r#"{"auth_events":["$auth1","$auth2"],"prev_events":["$prev1"],"type":"m.room.message","sender":"@user:localhost","content":{"body":"hello","msgtype":"m.text"},"depth":5,"room_id":"!room:localhost","origin_server_ts":1234567890,"hashes":{"sha256":"base64hash"},"signatures":{"localhost":{"ed25519:key":"sig"}},"unsigned":{}}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
+        let parsed_value = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(&*event.common_fields.type_, "m.room.message");
+        assert_eq!(
+            event.specific_fields.room_id.as_deref(),
+            Some("!room:localhost")
+        );
+        assert_eq!(
+            event.specific_fields.auth_prev_events.auth_events,
+            vec!["$auth1".to_string(), "$auth2".to_string()]
+        );
+        assert_eq!(
+            event.specific_fields.auth_prev_events.prev_events,
+            vec!["$prev1".to_string()]
+        );
+
+        assert_eq!(event_value, parsed_value);
+    }
+
+    #[test]
+    fn test_basic_v4_roundtrip_create_event() {
+        // A V4 create event for a v12 room has no room_id field.
+        let json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.create","sender":"@erikj:jki.re","content":{"room_version":"12"},"depth":1,"state_key":"","origin_server_ts":1775568141481,"hashes":{"sha256":"qBX+glsKvogXFrvsEN0eh13pO2kpuE6o/b4yREPtOqw"},"signatures":{"jki.re":{"ed25519:auto":"sig"}},"unsigned":{}}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
+        let parsed_value = serde_json::to_value(&event).unwrap();
+
+        assert!(event.specific_fields.room_id.is_none());
+        assert_eq!(&*event.common_fields.type_, M_ROOM_CREATE);
+
+        // Create events have no implicit auth events.
+        assert!(event
+            .specific_fields
+            .auth_event_ids(&event.common_fields)
+            .unwrap()
+            .is_empty());
+
+        assert_eq!(event_value, parsed_value);
+    }
+
+    #[test]
+    fn test_v4_auth_event_ids_implicit_create() {
+        // Non-create events implicitly include the create event (derived from
+        // the room ID) in their auth chain.
+        let json = r#"{"auth_events":["$auth1"],"prev_events":["$prev1"],"type":"m.room.message","sender":"@user:localhost","content":{"body":"hi","msgtype":"m.text"},"depth":5,"room_id":"!BeXKh925K_M46DwsuJFR0EyBpE1P7CFUDGuWW4xw55Y","origin_server_ts":1234567890,"hashes":{"sha256":"h"},"signatures":{"localhost":{"ed25519:k":"s"}},"unsigned":{}}"#;
+
+        let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
+
+        let auth_ids = event
+            .specific_fields
+            .auth_event_ids(&event.common_fields)
+            .unwrap();
+        assert_eq!(
+            auth_ids,
+            vec![
+                "$auth1".to_string(),
+                "$BeXKh925K_M46DwsuJFR0EyBpE1P7CFUDGuWW4xw55Y".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_v4_validate_rejects_missing_room_id_for_non_create() {
+        // A v12 non-create event without a room_id must fail validation.
+        let json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.message","sender":"@u:l","content":{},"depth":2,"state_key":"","origin_server_ts":1,"hashes":{"sha256":"h"},"signatures":{"l":{"ed25519:k":"s"}},"unsigned":{}}"#;
+        let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
+        assert!(event
+            .specific_fields
+            .validate(&event.common_fields)
+            .is_err());
+    }
+
+    #[test]
+    fn test_v4_validate_accepts_create_without_room_id() {
+        let json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.create","sender":"@u:l","content":{"room_version":"12"},"depth":1,"state_key":"","origin_server_ts":1,"hashes":{"sha256":"h"},"signatures":{"l":{"ed25519:k":"s"}},"unsigned":{}}"#;
+        let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
+        event
+            .specific_fields
+            .validate(&event.common_fields)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_basic_vmsc4242_roundtrip() {
+        // VMSC4242 introduces a `prev_state_events` field on top of V4.
+        let json = r#"{"auth_events":["$auth1"],"prev_events":["$prev1"],"prev_state_events":["$pstate1","$pstate2"],"type":"m.room.member","sender":"@user:localhost","content":{"membership":"join"},"depth":5,"room_id":"!room:localhost","state_key":"@user:localhost","origin_server_ts":1234567890,"hashes":{"sha256":"h"},"signatures":{"localhost":{"ed25519:k":"s"}},"unsigned":{}}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatVMSC4242> = serde_json::from_str(json).unwrap();
+        let parsed_value = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(
+            event.specific_fields.prev_state_events,
+            vec!["$pstate1".to_string(), "$pstate2".to_string()]
+        );
+        assert_eq!(
+            event.specific_fields.room_id.as_deref(),
+            Some("!room:localhost")
+        );
+        assert_eq!(
+            event.common_fields.state_key.as_deref(),
+            Some("@user:localhost")
+        );
+
+        assert_eq!(event_value, parsed_value);
+    }
+
+    #[test]
+    fn test_vmsc4242_room_id_for_create_event() {
+        let json = r#"{"auth_events":[],"prev_events":[],"prev_state_events":[],"type":"m.room.create","sender":"@erikj:jki.re","content":{"room_version":"12","predecessor":{"room_id":"!VuNGkDTdbMOOxSmuDa:jki.re"}},"depth":1,"state_key":"","origin_server_ts":1775568141481,"hashes":{"sha256":"qBX+glsKvogXFrvsEN0eh13pO2kpuE6o/b4yREPtOqw"},"signatures":{"jki.re":{"ed25519:auto":"n/4gHQRagk3r1r24L/7a+oaMMf9cysVfQRYdjpDZcf4ppkVym33rhTW18Vy4zMa1L5nsWLkxsBvbrRRDYUOhBQ"}},"unsigned":{"age_ts":1775568141481}}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatVMSC4242> = serde_json::from_str(json).unwrap();
+
+        // The event_id calculation is independent of the `prev_state_events`
+        // field not being present in V4, so the same event_id derivation works.
+        let event_id = calculate_event_id(&event_value, &RoomVersion::V12).unwrap();
+
+        assert_eq!(
+            &*event
+                .specific_fields
+                .room_id(&event_id, &event.common_fields)
+                .unwrap(),
+            "!BeXKh925K_M46DwsuJFR0EyBpE1P7CFUDGuWW4xw55Y"
+        );
+    }
+
+    #[test]
+    fn test_event_format_enum_untagged_roundtrip() {
+        // The untagged EventFormatEnum serialization/deserialization is
+        // driven by fields, so serializing any variant must match the
+        // original JSON exactly.
+        let v2v3_json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.create","sender":"@a:b","content":{},"depth":1,"room_id":"!r:b","state_key":"","origin_server_ts":1,"hashes":{"sha256":"h"},"signatures":{"b":{"ed25519:k":"s"}},"unsigned":{}}"#;
+        let v2v3_value: serde_json::Value = serde_json::from_str(v2v3_json).unwrap();
+        let v2v3_container: FormattedEvent<EventFormatV2V3> =
+            serde_json::from_str(v2v3_json).unwrap();
+        assert_eq!(serde_json::to_value(&v2v3_container).unwrap(), v2v3_value);
+        assert_eq!(
+            serde_json::to_value(v2v3_container.into_general()).unwrap(),
+            v2v3_value
+        );
+
+        let v4_json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.create","sender":"@a:b","content":{"room_version":"12"},"depth":1,"state_key":"","origin_server_ts":1,"hashes":{"sha256":"h"},"signatures":{"b":{"ed25519:k":"s"}},"unsigned":{}}"#;
+        let v4_value: serde_json::Value = serde_json::from_str(v4_json).unwrap();
+        let v4_container: FormattedEvent<EventFormatV4> = serde_json::from_str(v4_json).unwrap();
+        assert_eq!(serde_json::to_value(&v4_container).unwrap(), v4_value);
+        assert_eq!(
+            serde_json::to_value(v4_container.into_general()).unwrap(),
+            v4_value
+        );
+    }
+
+    #[test]
+    fn test_unknown_top_level_fields_preserved_roundtrip() {
+        // Extra top-level fields (e.g. unknown or experimental) are captured
+        // via `other_fields` and must round-trip losslessly.
+        let json = r#"{"auth_events":[],"prev_events":[],"type":"m.room.message","sender":"@a:b","content":{"body":"hi","msgtype":"m.text"},"depth":1,"room_id":"!r:b","origin_server_ts":1,"hashes":{"sha256":"h"},"signatures":{"b":{"ed25519:k":"s"}},"unsigned":{},"msc4354_sticky":{"duration_ms":5000},"some_unknown_field":"some_value"}"#;
+        let event_value: serde_json::Value = serde_json::from_str(json).unwrap();
+
+        let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
+        let parsed_value = serde_json::to_value(&event).unwrap();
+
+        assert!(event
+            .common_fields
+            .other_fields
+            .contains_key("msc4354_sticky"));
+        assert!(event
+            .common_fields
+            .other_fields
+            .contains_key("some_unknown_field"));
+
+        assert_eq!(event_value, parsed_value);
+    }
 }

@@ -745,7 +745,7 @@ impl EventInternalMetadata {
 
     /// The calculated auth event IDs, if it was set when the event was created.
     #[getter]
-    fn get_calculated_auth_event_ids(&self) -> PyResult<Vec<String>> {
+    pub fn get_calculated_auth_event_ids(&self) -> PyResult<Vec<String>> {
         let guard = self.read_inner()?;
         attr_err(
             guard.get_calculated_auth_event_ids().cloned(),
