@@ -101,6 +101,15 @@ impl Unsigned {
             .write()
             .map_err(|_| PyRuntimeError::new_err("Unsigned lock poisoned"))
     }
+
+    /// Create a deep copy of this `Unsigned` to allow modification without
+    /// affecting other references to the same unsigned data. This is needed
+    /// when we clone an event.
+    pub fn deep_copy(&self) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(self.py_read().expect("lock poisoned").clone())),
+        }
+    }
 }
 
 #[pymethods]
@@ -268,11 +277,11 @@ impl Unsigned {
         }
     }
 
-    fn for_persistence<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    pub fn for_persistence<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(pythonize(py, &self.py_read()?.persisted_fields)?)
     }
 
-    fn for_event<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    pub fn for_event<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(pythonize(py, &*self.py_read()?)?)
     }
 }

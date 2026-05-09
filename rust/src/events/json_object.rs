@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 #[pyclass(mapping, frozen, skip_from_py_object)]
 #[serde(transparent)]
 pub struct JsonObject {
-    object: Arc<BTreeMap<Box<str>, serde_json::Value>>,
+    pub object: Arc<BTreeMap<Box<str>, serde_json::Value>>,
 }
 
 #[pymethods]
@@ -190,6 +190,12 @@ impl JsonObject {
 
     fn __repr__(&self) -> String {
         format!("JsonObject({})", self.__str__())
+    }
+}
+
+impl JsonObject {
+    pub fn get_field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.object.get(key)
     }
 }
 

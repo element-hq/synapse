@@ -35,10 +35,23 @@ pub struct SynapseDuration {
 
 impl SynapseDuration {
     /// For now we only need to create durations from milliseconds.
-    pub fn from_milliseconds(milliseconds: u64) -> Self {
+    pub const fn from_milliseconds(milliseconds: u64) -> Self {
         Self {
             microseconds: milliseconds * 1_000,
         }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for SynapseDuration {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let duration_module = duration_module(py)?;
+        let kwargs = [("microseconds", self.microseconds)].into_py_dict(py)?;
+        let duration_instance = duration_module.call_method("Duration", (), Some(&kwargs))?;
+        Ok(duration_instance.into_bound())
     }
 }
 
