@@ -618,7 +618,7 @@ class FrozenEventVMSC4242(FrozenEventV4):
     """FrozenEventVMSC4242, which differs from FrozenEventV4 only in the addition of prev_state_events"""
 
     format_version = EventFormatVersions.ROOM_VMSC4242
-    prev_state_events: DictProperty[list[str]] = DictProperty("prev_state_events")
+    prev_state_events: DictProperty[StrCollection] = DictProperty("prev_state_events")
 
     def __init__(
         self,
