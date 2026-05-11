@@ -690,7 +690,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             extra_content={
                 "power_level_content_override": {
                     "users": {
-                        user2_id: 100,
                         # Allow user1 to send state in the room
                         user1_id: 100,
                     }
@@ -861,7 +860,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             extra_content={
                 "power_level_content_override": {
                     "users": {
-                        user2_id: 100,
                         # Allow user1 to send state in the room
                         user1_id: 100,
                     }
