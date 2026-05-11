@@ -37,7 +37,7 @@ use serde::{
 use serde_json::{
     ser::{Formatter, Serializer},
     value::RawValue,
-    Value,
+    Number, Value,
 };
 
 /// The minimum integer that can be used in canonical JSON.
@@ -610,6 +610,30 @@ where
         // canonicalizing it first, as `serde_json` will have already serialized
         // it in a canonical way.
         if key == SERDE_JSON_NUMBER_TOKEN && self.name == SERDE_JSON_NUMBER_TOKEN {
+            if self.options.enforce_int_range {
+                // We need to check that the number is in the valid range, as
+                // `serde_json` won't have done this for us as we're using the
+                // `arbitrary_precision` feature.
+
+                // The value here will be something that serializes to a JSON
+                // string containing the number, so we need to serialize it and
+                // deserialize it to get the string out, then parse it as a
+                // `Number`.
+                let number_json_str = serde_json::to_string(value)?;
+                let number_str: &str = serde_json::from_str(&number_json_str)?;
+                let number: Number = number_str
+                    .parse()
+                    .map_err(|_| serde_json::Error::custom("invalid number"))?;
+
+                // Now check that the number is an integer in the valid range.
+                if let Some(int) = number.as_i64() {
+                    assert_integer_in_range(int)?;
+                } else {
+                    // Can't be cast to an i64, so it must be out of range.
+                    return Err(serde_json::Error::custom("integer out of range"));
+                }
+            }
+
             self.struct_serializer.serialize_field(key, value)?;
             return Ok(());
         }
@@ -795,6 +819,23 @@ mod tests {
         assert!(to_string_canonical(&2i128.pow(60), CanonicalizationOptions::strict()).is_err());
         assert!(to_string_canonical(&-(2i64.pow(60)), CanonicalizationOptions::strict()).is_err());
         assert!(to_string_canonical(&-(2i128.pow(60)), CanonicalizationOptions::strict()).is_err());
+    }
+
+    #[test]
+    fn bigints() {
+        // Create a `serde_json::Number` that is too big to be represented as an
+        // i64, but can be represented as a string.
+        let bigint_string = "10000000000000000000000000000000000000";
+        let value: serde_json::Number = bigint_string.parse().unwrap();
+
+        // This should work with relaxed option.
+        assert_eq!(
+            to_string_canonical(&value, CanonicalizationOptions::relaxed()).unwrap(),
+            bigint_string
+        );
+
+        // But should fail with strict option, as it's out of range.
+        assert!(to_string_canonical(&value, CanonicalizationOptions::strict()).is_err());
     }
 
     #[test]
