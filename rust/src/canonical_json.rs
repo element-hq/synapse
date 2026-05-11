@@ -616,11 +616,14 @@ where
                 // `arbitrary_precision` feature.
 
                 // The value here will be something that serializes to a JSON
-                // string containing the number, so we need to serialize it and
-                // deserialize it to get the string out, then parse it as a
-                // `Number`.
-                let number_json_str = serde_json::to_string(value)?;
-                let number_str: &str = serde_json::from_str(&number_json_str)?;
+                // string containing the number, so we first serialize it to a
+                // Value and pull the string out, then parse it as a `Number`.
+
+                let serde_val = serde_json::to_value(value)?;
+                let serde_json::Value::String(number_str) = serde_val else {
+                    return Err(serde_json::Error::custom(format!("invalid number")));
+                };
+
                 let number: Number = number_str
                     .parse()
                     .map_err(|_| serde_json::Error::custom("invalid number"))?;
