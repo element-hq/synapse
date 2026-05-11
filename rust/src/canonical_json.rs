@@ -621,7 +621,7 @@ where
 
                 let serde_val = serde_json::to_value(value)?;
                 let serde_json::Value::String(number_str) = serde_val else {
-                    return Err(serde_json::Error::custom(format!("invalid number")));
+                    return Err(serde_json::Error::custom("invalid number"));
                 };
 
                 let number: Number = number_str
