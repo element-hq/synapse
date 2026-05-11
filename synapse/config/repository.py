@@ -242,7 +242,8 @@ class ContentRepositoryConfig(Config):
         self.thumbnail_requirements = parse_thumbnail_requirements(
             config.get("thumbnail_sizes", DEFAULT_THUMBNAIL_SIZES)
         )
-        self.url_preview_enabled = config.get("url_preview_enabled", False)
+        self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
+
         if self.url_preview_enabled:
             check_requirements("url-preview")
 
