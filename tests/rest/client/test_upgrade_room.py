@@ -134,7 +134,9 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
             "m.room.power_levels",
             tok=self.creator_token,
         )
-        power_levels["users"][self.other] = 100
+        # In the Matrix Spec v1.16, m.room.tombstone events are MUST explicitly be
+        # higher than `state_default` per MSC4289.
+        power_levels["users"][self.other] = 150
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
@@ -160,7 +162,9 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
             "m.room.power_levels",
             tok=self.creator_token,
         )
-        power_levels["users_default"] = 100
+        # In the Matrix Spec v1.16, m.room.tombstone events are MUST explicitly be
+        # higher than `state_default` per MSC4289.
+        power_levels["users"][self.other] = 150
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
