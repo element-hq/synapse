@@ -93,7 +93,7 @@ impl PushRuleRoomFlag {
 }
 
 /// An object which describes the unique attributes of a room version.
-#[pyclass(frozen, eq, hash, get_all)]
+#[pyclass(frozen, eq, hash, get_all, skip_from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RoomVersion {
     /// The identifier for this version.
@@ -622,7 +622,7 @@ const ROOM_VERSION_MSC4242V12: RoomVersion = RoomVersion {
 /// Note: room versions can be added to this mapping at startup (allowing
 /// support for experimental room versions to be behind experimental feature
 /// flags).
-#[pyclass(frozen, mapping)]
+#[pyclass(frozen, mapping, skip_from_py_object)]
 #[derive(Clone)]
 pub struct KnownRoomVersionsMapping {
     // Note we use a Vec here to ensure that the order of keys is
@@ -637,19 +637,22 @@ pub struct KnownRoomVersionsMapping {
 impl KnownRoomVersionsMapping {
     /// Add a new room version to the mapping, indicating that this instance
     /// supports it.
-    fn add_room_version(&self, version: RoomVersion) -> PyResult<()> {
+    fn add_room_version(&self, version: Bound<'_, RoomVersion>) -> PyResult<()> {
         let mut versions = self
             .versions
             .write()
             .map_err(|_| PyRuntimeError::new_err("KnownRoomVersionsMapping lock poisoned"))?;
 
-        if versions.iter().any(|v| v.identifier == version.identifier) {
+        if versions
+            .iter()
+            .any(|v| v.identifier == version.get().identifier)
+        {
             // We already have this room version, so we don't add it again (as
             // otherwise we'd end up with duplicates).
             return Ok(());
         }
 
-        versions.push(version);
+        versions.push(*version.get());
         Ok(())
     }
 
