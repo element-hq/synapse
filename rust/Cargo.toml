@@ -46,6 +46,9 @@ sha2 = "0.10.8"
 serde = { version = "1.0.144", features = ["derive", "rc"] }
 serde_json = { version = "1.0.85", features = [
     "raw_value",
+    # We need to be able to parse arbitrary precision numbers, as some numbers
+    # in the database may be out of range of i64 (as Python uses arbitrary
+    # precision integers).
     "arbitrary_precision",
 ] }
 ulid = "1.1.2"
