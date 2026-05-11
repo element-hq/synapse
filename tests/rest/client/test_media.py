@@ -1601,7 +1601,7 @@ class URLPreviewDisabledTests(unittest.HomeserverTestCase):
             "/_matrix/client/v1/media/preview_url?url=" + quote("http://example.com"),
             access_token=self.tok,
         )
-        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.code, 404, channel.result)
         self.assertEqual(
             channel.json_body,
             {"errcode": "M_UNRECOGNIZED", "error": "Unrecognized request"},

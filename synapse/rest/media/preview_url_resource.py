@@ -76,7 +76,7 @@ class PreviewUrlResource(RestServlet):
             if self.can_respond_403:
                 raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
             else:
-                raise UnrecognizedRequestError()
+                raise UnrecognizedRequestError(code=404)
         url = parse_string(request, "url", required=True)
         ts = parse_integer(request, "ts", default=self.clock.time_msec())
         og = await self.url_previewer.preview(url, requester.user, ts)

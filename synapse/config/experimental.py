@@ -617,6 +617,6 @@ class ExperimentalConfig(Config):
         # Note that this is only applicable to legacy auth, not MAS integration (OAuth 2.0).
         self.msc4450_enabled: bool = experimental.get("msc4450_enabled", False)
 
-        # MSC4455: MSC4452: Preview URL capability
+        # MSC4455: Preview URL capability
         # Tracked in: https://github.com/element-hq/synapse/issues/19719
         self.msc4452_enabled: bool = experimental.get("msc4452_enabled", False)
