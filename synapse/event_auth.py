@@ -61,7 +61,8 @@ from synapse.api.room_versions import (
     EventFormatVersions,
     RoomVersion,
 )
-from synapse.events import FrozenEventVMSC4242, is_creator
+from synapse.events import is_creator
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
@@ -187,8 +188,8 @@ async def check_state_independent_auth_rules(
         return
 
     # State DAGs 2. Considering the event's prev_state_events:
-    if event.room_version.msc4242_state_dags:
-        prev_state_events_ids = set(cast(FrozenEventVMSC4242, event).prev_state_events)
+    if supports_msc4242_state_dag(event):
+        prev_state_events_ids = set(event.prev_state_events)
         # Fetch all of the `prev_state_events`
         prev_state_events = {}
         # Try to load the `prev_state_events` from `batched_auth_events` initially as
@@ -515,8 +516,7 @@ def _check_create(event: "EventBase") -> None:
         raise AuthError(403, "Create event has prev events")
 
     # State DAGs 1.2 If it has any prev_state_events, reject.
-    if event.room_version.msc4242_state_dags:
-        assert isinstance(event, FrozenEventVMSC4242)
+    if supports_msc4242_state_dag(event):
         if len(event.prev_state_events) > 0:
             raise AuthError(403, "Create event has prev state events")
 
