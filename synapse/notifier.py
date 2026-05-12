@@ -41,6 +41,7 @@ from twisted.internet.defer import Deferred
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
@@ -63,7 +64,7 @@ from synapse.util.async_helpers import (
 )
 from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -210,7 +211,7 @@ class _NotifierUserStream:
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventStreamResult:
-    events: list[JsonDict | EventBase]
+    events: list[JsonDict | FilteredEvent]
     start_token: StreamToken
     end_token: StreamToken
 
@@ -526,6 +527,7 @@ class Notifier:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
+            StreamKeyType.STICKY_EVENTS,
         ],
         new_token: int,
         users: Collection[str | UserID] | None = None,
@@ -764,7 +766,7 @@ class Notifier:
             # The events fetched from each source are a JsonDict, EventBase, or
             # UserPresenceState, but see below for UserPresenceState being
             # converted to JsonDict.
-            events: list[JsonDict | EventBase] = []
+            events: list[JsonDict | FilteredEvent] = []
             end_token = from_token
 
             for keyname, source in self.event_sources.sources.get_sources():
@@ -783,7 +785,7 @@ class Notifier:
                 )
 
                 if keyname == StreamKeyType.ROOM:
-                    new_events = await filter_events_for_client(
+                    new_events = await filter_and_transform_events_for_client(
                         self._storage_controllers,
                         user.to_string(),
                         new_events,

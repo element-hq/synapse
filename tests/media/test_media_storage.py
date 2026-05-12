@@ -48,7 +48,10 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
-from synapse.media.storage_provider import FileStorageProviderBackend
+from synapse.media.storage_provider import (
+    FileStorageProviderBackend,
+    StorageProviderWrapper,
+)
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
@@ -77,11 +80,19 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
-        storage_providers = [FileStorageProviderBackend(hs, self.secondary_base_path)]
+        local_provider = FileStorageProviderBackend(hs, self.primary_base_path)
+        storage_providers = [
+            StorageProviderWrapper(
+                FileStorageProviderBackend(hs, self.secondary_base_path),
+                store_local=True,
+                store_remote=False,
+                store_synchronous=True,
+            ),
+        ]
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
         self.media_storage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            hs, self.filepaths, storage_providers, local_provider
         )
 
     def test_ensure_media_is_in_local_cache(self) -> None:
@@ -102,29 +113,31 @@ class MediaStorageTests(unittest.HomeserverTestCase):
         # to the local cache.
         file_info = FileInfo(None, media_id)
 
+        async def test_ensure_media() -> None:
+            async with self.media_storage.ensure_media_is_in_local_cache(
+                file_info
+            ) as local_path:
+                self.assertTrue(os.path.exists(local_path))
+
+                # Asserts the file is under the expected local cache directory
+                self.assertEqual(
+                    os.path.commonprefix([self.primary_base_path, local_path]),
+                    self.primary_base_path,
+                )
+
+                with open(local_path) as f:
+                    body = f.read()
+
+                self.assertEqual(test_body, body)
+
         # This uses a real blocking threadpool so we have to wait for it to be
         # actually done :/
-        x = defer.ensureDeferred(
-            self.media_storage.ensure_media_is_in_local_cache(file_info)
-        )
+        x = defer.ensureDeferred(test_ensure_media())
 
         # Hotloop until the threadpool does its job...
         self.wait_on_thread(x)
 
-        local_path = self.get_success(x)
-
-        self.assertTrue(os.path.exists(local_path))
-
-        # Asserts the file is under the expected local cache directory
-        self.assertEqual(
-            os.path.commonprefix([self.primary_base_path, local_path]),
-            self.primary_base_path,
-        )
-
-        with open(local_path) as f:
-            body = f.read()
-
-        self.assertEqual(test_body, body)
+        self.get_success(x)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)

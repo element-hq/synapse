@@ -135,7 +135,7 @@ class ScheduledTasksAdminApiTestCase(unittest.HomeserverTestCase):
         # filter via job_status
         channel = self.make_request(
             "GET",
-            "/_synapse/admin/v1/scheduled_tasks?job_status=active",
+            "/_synapse/admin/v1/scheduled_tasks?status=active",
             content={},
             access_token=self.admin_user_tok,
         )

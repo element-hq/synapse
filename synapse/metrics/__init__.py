@@ -27,6 +27,8 @@ import platform
 import threading
 from importlib import metadata
 from typing import (
+    TYPE_CHECKING,
+    Any,
     Callable,
     Generic,
     Iterable,
@@ -60,12 +62,16 @@ from twisted.web.server import Request
 import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
+from synapse.synapse_rust import get_rustc_version
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
 
 logger = logging.getLogger(__name__)
 
 METRICS_PREFIX = "/_synapse/metrics"
+
+# Rust version used for compilation
+RUSTC_VERSION = get_rustc_version()
 
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
@@ -262,8 +268,12 @@ shutdown.
 MetricsEntry = TypeVar("MetricsEntry")
 
 
-class InFlightGauge(Generic[MetricsEntry], Collector):
-    """Tracks number of things (e.g. requests, Measure blocks, etc) in flight
+class _InFlightGaugeRuntime(Collector):
+    """
+    Runtime class for InFlightGauge. Contains all actual logic.
+    Does not inherit from Generic to avoid method resolution order (MRO) conflicts.
+
+    Tracks number of things (e.g. requests, Measure blocks, etc) in flight
     at any given time.
 
     Each InFlightGauge will create a metric called `<name>_total` that counts
@@ -292,16 +302,20 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
 
         # Create a class which have the sub_metrics values as attributes, which
         # default to 0 on initialization. Used to pass to registered callbacks.
-        self._metrics_class: type[MetricsEntry] = attr.make_class(
+        self._metrics_class = attr.make_class(
             "_MetricsEntry",
             attrs={x: attr.ib(default=0) for x in sub_metrics},
             slots=True,
         )
 
         # Counts number of in flight blocks for a given set of label values
-        self._registrations: dict[
-            tuple[str, ...], set[Callable[[MetricsEntry], None]]
-        ] = {}
+        # `Callable` should be of type `Callable[[MetricsEntry], None]`, but
+        # `MetricsEntry` has no meaning in this context without the higher level
+        # `InFlightGauge` typing information.
+        # Instead, the typing is enforced by having `_registrations` be private and all
+        # accessor functions have proper `Callable[[MetricsEntry], None]` type
+        # annotations.
+        self._registrations: dict[tuple[str, ...], set[Callable[[Any], None]]] = {}
 
         # Protects access to _registrations
         self._lock = threading.Lock()
@@ -396,6 +410,17 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
             for key, metrics in metrics_by_key.items():
                 gauge.add_metric(labels=key, value=getattr(metrics, name))
             yield gauge
+
+
+if TYPE_CHECKING:
+
+    class InFlightGauge(_InFlightGaugeRuntime, Generic[MetricsEntry]):
+        """
+        Typing-only generic wrapper.
+        Provides InFlightGauge[T] support to type checkers.
+        """
+else:
+    InFlightGauge = _InFlightGaugeRuntime
 
 
 class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
@@ -651,13 +676,35 @@ event_processing_lag_by_event = Histogram(
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
 build_info = Gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
+    "synapse_build_info",
+    "Build information",
+    ["pythonversion", "version", "osversion", "rustcversion"],
 )
 build_info.labels(
     " ".join([platform.python_implementation(), platform.python_version()]),
     SYNAPSE_VERSION,
     " ".join([platform.system(), platform.release()]),
+    RUSTC_VERSION,
 ).set(1)
+
+synapse_server_name_info = Gauge(
+    "synapse_server_name_info",
+    "Maps Synapse `server_name`s to the `instance`s they're hosted on",
+    # `instance` will automatically be set by Prometheus
+    labelnames=[SERVER_NAME_LABEL],
+)
+"""
+Maps Synapse `server_name`s to the `instance`s they're hosted on.
+
+This is an info-style metric where the value is always 1, and labels carry metadata:
+
+ - `server_name`: The Synapse `server_name`
+ - `instance`: Automatically be set by Prometheus and is the `<host>:<port>` part
+    of the target's URL that was scraped.
+
+This is useful as it allows us to correlate process-level metrics (like `process_*`,
+`python_*`, etc) with homeservers.
+"""
 
 # 3PID send info
 threepid_send_requests = Histogram(

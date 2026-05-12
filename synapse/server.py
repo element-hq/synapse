@@ -147,8 +147,10 @@ from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     all_later_gauges_to_clean_up_on_shutdown,
     register_threadpool,
+    synapse_server_name_info,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
@@ -172,6 +174,7 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import SYNAPSE_VERSION
@@ -360,6 +363,9 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._async_shutdown_handlers: list[ShutdownInfo] = []
         self._sync_shutdown_handlers: list[ShutdownInfo] = []
         self._background_processes: set[defer.Deferred[Any | None]] = set()
+
+        # For every server we spawn in the process, track it in the metrics
+        synapse_server_name_info.labels(**{SERVER_NAME_LABEL: self.hostname}).set(1)
 
     def run_as_background_process(
         self,
@@ -1178,6 +1184,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_rendezvous_handler(self) -> RendezvousHandler:
         return RendezvousHandler(self)
+
+    @cache_in_self
+    def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
+        return MSC4388RendezvousHandler(self)
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":

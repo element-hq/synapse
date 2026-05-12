@@ -44,6 +44,7 @@ import jinja2
 import yaml
 
 from synapse.types import StrSequence
+from synapse.util.stringutils import parse_and_validate_server_name
 from synapse.util.templates import _create_mxc_to_http_filter, _format_ts_filter
 
 logger = logging.getLogger(__name__)
@@ -465,6 +466,7 @@ class RootConfig:
         generate_secrets: bool = False,
         report_stats: bool | None = None,
         open_private_ports: bool = False,
+        enable_metrics: bool = False,
         listeners: list[dict] | None = None,
         tls_certificate_path: str | None = None,
         tls_private_key_path: str | None = None,
@@ -495,9 +497,15 @@ class RootConfig:
             open_private_ports: True to leave private ports (such as the non-TLS
                 HTTP listener) open to the internet.
 
+            enable_metrics: True to set `enable_metrics: true` and when using the
+                default set of listeners, will also add the metrics listener on port 19090.
+
             listeners: A list of descriptions of the listeners synapse should
-                start with each of which specifies a port (int), a list of
-                resources (list(str)), tls (bool) and type (str). For example:
+                start with each of which specifies a port (int), a list of resources
+                (list(str)), tls (bool) and type (str). There is a default set of
+                listeners when `None`.
+
+                Example usage:
                 [{
                     "port": 8448,
                     "resources": [{"names": ["federation"]}],
@@ -518,6 +526,35 @@ class RootConfig:
         Returns:
             The yaml config file
         """
+        _, bind_port = parse_and_validate_server_name(server_name)
+        if bind_port is not None:
+            unsecure_port = bind_port - 400
+        else:
+            bind_port = 8448
+            unsecure_port = 8008
+
+        # The default listeners
+        if listeners is None:
+            listeners = [
+                {
+                    "port": unsecure_port,
+                    "tls": False,
+                    "type": "http",
+                    "x_forwarded": True,
+                    "resources": [
+                        {"names": ["client", "federation"], "compress": False}
+                    ],
+                }
+            ]
+
+            if enable_metrics:
+                listeners.append(
+                    {
+                        "port": 19090,
+                        "tls": False,
+                        "type": "metrics",
+                    }
+                )
 
         conf = CONFIG_FILE_HEADER + "\n".join(
             dedent(conf)
@@ -529,6 +566,7 @@ class RootConfig:
                 generate_secrets=generate_secrets,
                 report_stats=report_stats,
                 open_private_ports=open_private_ports,
+                enable_metrics=enable_metrics,
                 listeners=listeners,
                 tls_certificate_path=tls_certificate_path,
                 tls_private_key_path=tls_private_key_path,
@@ -756,6 +794,14 @@ class RootConfig:
                 " internet. Do not use this unless you know what you are doing."
             ),
         )
+        generate_group.add_argument(
+            "--enable-metrics",
+            action="store_true",
+            help=(
+                "Sets `enable_metrics: true` and when using the default set of listeners, "
+                "will also add the metrics listener on port 19090."
+            ),
+        )
 
         cls.invoke_all_static("add_arguments", parser)
         config_args = parser.parse_args(argv_options)
@@ -812,6 +858,7 @@ class RootConfig:
                     report_stats=(config_args.report_stats == "yes"),
                     generate_secrets=True,
                     open_private_ports=config_args.open_private_ports,
+                    enable_metrics=config_args.enable_metrics,
                 )
 
                 os.makedirs(config_dir_path, exist_ok=True)

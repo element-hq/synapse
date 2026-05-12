@@ -273,14 +273,16 @@ pub enum SimpleJsonValue {
     Null,
 }
 
-impl<'source> FromPyObject<'source> for SimpleJsonValue {
-    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        if let Ok(s) = ob.downcast::<PyString>() {
+impl<'source> FromPyObject<'_, 'source> for SimpleJsonValue {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'source, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(s) = ob.cast::<PyString>() {
             Ok(SimpleJsonValue::Str(Cow::Owned(s.to_string())))
         // A bool *is* an int, ensure we try bool first.
-        } else if let Ok(b) = ob.downcast::<PyBool>() {
+        } else if let Ok(b) = ob.cast::<PyBool>() {
             Ok(SimpleJsonValue::Bool(b.extract()?))
-        } else if let Ok(i) = ob.downcast::<PyInt>() {
+        } else if let Ok(i) = ob.cast::<PyInt>() {
             Ok(SimpleJsonValue::Int(i.extract()?))
         } else if ob.is_none() {
             Ok(SimpleJsonValue::Null)
@@ -301,12 +303,14 @@ pub enum JsonValue {
     Value(SimpleJsonValue),
 }
 
-impl<'source> FromPyObject<'source> for JsonValue {
-    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        if let Ok(l) = ob.downcast::<PyList>() {
+impl<'source> FromPyObject<'_, 'source> for JsonValue {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'source, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(l) = ob.cast::<PyList>() {
             match l
                 .iter()
-                .map(|it| SimpleJsonValue::extract_bound(&it))
+                .map(|it| SimpleJsonValue::extract(it.as_borrowed()))
                 .collect()
             {
                 Ok(a) => Ok(JsonValue::Array(a)),
@@ -314,7 +318,7 @@ impl<'source> FromPyObject<'source> for JsonValue {
                     "Can't convert to JsonValue::Array: {e}"
                 ))),
             }
-        } else if let Ok(v) = SimpleJsonValue::extract_bound(ob) {
+        } else if let Ok(v) = SimpleJsonValue::extract(ob) {
             Ok(JsonValue::Value(v))
         } else {
             Err(PyTypeError::new_err(format!(
@@ -385,9 +389,11 @@ impl<'source> IntoPyObject<'source> for Condition {
     }
 }
 
-impl<'source> FromPyObject<'source> for Condition {
-    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        Ok(depythonize(ob)?)
+impl<'source> FromPyObject<'_, 'source> for Condition {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'source, PyAny>) -> Result<Self, Self::Error> {
+        Ok(depythonize(&ob)?)
     }
 }
 

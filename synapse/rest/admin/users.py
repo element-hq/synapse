@@ -369,7 +369,7 @@ class UserRestServletV2(UserRestServletV2Get):
         if user:  # modify user
             if "displayname" in body:
                 await self.profile_handler.set_displayname(
-                    target_user, requester, body["displayname"], True
+                    target_user, requester, body["displayname"], by_admin=True
                 )
 
             if threepids is not None:
@@ -418,7 +418,7 @@ class UserRestServletV2(UserRestServletV2Get):
 
             if "avatar_url" in body:
                 await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], True
+                    target_user, requester, body["avatar_url"], by_admin=True
                 )
 
             if "admin" in body:
@@ -526,7 +526,7 @@ class UserRestServletV2(UserRestServletV2Get):
 
             if "avatar_url" in body and isinstance(body["avatar_url"], str):
                 await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], True
+                    target_user, requester, body["avatar_url"], by_admin=True
                 )
 
             user_info_dict = await self.admin_handler.get_user(target_user)
@@ -1144,6 +1144,7 @@ class UserTokenRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
+        self.admin_handler = hs.get_admin_handler()
         self.is_mine_id = hs.is_mine_id
 
     async def on_POST(
@@ -1157,6 +1158,12 @@ class UserTokenRestServlet(RestServlet):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be logged in as"
             )
+
+        # Validate user_id
+        UserID.from_string(user_id)
+        _user_info_dict = await self.store.get_user_by_id(user_id)
+        if not _user_info_dict:
+            raise NotFoundError("User not found")
 
         body = parse_json_object_from_request(request, allow_empty_body=True)
 

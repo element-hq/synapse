@@ -61,7 +61,6 @@ class LocalMedia:
     url_cache: str | None
     last_access_ts: int
     quarantined_by: str | None
-    quarantined_ts: int | None
     safe_from_quarantine: bool
     user_id: str | None
     authenticated: bool | None
@@ -79,7 +78,6 @@ class RemoteMedia:
     created_ts: int
     last_access_ts: int
     quarantined_by: str | None
-    quarantined_ts: int | None
     authenticated: bool | None
     sha256: str | None
 
@@ -245,7 +243,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "user_id",
                 "authenticated",
                 "sha256",
-                "quarantined_ts",
             ),
             allow_none=True,
             desc="get_local_media",
@@ -265,7 +262,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             user_id=row[8],
             authenticated=row[9],
             sha256=row[10],
-            quarantined_ts=row[11],
         )
 
     async def get_local_media_by_user_paginate(
@@ -323,8 +319,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     safe_from_quarantine,
                     user_id,
                     authenticated,
-                    sha256,
-                    quarantined_ts
+                    sha256
                 FROM local_media_repository
                 WHERE user_id = ?
                 ORDER BY {order_by_column} {order}, media_id ASC
@@ -350,7 +345,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     user_id=row[9],
                     authenticated=row[10],
                     sha256=row[11],
-                    quarantined_ts=row[12],
                 )
                 for row in txn
             ]
@@ -701,7 +695,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "quarantined_by",
                 "authenticated",
                 "sha256",
-                "quarantined_ts",
             ),
             allow_none=True,
             desc="get_cached_remote_media",
@@ -720,7 +713,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             quarantined_by=row[6],
             authenticated=row[7],
             sha256=row[8],
-            quarantined_ts=row[9],
         )
 
     async def store_cached_remote_media(

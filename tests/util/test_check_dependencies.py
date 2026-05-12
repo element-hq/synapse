@@ -201,13 +201,13 @@ class TestDependencyChecker(TestCase):
         """
         with patch(
             "synapse.util.check_dependencies.metadata.requires",
-            return_value=["setuptools_rust >= 1.3"],
+            return_value=["setuptools-rust >= 1.3"],
         ):
             with self.mock_installed_package(None):
-                # should not raise, even if setuptools_rust is not installed
+                # should not raise, even if setuptools-rust is not installed
                 check_requirements()
             with self.mock_installed_package(old):
-                # We also ignore old versions of setuptools_rust
+                # We also ignore old versions of setuptools-rust
                 check_requirements()
 
     def test_python_version_markers_respected(self) -> None:
