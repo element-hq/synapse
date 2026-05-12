@@ -236,7 +236,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         async def check(
             ev: EventBase, state: StateMap[EventBase]
         ) -> tuple[bool, JsonDict | None]:
-            ev.content = {"x": "y"}
+            ev.content = {"x": "y"}  # type: ignore[misc]
             return True, None
 
         self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
