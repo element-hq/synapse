@@ -28,7 +28,7 @@ from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
 from synapse.http.site import SynapseRequest
-from synapse.logging._terse_json import JsonFormatter, TerseJsonFormatter
+from synapse.logging._terse_json import GcpJsonFormatter, JsonFormatter, TerseJsonFormatter
 from synapse.logging.context import LoggingContext, LoggingContextFilter
 from synapse.types import JsonDict
 
@@ -251,3 +251,77 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         self.assertEqual(log["log"], "Hello there, wally!")
         self.assertEqual(log["exc_type"], "ValueError")
         self.assertEqual(log["exc_value"], "That's wrong, you wally!")
+
+
+class GcpJsonFormatterTestCase(LoggerCleanupMixin, TestCase):
+    def setUp(self) -> None:
+        self.output = StringIO()
+
+    def get_log_line(self) -> JsonDict:
+        data = self.output.getvalue()
+        logs = data.splitlines()
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(data.count("\n"), 1)
+        return json.loads(logs[0])
+
+    def test_gcp_json_output(self) -> None:
+        """
+        GcpJsonFormatter produces exactly the four fields GCL expects.
+        """
+        handler = logging.StreamHandler(self.output)
+        handler.setFormatter(GcpJsonFormatter())
+        logger = self.get_logger(handler)
+
+        logger.info("Hello there, %s!", "wally")
+
+        log = self.get_log_line()
+
+        self.assertIncludes(
+            log.keys(), {"severity", "message", "logger", "time"}, exact=True
+        )
+        self.assertEqual(log["message"], "Hello there, wally!")
+        self.assertEqual(log["severity"], "INFO")
+        self.assertTrue(log["time"].endswith("Z"))
+
+    def test_severity_levels(self) -> None:
+        """
+        Python log levels are mapped to their GCL severity equivalents.
+        """
+        cases = [
+            (logging.DEBUG, "DEBUG"),
+            (logging.INFO, "INFO"),
+            (logging.WARNING, "WARNING"),
+            (logging.ERROR, "ERROR"),
+            (logging.CRITICAL, "CRITICAL"),
+        ]
+        for level, expected_severity in cases:
+            self.output = StringIO()
+            handler = logging.StreamHandler(self.output)
+            handler.setFormatter(GcpJsonFormatter())
+            logger = self.get_logger(handler)
+            logger.setLevel(level)
+            logger.log(level, "test")
+            log = self.get_log_line()
+            self.assertEqual(log["severity"], expected_severity, f"level={level}")
+
+    def test_gcp_json_with_exception(self) -> None:
+        """
+        Exception info is appended to the message field, not separate keys.
+        """
+        handler = logging.StreamHandler(self.output)
+        handler.setFormatter(GcpJsonFormatter())
+        logger = self.get_logger(handler)
+
+        try:
+            raise ValueError("That's wrong, you wally!")
+        except ValueError:
+            logger.exception("Hello there, %s!", "wally")
+
+        log = self.get_log_line()
+
+        self.assertIncludes(
+            log.keys(), {"severity", "message", "logger", "time"}, exact=True
+        )
+        self.assertIn("Hello there, wally!", log["message"])
+        self.assertIn("ValueError", log["message"])
+        self.assertIn("That's wrong, you wally!", log["message"])
