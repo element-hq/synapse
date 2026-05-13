@@ -1005,9 +1005,9 @@ class SlidingSyncExtensionHandler:
         if not sticky_events_request.enabled:
             return None
         now = self.clock.time_msec()
-        since_token = sticky_events_request.since or SlidingSyncStickyEventsToken(
-            sticky_events_stream_id=0
-        )
+        # If there is no `since` token specified, start from the beginning of the stream
+        # to make sure the client receives all visible (unexpired) sticky events
+        since_token = sticky_events_request.since or SlidingSyncStickyEventsToken.START
         (
             sticky_events_to_id,
             room_to_event_ids,

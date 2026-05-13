@@ -19,6 +19,7 @@
 #
 #
 import re
+from typing import ClassVar
 
 import pydantic_core.core_schema
 from pydantic import (
@@ -126,6 +127,7 @@ class SlidingSyncStickyEventsToken:
     """
 
     PATTERN = re.compile(r"^sticky_([0-9]+)$")
+    START: ClassVar["SlidingSyncStickyEventsToken"]
 
     def __init__(self, *, sticky_events_stream_id: int) -> None:
         self.sticky_events_stream_id = sticky_events_stream_id
@@ -158,6 +160,12 @@ class SlidingSyncStickyEventsToken:
 
     def __repr__(self) -> str:
         return self.serialise()
+
+
+# Starting reading a stream at 0 ensures all stream fact rows wlil be read
+SlidingSyncStickyEventsToken.START = SlidingSyncStickyEventsToken(
+    sticky_events_stream_id=0
+)
 
 
 class SlidingSyncBody(RequestBodyModel):
