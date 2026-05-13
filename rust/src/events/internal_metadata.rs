@@ -476,7 +476,7 @@ impl EventInternalMetadataInner {
     }
 }
 
-#[pyclass(frozen)]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct EventInternalMetadata {
     inner: Arc<RwLock<EventInternalMetadataInner>>,
