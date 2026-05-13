@@ -322,7 +322,7 @@ impl Display for RoomVersion {
     }
 }
 
-impl FromStr for &RoomVersion {
+impl FromStr for &'static RoomVersion {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
