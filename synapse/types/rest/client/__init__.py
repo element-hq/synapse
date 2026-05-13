@@ -130,6 +130,8 @@ class SlidingSyncStickyEventsToken:
     START: ClassVar["SlidingSyncStickyEventsToken"]
 
     def __init__(self, *, sticky_events_stream_id: int) -> None:
+        # FIXME: We should use MultiWriterStreamToken here
+        # Track: https://github.com/element-hq/synapse/issues/19661
         self.sticky_events_stream_id = sticky_events_stream_id
 
     @classmethod
