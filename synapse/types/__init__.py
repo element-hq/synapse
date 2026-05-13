@@ -208,7 +208,10 @@ For a Sentinel for internal (non-API-facing) use, instead consider
 NonNegativeStrictInt = Annotated[StrictInt, annotated_types.Ge(0)]
 """A strict integer that must be greater than or equal to zero.
 
-Should be preferred in place of Pydantic's own (lax) NonNegativeInt.
+Should be preferred in place of Pydantic's own (lax) NonNegativeInt,
+which will coerce strings to integers in a way that does not agree with
+the Matrix specification (and would risk backing us into a backward compatibility
+hole where we had to support input forms we didn't intend).
 """
 
 
