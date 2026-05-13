@@ -29,7 +29,7 @@ use std::{
     io::{self, Write},
 };
 
-use serde::ser::SerializeMap;
+use serde::{ser::SerializeMap, Serializer as _};
 use serde::{
     ser::{Error as _, SerializeStruct},
     Serialize,
@@ -37,7 +37,7 @@ use serde::{
 use serde_json::{
     ser::{Formatter, Serializer},
     value::RawValue,
-    Value,
+    Number, Value,
 };
 
 /// The minimum integer that can be used in canonical JSON.
@@ -45,6 +45,12 @@ pub const MIN_VALID_INTEGER: i64 = -(2i64.pow(53)) + 1;
 
 /// The maximum integer that can be used in canonical JSON.
 pub const MAX_VALID_INTEGER: i64 = (2i64.pow(53)) - 1;
+
+/// A token used by `serde_json` to identify its internal `Number` type when the
+/// `arbitrary_precision` feature is enabled. This is a copy from serde_json's
+/// internal `TOKEN` for `Number`, which unfortunately isn't exported by the
+/// crate.
+const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 /// Options to control how strict JSON canonicalization is.
 #[derive(Clone, Debug)]
@@ -236,7 +242,7 @@ where
 
     type SerializeMap = CanonicalSerializeMap<'a, W>;
 
-    type SerializeStruct = CanonicalSerializeMap<'a, W>;
+    type SerializeStruct = CanonicalSerializeStruct<'a, W>;
 
     type SerializeStructVariant =
         <&'a mut Serializer<W, CanonicalFormatter> as serde::Serializer>::SerializeStructVariant;
@@ -426,7 +432,7 @@ where
     fn serialize_struct(
         self,
         name: &'static str,
-        _len: usize,
+        len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
         // We want to disallow `RawValue` as we don't know if its contents is
         // canonical JSON.
@@ -436,10 +442,7 @@ where
         if name == "$serde_json::private::RawValue" {
             return Err(Self::Error::custom("`RawValue` is not supported"));
         }
-        Ok(CanonicalSerializeMap::new(
-            &mut self.inner,
-            self.options.clone(),
-        ))
+        CanonicalSerializeStruct::new(name, len, &mut self.inner, self.options.clone())
     }
 
     fn serialize_struct_variant(
@@ -554,7 +557,42 @@ where
     }
 }
 
-impl<'a, W> SerializeStruct for CanonicalSerializeMap<'a, W>
+/// A helper type for [`CanonicalSerializer`] that serializes structs in
+/// lexicographic order.
+#[doc(hidden)]
+pub struct CanonicalSerializeStruct<'a, W: Write> {
+    name: &'static str,
+    // We buffer up the key and serialized value for each field we see.
+    // The BTreeMap will then serialize in lexicographic order.
+    map: BTreeMap<&'static str, Box<RawValue>>,
+    options: CanonicalizationOptions,
+    // The serializer to use to write the sorted map too.
+    struct_serializer:
+        <&'a mut Serializer<W, CanonicalFormatter> as serde::Serializer>::SerializeStruct,
+}
+
+impl<'a, W> CanonicalSerializeStruct<'a, W>
+where
+    W: Write,
+{
+    fn new(
+        name: &'static str,
+        len: usize,
+        ser: &'a mut Serializer<W, CanonicalFormatter>,
+        options: CanonicalizationOptions,
+    ) -> Result<Self, serde_json::Error> {
+        let struct_serializer = ser.serialize_struct(name, len)?;
+
+        Ok(Self {
+            name,
+            map: BTreeMap::new(),
+            options,
+            struct_serializer,
+        })
+    }
+}
+
+impl<'a, W> SerializeStruct for CanonicalSerializeStruct<'a, W>
 where
     W: Write,
 {
@@ -566,20 +604,69 @@ where
     where
         T: Serialize + ?Sized,
     {
-        let key_string = key.to_string();
+        // Check if this is the special case of `SERDE_JSON_NUMBER_TOKEN`,
+        // which is used when serializing numbers with the `arbitrary_precision`
+        // feature. If so, we can just serialize it directly without
+        // canonicalizing it first, as `serde_json` will have already serialized
+        // it in a canonical way.
+        if key == SERDE_JSON_NUMBER_TOKEN && self.name == SERDE_JSON_NUMBER_TOKEN {
+            if self.options.enforce_int_range {
+                // We need to check that the number is in the valid range, as
+                // `serde_json` won't have done this for us as we're using the
+                // `arbitrary_precision` feature.
+
+                // The value here will be something that serializes to a JSON
+                // string containing the number, so we first serialize it to a
+                // Value and pull the string out, then parse it as a `Number`.
+
+                let serde_val = serde_json::to_value(value)?;
+                let serde_json::Value::String(number_str) = serde_val else {
+                    return Err(serde_json::Error::custom("invalid number"));
+                };
+
+                let number: Number = number_str
+                    .parse()
+                    .map_err(|_| serde_json::Error::custom("invalid number"))?;
+
+                // Now check that the number is an integer in the valid range.
+                if let Some(int) = number.as_i64() {
+                    assert_integer_in_range(int)?;
+                } else {
+                    // Can't be cast to an i64, so it must be out of range.
+                    return Err(serde_json::Error::custom("integer out of range"));
+                }
+            }
+
+            self.struct_serializer.serialize_field(key, value)?;
+            return Ok(());
+        }
 
         // We serialize the value canonically, then store it as a `RawValue` in
         // the buffer map.
         let value_string = to_string_canonical(value, self.options.clone())?;
 
-        self.map
-            .insert(key_string, RawValue::from_string(value_string)?);
+        self.map.insert(key, RawValue::from_string(value_string)?);
 
         Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        self.map.serialize(self.ser)?;
+    fn end(mut self) -> Result<Self::Ok, Self::Error> {
+        if self.name == SERDE_JSON_NUMBER_TOKEN {
+            // Map must be empty in this case, as `SERDE_JSON_NUMBER_TOKEN`
+            // only has one field and we've handled it in `serialize_field`.
+            if !self.map.is_empty() {
+                return Err(Self::Error::custom(format!(
+                    "unexpected fields in `{}`",
+                    SERDE_JSON_NUMBER_TOKEN
+                )));
+            }
+        }
+
+        for (key, value) in self.map {
+            self.struct_serializer.serialize_field(key, &value)?;
+        }
+
+        SerializeStruct::end(self.struct_serializer)?;
 
         Ok(())
     }
@@ -738,6 +825,23 @@ mod tests {
     }
 
     #[test]
+    fn bigints() {
+        // Create a `serde_json::Number` that is too big to be represented as an
+        // i64, but can be represented as a string.
+        let bigint_string = "10000000000000000000000000000000000000";
+        let value: serde_json::Number = bigint_string.parse().unwrap();
+
+        // This should work with relaxed option.
+        assert_eq!(
+            to_string_canonical(&value, CanonicalizationOptions::relaxed()).unwrap(),
+            bigint_string
+        );
+
+        // But should fail with strict option, as it's out of range.
+        assert!(to_string_canonical(&value, CanonicalizationOptions::strict()).is_err());
+    }
+
+    #[test]
     fn backwards_compatibility() {
         assert_eq!(
             to_string_canonical(&u64::MAX, CanonicalizationOptions::relaxed()).unwrap(),
@@ -824,7 +928,7 @@ mod tests {
 
         // Serialize the keys in the reverse order.
         for (c, _) in ascii_order.iter().rev() {
-            map_serializer.serialize_entry(c.into(), &1).unwrap();
+            map_serializer.serialize_entry(c, &1).unwrap();
         }
         SerializeMap::end(map_serializer).unwrap();
 
