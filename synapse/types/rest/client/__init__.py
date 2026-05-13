@@ -138,6 +138,14 @@ class SlidingSyncStickyEventsToken:
     def __get_pydantic_core_schema__(
         cls, source_type: object, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
+        """
+        This function is checked for and used by Pydantic when
+        attempting to deserialise/validate a field of this type.
+
+        This returns a schema that will parse a string into an
+        instance of `SlidingSyncStickyEventsToken`.
+        """
+
         return pydantic_core.core_schema.no_info_plain_validator_function(
             cls._validate,
             serialization=pydantic_core.core_schema.plain_serializer_function_ser_schema(
@@ -148,6 +156,11 @@ class SlidingSyncStickyEventsToken:
 
     @classmethod
     def _validate(cls, v: object) -> Self:
+        """
+        Create an instance from serialised string form.
+
+        The inverse of `serialise`.
+        """
         if isinstance(v, cls):
             return v
         if isinstance(v, str):
@@ -158,9 +171,15 @@ class SlidingSyncStickyEventsToken:
         raise ValueError(f"Cannot parse SlidingSyncStickyEventsToken from {type(v)}")
 
     def serialise(self) -> str:
+        """
+        Convert this instance to string.
+
+        The inverse of `_validate`.
+        """
         return f"sticky_{self.sticky_events_stream_id}"
 
     def __repr__(self) -> str:
+        # Use the serialised form as debug output.
         return self.serialise()
 
 
