@@ -25,8 +25,13 @@ import platform
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.handlers.worker_lock import WORKER_LOCK_MAX_RETRY_INTERVAL
 from synapse.server import HomeServer
-from synapse.storage.databases.main.lock import _RENEWAL_INTERVAL
+from synapse.storage.databases.main.lock import (
+    _LOCK_REAP_INTERVAL,
+    _LOCK_TIMEOUT,
+    _RENEWAL_INTERVAL,
+)
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -83,7 +88,7 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         # Note: We use `_pump_by` instead of `pump`/`advance` as the `Lock` has an
         # internal background looping call that runs every 30 seconds
         # (`_RENEWAL_INTERVAL`) to renew the `Lock` and push it's "drop timeout" value
-        # further out by 2 minutes (`_LOCK_TIMEOUT_MS`). The `Lock` will prematurely
+        # further out by 2 minutes (`_LOCK_TIMEOUT`). The `Lock` will prematurely
         # drop if this renewal is not allowed to run, which sours the test.
         # self.pump(amount=Duration(hours=1))
         self._pump_by(amount=Duration(hours=1), by=_RENEWAL_INTERVAL)
@@ -91,9 +96,34 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         # Make sure we haven't acquired the `lock2` yet (`lock1` still holds it)
         self.assertNoResult(d2)
 
-        # Release the first lock (`lock1`). The second lock(`lock2`) should be
-        # automatically acquired by the `pump()` inside `get_success()`
-        self.get_success(lock1.__aexit__(None, None, None))
+        # Drop the lock without releasing it. If we just normally released the lock
+        # (`self.get_success(lock1.__aexit__(None, None, None))`), the
+        # `add_lock_released_callback`/`notify_lock_released` cycle would signal that we
+        # should re-aquire the lock right away (on the next reactor tick). And we want
+        # to avoid that as the point of this test is to stress the retry timeout
+        # interval and `WORKER_LOCK_MAX_RETRY_INTERVAL`.
+        del lock1
+
+        # Wait for `lock1` to go stale (it won't be renewed anymore because we deleted
+        # it just above)
+        self._pump_by(
+            amount=_LOCK_TIMEOUT,
+            by=_RENEWAL_INTERVAL,
+        )
+
+        # Wait just enough time so `lock1` is reaped (found stale and forcefully drops
+        # the lock its holding)
+        self._pump_by(
+            amount=_LOCK_REAP_INTERVAL,
+            by=_RENEWAL_INTERVAL,
+        )
+
+        # Wait just enough time so `lock2` tries re-acquiring the lock. Should be no
+        # longer than our `WORKER_LOCK_MAX_RETRY_INTERVAL`.
+        self._pump_by(
+            amount=WORKER_LOCK_MAX_RETRY_INTERVAL,
+            by=_RENEWAL_INTERVAL,
+        )
 
         # We should now have the lock
         self.successResultOf(d2)
@@ -219,7 +249,7 @@ class WorkerLockWorkersTestCase(BaseMultiWorkerStreamTestCase):
         # Note: We use `_pump_by` instead of `pump`/`advance` as the `Lock` has an
         # internal background looping call that runs every 30 seconds
         # (`_RENEWAL_INTERVAL`) to renew the `Lock` and push it's "drop timeout" value
-        # further out by 2 minutes (`_LOCK_TIMEOUT_MS`). The `Lock` will prematurely
+        # further out by 2 minutes (`_LOCK_TIMEOUT`). The `Lock` will prematurely
         # drop if this renewal is not allowed to run, which sours the test.
         # self.pump(amount=Duration(hours=1))
         self._pump_by(amount=Duration(hours=1), by=_RENEWAL_INTERVAL)
@@ -227,9 +257,34 @@ class WorkerLockWorkersTestCase(BaseMultiWorkerStreamTestCase):
         # Make sure we haven't acquired the `lock2` yet (`lock1` still holds it)
         self.assertNoResult(d2)
 
-        # Release the first lock (`lock1`). The second lock(`lock2`) should be
-        # automatically acquired by the `pump()` inside `get_success()`
-        self.get_success(lock1.__aexit__(None, None, None))
+        # Drop the lock without releasing it. If we just normally released the lock
+        # (`self.get_success(lock1.__aexit__(None, None, None))`), the
+        # `add_lock_released_callback`/`notify_lock_released` cycle would signal that we
+        # should re-aquire the lock right away (on the next reactor tick). And we want
+        # to avoid that as the point of this test is to stress the retry timeout
+        # interval and `WORKER_LOCK_MAX_RETRY_INTERVAL`.
+        del lock1
+
+        # Wait for `lock1` to go stale (it won't be renewed anymore because we deleted
+        # it just above)
+        self._pump_by(
+            amount=_LOCK_TIMEOUT,
+            by=_RENEWAL_INTERVAL,
+        )
+
+        # Wait just enough time so `lock1` is reaped (found stale and forcefully drops
+        # the lock its holding)
+        self._pump_by(
+            amount=_LOCK_REAP_INTERVAL,
+            by=_RENEWAL_INTERVAL,
+        )
+
+        # Wait just enough time so `lock2` tries re-acquiring the lock. Should be no
+        # longer than our `WORKER_LOCK_MAX_RETRY_INTERVAL`.
+        self._pump_by(
+            amount=WORKER_LOCK_MAX_RETRY_INTERVAL,
+            by=_RENEWAL_INTERVAL,
+        )
 
         # We should now have the lock
         self.successResultOf(d2)

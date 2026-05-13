@@ -61,10 +61,10 @@ The maximum wait time before retrying to acquire the lock.
 Better to retry more quickly than have workers wait around. 5 seconds is still a
 reasonable gap in time to not overwhelm the CPU/Database.
 
-This matters most in cross-worker scenarios. When locks are on the same worker, when the
-lock holder releases, we signal to other locks (with the same name/key) that they
-should try reacquiring the lock immediately. But locks on other workers only re-check
-based on their retry `_timeout_interval`.
+This matters most when locks go stale as normally, when the lock holder releases, we
+signal to other locks (with the same name/key) that they should try reacquiring the lock
+immediately. But stale locks are never released and instead forcefully reaped behind the
+scenes.
 """
 WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION = Duration(minutes=10)
 
