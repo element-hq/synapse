@@ -1,3 +1,10 @@
+# Synapse 1.153.0rc2 (2026-05-13)
+
+## Bugfixes
+
+- Correctly handle arbitrary precision integers in `unsigned` field of events. The bug was introduced in 1.153.0rc1. ([\#19769](https://github.com/element-hq/synapse/issues/19769))
+
+
 # Synapse 1.153.0rc1 (2026-05-08)
 
 ## Features
