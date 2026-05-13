@@ -32,7 +32,7 @@ from typing import (
 from prometheus_client import Counter
 from typing_extensions import ParamSpec, TypeGuard
 
-from synapse.api.constants import EventTypes, Membership, ThirdPartyEntityKind
+from synapse.api.constants import ThirdPartyEntityKind
 from synapse.api.errors import CodeMessageException, HttpResponseException
 from synapse.appservice import (
     ApplicationService,
@@ -40,12 +40,13 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.events import EventBase
-from synapse.events.utils import SerializeEventConfig, serialize_event
+from synapse.events.utils import FilteredEvent, SerializeEventConfig
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -127,12 +128,13 @@ class ApplicationServiceApi(SimpleHttpClient):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.config = hs.config.appservice
+        self._event_serializer = hs.get_event_client_serializer()
 
         self.protocol_meta_cache: ResponseCache[tuple[str, str]] = ResponseCache(
             clock=hs.get_clock(),
             name="as_protocol_meta",
             server_name=self.server_name,
-            timeout_ms=HOUR_IN_MS,
+            timeout=Duration(hours=1),
         )
 
     def _get_headers(self, service: "ApplicationService") -> dict[bytes, list[bytes]]:
@@ -342,7 +344,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         # This is required by the configuration.
         assert service.hs_token is not None
 
-        serialized_events = self._serialize(service, events)
+        serialized_events = await self._serialize(service, events)
 
         if txn_id is None:
             logger.warning(
@@ -538,30 +540,23 @@ class ApplicationServiceApi(SimpleHttpClient):
 
         return response
 
-    def _serialize(
+    async def _serialize(
         self, service: "ApplicationService", events: Iterable[EventBase]
     ) -> list[JsonDict]:
         time_now = self.clock.time_msec()
-        return [
-            serialize_event(
-                e,
-                time_now,
-                config=SerializeEventConfig(
-                    as_client_event=True,
-                    # If this is an invite or a knock membership event, and we're interested
-                    # in this user, then include any stripped state alongside the event.
-                    include_stripped_room_state=(
-                        e.type == EventTypes.Member
-                        and (
-                            e.membership == Membership.INVITE
-                            or e.membership == Membership.KNOCK
-                        )
-                        and service.is_interested_in_user(e.state_key)
-                    ),
-                    # Appservices are considered 'trusted' by the admin and should have
-                    # applicable metadata on their events.
-                    include_admin_metadata=True,
-                ),
-            )
-            for e in events
-        ]
+        return await self._event_serializer.serialize_events(
+            [FilteredEvent(event=e, membership=None) for e in events],
+            time_now,
+            config=SerializeEventConfig(
+                as_client_event=True,
+                # If this is an invite or a knock membership event, then include
+                # any stripped state alongside the event. We could narrow this
+                # down to only users the appservice is "interested in", however
+                # it's not worth the complexity of doing so, and it's simpler to
+                # just include it for all users.
+                include_stripped_room_state=True,
+                # Appservices are considered 'trusted' by the admin and should have
+                # applicable metadata on their events.
+                include_admin_metadata=True,
+            ),
+        )

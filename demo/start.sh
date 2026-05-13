@@ -49,7 +49,7 @@ for port in 8080 8081 8082; do
 			# Please don't accidentally bork me with your fancy settings.
 			listeners=$(cat <<-PORTLISTENERS
 			# Configure server to listen on both $https_port and $port
-			# This overides some of the default settings above
+			# This overrides some of the default settings above
 			listeners:
 			  - port: $https_port
 			    type: http
@@ -143,6 +143,12 @@ for port in 8080 8081 8082; do
 			    per_second: 1000
 			    burst_count: 1000
 			rc_delayed_event_mgmt:
+			  per_second: 1000
+			  burst_count: 1000
+			rc_room_creation:
+			  per_second: 1000
+			  burst_count: 1000
+			rc_user_directory:
 			  per_second: 1000
 			  burst_count: 1000
 			RC

@@ -180,6 +180,11 @@ class ContentRepositoryConfig(Config):
             config.get("media_store_path", "media_store")
         )
 
+        # Whether to enable the local media storage provider. When disabled,
+        # media will only be stored in configured storage providers and temp
+        # files will be used for processing.
+        self.enable_local_media_storage = config.get("enable_local_media_storage", True)
+
         backup_media_store_path = config.get("backup_media_store_path")
 
         synchronous_backup_media_store = config.get(
@@ -243,7 +248,8 @@ class ContentRepositoryConfig(Config):
         self.thumbnail_requirements = parse_thumbnail_requirements(
             config.get("thumbnail_sizes", DEFAULT_THUMBNAIL_SIZES)
         )
-        self.url_preview_enabled = config.get("url_preview_enabled", False)
+        self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
+
         if self.url_preview_enabled:
             check_requirements("url-preview")
 

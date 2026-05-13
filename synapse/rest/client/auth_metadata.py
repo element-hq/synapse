@@ -49,6 +49,25 @@ class AuthIssuerServlet(RestServlet):
         self._auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        # This endpoint is unauthenticated and the response only depends on
+        # the metadata we get from Matrix Authentication Service. Internally,
+        # MasDelegatedAuth/MSC3861DelegatedAuth.issuer() are already caching the
+        # response in memory anyway. Ideally we would follow any Cache-Control directive
+        # given by MAS, but this is fine for now.
+        #
+        # - `public` means it can be cached both in the browser and in caching proxies
+        # - `max-age` controls how long we cache on the browser side. 10m is sane enough
+        # - `s-maxage` controls how long we cache on the proxy side. Since caching
+        #   proxies usually have a way to purge caches, it is fine to cache there for
+        #   longer (1h), and issue cache invalidations in case we need it
+        # - `stale-while-revalidate` allows caching proxies to serve stale content while
+        #   revalidating in the background. This is useful for making this request always
+        #   'snappy' to end users whilst still keeping it fresh
+        request.setHeader(
+            b"Cache-Control",
+            b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+        )
+
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
             return 200, {"issuer": await self._auth.issuer()}
@@ -94,6 +113,25 @@ class AuthMetadataServlet(RestServlet):
         self._auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        # This endpoint is unauthenticated and the response only depends on
+        # the metadata we get from Matrix Authentication Service. Internally,
+        # MasDelegatedAuth/MSC3861DelegatedAuth.issuer() are already caching the
+        # response in memory anyway. Ideally we would follow any Cache-Control directive
+        # given by MAS, but this is fine for now.
+        #
+        # - `public` means it can be cached both in the browser and in caching proxies
+        # - `max-age` controls how long we cache on the browser side. 10m is sane enough
+        # - `s-maxage` controls how long we cache on the proxy side. Since caching
+        #   proxies usually have a way to purge caches, it is fine to cache there for
+        #   longer (1h), and issue cache invalidations in case we need it
+        # - `stale-while-revalidate` allows caching proxies to serve stale content while
+        #   revalidating in the background. This is useful for making this request always
+        #   'snappy' to end users whilst still keeping it fresh
+        request.setHeader(
+            b"Cache-Control",
+            b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+        )
+
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
             return 200, await self._auth.auth_metadata()

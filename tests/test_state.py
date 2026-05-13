@@ -35,7 +35,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.state import StateHandler, StateResolutionHandler, _make_state_cache_entry
-from synapse.types import MutableStateMap, StateMap
+from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.state import StateFilter
 from synapse.util.macaroons import MacaroonGenerator
 
@@ -67,13 +67,14 @@ def create_event(
         else:
             name = "<%s, %s>" % (type, event_id)
 
-    d = {
+    d: JsonDict = {
         "event_id": event_id,
         "type": type,
         "sender": "@user_id:example.com",
         "room_id": "!room_id:example.com",
         "depth": depth,
         "prev_events": prev_events or [],
+        "content": {},
     }
 
     if state_key is not None:

@@ -44,7 +44,7 @@ from synapse.http.servlet import (
     validate_json_object,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.opentracing import log_kv, set_tag
+from synapse.logging.opentracing import set_tag
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
 from synapse.types.rest import RequestBodyModel
@@ -105,7 +105,7 @@ class KeyUploadServlet(RestServlet):
 
     """
 
-    PATTERNS = client_patterns("/keys/upload(/(?P<device_id>[^/]+))?$")
+    PATTERNS = client_patterns("/keys/upload$")
     CATEGORY = "Encryption requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -158,6 +158,23 @@ class KeyUploadServlet(RestServlet):
 
         device_keys: DeviceKeys | None = None
         """Identity keys for the device. May be absent if no new identity keys are required."""
+
+        @field_validator("device_keys", mode="before")
+        @classmethod
+        def validate_device_keys_not_null(cls, v: Any) -> Any:
+            """Reject explicit `null` for `device_keys` while still allowing
+            the field to be omitted (in which case the default `None` is used).
+
+            The spec says `device_keys` may be omitted, but when present it
+            must be a `DeviceKeys` object — not `null`.
+
+            Pydantic's experimental `Missing` sentinel would be a cleaner way
+            to express this, but it's not stable yet:
+            https://docs.pydantic.dev/latest/concepts/experimental/#missing-sentinel
+            """
+            if v is None:
+                raise ValueError("device_keys must not be null")
+            return v
 
         fallback_keys: Mapping[StrictStr, StrictStr | KeyObject] | None = None
         """
@@ -220,9 +237,7 @@ class KeyUploadServlet(RestServlet):
                     )
             return v
 
-    async def on_POST(
-        self, request: SynapseRequest, device_id: str | None
-    ) -> tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
 
@@ -236,38 +251,14 @@ class KeyUploadServlet(RestServlet):
         body = parse_json_object_from_request(request)
         validate_json_object(body, self.KeyUploadRequestBody)
 
-        if device_id is not None:
-            # Providing the device_id should only be done for setting keys
-            # for dehydrated devices; however, we allow it for any device for
-            # compatibility with older clients.
-            if requester.device_id is not None and device_id != requester.device_id:
-                dehydrated_device = await self.device_handler.get_dehydrated_device(
-                    user_id
-                )
-                if dehydrated_device is not None and device_id != dehydrated_device[0]:
-                    set_tag("error", True)
-                    log_kv(
-                        {
-                            "message": "Client uploading keys for a different device",
-                            "logged_in_id": requester.device_id,
-                            "key_being_uploaded": device_id,
-                        }
-                    )
-                    logger.warning(
-                        "Client uploading keys for a different device "
-                        "(logged in as %s, uploading for %s)",
-                        requester.device_id,
-                        device_id,
-                    )
-        else:
-            device_id = requester.device_id
+        device_id = requester.device_id
 
         if device_id is None:
             raise SynapseError(
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        if "device_keys" in body and isinstance(body["device_keys"], dict):
+        if "device_keys" in body:
             # Validate the provided `user_id` and `device_id` fields in
             # `device_keys` match that of the requesting user. We can't do
             # this directly in the pydantic model as we don't have access
@@ -275,13 +266,13 @@ class KeyUploadServlet(RestServlet):
             #
             # TODO: We could use ValidationInfo when we switch to Pydantic v2.
             # https://docs.pydantic.dev/latest/concepts/validators/#validation-info
-            if body["device_keys"].get("user_id") != user_id:
+            if body["device_keys"]["user_id"] != user_id:
                 raise SynapseError(
                     code=HTTPStatus.BAD_REQUEST,
                     errcode=Codes.BAD_JSON,
                     msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
                 )
-            if body["device_keys"].get("device_id") != device_id:
+            if body["device_keys"]["device_id"] != device_id:
                 raise SynapseError(
                     code=HTTPStatus.BAD_REQUEST,
                     errcode=Codes.BAD_JSON,
@@ -560,9 +551,14 @@ class SigningKeyUploadServlet(RestServlet):
                         {
                             "session": "dummy",
                             "flows": [
+                                {"stages": ["m.oauth"]},
+                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
                                 {"stages": ["org.matrix.cross_signing_reset"]},
                             ],
                             "params": {
+                                "m.oauth": {
+                                    "url": url,
+                                },
                                 "org.matrix.cross_signing_reset": {
                                     "url": url,
                                 },
@@ -594,9 +590,14 @@ class SigningKeyUploadServlet(RestServlet):
                         {
                             "session": "dummy",
                             "flows": [
+                                {"stages": ["m.oauth"]},
+                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
                                 {"stages": ["org.matrix.cross_signing_reset"]},
                             ],
                             "params": {
+                                "m.oauth": {
+                                    "url": url,
+                                },
                                 "org.matrix.cross_signing_reset": {
                                     "url": url,
                                 },

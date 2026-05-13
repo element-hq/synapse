@@ -27,6 +27,7 @@ import math
 import random
 import string
 from collections import OrderedDict
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -65,9 +66,13 @@ from synapse.api.filtering import Filter
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase
+from synapse.events import EventBase, event_exists_in_state_dag
 from synapse.events.snapshot import UnpersistedEventContext
-from synapse.events.utils import copy_and_fixup_power_levels_contents
+from synapse.events.utils import (
+    FilteredEvent,
+    PowerLevelsContent,
+    copy_and_fixup_power_levels_contents,
+)
 from synapse.handlers.relations import BundledAggregations
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams import EventSource
@@ -95,7 +100,7 @@ from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import parse_and_validate_server_name
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -109,9 +114,9 @@ FIVE_MINUTES_IN_MS = 5 * 60 * 1000
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventContext:
-    events_before: list[EventBase]
-    event: EventBase
-    events_after: list[EventBase]
+    events_before: list[FilteredEvent]
+    event: FilteredEvent
+    events_after: list[FilteredEvent]
     state: list[EventBase]
     aggregations: dict[str, BundledAggregations]
     start: str
@@ -185,7 +190,7 @@ class RoomCreationHandler:
             clock=hs.get_clock(),
             name="room_upgrade",
             server_name=self.server_name,
-            timeout_ms=FIVE_MINUTES_IN_MS,
+            timeout=Duration(minutes=5),
         )
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 
@@ -500,10 +505,12 @@ class RoomCreationHandler:
             except AuthError as e:
                 logger.warning("Unable to update PLs in old room: %s", e)
 
+        power_levels_content: JsonMapping = old_room_pl_state.content
+
         new_room_version = await self.store.get_room_version(new_room_id)
         if new_room_version.msc4289_creator_power_enabled:
-            self._remove_creators_from_pl_users_map(
-                old_room_pl_state.content.get("users", {}),
+            power_levels_content = self._copy_and_remove_creators_from_pl_users_map(
+                power_levels_content,
                 requester.user.to_string(),
                 additional_creators,
             )
@@ -515,9 +522,7 @@ class RoomCreationHandler:
                 "state_key": "",
                 "room_id": new_room_id,
                 "sender": requester.user.to_string(),
-                "content": copy_and_fixup_power_levels_contents(
-                    old_room_pl_state.content
-                ),
+                "content": copy_and_fixup_power_levels_contents(power_levels_content),
             },
             ratelimit=False,
         )
@@ -686,11 +691,12 @@ class RoomCreationHandler:
 
         if new_room_version.msc4289_creator_power_enabled:
             # the creator(s) cannot be in the users map
-            self._remove_creators_from_pl_users_map(
-                user_power_levels,
+            fixed_power_levels = self._copy_and_remove_creators_from_pl_users_map(
+                power_levels,
                 user_id,
                 additional_creators,
             )
+            initial_state[(EventTypes.PowerLevels, "")] = fixed_power_levels
 
         # We construct a subset of what the body of a call to /createRoom would look like
         # for passing to the spam checker. We don't include a preset here, as we expect the
@@ -700,12 +706,12 @@ class RoomCreationHandler:
         spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
             user_id,
             {
-                "creation_content": creation_content,
+                "creation_content": dict(creation_content),
                 "initial_state": [
                     {
                         "type": state_key[0],
                         "state_key": state_key[1],
-                        "content": event_content,
+                        "content": dict(event_content),
                     }
                     for state_key, event_content in initial_state.items()
                 ],
@@ -1237,6 +1243,10 @@ class RoomCreationHandler:
         creation_content = config.get("creation_content", {})
         # override any attempt to set room versions via the creation_content
         creation_content["room_version"] = room_version.identifier
+        # We do not currently support federating state DAG rooms.
+        # See related restriction in /send_join requests in federation_client.py.
+        if room_version.msc4242_state_dags:
+            creation_content[EventContentFields.FEDERATE] = False
 
         # trusted private chats have the invited users marked as additional creators
         if (
@@ -1427,7 +1437,7 @@ class RoomCreationHandler:
         room_config: JsonDict,
         invite_list: list[str],
         initial_state: MutableStateMap,
-        creation_content: JsonDict,
+        creation_content: JsonMapping,
         room_alias: RoomAlias | None = None,
         power_level_content_override: JsonDict | None = None,
         creator_join_profile: JsonDict | None = None,
@@ -1486,6 +1496,11 @@ class RoomCreationHandler:
 
         # the most recently created event
         prev_event: list[str] = []
+        # This should be the most recently created state event as we create each event
+        prev_state_events: list[str] | None = (
+            [] if room_version.msc4242_state_dags else None
+        )
+
         # a map of event types, state keys -> event_ids. We collect these mappings this as events are
         # created (but not persisted to the db) to determine state for future created events
         # (as this info can't be pulled from the db)
@@ -1493,7 +1508,7 @@ class RoomCreationHandler:
 
         async def create_event(
             etype: str,
-            content: JsonDict,
+            content: JsonMapping,
             for_batch: bool,
             **kwargs: Any,
         ) -> tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]:
@@ -1512,6 +1527,7 @@ class RoomCreationHandler:
             """
             nonlocal depth
             nonlocal prev_event
+            nonlocal prev_state_events
 
             # Create the event dictionary.
             event_dict = {"type": etype, "content": content}
@@ -1525,6 +1541,7 @@ class RoomCreationHandler:
                 creator,
                 event_dict,
                 prev_event_ids=prev_event,
+                prev_state_events=prev_state_events,
                 depth=depth,
                 # Take a copy to ensure each event gets a unique copy of
                 # state_map since it is modified below.
@@ -1535,7 +1552,8 @@ class RoomCreationHandler:
             depth += 1
             prev_event = [new_event.event_id]
             state_map[(new_event.type, new_event.state_key)] = new_event.event_id
-
+            if room_version.msc4242_state_dags and event_exists_in_state_dag(new_event):
+                prev_state_events = [new_event.event_id]
             return new_event, new_unpersisted_context
 
         preset_config, config = self._room_preset_config(room_config)
@@ -1543,6 +1561,7 @@ class RoomCreationHandler:
         if creation_event_with_context is None:
             # MSC2175 removes the creator field from the create event.
             if not room_version.implicit_room_creator:
+                creation_content = dict(creation_content)
                 creation_content["creator"] = creator_id
             creation_event, unpersisted_creation_context = await create_event(
                 EventTypes.Create, creation_content, False
@@ -1568,6 +1587,8 @@ class RoomCreationHandler:
             ignore_shadow_ban=True,
         )
         last_sent_event_id = ev.event_id
+        if room_version.msc4242_state_dags:
+            prev_state_events = [ev.event_id]
 
         member_event_id, _ = await self.room_member_handler.update_membership(
             creator,
@@ -1579,8 +1600,11 @@ class RoomCreationHandler:
             new_room=True,
             prev_event_ids=[last_sent_event_id],
             depth=depth,
+            prev_state_events=prev_state_events,
         )
         prev_event = [member_event_id]
+        if room_version.msc4242_state_dags:
+            prev_state_events = [member_event_id]
 
         # update the depth and state map here as the membership event has been created
         # through a different code path
@@ -1812,18 +1836,28 @@ class RoomCreationHandler:
             )
         return preset_name, preset_config
 
-    def _remove_creators_from_pl_users_map(
+    def _copy_and_remove_creators_from_pl_users_map(
         self,
-        users_map: dict[str, int],
+        power_levels_content: PowerLevelsContent,
         creator: str,
         additional_creators: list[str] | None,
-    ) -> None:
+    ) -> PowerLevelsContent:
+        users_map = power_levels_content.get("users", {})
+        if not users_map:
+            return power_levels_content
+
+        assert isinstance(users_map, Mapping)
+        users_map = dict(users_map)
+
         creators = [creator]
         if additional_creators:
             creators.extend(additional_creators)
         for creator in creators:
             # the creator(s) cannot be in the users map
             users_map.pop(creator, None)
+
+        power_levels_content = {**power_levels_content, "users": users_map}
+        return power_levels_content
 
     def _generate_room_id(self) -> str:
         """Generates a random room ID.
@@ -1916,10 +1950,10 @@ class RoomContextHandler:
         # The user is peeking if they aren't in the room already
         is_peeking = not is_user_in_room
 
-        async def filter_evts(events: list[EventBase]) -> list[EventBase]:
+        async def filter_evts(events: list[EventBase]) -> list[FilteredEvent]:
             if use_admin_priviledge:
-                return events
-            return await filter_events_for_client(
+                return [FilteredEvent.admin_override(e) for e in events]
+            return await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user.to_string(),
                 events,
@@ -1946,31 +1980,33 @@ class RoomContextHandler:
             events_before = await event_filter.filter(events_before)
             events_after = await event_filter.filter(events_after)
 
-        events_before = await filter_evts(events_before)
-        events_after = await filter_evts(events_after)
+        filtered_events_before = await filter_evts(events_before)
+        filtered_events_after = await filter_evts(events_after)
         # filter_evts can return a pruned event in case the user is allowed to see that
         # there's something there but not see the content, so use the event that's in
         # `filtered` rather than the event we retrieved from the datastore.
-        event = filtered[0]
+        filtered_event = filtered[0]
 
         # Fetch the aggregations.
         aggregations = await self._relations_handler.get_bundled_aggregations(
-            itertools.chain(events_before, (event,), events_after),
+            itertools.chain(
+                filtered_events_before, (filtered_event,), filtered_events_after
+            ),
             user.to_string(),
         )
 
-        if events_after:
-            last_event_id = events_after[-1].event_id
+        if filtered_events_after:
+            last_event_id = filtered_events_after[-1].event.event_id
         else:
             last_event_id = event_id
 
         if event_filter and event_filter.lazy_load_members:
             state_filter = StateFilter.from_lazy_load_member_list(
-                ev.sender
+                ev.event.sender
                 for ev in itertools.chain(
-                    events_before,
-                    (event,),
-                    events_after,
+                    filtered_events_before,
+                    (filtered_event,),
+                    filtered_events_after,
                 )
             )
         else:
@@ -1993,9 +2029,9 @@ class RoomContextHandler:
         token = StreamToken.START
 
         return EventContext(
-            events_before=events_before,
-            event=event,
-            events_after=events_after,
+            events_before=filtered_events_before,
+            event=filtered_event,
+            events_after=filtered_events_after,
             state=state_events,
             aggregations=aggregations,
             start=await token.copy_and_replace(

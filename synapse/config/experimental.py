@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -366,7 +367,11 @@ class MSC3866Config:
 
 
 class ExperimentalConfig(Config):
-    """Config section for enabling experimental features"""
+    """Config section for enabling experimental features
+
+    All new experimental features should have a tracking issue with the
+    `T-ExperimentalFeatures` label, kept open as long as the experimental
+    feature is present in Synapse."""
 
     section = "experimental"
 
@@ -378,32 +383,8 @@ class ExperimentalConfig(Config):
         # MSC3026 (busy presence state)
         self.msc3026_enabled: bool = experimental.get("msc3026_enabled", False)
 
-        # MSC2697 (device dehydration)
-        # Enabled by default since this option was added after adding the feature.
-        # It is not recommended that both MSC2697 and MSC3814 both be enabled at
-        # once.
-        self.msc2697_enabled: bool = experimental.get("msc2697_enabled", True)
-
         # MSC3814 (dehydrated devices with SSSS)
-        # This is an alternative method to achieve the same goals as MSC2697.
-        # It is not recommended that both MSC2697 and MSC3814 both be enabled at
-        # once.
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
-
-        if self.msc2697_enabled and self.msc3814_enabled:
-            raise ConfigError(
-                "MSC2697 and MSC3814 should not both be enabled.",
-                (
-                    "experimental_features",
-                    "msc3814_enabled",
-                ),
-            )
-
-        # MSC3244 (room version capabilities)
-        self.msc3244_enabled: bool = experimental.get("msc3244_enabled", True)
-
-        # MSC3266 (room summary api)
-        self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
 
         # MSC2409 (this setting only relates to optionally sending to-device messages).
         # Presence, typing and read receipt EDUs are already sent to application services that
@@ -438,9 +419,6 @@ class ExperimentalConfig(Config):
         # previously calculated push actions.
         self.msc2654_enabled: bool = experimental.get("msc2654_enabled", False)
 
-        # MSC2666: Query mutual rooms between two users.
-        self.msc2666_enabled: bool = experimental.get("msc2666_enabled", False)
-
         # MSC2815 (allow room moderators to view redacted event content)
         self.msc2815_enabled: bool = experimental.get("msc2815_enabled", False)
 
@@ -460,9 +438,6 @@ class ExperimentalConfig(Config):
 
         # MSC3848: Introduce errcodes for specific event sending failures
         self.msc3848_enabled: bool = experimental.get("msc3848_enabled", False)
-
-        # MSC3852: Expose last seen user agent field on /_matrix/client/v3/devices.
-        self.msc3852_enabled: bool = experimental.get("msc3852_enabled", False)
 
         # MSC3866: M_USER_AWAITING_APPROVAL error code
         raw_msc3866_config = experimental.get("msc3866", {})
@@ -499,8 +474,13 @@ class ExperimentalConfig(Config):
         self.msc1767_enabled: bool = experimental.get("msc1767_enabled", False)
         if self.msc1767_enabled:
             # Enable room version (and thus applicable push rules from MSC3931/3932)
-            version_id = RoomVersions.MSC1767v10.identifier
-            KNOWN_ROOM_VERSIONS[version_id] = RoomVersions.MSC1767v10
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
+
+        # MSC4242: State DAGs
+        self.msc4242_enabled: bool = experimental.get("msc4242_enabled", False)
+        if self.msc4242_enabled:
+            # Enable the room version
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC4242v12)
 
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
@@ -526,12 +506,17 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
-        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version:
+        # See: https://github.com/element-hq/synapse/issues/19434
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 
         self.msc4108_delegation_endpoint: str | None = experimental.get(
             "msc4108_delegation_endpoint", None
         )
+
+        # MSC4370: Get extremities federation endpoint
+        # See https://github.com/element-hq/synapse/issues/19524
+        self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
         auth_delegated = self.msc3861.enabled or (
             config.get("matrix_authentication_service") or {}
@@ -549,6 +534,26 @@ class ExperimentalConfig(Config):
             raise ConfigError(
                 "You cannot have MSC4108 both enabled and delegated at the same time",
                 ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        # MSC4388: Secure out-of-band channel for sign in with QR:
+        # See: https://github.com/element-hq/synapse/issues/19433
+        msc4388_mode = experimental.get("msc4388_mode", "off")
+
+        if msc4388_mode not in ["off", "open", "authenticated"]:
+            raise ConfigError(
+                "msc4388_mode must be one of 'off', 'open' or 'authenticated'",
+                ("experimental", "msc4388_mode"),
+            )
+        self.msc4388_enabled: bool = msc4388_mode != "off"
+        self.msc4388_requires_authentication: bool = msc4388_mode == "authenticated"
+
+        if self.msc4388_enabled and not (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False):
+            raise ConfigError(
+                "MSC4388 requires matrix_authentication_service to be enabled",
+                ("experimental", "msc4388_enabled"),
             )
 
         # MSC4133: Custom profile fields
@@ -597,8 +602,18 @@ class ExperimentalConfig(Config):
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
 
-        # MSC4380: Invite blocking
-        self.msc4380_enabled: bool = experimental.get("msc4380_enabled", False)
+        # MSC4354: Sticky Events
+        # Tracked in: https://github.com/element-hq/synapse/issues/19409
+        # Note that sticky events persisted before this feature is enabled will not be
+        # considered sticky by the local homeserver.
+        self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
 
-        # MSC4335: M_USER_LIMIT_EXCEEDED error
-        self.msc4335_enabled: bool = experimental.get("msc4335_enabled", False)
+        # MSC4450: Identity Provider selection for User-Interactive Authentication
+        # with Legacy Single Sign-On (`m.login.sso`)
+        # Tracked in: https://github.com/element-hq/synapse/issues/19691
+        # Note that this is only applicable to legacy auth, not MAS integration (OAuth 2.0).
+        self.msc4450_enabled: bool = experimental.get("msc4450_enabled", False)
+
+        # MSC4455: Preview URL capability
+        # Tracked in: https://github.com/element-hq/synapse/issues/19719
+        self.msc4452_enabled: bool = experimental.get("msc4452_enabled", False)

@@ -1,0 +1,1 @@
+Improve Synapse logging around when someone encounters `We can't get valid state history.` so you can correlate everything by `event_id`.

@@ -1,1 +1,0 @@
-Use `uv` to test olddeps to ensure all transitive dependencies use minimum versions.

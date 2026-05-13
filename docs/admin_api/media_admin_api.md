@@ -73,33 +73,6 @@ Response:
 }
 ```
 
-## Listing all quarantined media
-
-This API returns a list of all quarantined media on the server. It is paginated, and can be scoped to either local or
-remote media. Note that the pagination values are also scoped to the request parameters - changing them but keeping the
-same pagination values will result in unexpected results.
-
-Request:
-```http
-GET /_synapse/admin/v1/media/quarantined?from=0&limit=100&kind=local
-```
-
-`from` and `limit` are optional parameters, and default to `0` and `100` respectively. They are the row index and number
-of rows to return - they are not timestamps.
-
-`kind` *MUST* either be `local` or `remote`.
-
-The API returns a JSON body containing MXC URIs for the quarantined media, like the following:
-
-```json
-{
-  "media": [
-    "mxc://localhost/xwvutsrqponmlkjihgfedcba",
-    "mxc://localhost/abcdefghijklmnopqrstuvwx"
-  ]
-}
-```
-
 # Quarantine media
 
 Quarantining media means that it is marked as inaccessible by users. It applies
@@ -272,6 +245,42 @@ Response:
 
 ```json
 {}
+```
+
+## Listing quarantined media changes
+
+When media is quarantined or unquarantined, a change record is created in the 
+database. This API returns those change records in the order they were created.
+
+**Note**: This API should be considered *best-effort* and expected to have missing or
+duplicate records. Currently, this only captures any media explicitly (un)quarantined by
+the media quarantine admin API, and the other cases are tracked by
+https://github.com/element-hq/synapse/issues/19672. Historical media uploaded before
+Synapse 1.152.0 is backfilled in a background update on a best-effort basis.
+
+Each page has a maximum of 100 records. The first page has the oldest records, 
+paginating forwards with each `next_batch` value.
+
+Request:
+
+```
+GET /_synapse/admin/v1/media/quarantine_changes?from=2
+```
+
+Where `from` is the `next_batch` value from a previous request. It is optional
+and defaults to the first page (the value `0`).
+
+Response:
+
+```json
+{
+  "next_batch": 4,
+  "changes": [
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": true },
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": false },
+    { "origin": "another.example.org", "media_id": "abcdefg12345...", "quarantined": true }
+  ]
+}
 ```
 
 # Delete local media

@@ -20,7 +20,9 @@
 #
 
 from typing import Callable
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
+
+import attr
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred
@@ -140,6 +142,14 @@ class ExecuteScriptTestCase(unittest.HomeserverTestCase):
         )
 
 
+@attr.s(slots=True, auto_attribs=True)
+class TransactionMocks:
+    after_callback: Mock
+    exception_callback: Mock
+    commit: Mock
+    rollback: Mock
+
+
 class CallbacksTestCase(unittest.HomeserverTestCase):
     """Tests for transaction callbacks."""
 
@@ -149,7 +159,7 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
 
     def _run_interaction(
         self, func: Callable[[LoggingTransaction], object]
-    ) -> tuple[Mock, Mock]:
+    ) -> TransactionMocks:
         """Run the given function in a database transaction, with callbacks registered.
 
         Args:
@@ -163,45 +173,97 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         after_callback = Mock()
         exception_callback = Mock()
 
+        # Track commit/rollback calls on the LoggingDatabaseConnection used
+        # for the transaction so tests can assert whether attempts committed
+        # or rolled back.
+        commit_mock = Mock()
+        rollback_mock = Mock()
+
         def _test_txn(txn: LoggingTransaction) -> None:
             txn.call_after(after_callback, 123, 456, extra=789)
             txn.call_on_exception(exception_callback, 987, 654, extra=321)
             func(txn)
 
+        # Wrap the real commit/rollback so we record calls but still perform
+        # the original behaviour.
+        orig_commit = LoggingDatabaseConnection.commit
+        orig_rollback = LoggingDatabaseConnection.rollback
+
+        # type-ignore becauase we're just transparently passing through args/kwargs and
+        # returning whatever result that the original function does
+        def _commit(self, *a, **kw):  # type: ignore[no-untyped-def]
+            commit_mock()
+            return orig_commit(self, *a, **kw)
+
+        # type-ignore becauase we're just transparently passing through args/kwargs and
+        # returning whatever result that the original function does
+        def _rollback(self, *a, **kw):  # type: ignore[no-untyped-def]
+            rollback_mock()
+            return orig_rollback(self, *a, **kw)
+
         try:
-            self.get_success_or_raise(
-                self.db_pool.runInteraction("test_transaction", _test_txn)
-            )
+            with (
+                patch.object(LoggingDatabaseConnection, "commit", _commit),
+                patch.object(LoggingDatabaseConnection, "rollback", _rollback),
+            ):
+                self.get_success_or_raise(
+                    self.db_pool.runInteraction("test_transaction", _test_txn)
+                )
         except Exception:
             pass
 
-        return after_callback, exception_callback
+        # FIXME: Sanity check that every transaction is either committed or rolled back,
+        # see https://github.com/element-hq/synapse/issues/19202
+        # transaction_count = after_callback.call_count + exception_callback.call_count
+        # self.assertEqual(
+        #     transaction_count,
+        #     commit_mock.call_count + rollback_mock.call_count,
+        #     "We expect every transaction attempt to either commit or rollback. "
+        #     f"Saw {transaction_count} transactions, but only {commit_mock.call_count} commits and {rollback_mock.call_count} rollbacks",
+        # )
+
+        return TransactionMocks(
+            after_callback=after_callback,
+            exception_callback=exception_callback,
+            commit=commit_mock,
+            rollback=rollback_mock,
+        )
 
     def test_after_callback(self) -> None:
         """Test that the after callback is called when a transaction succeeds."""
-        after_callback, exception_callback = self._run_interaction(lambda txn: None)
+        txn_mocks = self._run_interaction(lambda txn: None)
 
-        after_callback.assert_called_once_with(123, 456, extra=789)
-        exception_callback.assert_not_called()
+        txn_mocks.after_callback.assert_called_once_with(123, 456, extra=789)
+        txn_mocks.exception_callback.assert_not_called()
+
+        # Should have commited right away
+        self.assertEqual(txn_mocks.commit.call_count, 1)
+        # (nothing was rolled back)
+        self.assertEqual(txn_mocks.rollback.call_count, 0)
 
     def test_exception_callback(self) -> None:
         """Test that the exception callback is called when a transaction fails."""
         _test_txn = Mock(side_effect=ZeroDivisionError)
-        after_callback, exception_callback = self._run_interaction(_test_txn)
+        txn_mocks = self._run_interaction(_test_txn)
 
-        after_callback.assert_not_called()
-        exception_callback.assert_called_once_with(987, 654, extra=321)
+        txn_mocks.after_callback.assert_not_called()
+        txn_mocks.exception_callback.assert_called_once_with(987, 654, extra=321)
+
+        # Nothing should have committed.
+        self.assertEqual(txn_mocks.commit.call_count, 0)
+        # FIXME: Every transaction should have been rolled back, see
+        # https://github.com/element-hq/synapse/issues/19202
+        # self.assertEqual(txn_mocks.rollback.call_count, 1)
 
     def test_failed_retry(self) -> None:
         """Test that the exception callback is called for every failed attempt."""
         # Always raise an `OperationalError`.
         _test_txn = Mock(side_effect=self.db_pool.engine.module.OperationalError)
-        after_callback, exception_callback = self._run_interaction(_test_txn)
+        txn_mocks = self._run_interaction(_test_txn)
 
-        after_callback.assert_not_called()
-        exception_callback.assert_has_calls(
+        txn_mocks.after_callback.assert_not_called()
+        txn_mocks.exception_callback.assert_has_calls(
             [
-                call(987, 654, extra=321),
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
@@ -209,7 +271,13 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
                 call(987, 654, extra=321),
             ]
         )
-        self.assertEqual(exception_callback.call_count, 6)  # no additional calls
+        # no additional calls
+        self.assertEqual(txn_mocks.exception_callback.call_count, 5)
+
+        # Nothing should have committed.
+        self.assertEqual(txn_mocks.commit.call_count, 0)
+        # Every transaction should have been rolled back.
+        self.assertEqual(txn_mocks.rollback.call_count, 5)
 
     def test_successful_retry(self) -> None:
         """Test callbacks for a failed transaction followed by a successful attempt."""
@@ -217,19 +285,25 @@ class CallbacksTestCase(unittest.HomeserverTestCase):
         _test_txn = Mock(
             side_effect=[self.db_pool.engine.module.OperationalError, None]
         )
-        after_callback, exception_callback = self._run_interaction(_test_txn)
+        txn_mocks = self._run_interaction(_test_txn)
 
         # Calling both `after_callback`s when the first attempt failed is rather
         # surprising (https://github.com/matrix-org/synapse/issues/12184).
         # Let's document the behaviour in a test.
-        after_callback.assert_has_calls(
+        txn_mocks.after_callback.assert_has_calls(
             [
                 call(123, 456, extra=789),
                 call(123, 456, extra=789),
             ]
         )
-        self.assertEqual(after_callback.call_count, 2)  # no additional calls
-        exception_callback.assert_not_called()
+        # no additional calls
+        self.assertEqual(txn_mocks.after_callback.call_count, 2)
+        txn_mocks.exception_callback.assert_not_called()
+
+        # The last attempt should have committed.
+        self.assertEqual(txn_mocks.commit.call_count, 1)
+        # The first attempt should have been rolled back.
+        self.assertEqual(txn_mocks.rollback.call_count, 1)
 
 
 class CancellationTestCase(unittest.HomeserverTestCase):
@@ -282,7 +356,6 @@ class CancellationTestCase(unittest.HomeserverTestCase):
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
                 call(987, 654, extra=321),
-                call(987, 654, extra=321),
             ]
         )
-        self.assertEqual(exception_callback.call_count, 6)  # no additional calls
+        self.assertEqual(exception_callback.call_count, 5)  # no additional calls
