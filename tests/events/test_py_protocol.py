@@ -18,7 +18,6 @@ from unittest.mock import Mock
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.py_protocol import (
-    EventProtocol,
     MSC4242Event,
     all_supports_msc4242_state_dag,
     supports_msc4242_state_dag,
@@ -48,9 +47,6 @@ class TestMetaClass(TestCase):
         """
         # EventBase should work as normal
         self.assertFalse(isinstance(object(), EventBase))
-
-        with self.assertRaises(NotImplementedError):
-            isinstance(object(), EventProtocol)
 
         with self.assertRaises(NotImplementedError):
             isinstance(object(), MSC4242Event)
