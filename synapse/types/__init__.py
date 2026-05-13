@@ -134,6 +134,20 @@ class AbsentType(Enum):
     def __get_pydantic_core_schema__(
         cls, source_type: object, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
+        """
+        This function is checked for and used by Pydantic when
+        attempting to deserialise/validate a field of this type.
+
+        As the `Absent` type has no valid value when deserialising
+        from JSON (as that's the point; `Absent` is a marker representing
+        a lack of any JSON value), we always reject any value.
+        Instead of deserialising from this type, we rely on the struct class
+        we are in having field defaults that provide an `Absent`, which does not
+        go through the JSON validation.
+
+        When validating Python, we accept the absent marker itself.
+        """
+
         def _reject_from_json(v: object) -> "AbsentType":
             """
             Reject the JSON value, no matter what it is, since absent values
