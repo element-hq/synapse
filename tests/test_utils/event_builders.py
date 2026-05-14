@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from typing_extensions import NotRequired, Unpack
 
