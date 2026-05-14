@@ -12,7 +12,9 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from typing import Any
+from typing import Any, TypedDict
+
+from typing_extensions import NotRequired, Unpack
 
 from synapse.api.room_versions import (
     RoomVersion,
@@ -59,7 +61,7 @@ def make_test_event(
     room_version: RoomVersion = RoomVersions.V1,
     internal_metadata_dict: JsonDict | None = None,
     rejected_reason: str | None = None,
-    **fields: Any,
+    **fields: Unpack["_EventFields"],
 ) -> EventBase:
     """Build an `EventBase` with defaults for the strict-required fields.
 
@@ -97,3 +99,18 @@ def make_test_pdu_event(
     """
     pdu = {**default_event_fields(room_version), **pdu}
     return event_from_pdu_json(pdu, room_version, received_time=received_time)
+
+
+class _EventFields(TypedDict):
+    """Type for `kwargs` in `make_test_event`."""
+
+    event_id: NotRequired[str]
+    type: NotRequired[str]
+    sender: NotRequired[str]
+    content: NotRequired[JsonDict]
+    depth: NotRequired[int]
+    origin_server_ts: NotRequired[int]
+    hashes: NotRequired[dict]
+    auth_events: NotRequired[list]
+    prev_events: NotRequired[list]
+    room_id: NotRequired[str]
