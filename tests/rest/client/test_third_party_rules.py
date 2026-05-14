@@ -532,7 +532,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
                     "origin_server_ts": self.clock.time_msec(),
                     "prev_events": [],
                     "auth_events": [],
-                    "hashes": {"sha256": ""},
+                    "hashes": {},
                     "signatures": {},
                     "unsigned": {},
                 }

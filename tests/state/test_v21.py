@@ -495,7 +495,7 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
             "prev_events": prev_events,
             "auth_events": auth_events,
             "origin_server_ts": monotonic_timestamp(),
-            "hashes": {"sha256": ""},
+            "hashes": {},
         }
         if event_type != EventTypes.Create:
             if room_id is None:

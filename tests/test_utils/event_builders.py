@@ -32,7 +32,7 @@ def default_event_fields(room_version: RoomVersion) -> JsonDict:
         "content": {},
         "depth": 1,
         "origin_server_ts": 1,
-        "hashes": {"sha256": ""},
+        "hashes": {},
         "prev_events": [],
         "room_id": "!test:test",
     }
