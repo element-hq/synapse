@@ -39,7 +39,6 @@ class FederationBaseTestCase(unittest.HomeserverTestCase):
             "auth_events": [],
             "prev_events": [],
             "depth": 1,
-            "hashes": {"sha256": ""},
             "signatures": {},
             "unsigned": {"age_ts": 1000000},
         }
