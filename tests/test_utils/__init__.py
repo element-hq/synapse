@@ -24,7 +24,6 @@ Utilities for running the unit tests
 """
 
 import base64
-import json
 import sys
 import warnings
 from binascii import unhexlify
@@ -41,6 +40,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import IResponse
 
 from synapse.types import JsonSerializable
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from sys import UnraisableHookArgs
@@ -127,7 +127,7 @@ class FakeResponse:  # type: ignore[misc]
     @classmethod
     def json(cls, *, code: int = 200, payload: JsonSerializable) -> "FakeResponse":
         headers = Headers({"Content-Type": ["application/json"]})
-        body = json.dumps(payload).encode("utf-8")
+        body = json_encoder.encode(payload).encode("utf-8")
         return cls(code=code, body=body, headers=headers)
 
 

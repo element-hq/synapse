@@ -60,10 +60,10 @@ virtualenv, these can be installed with:
 pip install "matrix-synapse[redis]"
 ```
 
-Note that these dependencies are included when synapse is installed with `pip
-install matrix-synapse[all]`. They are also included in the debian packages from
-`packages.matrix.org` and in the docker images at
-https://hub.docker.com/r/ectorim/synapse/.
+Note that these dependencies are included when Synapse is installed with `pip install
+matrix-synapse[all]`. They are also included in the [Debian
+packages](setup/installation.md#debianubuntu) and in the [Docker
+images](setup/installation.md#docker-images-and-ansible-playbooks).
 
 To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
@@ -575,6 +575,14 @@ configured as stream writer for the `device_lists` stream:
     ^/_matrix/client/(r0|v3|unstable)/keys/upload
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
+
+##### The `quarantined_media_changes` stream
+
+The `quarantined_media_changes` stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the `quarantined_media_changes` stream:
+
+    ^/_synapse/admin/v1/quarantine_media/.*$
 
 #### Restrict outbound federation traffic to a specific set of workers
 

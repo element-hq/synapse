@@ -265,7 +265,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.message")
         self.assertEqual(event.room_id, room_id)
         self.assertFalse(hasattr(event, "state_key"))
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         expected_requester = create_requester(
             user_id, authenticated_entity=self.hs.hostname
@@ -301,7 +301,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.power_levels")
         self.assertEqual(event.room_id, room_id)
         self.assertEqual(event.state_key, "")
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         # Check that the event was sent
         self.event_creation_handler.create_and_send_nonmember_event.assert_called_with(
@@ -827,6 +827,24 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
 
         # Ensure the pushers were deleted after the callback.
         self.assertEqual(len(self.hs.get_pusherpool().pushers[user_id].values()), 0)
+
+    def test_event_deprecated_methods(self) -> None:
+        """Test that deprecated methods on events are still functional."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        room_id = self.helper.create_room_as(tok=tok)
+
+        state = self.get_success(
+            self.hs.get_storage_controllers().state.get_current_state(room_id)
+        )
+        create_event = state[(EventTypes.Create, "")]
+
+        # `.user_id` is a deprecated alias for `.sender`.
+        self.assertEqual(create_event.user_id, user_id)
+
+        # The event supports looking up keys via `__getitem__` although deprecated
+        self.assertEqual(create_event["room_id"], room_id)
 
 
 class ModuleApiWorkerTestCase(BaseModuleApiTestCase, BaseMultiWorkerStreamTestCase):

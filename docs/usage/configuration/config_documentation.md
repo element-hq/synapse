@@ -194,7 +194,11 @@ user_agent_suffix: ' (I''m a teapot; Linux x86_64)'
 ---
 ### `use_frozen_dicts`
 
-*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive. Defaults to `false`.
+*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.
+
+> ⚠️ **Warning** – This option is known to introduce a new class of [comparison bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.
+
+Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -652,6 +656,8 @@ This setting has the following sub-options:
 * `enabled` (boolean): Whether or not to enable the MAS integration. If this is set to `false`, Synapse will use its legacy internal authentication API. Defaults to `false`.
 
 * `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
+
+* `force_http2` (boolean): Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not. Defaults to `false`.
 
 * `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
 
@@ -4484,7 +4490,7 @@ stream_writers:
 ---
 ### `outbound_federation_restricted_to`
 
-*(array)* When using workers, you can restrict outbound federation traffic to only go through a specific subset of workers. Any worker specified here must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
+*(array)* You can restrict outbound federation traffic to only go through a specific subset of workers including the [Secure Border Gateway (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker specified here (including the SBG) must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
 
 Also see the [worker documentation](../../workers.md#restrict-outbound-federation-traffic-to-a-specific-set-of-workers) for more info.
 

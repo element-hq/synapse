@@ -347,6 +347,7 @@ class DelayedEventsHandler:
                     action=membership,
                     content=event.content,
                     origin_server_ts=event.origin_server_ts,
+                    delay_id=event.delay_id,
                 )
             else:
                 event_dict: JsonDict = {
@@ -372,6 +373,7 @@ class DelayedEventsHandler:
                     requester,
                     event_dict,
                     txn_id=txn_id,
+                    delay_id=event.delay_id,
                 )
                 event_id = sent_event.event_id
         except ShadowBanError:

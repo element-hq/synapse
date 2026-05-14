@@ -36,9 +36,11 @@ from synapse.api.constants import (
 from synapse.api.errors import (
     AuthError,
     Codes,
+    NotFoundError,
     PartialStateConflictError,
     ShadowBanError,
     SynapseError,
+    UnsupportedRoomVersionError,
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.event_auth import get_named_level, get_power_level_event
@@ -408,6 +410,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         require_consent: bool = True,
         outlier: bool = False,
         origin_server_ts: int | None = None,
+        prev_state_events: list[str] | None = None,
+        delay_id: str | None = None,
     ) -> tuple[str, int]:
         """
         Internal membership update function to get an existing event or create
@@ -440,6 +444,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 opposed to being inline with the current DAG.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
             Tuple of event ID and stream ordering position
@@ -492,6 +497,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     depth=depth,
                     require_consent=require_consent,
                     outlier=outlier,
+                    prev_state_events=prev_state_events,
+                    delay_id=delay_id,
                 )
                 context = await unpersisted_context.persist(event)
                 prev_state_ids = await context.get_prev_state_ids(
@@ -587,6 +594,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: list[str] | None = None,
         depth: int | None = None,
         origin_server_ts: int | None = None,
+        prev_state_events: list[str] | None = None,
+        delay_id: str | None = None,
     ) -> tuple[str, int]:
         """Update a user's membership in a room.
 
@@ -617,6 +626,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -679,6 +689,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             state_event_ids=state_event_ids,
                             depth=depth,
                             origin_server_ts=origin_server_ts,
+                            prev_state_events=prev_state_events,
+                            delay_id=delay_id,
                         )
 
         return result
@@ -701,6 +713,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: list[str] | None = None,
         depth: int | None = None,
         origin_server_ts: int | None = None,
+        prev_state_events: list[str] | None = None,
+        delay_id: str | None = None,
     ) -> tuple[str, int]:
         """Helper for update_membership.
 
@@ -733,6 +747,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 based on the prev_events.
             origin_server_ts: The origin_server_ts to use if a new event is created. Uses
                 the current timestamp if set to None.
+            delay_id: The delay ID of this event, if it was a delayed event.
 
         Returns:
             A tuple of the new event ID and stream ID.
@@ -943,9 +958,21 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 require_consent=require_consent,
                 outlier=outlier,
                 origin_server_ts=origin_server_ts,
+                prev_state_events=prev_state_events,
+                delay_id=delay_id,
             )
 
-        latest_event_ids = await self.store.get_prev_events_for_room(room_id)
+        is_state_dags = False
+        try:
+            room_version = await self.store.get_room_version(room_id)
+            is_state_dags = room_version.msc4242_state_dags
+        except (NotFoundError, UnsupportedRoomVersionError):
+            pass
+
+        if is_state_dags:
+            latest_event_ids = list(await self.store.get_state_dag_extremities(room_id))
+        else:
+            latest_event_ids = await self.store.get_prev_events_for_room(room_id)
 
         is_partial_state_room = await self.store.is_partial_state_room(room_id)
         partial_state_before_join = await self.state_handler.compute_state_after_events(
@@ -1156,6 +1183,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     # see: https://github.com/matrix-org/synapse/issues/7139
                     if len(latest_event_ids) == 0:
                         latest_event_ids = [invite.event_id]
+                        if invite.room_version.msc4242_state_dags:
+                            prev_state_events = [invite.event_id]
 
                 # or perhaps this is a remote room that a local user has knocked on
                 elif current_membership_type == Membership.KNOCK:
@@ -1201,6 +1230,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             require_consent=require_consent,
             outlier=outlier,
             origin_server_ts=origin_server_ts,
+            prev_state_events=prev_state_events,
+            delay_id=delay_id,
         )
 
     async def check_for_any_membership_in_room(
@@ -2098,10 +2129,21 @@ class RoomMemberMasterHandler(RoomMemberHandler):
         #
         # the prev_events consist solely of the previous membership event.
         prev_event_ids = [previous_membership_event.event_id]
-        auth_event_ids = (
-            list(previous_membership_event.auth_event_ids()) + prev_event_ids
-        )
+        auth_event_ids = None
+        # Authorise the leave by referencing the previous membership
+        prev_state_event_ids = None
+        if previous_membership_event.room_version.msc4242_state_dags:
+            prev_state_event_ids = [
+                previous_membership_event.event_id,
+            ]
+        else:
+            auth_event_ids = (
+                list(previous_membership_event.auth_event_ids()) + prev_event_ids
+            )
 
+        # State DAG rooms should not have auth events specified
+        # Normal rooms should not have prev state event IDs specified
+        assert not (prev_state_event_ids is not None and auth_event_ids is not None)
         # Try several times, it could fail with PartialStateConflictError
         # in handle_new_client_event, cf comment in except block.
         max_retries = 5
@@ -2117,6 +2159,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
                     prev_event_ids=prev_event_ids,
                     auth_event_ids=auth_event_ids,
                     outlier=True,
+                    prev_state_events=prev_state_event_ids,
                 )
                 context = await unpersisted_context.persist(event)
                 event.internal_metadata.out_of_band_membership = True

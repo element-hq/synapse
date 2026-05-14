@@ -13,9 +13,7 @@
 import logging
 import random
 from dataclasses import dataclass
-from typing import (
-    TYPE_CHECKING,
-)
+from typing import TYPE_CHECKING, Collection, cast
 
 from twisted.internet.defer import Deferred
 
@@ -25,6 +23,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
@@ -138,6 +137,98 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     def get_sticky_events_stream_id_generator(self) -> MultiWriterIdGenerator:
         return self._sticky_events_id_gen
 
+    async def get_sticky_events_in_rooms(
+        self,
+        room_ids: Collection[str],
+        *,
+        from_id: int,
+        to_id: int,
+        now: int,
+        limit: int | None,
+    ) -> tuple[int, dict[str, list[str]]]:
+        """
+        Fetch all the sticky events' IDs in the given rooms, with sticky stream IDs satisfying
+        from_id < sticky stream ID <= to_id.
+
+        The events are returned ordered by the sticky events stream.
+
+        Args:
+            room_ids: The room IDs to return sticky events in.
+            from_id: The sticky stream ID that sticky events should be returned from (exclusive).
+            to_id: The sticky stream ID that sticky events should end at (inclusive).
+            now: The current time in unix millis, used for skipping expired events.
+            limit: Max sticky events to return, or None to apply no limit.
+        Returns:
+            to_id, dict[room_id, list[event_ids]]
+        """
+        sticky_events_rows = await self.db_pool.runInteraction(
+            "get_sticky_events_in_rooms",
+            self._get_sticky_events_in_rooms_txn,
+            room_ids,
+            from_id=from_id,
+            to_id=to_id,
+            now=now,
+            limit=limit,
+        )
+
+        if not sticky_events_rows:
+            return to_id, {}
+
+        # Get stream_id of the last row, which is the highest
+        new_to_id, _, _ = sticky_events_rows[-1]
+
+        # room ID -> event IDs
+        room_id_to_event_ids: dict[str, list[str]] = {}
+        for _, room_id, event_id in sticky_events_rows:
+            events = room_id_to_event_ids.setdefault(room_id, [])
+            events.append(event_id)
+
+        return (new_to_id, room_id_to_event_ids)
+
+    def _get_sticky_events_in_rooms_txn(
+        self,
+        txn: LoggingTransaction,
+        room_ids: Collection[str],
+        *,
+        from_id: int,
+        to_id: int,
+        now: int,
+        limit: int | None,
+    ) -> list[tuple[int, str, str]]:
+        if len(room_ids) == 0:
+            return []
+        room_id_in_list_clause, room_id_in_list_values = make_in_list_sql_clause(
+            txn.database_engine, "se.room_id", room_ids
+        )
+        limit_clause = ""
+        limit_params: tuple[int, ...] = ()
+        if limit is not None:
+            limit_clause = "LIMIT ?"
+            limit_params = (limit,)
+
+        if isinstance(self.database_engine, PostgresEngine):
+            expr_soft_failed = "COALESCE(((ej.internal_metadata::jsonb)->>'soft_failed')::boolean, FALSE)"
+        else:
+            expr_soft_failed = "COALESCE(ej.internal_metadata->>'soft_failed', FALSE)"
+
+        txn.execute(
+            f"""
+            SELECT se.stream_id, se.room_id, event_id
+            FROM sticky_events se
+            INNER JOIN event_json ej USING (event_id)
+            WHERE
+                NOT {expr_soft_failed}
+                AND ? < expires_at
+                AND ? < stream_id
+                AND stream_id <= ?
+                AND {room_id_in_list_clause}
+            ORDER BY stream_id ASC
+            {limit_clause}
+            """,
+            (now, from_id, to_id, *room_id_in_list_values, *limit_params),
+        )
+        return cast(list[tuple[int, str, str]], txn.fetchall())
+
     async def get_updated_sticky_events(
         self, *, from_id: int, to_id: int, limit: int
     ) -> list[StickyEventUpdate]:
@@ -211,9 +302,13 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         Skips inserting events:
             - if they are considered spammy by the policy server;
               (unsure if correct, track: https://github.com/matrix-org/matrix-spec-proposals/pull/4354#discussion_r2727593350)
+            - if they are considered spammy by a Synapse spam checker module;
             - if they are rejected;
             - if they are outliers (they should be reconsidered for insertion when de-outliered); or
             - if they are not sticky (e.g. if the stickiness expired).
+
+        Note: Soft-failed sticky events ARE inserted, as their soft-failed status
+            could be re-evaluated later.
 
         Skipping the insertion of these types of 'invalid' events is useful for performance reasons because
         they would fill up the table yet we wouldn't show them to clients anyway.
@@ -230,7 +325,12 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         sticky_events: list[tuple[EventBase, int]] = []
         for ev in events:
             # MSC: Note: policy servers and other similar antispam techniques still apply to these events.
-            if ev.internal_metadata.policy_server_spammy:
+            # We don't filter out soft-failed events altogether (in case they get re-evaluated later),
+            # so filter out `spam_checker_spammy` events specifically as we don't want to re-evaluate _those_ later.
+            if (
+                ev.internal_metadata.policy_server_spammy
+                or ev.internal_metadata.spam_checker_spammy
+            ):
                 continue
             # We shouldn't be passed rejected events, but if we do, we filter them out too.
             if ev.rejected_reason is not None:
@@ -241,7 +341,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             sticky_duration = ev.sticky_duration()
             if sticky_duration is None:
                 continue
-            # Calculate the end time as start_time + effecitve sticky duration
+            # Calculate the end time as start_time + effective sticky duration
             expires_at = min(ev.origin_server_ts, now_ms) + sticky_duration.as_millis()
             # Filter out already expired sticky events
             if expires_at <= now_ms:

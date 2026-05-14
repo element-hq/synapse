@@ -81,6 +81,26 @@ class VersionsRestServlet(RestServlet):
             msc3575_enabled = await self.store.is_feature_enabled(
                 user_id, ExperimentalFeature.MSC3575
             )
+        else:
+            # Allow caching of unauthenticated responses, as they only depend
+            # on server configuration which rarely changes.
+            #
+            # - `public` means it can be cached both in the browser and in caching proxies
+            # - `max-age` controls how long we cache on the browser side. 10m is sane enough
+            # - `s-maxage` controls how long we cache on the proxy side. Since caching
+            #   proxies usually have a way to purge caches, it is fine to cache there for
+            #   longer (1h), and issue cache invalidations in case we need it
+            # - `stale-while-revalidate` allows caching proxies to serve stale content while
+            #   revalidating in the background. This is useful for making this request always
+            #   'snappy' to end users whilst still keeping it fresh
+            request.setHeader(
+                b"Cache-Control",
+                b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+            )
+
+        # Tell caches to vary on the Authorization header, so that
+        # authenticated responses are not served from cache.
+        request.setHeader(b"Vary", b"Authorization")
 
         return (
             200,
@@ -124,7 +144,7 @@ class VersionsRestServlet(RestServlet):
                     # Implements additional endpoints as described in MSC2432
                     "org.matrix.msc2432": True,
                     # Implements additional endpoints as described in MSC2666
-                    "uk.half-shot.msc2666.query_mutual_rooms": self.config.experimental.msc2666_enabled,
+                    "uk.half-shot.msc2666.query_mutual_rooms.stable": True,
                     # Whether new rooms will be set to encrypted or not (based on presets).
                     "io.element.e2ee_forced.public": self.e2ee_forced_public,
                     "io.element.e2ee_forced.private": self.e2ee_forced_private,
@@ -161,7 +181,7 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4069": self.config.experimental.msc4069_profile_inhibit_propagation,
                     # Allows clients to handle push for encrypted events.
                     "org.matrix.msc4028": self.config.experimental.msc4028_push_encrypted_events,
-                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
                     "org.matrix.msc4108": (
                         self.config.experimental.msc4108_enabled
                         or (
@@ -185,7 +205,9 @@ class VersionsRestServlet(RestServlet):
                     # MSC4354: Sticky events
                     "org.matrix.msc4354": self.config.experimental.msc4354_enabled,
                     # MSC4380: Invite blocking
-                    "org.matrix.msc4380": self.config.experimental.msc4380_enabled,
+                    "org.matrix.msc4380.stable": True,
+                    # MSC4445: Sync timeline order
+                    "org.matrix.msc4445.initial_sync_timeline_topological_ordering": True,
                 },
             },
         )

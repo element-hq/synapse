@@ -501,7 +501,7 @@ class HttpPusher(Pusher):
                 "event_id": event.event_id,
                 "room_id": event.room_id,
                 "type": event.type,
-                "sender": event.user_id,
+                "sender": event.sender,
                 "prio": priority,
             }
             if not self.disable_badge_count:

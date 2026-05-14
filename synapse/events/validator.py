@@ -42,7 +42,7 @@ from synapse.events.utils import (
 )
 from synapse.http.servlet import validate_json_object
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import EventID, JsonDict, RoomID, StrCollection, UserID
+from synapse.types import EventID, JsonDict, JsonMapping, RoomID, StrCollection, UserID
 from synapse.types.rest import RequestBodyModel
 
 
@@ -63,14 +63,17 @@ class EventValidator:
         if event.format_version == EventFormatVersions.ROOM_V1_V2:
             EventID.from_string(event.event_id)
 
-        required = [
+        required = {
             "auth_events",
             "content",
             "hashes",
             "prev_events",
             "sender",
             "type",
-        ]
+        }
+        if event.room_version.msc4242_state_dags:
+            required.remove("auth_events")
+            required.add("prev_state_events")
 
         for k in required:
             if k not in event:
@@ -242,7 +245,7 @@ class EventValidator:
 
             self._ensure_state_event(event)
 
-    def _ensure_strings(self, d: JsonDict, keys: StrCollection) -> None:
+    def _ensure_strings(self, d: JsonMapping, keys: StrCollection) -> None:
         for s in keys:
             if s not in d:
                 raise SynapseError(400, "'%s' not in content" % (s,))

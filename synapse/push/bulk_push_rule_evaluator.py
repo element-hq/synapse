@@ -51,7 +51,7 @@ from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import ProfileInfo
 from synapse.synapse_rust.push import FilteredPushRules, PushRuleEvaluator
-from synapse.types import JsonValue
+from synapse.types import JsonMapping, JsonValue
 from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
@@ -231,7 +231,7 @@ class BulkPushRuleEvaluator:
         event: EventBase,
         context: EventContext,
         event_id_to_event: Mapping[str, EventBase],
-    ) -> tuple[dict, int | None]:
+    ) -> tuple[JsonMapping, int | None]:
         """
         Given an event and an event context, get the power level event relevant to the event
         and the power level of the sender of the event.
