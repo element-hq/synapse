@@ -1,0 +1,1 @@
+Fix long-standing but niche bug with sync where it could attempt to fetch data with flawed invalid future tokens.
