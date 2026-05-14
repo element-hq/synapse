@@ -211,8 +211,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {},
                 "prev_events": [],
                 "auth_events": [],
-                "depth": 3,
                 "origin_server_ts": 700,
+                "depth": 10,
             }
         )
 
