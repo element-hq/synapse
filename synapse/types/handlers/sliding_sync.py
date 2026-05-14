@@ -314,9 +314,7 @@ class SlidingSyncResult:
                 # default_otk = self.device_one_time_keys_count.get("signed_curve25519")
                 # more_than_default_otk = len(self.device_one_time_keys_count) > 1
 
-                return bool(
-                    self.device_list_updates or self.device_unused_fallback_key_types
-                )
+                return bool(self.device_list_updates)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class AccountDataExtension:
