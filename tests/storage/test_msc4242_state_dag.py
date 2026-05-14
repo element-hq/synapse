@@ -20,7 +20,6 @@ from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import (
-    FrozenEventVMSC4242,
     make_event_from_dict,
 )
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
@@ -170,8 +169,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
             },
             room_version=RoomVersions.MSC4242v12,
         )
-        assert isinstance(ev, FrozenEventVMSC4242)
-        ev._event_id = id
+        ev._event_id = id  # type: ignore[attr-defined]
         assert supports_msc4242_state_dag(ev)
         ctx = Mock()
         ctx.rejected = rejected
