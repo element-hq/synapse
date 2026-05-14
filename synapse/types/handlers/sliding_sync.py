@@ -294,6 +294,15 @@ class SlidingSyncResult:
             device_unused_fallback_key_types: Sequence[str]
 
             def __bool__(self) -> bool:
+                """
+                Returns whether this contains any notifiable data that should wake up
+                the sync stream.
+
+                Danger: should not be used to decide whether to serialise the response or not,
+                because `device_one_time_keys_count` should always be serialised,
+                but is not notifiable.
+                """
+
                 # Note that "signed_curve25519" is always returned in key count responses
                 # regardless of whether we uploaded any keys for it. This is necessary until
                 # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
@@ -301,15 +310,12 @@ class SlidingSyncResult:
                 # Also related:
                 # https://github.com/element-hq/element-android/issues/3725 and
                 # https://github.com/matrix-org/synapse/issues/10456
-                default_otk = self.device_one_time_keys_count.get("signed_curve25519")
-                more_than_default_otk = len(self.device_one_time_keys_count) > 1 or (
-                    default_otk is not None and default_otk > 0
-                )
+                #
+                # default_otk = self.device_one_time_keys_count.get("signed_curve25519")
+                # more_than_default_otk = len(self.device_one_time_keys_count) > 1
 
                 return bool(
-                    more_than_default_otk
-                    or self.device_list_updates
-                    or self.device_unused_fallback_key_types
+                    self.device_list_updates or self.device_unused_fallback_key_types
                 )
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
