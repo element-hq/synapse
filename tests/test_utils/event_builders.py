@@ -110,7 +110,7 @@ class _EventFields(TypedDict):
     content: NotRequired[JsonDict]
     depth: NotRequired[int]
     origin_server_ts: NotRequired[int]
-    hashes: NotRequired[dict]
+    hashes: NotRequired[dict[str, str]]
     auth_events: NotRequired[list[str]]
     prev_events: NotRequired[list[str]]
     prev_state_events: NotRequired[list[str]]
