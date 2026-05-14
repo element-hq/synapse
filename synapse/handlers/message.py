@@ -80,6 +80,7 @@ from synapse.types import (
     Requester,
     RoomAlias,
     StateMap,
+    StrCollection,
     StreamToken,
     UserID,
     create_requester,
@@ -590,7 +591,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """
@@ -983,7 +984,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         """
@@ -1128,7 +1129,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         room_id = event_dict["room_id"]
@@ -1254,7 +1255,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """Create a new event for a local client. If bool for_batch is true, will
         create an event using the prev_event_ids, and will create an event context for
