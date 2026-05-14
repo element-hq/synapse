@@ -20,6 +20,7 @@ from synapse.events import EventBase, FrozenEvent, make_event_from_dict
 from synapse.events.py_protocol import (
     EventProtocol,
     MSC4242Event,
+    all_supports_msc4242_state_dag,
     supports_msc4242_state_dag,
 )
 
@@ -70,7 +71,7 @@ class SupportsMSC4242StateDagTestCase(TestCase):
     def test_sequence_all_msc4242(self) -> None:
         """A sequence of MSC4242 (event, context) pairs is recognised."""
         pairs = [(_make_event(RoomVersions.MSC4242v12), Mock()) for _ in range(3)]
-        self.assertTrue(supports_msc4242_state_dag(pairs))
+        self.assertTrue(all_supports_msc4242_state_dag(pairs))
 
     def test_sequence_mixed(self) -> None:
         """A sequence containing any non-MSC4242 event is not recognised."""
@@ -78,4 +79,4 @@ class SupportsMSC4242StateDagTestCase(TestCase):
             (_make_event(RoomVersions.MSC4242v12), Mock()),
             (_make_event(RoomVersions.V11), Mock()),
         ]
-        self.assertFalse(supports_msc4242_state_dag(pairs))
+        self.assertFalse(all_supports_msc4242_state_dag(pairs))

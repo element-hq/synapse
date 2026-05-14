@@ -37,7 +37,6 @@ import abc
 from typing import (
     TYPE_CHECKING,
     Sequence,
-    overload,
 )
 
 from typing_extensions import TypeIs
@@ -73,24 +72,17 @@ class MSC4242Event(EventProtocol):
     prev_state_events: list[str]
 
 
-@overload
-def supports_msc4242_state_dag(obj: EventBase) -> TypeIs[MSC4242Event]:
+def supports_msc4242_state_dag(event: EventBase) -> TypeIs[MSC4242Event]:
     """Returns true if the given event is in a room that supports state DAGs
     (MSC4242)"""
 
+    return event.room_version.msc4242_state_dags
 
-@overload
-def supports_msc4242_state_dag(
+
+def all_supports_msc4242_state_dag(
     obj: Sequence["EventPersistencePair"],
 ) -> TypeIs[Sequence[tuple[MSC4242Event, "EventContext"]]]:
     """Returns true if the given sequence of events are all in a room that
     supports state DAGs (MSC4242)"""
-
-
-def supports_msc4242_state_dag(
-    obj: Sequence["EventPersistencePair"] | EventBase,
-) -> bool:
-    if isinstance(obj, EventBase):
-        return obj.room_version.msc4242_state_dags
 
     return all(event.room_version.msc4242_state_dags for event, _ in obj)

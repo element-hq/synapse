@@ -51,7 +51,10 @@ from synapse.events import (
     EventBase,
     event_exists_in_state_dag,
 )
-from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
+from synapse.events.py_protocol import (
+    MSC4242Event,
+    all_supports_msc4242_state_dag,
+)
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
@@ -652,7 +655,7 @@ class EventsPersistenceStorageController:
             new_state_dag_extrems = None
 
             if not backfilled:
-                if supports_msc4242_state_dag(chunk):
+                if all_supports_msc4242_state_dag(chunk):
                     with Measure(
                         self._clock,
                         name="_process_state_dag_forward_extremities_and_state_delta",
