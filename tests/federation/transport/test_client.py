@@ -36,7 +36,16 @@ class SendJoinParserTestCase(TestCase):
     def test_two_writes(self) -> None:
         """Test that the parser can sensibly deserialise an input given in two slices."""
         parser = SendJoinParser(RoomVersions.V1, True)
+        common_event_fields = {
+            "sender": "@user:example.org",
+            "depth": 1,
+            "origin_server_ts": 1,
+            "hashes": {"sha256": ""},
+            "auth_events": [],
+            "prev_events": [],
+        }
         parent_event = {
+            **common_event_fields,
             "content": {
                 "see_room_version_spec": "The event format changes depending on the room version."
             },
@@ -45,6 +54,7 @@ class SendJoinParserTestCase(TestCase):
             "type": "m.room.minimal_pdu",
         }
         state = {
+            **common_event_fields,
             "content": {
                 "see_room_version_spec": "The event format changes depending on the room version."
             },

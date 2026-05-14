@@ -73,6 +73,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {"creator": self.creator},
                 "prev_events": [],
                 "auth_events": [],
+                "depth": 1,
                 "origin_server_ts": 500,
             }
         )
@@ -85,6 +86,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {"membership": "join"},
                 "prev_events": [],
                 "auth_events": [],
+                "depth": 2,
                 "origin_server_ts": 600,
             }
         )
@@ -97,6 +99,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {},
                 "prev_events": [],
                 "auth_events": [],
+                "depth": 3,
                 "origin_server_ts": 700,
             }
         )
@@ -208,8 +211,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {},
                 "prev_events": [],
                 "auth_events": [],
+                "depth": 3,
                 "origin_server_ts": 700,
-                "depth": 10,
             }
         )
 
