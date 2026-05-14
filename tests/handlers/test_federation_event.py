@@ -120,7 +120,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -416,7 +415,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -517,7 +515,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -714,7 +711,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -887,7 +883,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [other_member_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         initial_state_map[("m.room.power_levels", "")],
                         # The event will be rejected because of the duplicated auth
                         # event.
@@ -936,7 +931,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_power_levels_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         rejected_power_levels_event.event_id,
                         initial_state_map[("m.room.member", bert_user_id)],
                         initial_state_map[("m.room.member", OTHER_USER)],
@@ -1050,7 +1044,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_kick_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         initial_state_map[("m.room.power_levels", "")],
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],
@@ -1078,7 +1071,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         missing_event.event_id,
                     ],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         new_power_levels_event.event_id,
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],
