@@ -89,7 +89,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
         "room_id": "!test:test",
         "depth": 1,
         "origin_server_ts": 1,
-        "hashes": {"sha256": ""},
+        "hashes": {},
         "auth_events": [],
         "prev_events": [],
     }
