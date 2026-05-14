@@ -105,7 +105,6 @@ class FlattenDictTestCase(unittest.TestCase):
             "type": "m.room.message",
             "depth": 1,
             "origin_server_ts": 1,
-            "hashes.sha256": "",
             "auth_events": [],
             "prev_events": [],
         }
@@ -134,7 +133,6 @@ class FlattenDictTestCase(unittest.TestCase):
             "content.org\\.matrix\\.msc1767\\.markup": [],
             "depth": 1,
             "origin_server_ts": 1,
-            "hashes.sha256": "",
             "auth_events": [],
             "prev_events": [],
         }
@@ -151,7 +149,6 @@ class FlattenDictTestCase(unittest.TestCase):
             "content.org\\.matrix\\.msc1767\\.markup": [],
             "depth": 1,
             "origin_server_ts": 1,
-            "hashes.sha256": "",
             "auth_events": [],
             "prev_events": [],
         }
