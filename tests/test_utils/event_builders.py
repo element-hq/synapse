@@ -43,6 +43,10 @@ def default_event_fields(room_version: RoomVersion) -> JsonDict:
     else:
         defaults["auth_events"] = []
 
+    if room_version == RoomVersions.V1:
+        # V1 requires an event_id field, but later versions don't.
+        defaults["event_id"] = "$test_event_id:matrix.org"
+
     return defaults
 
 

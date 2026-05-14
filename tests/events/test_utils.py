@@ -49,35 +49,6 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
-def MockEvent(**kwargs: Any) -> EventBase:
-    if "event_id" not in kwargs:
-        kwargs["event_id"] = "fake_event_id"
-    if "type" not in kwargs:
-        kwargs["type"] = "fake_type"
-    if "content" not in kwargs:
-        kwargs["content"] = {}
-
-    # Move internal metadata out so we can call make_event properly
-    internal_metadata = kwargs.get("internal_metadata")
-    if internal_metadata is not None:
-        kwargs.pop("internal_metadata")
-
-    kwargs.setdefault("event_id", "$fake_event_id")
-    kwargs.setdefault("type", "fake_type")
-    kwargs.setdefault("auth_events", [])
-    kwargs.setdefault("prev_events", [])
-    kwargs.setdefault("content", {})
-    kwargs.setdefault("hashes", {})
-    kwargs.setdefault("signatures", {})
-    kwargs.setdefault("unsigned", {})
-    kwargs.setdefault("sender", "@fake_sender:domain")
-    kwargs.setdefault("room_id", "!fake_room_id")
-    kwargs.setdefault("depth", 0)
-    kwargs.setdefault("origin_server_ts", 0)
-
-    return make_test_event(kwargs, internal_metadata_dict=internal_metadata)
-
-
 class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
     def test_update_okay(self) -> None:
         event = make_test_event({"event_id": "$1234"})
@@ -705,7 +676,8 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(sender="@alice:localhost", room_id="!foo:bar"), ["room_id"]
+                make_test_event(sender="@alice:localhost", room_id="!foo:bar"),
+                ["room_id"],
             ),
             {"room_id": "!foo:bar"},
         )
@@ -713,7 +685,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_nested_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"body": "A message"},
@@ -726,7 +698,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_dot_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"key.with.dots": {}},
@@ -739,7 +711,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_nested_dot_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={
@@ -755,7 +727,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_nops_with_unknown_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
@@ -768,7 +740,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_nops_with_non_dict_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"foo": ["I", "am", "an", "array"]},
@@ -781,7 +753,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_nops_with_array_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"foo": ["I", "am", "an", "array"]},
@@ -794,7 +766,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_all_fields_if_empty(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
@@ -808,9 +780,9 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {},
-                "sender": "@fake_sender:domain",
-                "user_id": "@fake_sender:domain",
-                "origin_server_ts": 0,
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
 
@@ -828,12 +800,12 @@ class SerializeEventTestCase(HomeserverTestCase):
         # Default behaviour should be *not* to include it
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
-                    internal_metadata={"soft_failed": True},
+                    internal_metadata_dict={"soft_failed": True},
                 ),
                 [],
             ),
@@ -843,21 +815,21 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {},
-                "sender": "@fake_sender:domain",
-                "user_id": "@fake_sender:domain",
-                "origin_server_ts": 0,
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
 
         # When asked though, we should set it
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
-                    internal_metadata={"soft_failed": True},
+                    internal_metadata_dict={"soft_failed": True},
                 ),
                 [],
                 True,
@@ -868,19 +840,19 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {"io.element.synapse.soft_failed": True},
-                "sender": "@fake_sender:domain",
-                "user_id": "@fake_sender:domain",
-                "origin_server_ts": 0,
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
-                    internal_metadata={
+                    internal_metadata_dict={
                         "soft_failed": True,
                         "policy_server_spammy": True,
                     },
@@ -897,9 +869,9 @@ class SerializeEventTestCase(HomeserverTestCase):
                     "io.element.synapse.soft_failed": True,
                     "io.element.synapse.policy_server_spammy": True,
                 },
-                "sender": "@fake_sender:domain",
-                "user_id": "@fake_sender:domain",
-                "origin_server_ts": 0,
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
 
@@ -934,7 +906,7 @@ class SerializeEventTestCase(HomeserverTestCase):
 
         redaction_id = "$redaction_event_id"
 
-        event = MockEvent(
+        event = make_test_event(
             type="foo",
             event_id="test",
             room_id="!foo:bar",
@@ -942,7 +914,7 @@ class SerializeEventTestCase(HomeserverTestCase):
         )
         event.internal_metadata.redacted_by = redaction_id
 
-        redaction_event = MockEvent(
+        redaction_event = make_test_event(
             type="m.room.redaction",
             event_id=redaction_id,
             content={"redacts": "test"},
