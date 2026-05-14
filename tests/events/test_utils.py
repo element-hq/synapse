@@ -26,7 +26,7 @@ from parameterized import parameterized
 
 from synapse.api.constants import EventContentFields
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.events.utils import (
     FilteredEvent,
     PowerLevelsContent,
@@ -42,6 +42,7 @@ from synapse.events.utils import (
 from synapse.types import JsonDict, create_requester
 from synapse.util.frozenutils import freeze
 
+from tests.test_utils.event_builders import make_test_event
 from tests.unittest import HomeserverTestCase
 
 if TYPE_CHECKING:
@@ -61,12 +62,25 @@ def MockEvent(**kwargs: Any) -> EventBase:
     if internal_metadata is not None:
         kwargs.pop("internal_metadata")
 
-    return make_event_from_dict(kwargs, internal_metadata_dict=internal_metadata)
+    kwargs.setdefault("event_id", "$fake_event_id")
+    kwargs.setdefault("type", "fake_type")
+    kwargs.setdefault("auth_events", [])
+    kwargs.setdefault("prev_events", [])
+    kwargs.setdefault("content", {})
+    kwargs.setdefault("hashes", {})
+    kwargs.setdefault("signatures", {})
+    kwargs.setdefault("unsigned", {})
+    kwargs.setdefault("sender", "@fake_sender:domain")
+    kwargs.setdefault("room_id", "!fake_room_id")
+    kwargs.setdefault("depth", 0)
+    kwargs.setdefault("origin_server_ts", 0)
+
+    return make_test_event(kwargs, internal_metadata_dict=internal_metadata)
 
 
 class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
     def test_update_okay(self) -> None:
-        event = make_event_from_dict({"event_id": "$1234"})
+        event = make_test_event({"event_id": "$1234"})
         success = maybe_upsert_event_field(
             event, event.unsigned, "replaces_state", "value"
         )
@@ -74,7 +88,7 @@ class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
         self.assertEqual(event.unsigned["replaces_state"], "value")
 
     def test_update_not_okay(self) -> None:
-        event = make_event_from_dict({"event_id": "$1234"})
+        event = make_test_event({"event_id": "$1234"})
         LARGE_STRING = "a" * 100_000
         success = maybe_upsert_event_field(
             event, event.unsigned, "replaces_state", LARGE_STRING
@@ -83,7 +97,7 @@ class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
         self.assertNotIn("replaces_state", event.unsigned)
 
     def test_update_not_okay_leaves_original_value(self) -> None:
-        event = make_event_from_dict(
+        event = make_test_event(
             {"event_id": "$1234", "unsigned": {"replaces_state": "value"}}
         )
         LARGE_STRING = "a" * 100_000
@@ -95,6 +109,20 @@ class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
 
 
 class PruneEventTestCase(stdlib_unittest.TestCase):
+    # Fields that `make_test_event` fills in by default and that `prune_event`
+    # preserves as spec-required keep fields. Pruning tests only spell out the
+    # fields they care about; these are merged into the expected dict so each
+    # test stays focused on what it is actually checking.
+    _DEFAULT_KEPT_FIELDS: JsonDict = {
+        "sender": "@test:test",
+        "room_id": "!test:test",
+        "depth": 1,
+        "origin_server_ts": 1,
+        "hashes": {"sha256": ""},
+        "auth_events": [],
+        "prev_events": [],
+    }
+
     def run_test(self, evdict: JsonDict, matchdict: JsonDict, **kwargs: Any) -> None:
         """
         Asserts that a new event constructed with `evdict` will look like
@@ -105,8 +133,9 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
              matchdict: The expected resulting dictionary.
              kwargs: Additional keyword arguments used to create the event.
         """
+        expected = {**self._DEFAULT_KEPT_FIELDS, **matchdict}
         self.assertEqual(
-            prune_event(make_event_from_dict(evdict, **kwargs)).get_dict(), matchdict
+            prune_event(make_test_event(evdict, **kwargs)).get_dict(), expected
         )
 
     def test_minimal(self) -> None:
@@ -123,9 +152,6 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
 
     def test_basic_keys(self) -> None:
         """Ensure that the keys that should be untouched are kept."""
-        # Note that some of the values below don't really make sense, but the
-        # pruning of events doesn't worry about the values of any fields (with
-        # the exception of the content field).
         self.run_test(
             {
                 "event_id": "$3:domain",
@@ -134,12 +160,12 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "sender": "@2:domain",
                 "state_key": "B",
                 "content": {"other_key": "foo"},
-                "hashes": "hashes",
+                "hashes": {"sha256": "abc"},
                 "signatures": {"domain": {"algo:1": "sigs"}},
                 "depth": 4,
-                "prev_events": "prev_events",
+                "prev_events": [],
                 "prev_state": "prev_state",
-                "auth_events": "auth_events",
+                "auth_events": [],
                 "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
@@ -152,11 +178,11 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "room_id": "!1:domain",
                 "sender": "@2:domain",
                 "state_key": "B",
-                "hashes": "hashes",
+                "hashes": {"sha256": "abc"},
                 "depth": 4,
-                "prev_events": "prev_events",
+                "prev_events": [],
                 "prev_state": "prev_state",
-                "auth_events": "auth_events",
+                "auth_events": [],
                 "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
@@ -625,7 +651,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
 
 class CloneEventTestCase(stdlib_unittest.TestCase):
     def test_unsigned_is_copied(self) -> None:
-        original = make_event_from_dict(
+        original = make_test_event(
             {
                 "type": "A",
                 "event_id": "$test:domain",
@@ -782,6 +808,9 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {},
+                "sender": "@fake_sender:domain",
+                "user_id": "@fake_sender:domain",
+                "origin_server_ts": 0,
             },
         )
 
@@ -814,6 +843,9 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {},
+                "sender": "@fake_sender:domain",
+                "user_id": "@fake_sender:domain",
+                "origin_server_ts": 0,
             },
         )
 
@@ -836,6 +868,9 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {"io.element.synapse.soft_failed": True},
+                "sender": "@fake_sender:domain",
+                "user_id": "@fake_sender:domain",
+                "origin_server_ts": 0,
             },
         )
         self.assertEqual(
@@ -862,6 +897,9 @@ class SerializeEventTestCase(HomeserverTestCase):
                     "io.element.synapse.soft_failed": True,
                     "io.element.synapse.policy_server_spammy": True,
                 },
+                "sender": "@fake_sender:domain",
+                "user_id": "@fake_sender:domain",
+                "origin_server_ts": 0,
             },
         )
 

@@ -32,7 +32,6 @@ from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
-from synapse.federation.federation_base import event_from_pdu_json
 from synapse.handlers.sync import (
     SyncConfig,
     SyncRequestKey,
@@ -54,6 +53,7 @@ from synapse.util.clock import Clock
 
 import tests.unittest
 import tests.utils
+from tests.test_utils.event_builders import make_test_pdu_event
 
 _request_key = 0
 
@@ -912,7 +912,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         prev_events = self.get_success(self.store.get_prev_events_for_room(room_id))
 
         # create a call invite event
-        call_event = event_from_pdu_json(
+        call_event = make_test_pdu_event(
             {
                 "type": EventTypes.CallInvite,
                 "content": {},
@@ -960,7 +960,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         priv_prev_events = self.get_success(
             self.store.get_prev_events_for_room(private_room_id)
         )
-        private_call_event = event_from_pdu_json(
+        private_call_event = make_test_pdu_event(
             {
                 "type": EventTypes.CallInvite,
                 "content": {},
