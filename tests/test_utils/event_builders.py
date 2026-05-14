@@ -26,6 +26,10 @@ from synapse.types import JsonDict
 def default_event_fields(room_version: RoomVersion) -> JsonDict:
     """Return default values for every field required by `room_version`."""
 
+    # We need to include entries for every required field for the room version.
+    # Note that they don't necessarily have to be valid values, just enough to
+    # allow us to construct the event class. (Ideally we'd build a fully valid
+    # event, but this is fine for now.)
     defaults: JsonDict = {
         "type": "m.test",
         "sender": "@test:test",
