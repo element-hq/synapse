@@ -2748,3 +2748,16 @@ def make_tuple_comparison_clause(keys: list[tuple[str, KV]]) -> tuple[str, list[
         "(%s) > (%s)" % (",".join(k[0] for k in keys), ",".join("?" for _ in keys)),
         [k[1] for k in keys],
     )
+
+
+def user_is_local_like_pattern(hs: HomeServer) -> str:
+    """
+    Returns a LIKE pattern that matches the User IDs of local users on this
+    homeserver.
+
+    The caller should bind this pattern to a parameter and use it in
+    a `user_id LIKE ?` clause.
+    """
+    # This is good enough as if you have silly characters in your own
+    # hostname then that's your own fault.
+    return f"@%:{hs.hostname}"
