@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-d9457005.js";
+            window.path_to_searchindex_js = "searchindex-20f754e3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -7399,7 +7399,12 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p>Defaults to <code>null</code>.</p>
 </li>
 <li>
-<p><code>update_profile_information</code> (boolean): Use this setting to keep a user’s profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to <code>false</code>.</p>
+<p><code>update_profile_information</code> (boolean): Use this setting to keep a user’s profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:</p>
+<ul>
+<li>displayname</li>
+<li>picture - only if Synapse media repository is running in the main
+process (i.e. not workerized) and media is stored locally Defaults to <code>false</code>.</li>
+</ul>
 </li>
 </ul>
 <p>Example configuration:</p>
