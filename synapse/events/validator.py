@@ -295,7 +295,7 @@ def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
         "object", lambda checker, thing: isinstance(thing, collections.abc.Mapping)
     ).redefine(
         "array",
-        lambda checker, thing: isinstance(thing, (list, tuple)),
+        lambda checker, thing: isinstance(thing, collections.abc.Sequence),
     )
 
     return jsonschema.validators.extend(validator, type_checker=type_checker)
