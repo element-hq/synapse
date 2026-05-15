@@ -50,6 +50,7 @@ from synapse.types import (
     create_requester,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 import tests.unittest
 import tests.utils
@@ -1058,13 +1059,22 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         )
 
         # This should block waiting for the presence stream to update
-        self.pump()
+        #
+        # Advance time a little bit to make the
+        # `wait_for_stream_token(...)` sleep loop iterate.
+        self.reactor.advance(Duration(seconds=2).as_secs())
+        # It should still not be done yet
         self.assertFalse(sync_d.called)
 
         # Marking the stream ID as persisted should unblock the request.
         self.get_success(ctx_mgr.__aexit__(None, None, None))
 
-        self.get_success(sync_d, by=1.0)
+        # Advance time to make another iteration of `wait_for_stream_token(...)` sleep
+        # loop so it sees that we're finally caught up now.
+        self.reactor.advance(Duration(seconds=1).as_secs())
+
+        # Done waiting
+        self.get_success(sync_d)
 
     @parameterized.expand(
         [(key,) for key in StreamKeyType.__members__.values()],

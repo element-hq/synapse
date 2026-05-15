@@ -685,6 +685,9 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
 
     def bound_stream_token(self, max_stream: int) -> "Self":
         """Bound the stream positions to a maximum value"""
+        # Shortcut if we're already under the bound
+        if self.get_max_stream_pos() <= max_stream:
+            return self
 
         min_pos = min(self.stream, max_stream)
         return type(self)(
