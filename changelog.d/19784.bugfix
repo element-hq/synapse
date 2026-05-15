@@ -1,1 +1,0 @@
-Revert 'Have [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) return a new response immediately if a room subscription has changed and produced a new response. ([\#19714](https://github.com/element-hq/synapse/issues/19714))' due to performance problems.
