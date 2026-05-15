@@ -1,1 +1,1 @@
-Replace unique `quarantined_media` waiting patterns for with standard `wait_for_stream_token(...)`.
+Replace unique `quarantined_media` waiting patterns with standard `wait_for_stream_token(...)`.
