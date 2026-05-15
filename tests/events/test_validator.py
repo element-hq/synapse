@@ -11,14 +11,13 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-import unittest as stdlib_unittest
-
-from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.validator import EventValidator
 
+from tests.unittest import HomeserverTestCase
 from tests.utils import default_config
+
 
 def make_message_event(content: dict) -> EventBase:
     return make_event_from_dict(
@@ -52,7 +51,7 @@ class EventValidatorTestCase(HomeserverTestCase):
                 "m.mentions": {"user_ids": ["@alice:example.com"]},
             }
         )
-        // Sanity check that the event is valid before freezing
+        # Sanity check that the event is valid before freezing
         EventValidator().validate_new(event, config)
         event.freeze()
         # Event should still be valid after freezing
