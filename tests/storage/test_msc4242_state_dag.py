@@ -19,15 +19,13 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import (
-    make_event_from_dict,
-)
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventContext
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
+from tests.test_utils.event_builders import make_test_event
 from tests.unittest import HomeserverTestCase, override_config
 
 
@@ -156,7 +154,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
         prev_state_events: list[str],
         rejected: bool = False,
     ) -> tuple[MSC4242Event, EventContext]:
-        ev = make_event_from_dict(
+        ev = make_test_event(
             {
                 "prev_state_events": prev_state_events,
                 "content": {
