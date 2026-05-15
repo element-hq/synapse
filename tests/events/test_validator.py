@@ -12,29 +12,10 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import make_event_from_dict
 from synapse.events.validator import EventValidator
 
 from tests.unittest import HomeserverTestCase
-from tests.utils import default_config
-
-
-def make_message_event(content: dict) -> EventBase:
-    return make_event_from_dict(
-        {
-            "room_id": "!room:test",
-            "type": "m.room.message",
-            "sender": "@alice:example.com",
-            "content": content,
-            "auth_events": [],
-            "prev_events": [],
-            "hashes": {"sha256": "aGVsbG8="},
-            "signatures": {},
-            "depth": 1,
-            "origin_server_ts": 1000,
-        },
-        room_version=RoomVersions.V9,
-    )
 
 
 class EventValidatorTestCase(HomeserverTestCase):
@@ -43,16 +24,27 @@ class EventValidatorTestCase(HomeserverTestCase):
         Test that `EventValidator.validate_new` accepts an event with valid `m.mentions`
         content even when the event is frozen.
         """
-        config = default_config("test", parse=True)
-        event = make_message_event(
+        event = make_event_from_dict(
             {
-                "msgtype": "m.text",
-                "body": "@alice:example.com hello",
-                "m.mentions": {"user_ids": ["@alice:example.com"]},
-            }
+                "room_id": "!room:test",
+                "type": "m.room.message",
+                "sender": "@alice:example.com",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "@alice:example.com hello",
+                    "m.mentions": {"user_ids": ["@alice:example.com"]},
+                },
+                "auth_events": [],
+                "prev_events": [],
+                "hashes": {"sha256": "aGVsbG8="},
+                "signatures": {},
+                "depth": 1,
+                "origin_server_ts": 1000,
+            },
+            room_version=RoomVersions.V9,
         )
         # Sanity check that the event is valid before freezing
-        EventValidator().validate_new(event, config)
+        EventValidator().validate_new(event, self.hs.config)
         event.freeze()
         # Event should still be valid after freezing
-        EventValidator().validate_new(event, config)
+        EventValidator().validate_new(event, self.hs.config)
