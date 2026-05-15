@@ -22,7 +22,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import EventTypes
 from synapse.api.errors import HttpResponseException, SynapseError
 from synapse.crypto.event_signing import compute_event_signature
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
@@ -32,6 +32,7 @@ from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import event_injection
+from tests.test_utils.event_builders import make_test_event
 
 
 class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
@@ -75,7 +76,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.signing_key = signedjson.key.generate_signing_key("policy_server")
 
         # Create some sample events
-        self.spammy_event = make_event_from_dict(
+        self.spammy_event = make_test_event(
             room_version=room_version,
             internal_metadata_dict={},
             event_dict={
@@ -88,7 +89,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 },
             },
         )
-        self.not_spammy_event = make_event_from_dict(
+        self.not_spammy_event = make_test_event(
             room_version=room_version,
             internal_metadata_dict={},
             event_dict={
@@ -272,7 +273,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_signed_event_is_not_spam(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
-        event = make_event_from_dict(
+        event = make_test_event(
             room_version=self.room_version,
             internal_metadata_dict={},
             event_dict={
@@ -302,7 +303,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_ask_policy_server_to_sign_event_ok(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
-        event = make_event_from_dict(
+        event = make_test_event(
             room_version=self.room_version,
             internal_metadata_dict={},
             event_dict={
@@ -324,7 +325,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_ask_policy_server_to_sign_event_refuses(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
-        event = make_event_from_dict(
+        event = make_test_event(
             room_version=self.room_version,
             internal_metadata_dict={},
             event_dict={
@@ -353,7 +354,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_ask_policy_server_to_sign_event_cannot_reach(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
-        event = make_event_from_dict(
+        event = make_test_event(
             room_version=self.room_version,
             internal_metadata_dict={},
             event_dict={
@@ -379,7 +380,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event_with_wrong_key
-        unverified_event = make_event_from_dict(
+        unverified_event = make_test_event(
             room_version=self.room_version,
             internal_metadata_dict={},
             event_dict={
@@ -398,7 +399,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(len(unverified_event.signatures), 1)
 
-        verified_event = make_event_from_dict(
+        verified_event = make_test_event(
             room_version=self.room_version,
             internal_metadata_dict={},
             event_dict={

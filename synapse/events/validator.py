@@ -40,7 +40,7 @@ from synapse.events.utils import (
     validate_canonicaljson,
 )
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import EventID, JsonDict, RoomID, StrCollection, UserID
+from synapse.types import EventID, JsonDict, JsonMapping, RoomID, StrCollection, UserID
 
 
 class EventValidator:
@@ -253,7 +253,7 @@ class EventValidator:
 
             self._ensure_state_event(event)
 
-    def _ensure_strings(self, d: JsonDict, keys: StrCollection) -> None:
+    def _ensure_strings(self, d: JsonMapping, keys: StrCollection) -> None:
         for s in keys:
             if s not in d:
                 raise SynapseError(400, "'%s' not in content" % (s,))

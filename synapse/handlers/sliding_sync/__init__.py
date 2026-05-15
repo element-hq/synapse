@@ -150,6 +150,23 @@ class SlidingSyncHandler:
         # events or future events if the user is nefariously, manually modifying the
         # token.
         if from_token is not None:
+            # Work around a bug where older Synapse versions gave out tokens "from the
+            # future", i.e. that are ahead of the tokens persisted in the DB. This could
+            # also happen if a user is intentionally messing with the token so this also
+            # acts as sanitization/validation.
+            #
+            # If the token has positions ahead of our persisted positions in the
+            # database (invalid), then we simply use our max persisted position (recover
+            # gracefully); instead of waiting for a position that may never come around.
+            #
+            # FIXME: For Sliding Sync, instead of bounding the token, we should detect
+            # the invalid future position and raise a `M_UNKNOWN_POS` error.
+            from_token = SlidingSyncStreamToken(
+                stream_token=await self.event_sources.bound_future_token(
+                    from_token.stream_token
+                ),
+                connection_position=from_token.connection_position,
+            )
             # We need to make sure this worker has caught up with the token. If
             # this returns false, it means we timed out waiting, and we should
             # just return an empty response.
