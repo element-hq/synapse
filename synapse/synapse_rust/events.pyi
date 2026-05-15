@@ -10,7 +10,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from synapse.types import JsonDict, JsonMapping
 
@@ -213,3 +213,12 @@ class Unsigned:
     def for_event(self) -> JsonDict: ...
     """Return a dict of all unsigned fields, including those only kept in
     memory, suitable for inclusion in an event."""
+
+class JsonObject(Mapping[str, Any]):
+    """Immutable JSON object mapping."""
+
+    def __init__(self, content_dict: JsonMapping | None = None): ...
+    def __len__(self) -> int: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def __iter__(self) -> Iterator[str]: ...
+    def __eq__(self, other: object) -> bool: ...

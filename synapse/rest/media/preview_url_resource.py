@@ -23,6 +23,7 @@
 import re
 from typing import TYPE_CHECKING
 
+from synapse.api.errors import Codes, SynapseError, UnrecognizedRequestError
 from synapse.http.server import respond_with_json_bytes
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
@@ -65,12 +66,17 @@ class PreviewUrlResource(RestServlet):
         self.clock = hs.get_clock()
         self.media_repo = media_repo
         self.media_storage = media_storage
-        assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
+        self.can_respond_403 = hs.config.experimental.msc4452_enabled
 
     async def on_GET(self, request: SynapseRequest) -> None:
-        # XXX: if get_user_by_req fails, what should we do in an async render?
         requester = await self.auth.get_user_by_req(request)
+        if self.url_previewer is None:
+            # If we have no url_previewer then it has been disabled by the server.
+            if self.can_respond_403:
+                raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
+            else:
+                raise UnrecognizedRequestError(code=404)
         url = parse_string(request, "url", required=True)
         ts = parse_integer(request, "ts", default=self.clock.time_msec())
         og = await self.url_previewer.preview(url, requester.user, ts)

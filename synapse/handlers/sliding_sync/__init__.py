@@ -150,6 +150,23 @@ class SlidingSyncHandler:
         # events or future events if the user is nefariously, manually modifying the
         # token.
         if from_token is not None:
+            # Work around a bug where older Synapse versions gave out tokens "from the
+            # future", i.e. that are ahead of the tokens persisted in the DB. This could
+            # also happen if a user is intentionally messing with the token so this also
+            # acts as sanitization/validation.
+            #
+            # If the token has positions ahead of our persisted positions in the
+            # database (invalid), then we simply use our max persisted position (recover
+            # gracefully); instead of waiting for a position that may never come around.
+            #
+            # FIXME: For Sliding Sync, instead of bounding the token, we should detect
+            # the invalid future position and raise a `M_UNKNOWN_POS` error.
+            from_token = SlidingSyncStreamToken(
+                stream_token=await self.event_sources.bound_future_token(
+                    from_token.stream_token
+                ),
+                connection_position=from_token.connection_position,
+            )
             # We need to make sure this worker has caught up with the token. If
             # this returns false, it means we timed out waiting, and we should
             # just return an empty response.
@@ -167,38 +184,34 @@ class SlidingSyncHandler:
                 timeout_ms -= after_wait_ts - before_wait_ts
                 timeout_ms = max(timeout_ms, 0)
 
-        # Compute a response immediately. We always need to do this before
-        # waiting for new data (unlike in /v3/sync), as the request config might
-        # have changed (e.g. new room subscriptions, etc).
-        now_token = self.event_sources.get_current_token()
-        result = await self.current_sync_for_user(
-            sync_config,
-            from_token=from_token,
-            to_token=now_token,
-        )
-
-        # Return immediately if we have a result, the timeout is 0, or this is
-        # an initial sync.
-        if result or timeout_ms == 0 or from_token is None:
-            return result, did_wait
-
-        # Otherwise, we wait for something to happen and report it to the user.
-        async def current_sync_callback(
-            before_token: StreamToken, after_token: StreamToken
-        ) -> SlidingSyncResult:
-            return await self.current_sync_for_user(
+        # We're going to respond immediately if the timeout is 0 or if this is an
+        # initial sync (without a `from_token`) so we can avoid calling
+        # `notifier.wait_for_events()`.
+        if timeout_ms == 0 or from_token is None:
+            now_token = self.event_sources.get_current_token()
+            result = await self.current_sync_for_user(
                 sync_config,
                 from_token=from_token,
-                to_token=after_token,
+                to_token=now_token,
             )
+        else:
+            # Otherwise, we wait for something to happen and report it to the user.
+            async def current_sync_callback(
+                before_token: StreamToken, after_token: StreamToken
+            ) -> SlidingSyncResult:
+                return await self.current_sync_for_user(
+                    sync_config,
+                    from_token=from_token,
+                    to_token=after_token,
+                )
 
-        result = await self.notifier.wait_for_events(
-            sync_config.user.to_string(),
-            timeout_ms,
-            current_sync_callback,
-            from_token=now_token,
-        )
-        did_wait = True
+            result = await self.notifier.wait_for_events(
+                sync_config.user.to_string(),
+                timeout_ms,
+                current_sync_callback,
+                from_token=from_token.stream_token,
+            )
+            did_wait = True
 
         return result, did_wait
 

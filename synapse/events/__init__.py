@@ -44,9 +44,15 @@ from synapse.api.constants import (
     StickyEvent,
 )
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import EventInternalMetadata, Signatures, Unsigned
+from synapse.synapse_rust.events import (
+    EventInternalMetadata,
+    JsonObject,
+    Signatures,
+    Unsigned,
+)
 from synapse.types import (
     JsonDict,
+    JsonMapping,
     StateKey,
     StrCollection,
 )
@@ -206,17 +212,29 @@ class EventBase(metaclass=abc.ABCMeta):
     ):
         assert room_version.event_format == self.format_version
 
+        if "content" in event_dict:
+            event_dict["content"] = JsonObject(event_dict["content"])
+
+        # We intern these strings because they turn up a lot (especially when
+        # caching).
+        event_dict = intern_dict(event_dict)
+
+        if USE_FROZEN_DICTS:
+            frozen_dict = freeze(event_dict)
+        else:
+            frozen_dict = event_dict
+
         self.room_version = room_version
         self.signatures = Signatures(signatures)
         self.unsigned = Unsigned(unsigned)
         self.rejected_reason = rejected_reason
 
-        self._dict = event_dict
+        self._dict = frozen_dict
 
         self.internal_metadata = EventInternalMetadata(internal_metadata_dict)
 
     depth: DictProperty[int] = DictProperty("depth")
-    content: DictProperty[JsonDict] = DictProperty("content")
+    content: DictProperty[JsonMapping] = DictProperty("content")
     hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
     sender: DictProperty[str] = DictProperty("sender")
@@ -259,7 +277,14 @@ class EventBase(metaclass=abc.ABCMeta):
 
     def get_dict(self) -> JsonDict:
         """Convert the event to a dictionary suitable for serialisation."""
+
         d = dict(self._dict)
+        if "content" in d:
+            # Convert the content (which is a JsonObject) back to a dict. Json
+            # serialization should handle JsonObjects fine, but for sanities
+            # sake we want `get_dict()` and `get_pdu_json()` to return plain
+            # dicts.
+            d["content"] = dict(self.content)
         d.update(
             {
                 "signatures": self.signatures.as_dict(),
@@ -419,19 +444,10 @@ class FrozenEvent(EventBase):
 
         unsigned = event_dict.pop("unsigned", {})
 
-        # We intern these strings because they turn up a lot (especially when
-        # caching).
-        event_dict = intern_dict(event_dict)
-
-        if USE_FROZEN_DICTS:
-            frozen_dict = freeze(event_dict)
-        else:
-            frozen_dict = event_dict
-
         self._event_id = event_dict["event_id"]
 
         super().__init__(
-            frozen_dict,
+            event_dict,
             room_version=room_version,
             signatures=signatures,
             unsigned=unsigned,
@@ -473,19 +489,10 @@ class FrozenEventV2(EventBase):
 
         unsigned = event_dict.pop("unsigned", {})
 
-        # We intern these strings because they turn up a lot (especially when
-        # caching).
-        event_dict = intern_dict(event_dict)
-
-        if USE_FROZEN_DICTS:
-            frozen_dict = freeze(event_dict)
-        else:
-            frozen_dict = event_dict
-
         self._event_id: str | None = None
 
         super().__init__(
-            frozen_dict,
+            event_dict,
             room_version=room_version,
             signatures=signatures,
             unsigned=unsigned,
@@ -611,7 +618,7 @@ class FrozenEventVMSC4242(FrozenEventV4):
     """FrozenEventVMSC4242, which differs from FrozenEventV4 only in the addition of prev_state_events"""
 
     format_version = EventFormatVersions.ROOM_VMSC4242
-    prev_state_events: DictProperty[list[str]] = DictProperty("prev_state_events")
+    prev_state_events: DictProperty[StrCollection] = DictProperty("prev_state_events")
 
     def __init__(
         self,

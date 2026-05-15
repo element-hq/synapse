@@ -852,15 +852,11 @@ class SlidingSyncRoomLists:
                             previous_connection_state.room_configs.get(room_id)
                         )
                         if prev_room_sync_config is not None:
-                            # Always include rooms whose effective config has
-                            # expanded. This covers timeline-limit increases and
-                            # required-state additions introduced by room
-                            # subscriptions overriding list-derived params.
+                            # Always include rooms whose timeline limit has increased.
+                            # (see the "XXX: Odd behavior" described below)
                             if (
-                                prev_room_sync_config.combine_room_sync_config(
-                                    room_config
-                                )
-                                != prev_room_sync_config
+                                prev_room_sync_config.timeline_limit
+                                < room_config.timeline_limit
                             ):
                                 rooms_should_send.add(room_id)
                                 continue

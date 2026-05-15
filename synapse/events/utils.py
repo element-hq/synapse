@@ -1032,7 +1032,7 @@ def strip_event(event: EventBase) -> JsonDict:
     return {
         "type": event.type,
         "state_key": event.state_key,
-        "content": event.content,
+        "content": dict(event.content),
         "sender": event.sender,
     }
 

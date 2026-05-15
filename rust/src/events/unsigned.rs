@@ -23,6 +23,7 @@ use pyo3::{
 };
 use pythonize::{depythonize, pythonize};
 use serde::{Deserialize, Serialize};
+use serde_json::Number;
 
 #[pyclass(frozen, skip_from_py_object)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -36,7 +37,7 @@ pub struct Unsigned {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PersistedUnsignedFields {
     #[serde(skip_serializing_if = "Option::is_none")]
-    age_ts: Option<i64>,
+    age_ts: Option<Number>,
     #[serde(skip_serializing_if = "Option::is_none")]
     replaces_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,11 +130,14 @@ impl Unsigned {
         let unsigned = self.py_read()?;
 
         match field {
-            UnsignedField::AgeTs => Ok(unsigned
-                .persisted_fields
-                .age_ts
-                .ok_or_else(|| PyKeyError::new_err("age_ts"))?
-                .into_bound_py_any(py)?),
+            UnsignedField::AgeTs => {
+                let age_ts = &unsigned
+                    .persisted_fields
+                    .age_ts
+                    .as_ref()
+                    .ok_or_else(|| PyKeyError::new_err("age_ts"))?;
+                Ok(pythonize(py, age_ts)?)
+            }
             UnsignedField::ReplacesState => Ok((unsigned.persisted_fields.replaces_state)
                 .as_ref()
                 .ok_or_else(|| PyKeyError::new_err("replaces_state"))?
@@ -203,7 +207,7 @@ impl Unsigned {
         let mut unsigned = self.py_write()?;
 
         match field {
-            UnsignedField::AgeTs => unsigned.persisted_fields.age_ts = Some(value.extract()?),
+            UnsignedField::AgeTs => unsigned.persisted_fields.age_ts = Some(depythonize(&value)?),
             UnsignedField::ReplacesState => {
                 unsigned.persisted_fields.replaces_state = Some(value.extract()?)
             }
@@ -339,7 +343,7 @@ mod tests {
     #[test]
     fn test_persisted_fields_serialize_populated() {
         let fields = PersistedUnsignedFields {
-            age_ts: Some(1234),
+            age_ts: Some(1234.into()),
             replaces_state: Some("$prev:example.com".to_string()),
             invite_room_state: Some(vec![json!({"type": "m.room.name"})]),
             knock_room_state: Some(vec![json!({"type": "m.room.topic"})]),
@@ -360,7 +364,7 @@ mod tests {
     fn test_unsigned_inner_flattens_persisted_fields() {
         let inner = UnsignedInner {
             persisted_fields: PersistedUnsignedFields {
-                age_ts: Some(99),
+                age_ts: Some(99.into()),
                 ..Default::default()
             },
             prev_content: Some(Box::new(json!({"body": "hi"}))),
@@ -382,7 +386,7 @@ mod tests {
     fn test_unsigned_inner_roundtrip() {
         let original = UnsignedInner {
             persisted_fields: PersistedUnsignedFields {
-                age_ts: Some(10),
+                age_ts: Some(10.into()),
                 replaces_state: Some("$state:example.com".to_string()),
                 invite_room_state: None,
                 knock_room_state: None,
@@ -394,7 +398,7 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let roundtripped: UnsignedInner = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(roundtripped.persisted_fields.age_ts, Some(10));
+        assert_eq!(roundtripped.persisted_fields.age_ts, Some(10.into()));
         assert_eq!(
             roundtripped.persisted_fields.replaces_state.as_deref(),
             Some("$state:example.com")
@@ -423,7 +427,7 @@ mod tests {
         });
         let unsigned: Unsigned = serde_json::from_value(json).unwrap();
         let inner = unsigned.inner.read().unwrap();
-        assert_eq!(inner.persisted_fields.age_ts, Some(5));
+        assert_eq!(inner.persisted_fields.age_ts, Some(5.into()));
         assert_eq!(inner.prev_sender.as_deref(), Some("@bob:example.com"));
     }
 }

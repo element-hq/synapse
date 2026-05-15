@@ -1,0 +1,1 @@
+Update `WorkerLock` tests to better stress the `WORKER_LOCK_MAX_RETRY_INTERVAL`.

@@ -21,21 +21,31 @@
 //! Classes for representing Events.
 
 use pyo3::{
-    types::{PyAnyMethods, PyModule, PyModuleMethods},
+    types::{PyAnyMethods, PyMapping, PyModule, PyModuleMethods},
     wrap_pyfunction, Bound, PyResult, Python,
 };
 
 pub mod filter;
 mod internal_metadata;
+mod json_object;
 pub mod signatures;
 pub mod unsigned;
 
+use json_object::JsonObject;
+
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Register the `JsonObject` class as a `Mapping` so that `isinstance` works.
+    PyMapping::register::<JsonObject>(py)?;
+
     let child_module = PyModule::new(py, "events")?;
     child_module.add_class::<internal_metadata::EventInternalMetadata>()?;
     child_module.add_class::<signatures::Signatures>()?;
     child_module.add_class::<unsigned::Unsigned>()?;
+    child_module.add_class::<JsonObject>()?;
+    child_module.add_class::<json_object::JsonObjectKeysView>()?;
+    child_module.add_class::<json_object::JsonObjectValuesView>()?;
+    child_module.add_class::<json_object::JsonObjectItemsView>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
 
     m.add_submodule(&child_module)?;
