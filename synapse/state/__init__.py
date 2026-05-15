@@ -37,7 +37,7 @@ from prometheus_client import Counter, Histogram
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
-from synapse.events import EventBase
+from synapse.events import EventBase, FrozenEventVMSC4242
 from synapse.events.snapshot import (
     EventContext,
     UnpersistedEventContext,
@@ -239,31 +239,6 @@ class StateHandler:
         )
         return await ret.get_state(self._state_storage_controller, state_filter)
 
-    async def get_current_user_ids_in_room(
-        self, room_id: str, latest_event_ids: StrCollection
-    ) -> set[str]:
-        """
-        Get the users IDs who are currently in a room.
-
-        Note: This is much slower than using the equivalent method
-        `DataStore.get_users_in_room` or `DataStore.get_users_in_room_with_profiles`,
-        so this should only be used when wanting the users at a particular point
-        in the room.
-
-        Args:
-            room_id: The ID of the room.
-            latest_event_ids: Precomputed list of latest event IDs. Will be computed if None.
-        Returns:
-            Set of user IDs in the room.
-        """
-
-        assert latest_event_ids is not None
-
-        logger.debug("calling resolve_state_groups from get_current_user_ids_in_room")
-        entry = await self.resolve_state_groups_for_events(room_id, latest_event_ids)
-        state = await entry.get_state(self._state_storage_controller, StateFilter.all())
-        return await self.store.get_joined_user_ids_from_state(room_id, state)
-
     async def get_hosts_in_room_at_events(
         self, room_id: str, event_ids: StrCollection
     ) -> frozenset[str]:
@@ -303,7 +278,8 @@ class StateHandler:
             membership events.
             `False` if `state_ids_before_event` is the full state.
             `None` when `state_ids_before_event` is not provided. In this case, the
-            flag will be calculated based on `event`'s prev events.
+            flag will be calculated based on `event`'s `prev_events` or `prev_state_events`
+            for state DAG rooms.
         state_group_before_event:
             the current state group at the time of event, if known
         Returns:
@@ -337,7 +313,11 @@ class StateHandler:
             # (This is slightly racy - the prev-events might get fixed up before we use
             # their states - but I don't think that really matters; it just means we
             # might redundantly recalculate the state for this event later.)
-            prev_event_ids = event.prev_event_ids()
+            prev_event_ids = frozenset(
+                event.prev_state_events
+                if isinstance(event, FrozenEventVMSC4242)
+                else event.prev_event_ids()
+            )
             incomplete_prev_events = await self.store.get_partial_state_events(
                 prev_event_ids
             )
@@ -355,7 +335,7 @@ class StateHandler:
 
             entry = await self.resolve_state_groups_for_events(
                 event.room_id,
-                event.prev_event_ids(),
+                prev_event_ids,
                 await_full_state=False,
             )
 

@@ -1108,6 +1108,11 @@ class FederationClient(FederationBase):
             SynapseError: if the chosen remote server returns a 300/400 code, or
                 no servers successfully handle the request.
         """
+        # See related restriction in /createRoom requests in handlers/room.py
+        if room_version.msc4242_state_dags:
+            raise UnsupportedRoomVersionError(
+                "Homeserver does not support this room version over federation"
+            )
 
         async def send_request(destination: str) -> SendJoinResult:
             response = await self._do_send_join(
@@ -1569,10 +1574,15 @@ class FederationClient(FederationBase):
                 min_depth=min_depth,
                 timeout=timeout,
             )
+            received_time = self._clock.time_msec()
 
             room_version = await self.store.get_room_version(room_id)
 
-            events = parse_events_from_pdu_json(content.get("events", []), room_version)
+            events = parse_events_from_pdu_json(
+                content.get("events", []),
+                room_version,
+                received_time=received_time,
+            )
 
             signed_events = await self._check_sigs_and_hash_for_pulled_events_and_fetch(
                 destination, events, room_version=room_version

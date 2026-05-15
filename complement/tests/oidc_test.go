@@ -93,7 +93,10 @@ func TestOIDCProviderUnavailable(t *testing.T) {
 		// by the user's browser in order to start the login flow.
 		queryParams := url.Values{}
 		queryParams.Add("redirectUrl", "http://redirect.invalid/redirect")
-		res := unauthedClient.Do(t, "GET", []string{"_matrix", "client", "v3", "login", "sso", "redirect", "oidc-test_provider"},
+		res := unauthedClient.Do(
+			t,
+			"GET",
+			[]string{"_matrix", "client", "v3", "login", "sso", "redirect", "oidc-test_provider"},
 			client.WithQueries(queryParams),
 		)
 

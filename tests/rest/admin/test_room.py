@@ -2311,10 +2311,14 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertIn("state_events", channel.json_body)
         self.assertIn("room_type", channel.json_body)
         self.assertIn("forgotten", channel.json_body)
+        self.assertIn("tombstoned", channel.json_body)
+        self.assertIn("replacement_room", channel.json_body)
 
         self.assertEqual(room_id_1, channel.json_body["room_id"])
         self.assertIs(True, channel.json_body["federatable"])
         self.assertIs(True, channel.json_body["public"])
+        self.assertIs(False, channel.json_body["tombstoned"])
+        self.assertIs(None, channel.json_body["replacement_room"])
 
     def test_single_room_devices(self) -> None:
         """Test that `joined_local_devices` can be requested correctly"""

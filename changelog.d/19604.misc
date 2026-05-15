@@ -1,1 +1,0 @@
-Lower the Postgres database `statement_timeout` to 10m (previously 1h).

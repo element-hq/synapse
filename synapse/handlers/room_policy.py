@@ -181,9 +181,10 @@ class RoomPolicyHandler:
     async def _verify_policy_server_signature(
         self, event: EventBase, policy_server: str, public_key: str
     ) -> bool:
-        # check the event is signed with this (via, public_key).
-        verify_json_req = VerifyJsonRequest.from_event(policy_server, event, 0)
         try:
+            # check the event is signed with this (via, public_key).
+            verify_json_req = VerifyJsonRequest.from_event(policy_server, event, 0)
+
             key_bytes = decode_base64(public_key)
             verify_key = decode_verify_key_bytes(POLICY_SERVER_KEY_ID, key_bytes)
             # We would normally use KeyRing.verify_event_for_server but we can't here as we don't
@@ -223,11 +224,16 @@ class RoomPolicyHandler:
             return
 
         # Ask the policy server to sign this event.
-        # We set a smallish timeout here as we don't want to block event sending too long.
         try:
             signature = await self._federation_client.ask_policy_server_to_sign_event(
                 policy_server.server_name,
                 event,
+                # We set a smallish timeout here as we don't want to block event sending
+                # too long.
+                #
+                # We were previously seeing regular timeouts with media
+                # scanning/checking when the timeout was set to 3s. 30s was chosen based
+                # on vibes and light real world testing.
                 timeout=30000,
             )
             # TODO: We can *probably* remove this when we remove unstable MSC4284 support.
@@ -255,9 +261,7 @@ class RoomPolicyHandler:
             # servers need to manually fetch signatures for. This is the code that allows
             # those events to continue working (because they're legally sent, even if missing
             # the policy server signature).
-            event.signatures.setdefault(policy_server.server_name, {}).update(
-                signature.get(policy_server.server_name, {})
-            )
+            event.signatures.update(signature)
         except HttpResponseException as ex:
             # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
             raise ex.to_synapse_error() from ex

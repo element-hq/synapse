@@ -34,6 +34,7 @@ from typing import (
 )
 
 import attr
+from typing_extensions import deprecated
 from unpaddedbase64 import encode_base64
 
 from synapse.api.constants import (
@@ -43,9 +44,10 @@ from synapse.api.constants import (
     StickyEvent,
 )
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import EventInternalMetadata
+from synapse.synapse_rust.events import EventInternalMetadata, Signatures, Unsigned
 from synapse.types import (
     JsonDict,
+    StateKey,
     StrCollection,
 )
 from synapse.util.caches import intern_dict
@@ -65,6 +67,10 @@ dict to frozen_dicts is expensive.
 NOTE: This is overridden by the configuration by the Synapse worker apps, but
 for the sake of tests, it is set here because it cannot be configured on the
 homeserver object itself.
+
+FIXME: Because of how this option works (changing the underlying types), it causes
+subtle downstream bugs that makes type comparisons brittle, tracked by
+https://github.com/element-hq/synapse/issues/18117
 """
 
 T = TypeVar("T")
@@ -201,8 +207,8 @@ class EventBase(metaclass=abc.ABCMeta):
         assert room_version.event_format == self.format_version
 
         self.room_version = room_version
-        self.signatures = signatures
-        self.unsigned = unsigned
+        self.signatures = Signatures(signatures)
+        self.unsigned = Unsigned(unsigned)
         self.rejected_reason = rejected_reason
 
         self._dict = event_dict
@@ -221,6 +227,8 @@ class EventBase(metaclass=abc.ABCMeta):
     # get_state_key() (and a check for None).
     state_key: DictProperty[str] = DictProperty("state_key")
     type: DictProperty[str] = DictProperty("type")
+
+    # This is a deprecated property, use `sender` instead. Only used by modules.
     user_id: DictProperty[str] = DictProperty("sender")
 
     @property
@@ -250,8 +258,26 @@ class EventBase(metaclass=abc.ABCMeta):
         return self._dict.get("state_key")
 
     def get_dict(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for serialisation."""
         d = dict(self._dict)
-        d.update({"signatures": self.signatures, "unsigned": dict(self.unsigned)})
+        d.update(
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_event(),
+            }
+        )
+
+        return d
+
+    def get_dict_for_persistence(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for persistence."""
+        d = dict(self._dict)
+        d.update(
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_persistence(),
+            }
+        )
 
         return d
 
@@ -287,9 +313,6 @@ class EventBase(metaclass=abc.ABCMeta):
         template_json.pop("hashes")
 
         return template_json
-
-    def __getitem__(self, field: str) -> Any | None:
-        return self._dict[field]
 
     def __contains__(self, field: str) -> bool:
         return field in self._dict
@@ -367,6 +390,11 @@ class EventBase(metaclass=abc.ABCMeta):
             ">"
         )
 
+    # Using `__getitem__` is deprecated. Only used by modules.
+    @deprecated("Use attribute access instead")
+    def __getitem__(self, field: str) -> Any | None:
+        return self._dict[field]
+
 
 class FrozenEvent(EventBase):
     format_version = EventFormatVersions.ROOM_V1_V2  # All events of this type are V1
@@ -389,7 +417,7 @@ class FrozenEvent(EventBase):
             for name, sigs in event_dict.pop("signatures", {}).items()
         }
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
+        unsigned = event_dict.pop("unsigned", {})
 
         # We intern these strings because they turn up a lot (especially when
         # caching).
@@ -443,7 +471,7 @@ class FrozenEventV2(EventBase):
 
         assert "event_id" not in event_dict
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
+        unsigned = event_dict.pop("unsigned", {})
 
         # We intern these strings because they turn up a lot (especially when
         # caching).
@@ -579,9 +607,60 @@ class FrozenEventV4(FrozenEventV3):
         return [*self._dict["auth_events"], create_event_id]
 
 
+class FrozenEventVMSC4242(FrozenEventV4):
+    """FrozenEventVMSC4242, which differs from FrozenEventV4 only in the addition of prev_state_events"""
+
+    format_version = EventFormatVersions.ROOM_VMSC4242
+    prev_state_events: DictProperty[list[str]] = DictProperty("prev_state_events")
+
+    def __init__(
+        self,
+        event_dict: JsonDict,
+        room_version: RoomVersion,
+        internal_metadata_dict: JsonDict | None = None,
+        rejected_reason: str | None = None,
+    ):
+        # Similar to how we assert event_id isn't in V2+ events, we do the same with auth_events.
+        # We don't expect `auth_events` in the wire format because we calculate it from prev_state_events.
+        assert "auth_events" not in event_dict
+        super().__init__(
+            event_dict=event_dict,
+            room_version=room_version,
+            internal_metadata_dict=internal_metadata_dict,
+            rejected_reason=rejected_reason,
+        )
+
+    def auth_event_ids(self) -> StrCollection:
+        """Returns the list of _calculated_ auth event IDs.
+
+        Returns:
+            The list of event IDs of this event's auth events
+        """
+        # Catches cases where we accidentally call auth_event_ids() prior to calculating what they
+        # actually are. The exception being the m.room.create event which has no auth events.
+        if self.type != EventTypes.Create:
+            assert len(self.internal_metadata.calculated_auth_event_ids) > 0
+        return self.internal_metadata.calculated_auth_event_ids
+
+    def __repr__(self) -> str:
+        rejection = f"REJECTED={self.rejected_reason}, " if self.rejected_reason else ""
+
+        return (
+            f"<{self.__class__.__name__} "
+            f"{rejection}"
+            f"event_id={self.event_id}, "
+            f"type={self.get('type')}, "
+            f"state_key={self.get('state_key')}, "
+            f"prev_events={self.get('prev_events')}, "
+            f"prev_state_events={self.get('prev_state_events')}, "
+            f"outlier={self.internal_metadata.is_outlier()}"
+            ">"
+        )
+
+
 def _event_type_from_format_version(
     format_version: int,
-) -> type[FrozenEvent | FrozenEventV2 | FrozenEventV3]:
+) -> type[FrozenEvent | FrozenEventV2 | FrozenEventV3 | FrozenEventVMSC4242]:
     """Returns the python type to use to construct an Event object for the
     given event format version.
 
@@ -598,6 +677,8 @@ def _event_type_from_format_version(
         return FrozenEventV2
     elif format_version == EventFormatVersions.ROOM_V4_PLUS:
         return FrozenEventV3
+    elif format_version == EventFormatVersions.ROOM_VMSC4242:
+        return FrozenEventVMSC4242
     elif format_version == EventFormatVersions.ROOM_V11_HYDRA_PLUS:
         return FrozenEventV4
     else:
@@ -659,6 +740,24 @@ def relation_from_event(event: EventBase) -> _EventRelation | None:
     return _EventRelation(parent_id, rel_type, aggregation_key)
 
 
+def event_exists_in_state_dag(
+    event: Union["EventBase", "EventBuilder", "EventMetadata", "StateKey"],
+) -> bool:
+    """Given an event, returns true if this event should form part of the state DAG.
+    Only valid for room versions which use a state DAG (MSC4242)."""
+    state_key = None
+    if isinstance(event, EventMetadata):
+        state_key = event.state_key
+    elif isinstance(event, tuple):  # StateKey
+        # can't use StateKey else you get:
+        # "Subscripted generics cannot be used with class and instance checks"
+        state_key = event[1]
+    else:
+        state_key = event.state_key if event.is_state() else None
+
+    return state_key is not None
+
+
 def is_creator(create: EventBase, user_id: str) -> bool:
     """
     Return true if the provided user ID is the room creator.
@@ -693,3 +792,13 @@ class StrippedStateEvent:
     state_key: str
     sender: str
     content: dict[str, Any]
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class EventMetadata:
+    """Returned by `get_metadata_for_events`"""
+
+    room_id: str
+    event_type: str
+    state_key: str | None
+    rejection_reason: str | None

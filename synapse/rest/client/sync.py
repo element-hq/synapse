@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import itertools
 import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Mapping
@@ -31,6 +30,7 @@ from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
+    FilteredEvent,
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
     format_event_raw,
@@ -448,7 +448,9 @@ class SyncRestServlet(RestServlet):
         invited = {}
         for room in rooms:
             invite = await self._event_serializer.serialize_event(
-                room.invite, time_now, config=serialize_options
+                FilteredEvent.state(event=room.invite),
+                time_now,
+                config=serialize_options,
             )
             unsigned = dict(invite.get("unsigned", {}))
             invite["unsigned"] = unsigned
@@ -484,7 +486,9 @@ class SyncRestServlet(RestServlet):
         knocked = {}
         for room in rooms:
             knock = await self._event_serializer.serialize_event(
-                room.knock, time_now, config=serialize_options
+                FilteredEvent.state(event=room.knock),
+                time_now,
+                config=serialize_options,
             )
 
             # Extract the `unsigned` key from the knock event.
@@ -574,7 +578,7 @@ class SyncRestServlet(RestServlet):
 
         state_events = state_dict.values()
 
-        for event in itertools.chain(state_events, timeline_events):
+        for event in state_events:
             # We've had bug reports that events were coming down under the
             # wrong room.
             if event.room_id != room.room_id:
@@ -584,9 +588,21 @@ class SyncRestServlet(RestServlet):
                     room.room_id,
                     event.room_id,
                 )
+        for filtered_event in timeline_events:
+            # We've had bug reports that events were coming down under the
+            # wrong room.
+            if filtered_event.event.room_id != room.room_id:
+                logger.warning(
+                    "Event %r is under room %r instead of %r",
+                    filtered_event.event.event_id,
+                    room.room_id,
+                    filtered_event.event.room_id,
+                )
 
         serialized_state = await self._event_serializer.serialize_events(
-            state_events, time_now, config=serialize_options
+            [FilteredEvent.state(e) for e in state_events],
+            time_now,
+            config=serialize_options,
         )
         serialized_timeline = await self._event_serializer.serialize_events(
             timeline_events,
@@ -974,7 +990,7 @@ class SlidingSyncRestServlet(RestServlet):
             ):
                 serialized_required_state = (
                     await self.event_serializer.serialize_events(
-                        room_result.required_state,
+                        [FilteredEvent.state(e) for e in room_result.required_state],
                         time_now,
                         config=serialize_options,
                     )
