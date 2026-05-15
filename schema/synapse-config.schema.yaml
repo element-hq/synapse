@@ -2475,21 +2475,29 @@ properties:
           description: >-
             Amount of data that can be uploaded in the time period by the user.
             Required.
-        msc4335_info_uri:
+        info_uri:
           type: string
           description: >-
-            Experimental MSC4335 URI to where the user can find information about the upload limit. Optional.
-        msc4335_can_upgrade:
+            URI return to the client for where the user can find information
+            about the upload limit. Optional.
+            If not set then a static `data:text/html` URI is returned with a
+            simple message.
+            It is recommended to provide an `info_uri` that points to a page
+            with more information about the upload limit and how users can
+            reduce their upload usage or request an upload limit increase.
+        can_upgrade:
           type: boolean
           description: >-
-            Experimental MSC4335 value to say if the limit can be increased. Optional.
+            Value returned to the client for whether the limit can be increased. Optional default `false`.
+          default: false
     examples:
       - - time_period: 1h
           max_size: 100M
+          info_uri: https://example.com/quota#hour
         - time_period: 1w
           max_size: 500M
-          msc4335_info_uri: https://example.com/quota
-          msc4335_can_upgrade: true
+          info_uri: https://example.com/quota
+          can_upgrade: true
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.

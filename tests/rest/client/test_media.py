@@ -44,9 +44,8 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
-from synapse.config import ConfigError
 from synapse.config._base import Config
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.oembed import OEmbedEndpointConfig
@@ -2938,8 +2937,16 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         # These are the limits that we are testing unless overridden
         if config.get("media_upload_limits") is None:
             config["media_upload_limits"] = [
-                {"time_period": "1d", "max_size": "1K"},
-                {"time_period": "1w", "max_size": "3K"},
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "info_uri": "https://example.com/limits#daily",
+                },
+                {
+                    "time_period": "1w",
+                    "max_size": "3K",
+                    "info_uri": "https://example.com/limits#weekly",
+                },
             ]
 
         return self.setup_test_homeserver(config=config)
@@ -2978,7 +2985,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         channel = self.upload_media(800)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
 
     def test_under_daily_limit(self) -> None:
         """Test that uploading media under the daily limit fails."""
@@ -3016,7 +3023,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
 
         # This will fail as the weekly limit has been exceeded
         channel = self.upload_media(900)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
 
         # Reset the weekly limit by advancing a week
         self.reactor.advance(7 * 60 * 60 * 24)  # Advance by 7 days
@@ -3025,12 +3032,10 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
 
-    def test_msc4335_requires_config(self) -> None:
+    def test_logs_warning_with_no_info_uri_in_config(self) -> None:
         config_dict = default_config("test")
 
-        # msc4335_info_uri and msc4335_can_upgrade are required
-
-        with self.assertRaises(ConfigError):
+        with self.assertLogs("synapse.config.repository", level="WARNING"):
             HomeServerConfig().parse_config_dict(
                 {
                     "media_upload_limits": [
@@ -3046,111 +3051,71 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                 "",
             )
 
-        with self.assertRaises(ConfigError):
-            HomeServerConfig().parse_config_dict(
-                {
-                    "media_upload_limits": [
-                        {
-                            "time_period": "1d",
-                            "max_size": "1K",
-                            "msc4335_can_upgrade": False,
-                        }
-                    ],
-                    **config_dict,
-                },
-                "",
-                "",
-            )
-
-        with self.assertRaises(ConfigError):
-            HomeServerConfig().parse_config_dict(
-                {
-                    "media_upload_limits": [
-                        {
-                            "time_period": "1d",
-                            "max_size": "1K",
-                            "msc4335_can_upgrade": True,
-                        }
-                    ],
-                    **config_dict,
-                },
-                "",
-                "",
-            )
-
     @override_config(
         {
-            "experimental_features": {"msc4335_enabled": True},
             "media_upload_limits": [
                 {
                     "time_period": "1d",
                     "max_size": "1K",
-                    "msc4335_info_uri": "https://example.com",
-                    "msc4335_can_upgrade": False,
+                    "info_uri": "https://example.com",
+                    "can_upgrade": False,
                 }
             ],
         }
     )
-    def test_msc4335_returns_hard_user_limit_exceeded(self) -> None:
-        """Test that the MSC4335 error is returned with can_upgrade False when experimental feature is enabled."""
+    def test_returns_hard_user_limit_exceeded(self) -> None:
+        """Test that the error is returned with can_upgrade False."""
         channel = self.upload_media(500)
         self.assertEqual(channel.code, 200)
 
         channel = self.upload_media(800)
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
-        )
-        self.assertEqual(
-            channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+        self.assertEqual(channel.json_body["info_uri"], "https://example.com")
 
     @override_config(
         {
-            "experimental_features": {"msc4335_enabled": True},
             "media_upload_limits": [
                 {
                     "time_period": "1d",
                     "max_size": "1K",
-                    "msc4335_info_uri": "https://example.com",
-                    "msc4335_can_upgrade": True,
+                    "info_uri": "https://example.com",
                 }
             ],
         }
     )
-    def test_msc4335_returns_soft_user_limit_exceeded(self) -> None:
+    def test_returns_hard_user_limit_exceeded_by_default(self) -> None:
+        """Test that the error is returned with can_upgrade False by default."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+        self.assertEqual(channel.json_body["info_uri"], "https://example.com")
+
+    @override_config(
+        {
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "info_uri": "https://example.com",
+                    "can_upgrade": True,
+                }
+            ],
+        }
+    )
+    def test_returns_soft_user_limit_exceeded(self) -> None:
         """Test that the MSC4335 error is returned with can_upgrade True when experimental feature is enabled."""
         channel = self.upload_media(500)
         self.assertEqual(channel.code, 200)
 
         channel = self.upload_media(800)
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
-        )
-        self.assertEqual(
-            channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
-        )
-        self.assertEqual(channel.json_body["org.matrix.msc4335.can_upgrade"], True)
-
-    @override_config(
-        {
-            "experimental_features": {"msc4335_enabled": True},
-            "media_upload_limits": [
-                {
-                    "time_period": "1d",
-                    "max_size": "1K",
-                }
-            ],
-        }
-    )
-    def test_msc4335_requires_info_uri(self) -> None:
-        """Test that the MSC4335 error is not used if info_uri is not provided."""
-        channel = self.upload_media(500)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+        self.assertEqual(channel.json_body["info_uri"], "https://example.com")
+        self.assertEqual(channel.json_body["can_upgrade"], True)
 
 
 class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
@@ -3186,8 +3151,16 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         # default limits to use
         if config.get("media_upload_limits") is None:
             config["media_upload_limits"] = [
-                {"time_period": "1d", "max_size": "1K"},
-                {"time_period": "1w", "max_size": "3K"},
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "info_uri": "https://example.com/limits#daily",
+                },
+                {
+                    "time_period": "1w",
+                    "max_size": "3K",
+                    "info_uri": "https://example.com/limits#weekly",
+                },
             ]
 
         return self.setup_test_homeserver(config=config)
@@ -3201,10 +3174,14 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
             # n.b. we return these in increasing duration order and Synapse will need to sort them correctly
             return [
                 MediaUploadLimit(
-                    time_period_ms=Config.parse_duration("1d"), max_bytes=5000
+                    time_period_ms=Config.parse_duration("1d"),
+                    max_bytes=5000,
+                    info_uri="https://override.example.com/limits#daily",
                 ),
                 MediaUploadLimit(
-                    time_period_ms=Config.parse_duration("1w"), max_bytes=15000
+                    time_period_ms=Config.parse_duration("1w"),
+                    max_bytes=15000,
+                    info_uri="https://override.example.com/limits#weekly",
                 ),
             ]
         # user2 has no limits
@@ -3285,13 +3262,16 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
 
         # User 1 attempts to upload 4000 bytes taking it over the limit
         channel = self.upload_media(4000, self.tok1)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
         assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
             MediaUploadLimit(
-                max_bytes=5000, time_period_ms=Config.parse_duration("1d")
+                max_bytes=5000,
+                time_period_ms=Config.parse_duration("1d"),
+                info_uri="https://override.example.com/limits#daily",
+                can_upgrade=False,
             ),
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
@@ -3300,13 +3280,16 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         # User 1 attempts to upload 20000 bytes which is over the weekly limit
         # This tests that the limits have been sorted as expected
         channel = self.upload_media(20000, self.tok1)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
         assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
             MediaUploadLimit(
-                max_bytes=15000, time_period_ms=Config.parse_duration("1w")
+                max_bytes=15000,
+                time_period_ms=Config.parse_duration("1w"),
+                info_uri="https://override.example.com/limits#weekly",
+                can_upgrade=False,
             ),
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
@@ -3329,36 +3312,17 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
 
         # User 3 uploads 800 bytes which is over the limit
         channel = self.upload_media(800, self.tok3)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
         assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user3)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
             MediaUploadLimit(
-                max_bytes=1024, time_period_ms=Config.parse_duration("1d")
+                max_bytes=1024,
+                time_period_ms=Config.parse_duration("1d"),
+                info_uri="https://example.com/limits#daily",
+                can_upgrade=False,
             ),
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 500)
         self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 800)
-
-    @override_config(
-        {
-            "media_upload_limits": [
-                {
-                    "time_period": "1d",
-                    "max_size": "1K",
-                    "msc4335_info_uri": "https://example.com",
-                    "msc4335_can_upgrade": False,
-                },
-            ]
-        }
-    )
-    def test_msc4335_defaults_disabled(self) -> None:
-        """Test that the MSC4335 is not used unless experimental feature is enabled."""
-        channel = self.upload_media(500, self.tok3)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800, self.tok3)
-        # n.b. this response is not spec compliant as described at: https://github.com/element-hq/synapse/issues/18749
-        self.assertEqual(channel.code, 400)
-        self.assertEqual(channel.json_body["errcode"], Codes.RESOURCE_LIMIT_EXCEEDED)
