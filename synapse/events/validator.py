@@ -124,11 +124,7 @@ class EventValidator:
                     cls=MENTIONS_VALIDATOR,
                 )
             except jsonschema.ValidationError as e:
-                raise SynapseError(
-                    code=400,
-                    msg=e.message,  # noqa: B306
-                    errcode=Codes.BAD_JSON,
-                )
+                raise _validation_error_to_api_error(e)
 
     def _validate_retention(self, event: EventBase) -> None:
         """Checks that an event that defines the retention policy for a room respects the
