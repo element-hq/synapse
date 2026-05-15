@@ -113,25 +113,7 @@ class EventValidator:
                     cls=POWER_LEVELS_VALIDATOR,
                 )
             except jsonschema.ValidationError as e:
-                if e.path:
-                    # example: "users_default": '0' is not of type 'integer'
-                    # cast safety: path entries can be integers, if we fail to validate
-                    # items in an array. However, the POWER_LEVELS_SCHEMA doesn't expect
-                    # to see any arrays.
-                    message = (
-                        '"' + cast(str, e.path[-1]) + '": ' + e.message  # noqa: B306
-                    )
-                    # jsonschema.ValidationError.message is a valid attribute
-                else:
-                    # example: '0' is not of type 'integer'
-                    message = e.message  # noqa: B306
-                    # jsonschema.ValidationError.message is a valid attribute
-
-                raise SynapseError(
-                    code=400,
-                    msg=message,
-                    errcode=Codes.BAD_JSON,
-                )
+                raise _validation_error_to_api_error(e)
 
         # If the event contains a mentions key, validate it.
         if EventContentFields.MENTIONS in event.content:
@@ -321,6 +303,31 @@ def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
     )
 
     return jsonschema.validators.extend(validator, type_checker=type_checker)
+
+
+def _validation_error_to_api_error(err: jsonschema.ValidationError) -> SynapseError:
+    """
+    Converts a JSONSchema `ValidationError` to a `SynapseError` that can be thrown
+    to give a Matrix API-compatible 400 Bad Request response with `M_BAD_JSON` code
+    and a descriptive error message.
+    """
+    if err.path:
+        # example: "users_default": '0' is not of type 'integer'
+        # cast safety: path entries can be integers, if we fail to validate
+        # items in an array. However, the POWER_LEVELS_SCHEMA doesn't expect
+        # to see any arrays.
+        message = '"' + cast(str, err.path[-1]) + '": ' + err.message
+        # jsonschema.ValidationError.message is a valid attribute
+    else:
+        # example: '0' is not of type 'integer'
+        message = err.message
+        # jsonschema.ValidationError.message is a valid attribute
+
+    return SynapseError(
+        code=400,
+        msg=message,
+        errcode=Codes.BAD_JSON,
+    )
 
 
 POWER_LEVELS_VALIDATOR = _create_validator(POWER_LEVELS_SCHEMA)
