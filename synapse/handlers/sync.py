@@ -2236,19 +2236,23 @@ class SyncHandler:
         if block_all_room_ephemeral:
             ephemeral_by_room: dict[str, list[JsonDict]] = {}
         else:
-            now_token, ephemeral_by_room = await self.ephemeral_by_room(
+            (
+                sync_result_builder.now_token,
+                ephemeral_by_room,
+            ) = await self.ephemeral_by_room(
                 sync_result_builder,
                 now_token=sync_result_builder.now_token,
                 since_token=sync_result_builder.since_token,
             )
-            sync_result_builder.now_token = now_token
 
         sticky_by_room: dict[str, list[str]] = {}
         if self.hs_config.experimental.msc4354_enabled:
-            now_token, sticky_by_room = await self.sticky_events_by_room(
-                sync_result_builder, now_token, since_token
+            (
+                sync_result_builder.now_token,
+                sticky_by_room,
+            ) = await self.sticky_events_by_room(
+                sync_result_builder, sync_result_builder.now_token, since_token
             )
-            sync_result_builder.now_token = now_token
 
         # 2. We check up front if anything has changed, if it hasn't then there is
         # no point in going further.
