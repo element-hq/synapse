@@ -1516,12 +1516,17 @@ class EventsWorkerStore(SQLBaseStore):
                     )
                     continue
 
-            original_ev = make_event_from_dict(
-                event_dict=d,
-                room_version=room_version,
-                internal_metadata_dict=internal_metadata,
-                rejected_reason=rejected_reason,
-            )
+            try:
+                original_ev = make_event_from_dict(
+                    event_dict=d,
+                    room_version=room_version,
+                    internal_metadata_dict=internal_metadata,
+                    rejected_reason=rejected_reason,
+                )
+            except ValueError:
+                logger.error("Unable to parse event from database: %s", event_id)
+                continue
+
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
             original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier
