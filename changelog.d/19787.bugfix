@@ -1,0 +1,1 @@
+Fix `/sync` failing when [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) are enabled and the sync request filters out Ephemeral Data Units (EDUs).

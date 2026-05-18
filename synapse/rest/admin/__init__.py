@@ -100,6 +100,10 @@ from synapse.rest.admin.statistics import (
     LargestRoomsStatistics,
     UserMediaStatisticsRestServlet,
 )
+from synapse.rest.admin.user_reports import (
+    UserReportDetailRestServlet,
+    UserReportsRestServlet,
+)
 from synapse.rest.admin.username_available import UsernameAvailableRestServlet
 from synapse.rest.admin.users import (
     AccountDataRestServlet,
@@ -318,6 +322,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     EventReportsRestServlet(hs).register(http_server)
     RoomReportDetailRestServlet(hs).register(http_server)
     RoomReportsRestServlet(hs).register(http_server)
+    UserReportsRestServlet(hs).register(http_server)
+    UserReportDetailRestServlet(hs).register(http_server)
     AccountDataRestServlet(hs).register(http_server)
     PushersRestServlet(hs).register(http_server)
     MakeRoomAdminRestServlet(hs).register(http_server)

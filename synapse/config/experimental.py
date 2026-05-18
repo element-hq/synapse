@@ -386,9 +386,6 @@ class ExperimentalConfig(Config):
         # MSC3814 (dehydrated devices with SSSS)
         self.msc3814_enabled: bool = experimental.get("msc3814_enabled", False)
 
-        # MSC3266 (room summary api)
-        self.msc3266_enabled: bool = experimental.get("msc3266_enabled", False)
-
         # MSC2409 (this setting only relates to optionally sending to-device messages).
         # Presence, typing and read receipt EDUs are already sent to application services that
         # have opted in to receive them. If enabled, this adds to-device messages to that list.
@@ -478,6 +475,12 @@ class ExperimentalConfig(Config):
         if self.msc1767_enabled:
             # Enable room version (and thus applicable push rules from MSC3931/3932)
             KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC1767v10)
+
+        # MSC4242: State DAGs
+        self.msc4242_enabled: bool = experimental.get("msc4242_enabled", False)
+        if self.msc4242_enabled:
+            # Enable the room version
+            KNOWN_ROOM_VERSIONS.add_room_version(RoomVersions.MSC4242v12)
 
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
@@ -604,3 +607,13 @@ class ExperimentalConfig(Config):
         # Note that sticky events persisted before this feature is enabled will not be
         # considered sticky by the local homeserver.
         self.msc4354_enabled: bool = experimental.get("msc4354_enabled", False)
+
+        # MSC4450: Identity Provider selection for User-Interactive Authentication
+        # with Legacy Single Sign-On (`m.login.sso`)
+        # Tracked in: https://github.com/element-hq/synapse/issues/19691
+        # Note that this is only applicable to legacy auth, not MAS integration (OAuth 2.0).
+        self.msc4450_enabled: bool = experimental.get("msc4450_enabled", False)
+
+        # MSC4455: Preview URL capability
+        # Tracked in: https://github.com/element-hq/synapse/issues/19719
+        self.msc4452_enabled: bool = experimental.get("msc4452_enabled", False)
