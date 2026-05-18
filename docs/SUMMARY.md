@@ -63,6 +63,7 @@
       - [Background Updates](usage/administration/admin_api/background_updates.md)
       - [Fetch Event](admin_api/fetch_event.md)
       - [Event Reports](admin_api/event_reports.md)
+      - [Room Reports](admin_api/room_reports.md)
       - [Experimental Features](admin_api/experimental_features.md)
       - [Media](admin_api/media_admin_api.md)
       - [Purge History](admin_api/purge_history_api.md)
