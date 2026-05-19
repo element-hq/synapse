@@ -75,6 +75,3 @@ blake2 = "0.10.4"
 hex = "0.4.3"
 rustc_version = "0.4.1"
 
-
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "link-arg=-Wl,--version-script=export.map"]
