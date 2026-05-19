@@ -3,6 +3,7 @@ use std::convert::Infallible;
 use lazy_static::lazy_static;
 use pyo3::prelude::*;
 use pyo3_log::ResetHandle;
+use tikv_jemallocator::Jemalloc;
 
 pub mod acl;
 pub mod canonical_json;
@@ -18,6 +19,9 @@ pub mod push;
 pub mod rendezvous;
 pub mod room_versions;
 pub mod segmenter;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 lazy_static! {
     static ref LOGGING_HANDLE: ResetHandle = pyo3_log::init();
