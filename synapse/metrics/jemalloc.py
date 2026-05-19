@@ -106,7 +106,7 @@ class JemallocStats:
         )
 
         if result != 0:
-            raise Exception("Failed to call mallctl")
+            raise Exception(f"Failed to call mallctl {result}")
 
         if input_var is None:
             return None
