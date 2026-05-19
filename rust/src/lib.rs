@@ -20,6 +20,8 @@ pub mod rendezvous;
 pub mod room_versions;
 pub mod segmenter;
 
+use libc::{c_char, c_int, c_void, size_t};
+
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
@@ -92,32 +94,32 @@ impl<T> UnwrapInfallible<T> for Result<T, Infallible> {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn malloc(size: usize) -> *mut std::ffi::c_void {
+pub unsafe extern "C" fn malloc(size: size_t) -> *mut c_void {
     tikv_jemalloc_sys::malloc(size)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn calloc(number: usize, size: usize) -> *mut std::ffi::c_void {
+pub unsafe extern "C" fn calloc(number: size_t, size: size_t) -> *mut c_void {
     tikv_jemalloc_sys::calloc(number, size)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn realloc(ptr: *mut std::ffi::c_void, size: usize) -> *mut std::ffi::c_void {
+pub unsafe extern "C" fn realloc(ptr: *mut c_void, size: size_t) -> *mut c_void {
     tikv_jemalloc_sys::realloc(ptr, size)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn free(ptr: *mut std::ffi::c_void) {
+pub unsafe extern "C" fn free(ptr: *mut c_void) {
     tikv_jemalloc_sys::free(ptr)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn mallctl(
-    name: *const std::ffi::c_char,
-    oldp: *mut std::ffi::c_void,
-    oldlenp: *mut usize,
-    newp: *mut std::ffi::c_void,
-    newlen: usize,
-) -> i32 {
+    name: *const c_char,
+    oldp: *mut c_void,
+    oldlenp: *mut size_t,
+    newp: *mut c_void,
+    newlen: size_t,
+) -> c_int {
     tikv_jemalloc_sys::mallctl(name, oldp, oldlenp, newp, newlen)
 }

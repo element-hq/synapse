@@ -161,7 +161,7 @@ def _setup_jemalloc_stats() -> None:
 
     # We're looking for a path at the end of the line that includes
     # "libjemalloc".
-    regex = re.compile(r"/\S+/libjemalloc.*$")
+    regex = re.compile(r"/\S+/synapse_rust\.abi3\.so$")
 
     jemalloc_path = None
     with open("/proc/self/maps") as f:
