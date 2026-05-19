@@ -90,3 +90,34 @@ impl<T> UnwrapInfallible<T> for Result<T, Infallible> {
         }
     }
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn malloc(size: usize) -> *mut std::ffi::c_void {
+    tikv_jemalloc_sys::malloc(size)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn calloc(number: usize, size: usize) -> *mut std::ffi::c_void {
+    tikv_jemalloc_sys::calloc(number, size)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn realloc(ptr: *mut std::ffi::c_void, size: usize) -> *mut std::ffi::c_void {
+    tikv_jemalloc_sys::realloc(ptr, size)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn free(ptr: *mut std::ffi::c_void) {
+    tikv_jemalloc_sys::free(ptr)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mallctl(
+    name: *const std::ffi::c_char,
+    oldp: *mut std::ffi::c_void,
+    oldlenp: *mut usize,
+    newp: *mut std::ffi::c_void,
+    newlen: usize,
+) -> i32 {
+    tikv_jemalloc_sys::mallctl(name, oldp, oldlenp, newp, newlen)
+}

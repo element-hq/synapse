@@ -65,10 +65,16 @@ once_cell = "1.18.0"
 itertools = "0.14.0"
 tikv-jemallocator = { version = "0.6.1", features = [
     "disable_initial_exec_tls",
-    "unprefixed_malloc_on_supported_platforms",
+] }
+tikv-jemalloc-sys = { version = "0.6.1", features = [
+    "disable_initial_exec_tls",
 ] }
 
 [build-dependencies]
 blake2 = "0.10.4"
 hex = "0.4.3"
 rustc_version = "0.4.1"
+
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,--version-script=export.map"]

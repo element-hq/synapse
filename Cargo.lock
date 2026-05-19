@@ -1342,6 +1342,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tikv-jemalloc-sys",
  "tikv-jemallocator",
  "tokio",
  "ulid",
