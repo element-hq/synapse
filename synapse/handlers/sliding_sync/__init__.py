@@ -1185,8 +1185,6 @@ class SlidingSyncHandler:
             (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
         ]
         meta_room_state = list(hero_room_state)
-        if initial or name_changed:
-            meta_room_state.append((EventTypes.Name, ""))
         if initial or avatar_changed:
             meta_room_state.append((EventTypes.RoomAvatar, ""))
 
