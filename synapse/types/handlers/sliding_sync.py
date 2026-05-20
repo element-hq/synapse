@@ -203,6 +203,9 @@ class SlidingSyncResult:
         highlight_count: int
 
         def __bool__(self) -> bool:
+            """Are there any updates that should be returned immediately to
+            the client?
+            """
             return (
                 # If this is the first time the client is seeing the room, we should not filter it out
                 # under any circumstance.
@@ -270,6 +273,8 @@ class SlidingSyncResult:
             events: Sequence[JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.events)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -294,6 +299,8 @@ class SlidingSyncResult:
             device_unused_fallback_key_types: Sequence[str]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 # Note that "signed_curve25519" is always returned in key count responses
                 # regardless of whether we uploaded any keys for it. This is necessary until
                 # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
@@ -324,6 +331,8 @@ class SlidingSyncResult:
             account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(
                     self.global_account_data_map or self.account_data_by_room_map
                 )
@@ -340,6 +349,8 @@ class SlidingSyncResult:
             room_id_to_receipt_map: Mapping[str, JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.room_id_to_receipt_map)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -354,6 +365,8 @@ class SlidingSyncResult:
             room_id_to_typing_map: Mapping[str, JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.room_id_to_typing_map)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -388,6 +401,8 @@ class SlidingSyncResult:
             prev_batch: ThreadSubscriptionsToken | None
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return (
                     bool(self.subscribed)
                     or bool(self.unsubscribed)
@@ -402,6 +417,8 @@ class SlidingSyncResult:
         thread_subscriptions: ThreadSubscriptionsExtension | None = None
 
         def __bool__(self) -> bool:
+            """Are there any updates that should be returned immediately to
+            the client?"""
             return bool(
                 self.to_device
                 or self.e2ee
@@ -417,9 +434,14 @@ class SlidingSyncResult:
     extensions: Extensions
 
     def __bool__(self) -> bool:
-        """Make the result appear empty if there are no updates. This is used
-        to tell if the notifier needs to wait for more events when polling for
-        events.
+        """Are there any updates that should be returned immediately to
+        the client?
+
+        This is used to determine if a sliding sync response should be returned
+        immediately or if the notifier needs to wait for further updates, and
+        thus MUST return false if there is no new data since the last sync. This
+        is subtly different than just checking if any of the fields are set,
+        since some fields are always included (like `bump_stamp`).
         """
         # We don't include `self.lists` here, as a) `lists` is always non-empty even if
         # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
