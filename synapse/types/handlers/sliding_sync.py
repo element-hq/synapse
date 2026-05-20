@@ -309,12 +309,11 @@ class SlidingSyncResult:
                 # https://github.com/element-hq/element-android/issues/3725 and
                 # https://github.com/matrix-org/synapse/issues/10456
                 #
-                # This is why we don't incorporate `device_one_time_keys_count` into the
+                # This is why we don't incorporate `device_one_time_keys_count`
+                # (or `device_unused_fallback_key_types`) into the
                 # `__bool__` check.
 
-                return bool(
-                    self.device_list_updates or self.device_unused_fallback_key_types
-                )
+                return bool(self.device_list_updates)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class AccountDataExtension:

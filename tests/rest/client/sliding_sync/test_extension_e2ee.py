@@ -380,6 +380,83 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
             [],
         )
 
+    def test_wait_for_new_data_timeout_with_fallback_keys(self) -> None:
+        """
+        Test that an incremental Sliding Sync with the e2ee extension enabled
+        does not return immediately when the user has uploaded fallback keys
+        (i.e. `device_unused_fallback_key_types` is non-empty).
+        """
+        test_device_id = "TESTDEVICE"
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass", device_id=test_device_id)
+
+        # Upload a fallback key for the user/device so that
+        # `device_unused_fallback_key_types` is non-empty in the response.
+        self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                user1_id,
+                test_device_id,
+                {"fallback_keys": {"alg1:k1": "fallback_key1"}},
+            )
+        )
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "e2ee": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with a timeout
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+
+        # Wake-up `notifier.wait_for_events(...)` that will cause us to test
+        # `SlidingSyncResult.__bool__` for new results. The non-empty
+        # `device_unused_fallback_key_types` must not be considered new data.
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
+
+        # Block for a little bit more to ensure we don't see any new results.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=4000)
+
+        # Wait for the sync to complete (wait for the rest of the 10 second timeout,
+        # 5000 + 4000 + 1200 > 10000)
+        channel.await_result(timeout_ms=1200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Device lists are present for incremental syncs but empty because no device changes
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]
+            .get("device_lists", {})
+            .get("changed"),
+            [],
+        )
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"].get("device_lists", {}).get("left"),
+            [],
+        )
+
+        # The unused fallback key types are present, but they should not have
+        # caused the sync to return early.
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]["device_unused_fallback_key_types"],
+            ["alg1"],
+        )
+
     def test_device_lists(self) -> None:
         """
         Test that device list updates are included in the response
