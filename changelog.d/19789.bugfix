@@ -1,0 +1,1 @@
+Fix packaging for Fedora and EPEL caused by unnecessary bumping `attrs` minimum version requirement in `pyproject.toml` file. Contributed by Oleg Girko.
