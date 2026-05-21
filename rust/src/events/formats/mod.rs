@@ -179,6 +179,8 @@ pub struct EventCommonFields {
 }
 
 impl EventCommonFields {
+    /// Helper method to check if the event is a state event and return the
+    /// tuple of `(type, state_key)` if so.
     fn type_state_key_tuple(&self) -> Option<(&str, &str)> {
         if let Some(state_key) = &self.state_key {
             Some((&self.type_, state_key))
