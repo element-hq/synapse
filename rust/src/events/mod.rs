@@ -260,7 +260,7 @@ impl Event {
 
     /// Like [`Event::get_dict`], except strips fields like `signatures`,
     /// `hashes` and `unsigned` so that the result is suitable as a template for
-    /// creating new events.
+    /// creating new events. Used in make_{join,leave,knock} flows.
     fn get_templated_pdu_json<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         // Use get_dict but strip signatures, unsigned, and hashes — the
         // joining/leaving/knocking server will re-sign and recalculate hashes.
