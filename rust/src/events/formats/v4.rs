@@ -112,21 +112,27 @@ pub fn get_room_id_for_optional_room_id<'a>(
     event_id: &str,
     common_fields: &EventCommonFields,
 ) -> Result<Cow<'a, str>, Error> {
-    if let Some(room_id) = room_id {
-        return Ok(room_id.into());
+    let is_create_event = common_fields.type_state_key_tuple() == Some((M_ROOM_CREATE, ""));
+
+    match (is_create_event, room_id) {
+        // For non-create events, room_id must be present.
+        (false, None) => bail!("Event '{}' has no room ID", event_id),
+        (false, Some(room_id)) => Ok(room_id.into()),
+
+        // For create events, room_id must be absent.
+        (true, Some(_)) => bail!("Create event '{}' has unexpected room_id", event_id),
+        (true, None) => {
+            // The room ID is derived from the event ID by replacing the
+            // leading '$' with a '!'.
+            if !event_id.starts_with('$') {
+                bail!("Create event ID does not start with '$': {}", event_id);
+            }
+
+            let mut room_id = String::with_capacity(event_id.len());
+            room_id.push('!');
+            room_id.push_str(&event_id[1..]);
+
+            Ok(room_id.into())
+        }
     }
-
-    // Ensure that this is a create event, as all other events must
-    // have a room ID.
-    if common_fields.type_state_key_tuple() != Some((M_ROOM_CREATE, "")) {
-        bail!("Event '{}' has no room ID", event_id);
-    }
-
-    // The room ID is derived from the event ID by replacing the
-    // leading '$' with a '!'.
-    let mut room_id = String::with_capacity(event_id.len());
-    room_id.push('!');
-    room_id.push_str(&event_id[1..]);
-
-    Ok(room_id.into())
 }
