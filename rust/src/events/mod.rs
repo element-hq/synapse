@@ -127,7 +127,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[pyclass(frozen, weakref)]
 pub struct Event {
     /// The parsed event JSON.
-    fields: FormattedEvent,
+    parsed_event: FormattedEvent,
 
     /// The event ID. For format v1 this is read directly from the JSON;
     /// for v2+ it is computed from the canonical-JSON hash at
@@ -170,7 +170,7 @@ impl Event {
 
         // Parse the event dict into a FormattedEvent, converting any failures to
         // a `ValueError`.
-        let fields = depythonize_event_dict(room_version, event_dict).map_err(|err| {
+        let parsed_event = depythonize_event_dict(room_version, event_dict).map_err(|err| {
             let new_err = PyValueError::new_err(format!(
                 "Failed to parse event for room version {}",
                 room_version
@@ -181,7 +181,7 @@ impl Event {
 
         let internal_metadata = EventInternalMetadata::new(internal_metadata_dict)?;
 
-        let event_id = match &*fields.specific_fields {
+        let event_id = match &*parsed_event.specific_fields {
             EventFormatEnum::V1(format) => {
                 // V1/V2 events have the event_id in the event dict.
                 Arc::clone(&format.event_id)
@@ -191,7 +191,7 @@ impl Event {
                 // fail if the event can't be serialized to canonical JSON (e.g.
                 // having out-of-range integers), which we report as
                 // `ValueError` as it indicates the event is invalid.
-                let event_value = serde_json::to_value(&fields).map_err(|err| {
+                let event_value = serde_json::to_value(&parsed_event).map_err(|err| {
                     PyValueError::new_err(format!("Failed to serialize event: {}", err))
                 })?;
                 calculate_event_id(&event_value, room_version)
@@ -203,7 +203,7 @@ impl Event {
         };
 
         Ok(Self {
-            fields,
+            parsed_event,
 
             event_id,
             room_version,
@@ -215,7 +215,7 @@ impl Event {
     /// Serializes the event into a Python dict (i.e. the same shape as if we
     /// had parsed the event from JSON).
     fn get_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        Ok(pythonize(py, &self.fields)?)
+        Ok(pythonize(py, &self.parsed_event)?)
     }
 
     /// Like `get_dict`, but serializes `unsigned` in a form suitable for
@@ -224,7 +224,7 @@ impl Event {
         let binding = self.get_dict(py)?;
         let dict = binding.cast::<PyDict>()?;
 
-        dict.set_item("unsigned", self.fields.unsigned.for_persistence(py)?)?;
+        dict.set_item("unsigned", self.parsed_event.unsigned.for_persistence(py)?)?;
 
         Ok(binding)
     }
@@ -280,7 +280,7 @@ impl Event {
     }
 
     fn prev_event_ids(&self) -> Vec<String> {
-        match &*self.fields.specific_fields {
+        match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => format.prev_event_ids(),
             EventFormatEnum::V2V3(format) => format.auth_prev_events.prev_events.clone(),
             EventFormatEnum::V4(format) => format.auth_prev_events.prev_events.clone(),
@@ -289,10 +289,12 @@ impl Event {
     }
 
     fn auth_event_ids(&self) -> PyResult<Vec<String>> {
-        match &*self.fields.specific_fields {
+        match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => Ok(format.auth_event_ids()),
             EventFormatEnum::V2V3(format) => Ok(format.auth_event_ids()),
-            EventFormatEnum::V4(format) => Ok(format.auth_event_ids(&self.fields.common_fields)?),
+            EventFormatEnum::V4(format) => {
+                Ok(format.auth_event_ids(&self.parsed_event.common_fields)?)
+            }
             EventFormatEnum::VMSC4242(format) => Ok(format.auth_event_ids(self)?),
         }
     }
@@ -308,11 +310,11 @@ impl Event {
     }
 
     fn is_state(&self) -> bool {
-        self.fields.common_fields.state_key.is_some()
+        self.parsed_event.common_fields.state_key.is_some()
     }
 
     fn get_state_key(&self) -> Option<&str> {
-        self.fields.common_fields.state_key.as_deref()
+        self.parsed_event.common_fields.state_key.as_deref()
     }
 
     #[getter]
@@ -326,7 +328,7 @@ impl Event {
         let internal_metadata = self.internal_metadata.deep_copy()?;
 
         let new_event = Event {
-            fields: self.fields.deep_copy(),
+            parsed_event: self.parsed_event.deep_copy(),
             internal_metadata,
             room_version: self.room_version,
             rejected_reason: self.rejected_reason.clone(),
@@ -341,7 +343,11 @@ impl Event {
     fn sticky_duration(&self) -> Option<SynapseDuration> {
         const MAX_DURATION_MS: u64 = 3600 * 1000;
 
-        let sticky_obj = self.fields.common_fields.other_fields.get("msc4354_sticky");
+        let sticky_obj = self
+            .parsed_event
+            .common_fields
+            .other_fields
+            .get("msc4354_sticky");
 
         let sticky_obj = match sticky_obj {
             Some(serde_json::Value::Object(obj)) => obj,
@@ -417,37 +423,37 @@ impl Event {
 
     #[getter]
     fn room_id(&self) -> PyResult<Cow<'_, str>> {
-        match &*self.fields.specific_fields {
+        match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => Ok(format.room_id.as_ref().into()),
             EventFormatEnum::V2V3(format) => Ok(format.room_id.as_ref().into()),
             EventFormatEnum::V4(format) => {
-                Ok(format.room_id(&self.event_id, &self.fields.common_fields)?)
+                Ok(format.room_id(&self.event_id, &self.parsed_event.common_fields)?)
             }
             EventFormatEnum::VMSC4242(format) => {
-                Ok(format.room_id(&self.event_id, &self.fields.common_fields)?)
+                Ok(format.room_id(&self.event_id, &self.parsed_event.common_fields)?)
             }
         }
     }
 
     #[getter]
     fn signatures(&self) -> Signatures {
-        self.fields.signatures.clone()
+        self.parsed_event.signatures.clone()
     }
 
     #[getter]
     fn content(&self) -> JsonObject {
-        self.fields.common_fields.content.clone()
+        self.parsed_event.common_fields.content.clone()
     }
 
     #[getter]
     fn depth(&self) -> i64 {
-        self.fields.common_fields.depth
+        self.parsed_event.common_fields.depth
     }
 
     #[getter]
     fn hashes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
-        for (key, value) in &self.fields.common_fields.hashes {
+        for (key, value) in &self.parsed_event.common_fields.hashes {
             dict.set_item(&**key, &**value)?;
         }
         Ok(dict)
@@ -455,12 +461,12 @@ impl Event {
 
     #[getter]
     fn origin_server_ts(&self) -> i64 {
-        self.fields.common_fields.origin_server_ts
+        self.parsed_event.common_fields.origin_server_ts
     }
 
     #[getter]
     fn sender(&self) -> &str {
-        &self.fields.common_fields.sender
+        &self.parsed_event.common_fields.sender
     }
 
     /// Deprecated alias for `sender`. Kept for backwards compatibility with
@@ -468,12 +474,12 @@ impl Event {
     /// exposed in the type stubs.
     #[getter]
     fn user_id(&self) -> &str {
-        &self.fields.common_fields.sender
+        &self.parsed_event.common_fields.sender
     }
 
     #[getter(state_key)]
     fn state_key_attr(&self) -> PyResult<&str> {
-        let Some(state_key) = self.fields.common_fields.state_key.as_deref() else {
+        let Some(state_key) = self.parsed_event.common_fields.state_key.as_deref() else {
             return Err(PyAttributeError::new_err("state_key"));
         };
         Ok(state_key)
@@ -481,12 +487,12 @@ impl Event {
 
     #[getter]
     fn r#type(&self) -> &str {
-        &self.fields.common_fields.type_
+        &self.parsed_event.common_fields.type_
     }
 
     #[getter]
     fn unsigned(&self) -> Unsigned {
-        self.fields.unsigned.clone()
+        self.parsed_event.unsigned.clone()
     }
 
     #[getter]
@@ -494,7 +500,7 @@ impl Event {
         // `prev_state_events` should only be called after validating the event
         // is of a format that supports MSC4242, so we return an AttributeError
         // for formats that don't support it.
-        match &*self.fields.specific_fields {
+        match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(_) | EventFormatEnum::V2V3(_) | EventFormatEnum::V4(_) => {
                 Err(PyAttributeError::new_err("prev_state_events"))
             }
@@ -504,7 +510,7 @@ impl Event {
 
     #[getter]
     fn redacts<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
-        let common = &self.fields.common_fields;
+        let common = &self.parsed_event.common_fields;
         let value = if self.room_version.updated_redaction_rules {
             common.content.get_field(REDACTS)
         } else {

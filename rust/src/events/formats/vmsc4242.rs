@@ -78,7 +78,7 @@ impl EventFormatVMSC4242 {
 
         // Catches cases where we accidentally call auth_event_ids() prior to calculating what they
         // actually are. The exception being the m.room.create event which has no auth events.
-        if event.fields.common_fields.type_state_key_tuple() != Some((M_ROOM_CREATE, ""))
+        if event.parsed_event.common_fields.type_state_key_tuple() != Some((M_ROOM_CREATE, ""))
             && auth_event_ids.is_empty()
         {
             return Err(PyRuntimeError::new_err(format!(
