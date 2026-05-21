@@ -171,7 +171,10 @@ impl Event {
         // Parse the event dict into a FormattedEvent, converting any failures to
         // a `ValueError`.
         let fields = depythonize_event_dict(room_version, event_dict).map_err(|err| {
-            let new_err = PyValueError::new_err("Failed to parse event");
+            let new_err = PyValueError::new_err(format!(
+                "Failed to parse event for room version {}",
+                room_version
+            ));
             new_err.set_cause(py, Some(err));
             new_err
         })?;
