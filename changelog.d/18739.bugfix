@@ -1,0 +1,1 @@
+Fix `master_key` and `self_signing_key` being sent on federation user device queries when they are not set.
