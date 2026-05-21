@@ -576,10 +576,20 @@ configured as stream writer for the `device_lists` stream:
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
+##### The `thread_subscriptions` stream
+
+This stream is only used for MSC4306 (experimental).
+It is not used when that experimental feature is disabled.
+
+The `thread_subscriptions` stream supports multiple writers.
+The following endpoints should be routed directly to one of the workers
+configured as stream writer for the `thread_subscriptions` stream:
+
+    ^/_matrix/client/unstable/io.element.msc4306/.*
+
 ##### The `quarantined_media_changes` stream
 
-The `quarantined_media_changes` stream supports multiple writers. The following endpoints
-can be handled by any worker, but should be routed directly to one of the workers
+The `quarantined_media_changes` stream supports multiple writers. The following endpoints should be routed directly to one of the workers
 configured as stream writer for the `quarantined_media_changes` stream:
 
     ^/_synapse/admin/v1/quarantine_media/.*$
