@@ -1,0 +1,1 @@
+Fix merging signatures when a policy server is running under the same server name as Synapse. The bug was re-introduced in v1.153.0rc1 after being fixed earlier in v1.151.0rc1. Contributed by @tulir @ Beeper.

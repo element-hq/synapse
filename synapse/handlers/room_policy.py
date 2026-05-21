@@ -251,8 +251,8 @@ class RoomPolicyHandler:
             # Note: if the policy server and event sender are the same server, the sender
             # might not have added policy server signatures to the event for whatever reason.
             # When this happens, we don't want to obliterate the event's existing signatures
-            # because the event will fail authorization. This is why we add defaults rather
-            # than simply `update` the signatures on the event.
+            # because the event will fail authorization. This is why we add items individually
+            # rather than simply `update` the signatures on the event.
             #
             # This situation can happen if the homeserver and policy server parts are
             # logically the same server, but run by different software. For example, Synapse
@@ -261,7 +261,9 @@ class RoomPolicyHandler:
             # servers need to manually fetch signatures for. This is the code that allows
             # those events to continue working (because they're legally sent, even if missing
             # the policy server signature).
-            event.signatures.update(signature)
+            signatures = signature.get(policy_server.server_name, {})
+            for key_id, sig in signatures.items():
+                event.signatures.add_signature(policy_server.server_name, key_id, sig)
         except HttpResponseException as ex:
             # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
             raise ex.to_synapse_error() from ex
