@@ -3,7 +3,7 @@
 //! Contains types and utilities for working with Matrix events.
 
 /// Maximum size of a PDU
-pub const MAX_PDU_SIZE_BYTES: usize = 65_535;
+pub const MAX_PDU_SIZE_BYTES: usize = 65_536;
 
 /// Event Types
 pub mod event_type {
