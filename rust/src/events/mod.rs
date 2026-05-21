@@ -639,11 +639,11 @@ mod tests {
             Some("!room:localhost")
         );
         assert_eq!(
-            event.specific_fields.auth_prev_events.auth_events,
+            event.specific_fields.auth_events,
             vec!["$auth1".to_string(), "$auth2".to_string()]
         );
         assert_eq!(
-            event.specific_fields.auth_prev_events.prev_events,
+            event.specific_fields.prev_events,
             vec!["$prev1".to_string()]
         );
 
