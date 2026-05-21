@@ -212,8 +212,7 @@ impl Event {
         })
     }
 
-    /// Serializes the event into a Python dict (i.e. the same shape as if we
-    /// had parsed the event from JSON).
+    /// Convert the event to a dictionary suitable for serialisation.
     fn get_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(pythonize(py, &self.parsed_event)?)
     }
