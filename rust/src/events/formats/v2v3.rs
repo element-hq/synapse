@@ -34,20 +34,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::formats::EventCommonFields;
 
-/// Shared flat-list encoding of `auth_events` and `prev_events`, reused
-/// by every format from v2/v3 onwards.
-#[derive(Serialize, Deserialize)]
-pub struct SimpleAuthPrevEvents {
-    pub auth_events: Vec<String>,
-    pub prev_events: Vec<String>,
-}
-
 /// Version-specific fields for room versions 3-10.
 #[derive(Serialize, Deserialize)]
 pub struct EventFormatV2V3 {
     pub room_id: Box<str>,
-    #[serde(flatten)]
-    pub auth_prev_events: SimpleAuthPrevEvents,
+    pub auth_events: Vec<String>,
+    pub prev_events: Vec<String>,
 }
 
 impl EventFormatV2V3 {
@@ -61,6 +53,6 @@ impl EventFormatV2V3 {
     }
 
     pub fn auth_event_ids(&self) -> Vec<String> {
-        self.auth_prev_events.auth_events.clone()
+        self.auth_events.clone()
     }
 }

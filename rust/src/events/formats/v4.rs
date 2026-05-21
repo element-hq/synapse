@@ -32,7 +32,6 @@ use std::borrow::Cow;
 use anyhow::{bail, Error};
 use serde::{Deserialize, Serialize};
 
-use crate::events::formats::v2v3::SimpleAuthPrevEvents;
 use crate::events::{constants::event_type::M_ROOM_CREATE, formats::EventCommonFields};
 
 /// Version-specific fields for room version 11.
@@ -40,8 +39,8 @@ use crate::events::{constants::event_type::M_ROOM_CREATE, formats::EventCommonFi
 pub struct EventFormatV4 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_id: Option<Box<str>>,
-    #[serde(flatten)]
-    pub auth_prev_events: SimpleAuthPrevEvents,
+    pub auth_events: Vec<String>,
+    pub prev_events: Vec<String>,
 }
 
 impl EventFormatV4 {
@@ -69,7 +68,7 @@ impl EventFormatV4 {
 
         if is_create {
             // The create event itself has no implicit auth events.
-            return Ok(self.auth_prev_events.auth_events.clone());
+            return Ok(self.auth_events.clone());
         }
 
         // For non-create events, the create event is implicitly part of
@@ -85,11 +84,11 @@ impl EventFormatV4 {
         create_event_id.push_str(&room_id[1..]);
 
         debug_assert!(
-            !self.auth_prev_events.auth_events.contains(&create_event_id),
+            !self.auth_events.contains(&create_event_id),
             "create event ID should not already be in auth_events"
         );
 
-        let mut auth_events = self.auth_prev_events.auth_events.clone();
+        let mut auth_events = self.auth_events.clone();
         auth_events.push(create_event_id);
         Ok(auth_events)
     }

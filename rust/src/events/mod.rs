@@ -281,8 +281,8 @@ impl Event {
     fn prev_event_ids(&self) -> Vec<String> {
         match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => format.prev_event_ids(),
-            EventFormatEnum::V2V3(format) => format.auth_prev_events.prev_events.clone(),
-            EventFormatEnum::V4(format) => format.auth_prev_events.prev_events.clone(),
+            EventFormatEnum::V2V3(format) => format.prev_events.clone(),
+            EventFormatEnum::V4(format) => format.prev_events.clone(),
             EventFormatEnum::VMSC4242(format) => format.prev_events.clone(),
         }
     }
