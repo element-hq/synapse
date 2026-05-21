@@ -1,0 +1,1 @@
+Fix access token cache not being invalidated for sessions using refresh tokens. Contributed by @FrenchGithubUser @ Famedly.

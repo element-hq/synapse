@@ -1,3 +1,15 @@
+# Synapse 1.153.0 (2026-05-19)
+
+No significant changes since 1.153.0rc3.
+
+
+# Synapse 1.153.0rc3 (2026-05-15)
+
+## Bugfixes
+
+- Revert 'Have [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) return a new response immediately if a room subscription has changed and produced a new response. ([\#19714](https://github.com/element-hq/synapse/issues/19714))' (introduced in 1.153.0rc1) due to performance problems. ([\#19784](https://github.com/element-hq/synapse/issues/19784))
+
+
 # Synapse 1.153.0rc2 (2026-05-13)
 
 ## Bugfixes
