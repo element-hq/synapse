@@ -340,7 +340,7 @@ impl Event {
     /// `SynapseDuration` representing the sticky duration. Otherwise returns
     /// `None`.
     fn sticky_duration(&self) -> Option<SynapseDuration> {
-        const MAX_DURATION_MS: u64 = 3600 * 1000;
+        const MAX_DURATION: SynapseDuration = SynapseDuration::from_milliseconds(3600 * 1000);
 
         let sticky_obj = self
             .parsed_event
@@ -358,9 +358,10 @@ impl Event {
             _ => return None,
         };
 
-        let duration_ms = std::cmp::min(duration_ms, MAX_DURATION_MS);
-
         let duration = SynapseDuration::from_milliseconds(duration_ms);
+
+        let duration = std::cmp::min(duration, MAX_DURATION);
+
         Some(duration)
     }
 

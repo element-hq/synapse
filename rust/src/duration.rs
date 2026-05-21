@@ -29,6 +29,7 @@ fn duration_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 }
 
 /// Mirrors the `synapse.util.duration.Duration` Python class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SynapseDuration {
     microseconds: u64,
 }
