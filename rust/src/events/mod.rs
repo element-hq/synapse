@@ -503,7 +503,7 @@ impl Event {
     fn redacts<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
         let common = &self.fields.common_fields;
         let value = if self.room_version.updated_redaction_rules {
-            common.content.object.get(REDACTS)
+            common.content.get_field(REDACTS)
         } else {
             common.other_fields.get(REDACTS)
         };

@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 #[pyclass(mapping, frozen, skip_from_py_object)]
 #[serde(transparent)]
 pub struct JsonObject {
-    pub object: Arc<BTreeMap<Box<str>, serde_json::Value>>,
+    object: Arc<BTreeMap<Box<str>, serde_json::Value>>,
 }
 
 #[pymethods]
