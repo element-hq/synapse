@@ -98,6 +98,7 @@ jobs:
         # real-time.
         run: |
           set -o pipefail
+
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 | tee /tmp/gotest-sanity-check-complement.log
         shell: bash
         env:
@@ -122,12 +123,26 @@ jobs:
         # -json: Output JSON format so that gotestfmt can parse it.
         #
         # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
+        # later on for better formatting with gotestfmt.
+        # But we still want the ability for the command
         # to output to the terminal as it runs so we can see what's happening in
         # real-time.
+        # When not running in pipeline debug mode, we only show the last 50 lines
+        # of the JSON output from the build log because it is not human-readable,
+        # the extreme volume makes it very unwieldy to access in the web UI
+        # and the resultant log download extremely large.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
+
+          # To see the full build log, start a re-run with
+          # the debug mode enabled in the GitHub UI.
+          if [ "$RUNNER_DEBUG" = "1" ]; then
+            debug_pipe="cat"
+          else
+            debug_pipe="tail -n 50"
+          fi
+
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log | $debug_pipe
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -151,12 +166,26 @@ jobs:
         #     are underpowered and don't like running tons of Synapse instances at once.
         # -json: Output JSON format so that gotestfmt can parse it.
         #
-        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
+        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
+        # later on for better formatting with gotestfmt.
+        # But we still want the ability for the command
         # to output to the terminal as it runs so we can see what's happening in
         # real-time.
+        # When not running in pipeline debug mode, we only show the last 50 lines
+        # of the JSON output from the build log because it is not human-readable,
+        # the extreme volume makes it very unwieldy to access in the web UI
+        # and the resultant log download extremely large.
         run: |
           set -o pipefail
+
+          # To see the full build log, start a re-run with
+          # the debug mode enabled in the GitHub UI.
+          if [ "$RUNNER_DEBUG" = "1" ]; then
+            debug_pipe="cat"
+          else
+            debug_pipe="tail -n 50"
+          fi
+
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
         shell: bash
         env:
