@@ -29,7 +29,10 @@
 //! [`SimpleAuthPrevEvents`] is shared with [`v4`](super::v4) since the
 //! flat-list encoding carries forward unchanged.
 
+use anyhow::{bail, Error};
 use serde::{Deserialize, Serialize};
+
+use crate::events::formats::EventCommonFields;
 
 /// Shared flat-list encoding of `auth_events` and `prev_events`, reused
 /// by every format from v2/v3 onwards.
@@ -48,6 +51,15 @@ pub struct EventFormatV2V3 {
 }
 
 impl EventFormatV2V3 {
+    pub fn validate(&self, common_fields: &EventCommonFields) -> Result<(), Error> {
+        // Ensure that we don't have an event_id set.
+        if common_fields.other_fields.contains_key("event_id") {
+            bail!("v2/v3 events must not have an explicit event_id");
+        }
+
+        Ok(())
+    }
+
     pub fn auth_event_ids(&self) -> Vec<String> {
         self.auth_prev_events.auth_events.clone()
     }

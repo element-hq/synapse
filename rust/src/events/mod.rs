@@ -525,6 +525,9 @@ fn depythonize_event_dict(
         }
         EventFormatVersions::ROOM_V3 | EventFormatVersions::ROOM_V4_PLUS => {
             let event_format: FormattedEvent<EventFormatV2V3> = depythonize(event_dict)?;
+            event_format
+                .specific_fields
+                .validate(&event_format.common_fields)?;
             event_format.into()
         }
         EventFormatVersions::ROOM_V11_HYDRA_PLUS => {

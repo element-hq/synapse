@@ -26,6 +26,7 @@
 
 use std::borrow::Cow;
 
+use anyhow::bail;
 use anyhow::Error;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::PyResult;
@@ -50,6 +51,15 @@ impl EventFormatVMSC4242 {
     pub fn validate(&self, common_fields: &EventCommonFields) -> Result<(), Error> {
         validate_optional_room_id(self.room_id.as_deref(), common_fields)?;
 
+        // Ensure that we don't have any `auth_events` or `event_id` fields
+        // set.
+        if common_fields.other_fields.contains_key("auth_events") {
+            bail!("MSC4242 events must not have explicit auth_events");
+        }
+        if common_fields.other_fields.contains_key("event_id") {
+            bail!("MSC4242 events must not have an explicit event_id");
+        }
+
         Ok(())
     }
 
@@ -72,7 +82,7 @@ impl EventFormatVMSC4242 {
             && auth_event_ids.is_empty()
         {
             return Err(PyRuntimeError::new_err(format!(
-                "auth_event_ids has not been calculated: {}",
+                "auth_event_ids has not been calculated : {}",
                 event.event_id
             )));
         }

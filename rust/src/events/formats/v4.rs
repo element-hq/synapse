@@ -48,6 +48,11 @@ impl EventFormatV4 {
     pub fn validate(&self, common_fields: &EventCommonFields) -> Result<(), Error> {
         validate_optional_room_id(self.room_id.as_deref(), common_fields)?;
 
+        // Ensure that we don't have an event_id set.
+        if common_fields.other_fields.contains_key("event_id") {
+            bail!("v4 events must not have an explicit event_id");
+        }
+
         Ok(())
     }
 
