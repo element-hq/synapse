@@ -68,6 +68,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use anyhow::Error;
 use serde::{Deserialize, Serialize};
 
 use crate::events::{json_object::JsonObject, signatures::Signatures, unsigned::Unsigned};
@@ -126,6 +127,15 @@ impl FormattedEvent {
             unsigned: self.unsigned.deep_copy(),
             specific_fields: Arc::clone(&self.specific_fields),
             common_fields: Arc::clone(&self.common_fields),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), Error> {
+        match &*self.specific_fields {
+            EventFormatEnum::V1(format) => format.validate(&self.common_fields),
+            EventFormatEnum::V2V3(format) => format.validate(&self.common_fields),
+            EventFormatEnum::V4(format) => format.validate(&self.common_fields),
+            EventFormatEnum::VMSC4242(format) => format.validate(&self.common_fields),
         }
     }
 }

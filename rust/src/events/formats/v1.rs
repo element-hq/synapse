@@ -25,7 +25,10 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use anyhow::Error;
 use serde::{Deserialize, Serialize};
+
+use crate::events::formats::EventCommonFields;
 
 /// Version-specific fields for room versions 1 and 2.
 #[derive(Serialize, Deserialize)]
@@ -37,6 +40,10 @@ pub struct EventFormatV1 {
 }
 
 impl EventFormatV1 {
+    pub fn validate(&self, _common_fields: &EventCommonFields) -> Result<(), Error> {
+        Ok(())
+    }
+
     pub fn auth_event_ids(&self) -> Vec<String> {
         self.auth_events.iter().map(|(id, _)| id.clone()).collect()
     }
