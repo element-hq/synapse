@@ -781,6 +781,11 @@ class FederationServer(FederationBase):
             expected_room_id: The room ID specified in the
                 `/_matrix/federation/v1/invite/{roomId}/{eventId}` request that we expect to
                 match in the actual event itself.
+            expected_event_id: The event ID specified in the
+                `/_matrix/federation/v1/invite/{roomId}/{eventId}` request that we expect to
+                match in the actual event itself.
+            event_json:
+            room_version_id:
         """
 
         room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
