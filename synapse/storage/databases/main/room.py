@@ -836,7 +836,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         if room_type is not None:
             if room_type == "":
-                filter_.append("state.room_type IS NULL")
+                filter_.append("state.room_type IS NULL OR state.room_type = ''")
             else:
                 filter_.append("state.room_type = ?")
                 where_args.append(room_type)
