@@ -531,7 +531,9 @@ class DelayedEventsHandler:
     async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
-        return await self._store.get_all_delayed_events_for_user(requester.user.localpart)
+        return await self._store.get_all_delayed_events_for_user(
+            requester.user.localpart
+        )
 
     async def _send_event(
         self,

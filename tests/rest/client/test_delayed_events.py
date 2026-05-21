@@ -338,11 +338,15 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
         # Using auth should bypass ratelimit applied against source IP
-        channel = self._update_delayed_event(delay_id, "cancel", action_in_path, self.user1_access_token)
+        channel = self._update_delayed_event(
+            delay_id, "cancel", action_in_path, self.user1_access_token
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "cancel", action_in_path, self.user1_access_token)
+        channel = self._update_delayed_event(
+            delay_id, "cancel", action_in_path, self.user1_access_token
+        )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
@@ -353,7 +357,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
 
         # Test that the request isn't ratelimited anymore.
-        channel = self._update_delayed_event(delay_id, "cancel", action_in_path, self.user1_access_token)
+        channel = self._update_delayed_event(
+            delay_id, "cancel", action_in_path, self.user1_access_token
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @parameterized.expand(
@@ -517,11 +523,15 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
         # Using auth should bypass ratelimit applied against source IP
-        channel = self._update_delayed_event(delay_id, "restart", action_in_path, self.user1_access_token)
+        channel = self._update_delayed_event(
+            delay_id, "restart", action_in_path, self.user1_access_token
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "restart", action_in_path, self.user1_access_token)
+        channel = self._update_delayed_event(
+            delay_id, "restart", action_in_path, self.user1_access_token
+        )
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
@@ -532,7 +542,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
 
         # Test that the request isn't ratelimited anymore.
-        channel = self._update_delayed_event(delay_id, "restart", action_in_path, self.user1_access_token)
+        channel = self._update_delayed_event(
+            delay_id, "restart", action_in_path, self.user1_access_token
+        )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     def test_delayed_state_is_not_cancelled_by_new_state_from_same_user(
@@ -650,7 +662,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
         return content
 
     def _update_delayed_event(
-        self, delay_id: str, action: str, action_in_path: bool, access_token: str | None = None
+        self,
+        delay_id: str,
+        action: str,
+        action_in_path: bool,
+        access_token: str | None = None,
     ) -> FakeChannel:
         path = f"{PATH_PREFIX}/{delay_id}"
         body = {}
