@@ -169,7 +169,19 @@ def _load_appservice(
     if as_info.get("ip_range_whitelist"):
         ip_range_whitelist = IPSet(as_info.get("ip_range_whitelist"))
 
-    supports_ephemeral = as_info.get("de.sorunome.msc2409.push_ephemeral", False)
+    unstable_msc2409_supports_ephemeral = as_info.get(
+        "de.sorunome.msc2409.push_ephemeral", False
+    )
+    if not isinstance(unstable_msc2409_supports_ephemeral, bool):
+        raise ValueError(
+            "The `de.sorunome.msc2409.push_ephemeral` option should be true or false if specified."
+        )
+
+    receive_ephemeral = as_info.get("receive_ephemeral", False)
+    if not isinstance(receive_ephemeral, bool):
+        raise ValueError(
+            "The `receive_ephemeral` option should be true or false if specified."
+        )
 
     # Opt-in flag for the MSC3202-specific transactional behaviour.
     # When enabled, appservice transactions contain the following information:
@@ -204,7 +216,8 @@ def _load_appservice(
         protocols=protocols,
         rate_limited=rate_limited,
         ip_range_whitelist=ip_range_whitelist,
-        supports_ephemeral=supports_ephemeral,
+        receive_ephemeral=receive_ephemeral,
+        msc2409_push_ephemeral=unstable_msc2409_supports_ephemeral,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
         msc4190_device_management=msc4190_enabled,
     )
