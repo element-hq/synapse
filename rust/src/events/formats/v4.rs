@@ -29,7 +29,7 @@
 
 use std::borrow::Cow;
 
-use anyhow::{bail, Error};
+use anyhow::{bail, ensure, Error};
 use serde::{Deserialize, Serialize};
 
 use crate::events::{constants::event_type::M_ROOM_CREATE, formats::EventCommonFields};
@@ -83,7 +83,7 @@ impl EventFormatV4 {
         create_event_id.push('$');
         create_event_id.push_str(&room_id[1..]);
 
-        debug_assert!(
+        ensure!(
             !self.auth_events.contains(&create_event_id),
             "create event ID should not already be in auth_events"
         );
