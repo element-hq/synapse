@@ -27,7 +27,7 @@
 //! [`FormattedEvent`] is a generic container parametrised by the
 //! room-version-specific portion (`EventFormatV1`, `EventFormatV2V3`,
 //! `EventFormatV4`, `EventFormatVMSC4242`). See [`formats`] for the layout
-//! of the on-the-wire JSON and how the room-version-agnostic fields are
+//! of the over-the-wire JSON and how the room-version-agnostic fields are
 //! split from the version-specific ones.
 //!
 //! [`Event`] is the `pyclass` exposed to Python. It bundles a fully parsed

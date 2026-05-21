@@ -13,8 +13,8 @@
  *
  */
 
-//! On-the-wire representations of Matrix events, parameterised by event format
-//! version.
+//! Over-the-wire representations of Matrix events, parameterised by event
+//! format version.
 //!
 //! # Design
 //!
@@ -23,7 +23,7 @@
 //!
 //! We model this with a single [`FormattedEvent`] container that is generic
 //! over the format-specific tail `E`. Serde `#[serde(flatten)]` merges the
-//! common and specific halves into a single JSON object on the wire, while
+//! common and specific halves into a single JSON object over the wire, while
 //! keeping them as distinct structs in Rust. This lets version-agnostic code
 //! (field getters, the `unsigned` accessor, …) read [`EventCommonFields`]
 //! directly, and only the small amount of version-aware logic (auth-event
@@ -40,8 +40,8 @@
 //!
 //! # Format variants
 //!
-//! Different room versions have different on-the-wire formats, which is tracked
-//! by [`crate::room_versions::RoomVersion::event_format`] field.
+//! Different room versions have different over-the-wire formats, which is
+//! tracked by [`crate::room_versions::RoomVersion::event_format`] field.
 //!
 //! Each format struct owns only its version-specific fields and any
 //! validation/derivation logic; the rest lives in [`EventCommonFields`]. The
@@ -82,7 +82,7 @@ pub use v2v3::EventFormatV2V3;
 pub use v4::EventFormatV4;
 pub use vmsc4242::EventFormatVMSC4242;
 
-/// A parsed Matrix event in its on-the-wire layout.
+/// A parsed Matrix event in its over-the-wire layout.
 ///
 /// `E` is the format-specific tail. Code that deserialises a known
 /// room version picks a concrete `E` (e.g. `FormattedEvent<EventFormatV4>`);
