@@ -71,9 +71,10 @@ impl EventFormatVMSC4242 {
         if event.fields.common_fields.type_state_key_tuple() != Some((M_ROOM_CREATE, ""))
             && auth_event_ids.is_empty()
         {
-            return Err(PyRuntimeError::new_err(
-                "auth_event_ids is unexpectedly empty for a non-create event",
-            ));
+            return Err(PyRuntimeError::new_err(format!(
+                "auth_event_ids has not been calculated: {}",
+                event.event_id
+            )));
         }
 
         Ok(auth_event_ids)
