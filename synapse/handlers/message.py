@@ -53,8 +53,9 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.api.urls import ConsentURIBuilder
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase, FrozenEventVMSC4242, relation_from_event
+from synapse.events import EventBase, relation_from_event
 from synapse.events.builder import EventBuilder
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -79,6 +80,7 @@ from synapse.types import (
     Requester,
     RoomAlias,
     StateMap,
+    StrCollection,
     StreamToken,
     UserID,
     create_requester,
@@ -589,7 +591,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """
@@ -982,7 +984,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         """
@@ -1127,7 +1129,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         room_id = event_dict["room_id"]
@@ -1253,7 +1255,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """Create a new event for a local client. If bool for_batch is true, will
         create an event using the prev_event_ids, and will create an event context for
@@ -1602,8 +1604,7 @@ class EventCreationHandler:
                         auth_event = event_id_to_event.get(event_id)
                         if auth_event:
                             batched_auth_events[event_id] = auth_event
-                    if event.room_version.msc4242_state_dags:
-                        assert isinstance(event, FrozenEventVMSC4242)
+                    if supports_msc4242_state_dag(event):
                         # State DAG rooms will check that the prev_state_events are not rejected.
                         # To do that, we need to make sure we pass in the prev_state_events as
                         # batched_auth_events, else we will fail the event due to the
@@ -1872,7 +1873,7 @@ class EventCreationHandler:
             state_entry = await self.state.resolve_state_groups_for_events(
                 event.room_id,
                 event_ids=event.prev_state_events
-                if isinstance(event, FrozenEventVMSC4242)
+                if supports_msc4242_state_dag(event)
                 else event.prev_event_ids(),
             )
 
@@ -2089,10 +2090,9 @@ class EventCreationHandler:
                         returned_invite = await federation_handler.send_invite(
                             invitee.domain, event, context
                         )
-                        event.unsigned.pop("room_state", None)
 
                         # TODO: Make sure the signatures actually are correct.
-                        event.signatures.update(returned_invite.signatures)
+                        event.signatures.update(returned_invite.signatures.as_dict())
 
                 if event.content["membership"] == Membership.KNOCK:
                     maybe_upsert_event_field(

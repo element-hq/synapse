@@ -451,16 +451,6 @@ class FederationServer(FederationBase):
         newest_pdu_ts = 0
 
         for p in transaction.pdus:
-            # FIXME (richardv): I don't think this works:
-            #  https://github.com/matrix-org/synapse/issues/8429
-            if "unsigned" in p:
-                unsigned = p["unsigned"]
-                if "age" in unsigned:
-                    p["age"] = unsigned["age"]
-            if "age" in p:
-                p["age_ts"] = request_time - int(p["age"])
-                del p["age"]
-
             # We try and pull out an event ID so that if later checks fail we
             # can log something sensible. We don't mandate an event ID here in
             # case future event formats get rid of the key.
@@ -488,9 +478,14 @@ class FederationServer(FederationBase):
                 continue
 
             try:
-                event = event_from_pdu_json(p, room_version)
+                event = event_from_pdu_json(p, room_version, received_time=request_time)
             except SynapseError as e:
                 logger.info("Ignoring PDU for failing to deserialize: %s", e)
+                continue
+            except Exception as e:
+                # We catch all exceptions here as we don't want a single bad
+                # event to cause us to fail the whole transaction.
+                logger.exception("Error deserializing PDU: %s", e)
                 continue
 
             pdus_by_room.setdefault(room_id, []).append(event)

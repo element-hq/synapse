@@ -34,6 +34,7 @@ from typing import (
     Generator,
     Generic,
     Iterable,
+    Sequence,
     TypeVar,
     cast,
 )
@@ -46,7 +47,14 @@ from twisted.internet import defer
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events import EventBase, FrozenEventVMSC4242, event_exists_in_state_dag
+from synapse.events import (
+    EventBase,
+    event_exists_in_state_dag,
+)
+from synapse.events.py_protocol import (
+    MSC4242Event,
+    all_supports_msc4242_state_dag,
+)
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
@@ -637,7 +645,6 @@ class EventsPersistenceStorageController:
         # Get the room version for the first event. This room version is the same for all events
         # as events_and_contexts is all for one room.
         assert len(events_and_contexts) > 0
-        room_version = events_and_contexts[0][0].room_version
 
         for chunk in chunks:
             # We can't easily parallelize these since different chunks
@@ -648,22 +655,18 @@ class EventsPersistenceStorageController:
             new_state_dag_extrems = None
 
             if not backfilled:
-                if room_version.msc4242_state_dags:
+                if all_supports_msc4242_state_dag(chunk):
                     with Measure(
                         self._clock,
                         name="_process_state_dag_forward_extremities_and_state_delta",
                         server_name=self.server_name,
                     ):
-                        assert all(
-                            isinstance(ev, FrozenEventVMSC4242) for ev, _ in chunk
-                        )
                         (
                             new_forward_extremities,  # for prev_events
                             state_delta_for_room,  # for state groups
                             new_state_dag_extrems,  # for prev_state_events
                         ) = await self._process_state_dag_forward_extremities_and_state_delta(
-                            room_id,
-                            cast(list[tuple[FrozenEventVMSC4242, EventContext]], chunk),
+                            room_id, chunk
                         )
                 else:
                     with Measure(
@@ -840,7 +843,7 @@ class EventsPersistenceStorageController:
     async def _process_state_dag_forward_extremities_and_state_delta(
         self,
         room_id: str,
-        event_contexts: list[tuple[FrozenEventVMSC4242, EventContext]],
+        event_contexts: Sequence[tuple[MSC4242Event, EventContext]],
     ) -> tuple[set[str] | None, DeltaState | None, set[str] | None]:
         """Process the forwards extremities for state DAG rooms.
         Returns:
@@ -933,7 +936,7 @@ class EventsPersistenceStorageController:
         self,
         room_id: str,
         existing_fwd_extrems: frozenset[str],
-        event_contexts: list[tuple[FrozenEventVMSC4242, EventContext]],
+        event_contexts: Sequence[tuple[MSC4242Event, EventContext]],
     ) -> set[str]:
         """Calculate the new state dag forward extremities. Modifies existing_fwd_extrems.
 

@@ -1626,10 +1626,15 @@ class FederationClient(FederationBase):
                 min_depth=min_depth,
                 timeout=timeout,
             )
+            received_time = self._clock.time_msec()
 
             room_version = await self.store.get_room_version(room_id)
 
-            events = parse_events_from_pdu_json(content.get("events", []), room_version)
+            events = parse_events_from_pdu_json(
+                content.get("events", []),
+                room_version,
+                received_time=received_time,
+            )
 
             signed_events = await self._check_sigs_and_hash_for_pulled_events_and_fetch(
                 destination, events, room_version=room_version

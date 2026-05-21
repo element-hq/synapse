@@ -236,9 +236,7 @@ def event_needs_resigning(
     if sender.domain != server_name:
         return False
     want_key_id = verify_key.alg + ":" + verify_key.version
-    signed_with_current_key_id = ev.signatures.get(server_name, {}).get(
-        want_key_id, None
-    )
+    signed_with_current_key_id = ev.signatures.get_signature(server_name, want_key_id)
     if signed_with_current_key_id:
         return False
 

@@ -9,9 +9,6 @@ from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import FrozenEventV3
-from synapse.federation.federation_base import (
-    event_from_pdu_json,
-)
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
@@ -19,6 +16,7 @@ from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -549,7 +547,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -595,7 +593,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -710,7 +708,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},

@@ -1,3 +1,61 @@
+# Synapse 1.153.0 (2026-05-19)
+
+No significant changes since 1.153.0rc3.
+
+
+# Synapse 1.153.0rc3 (2026-05-15)
+
+## Bugfixes
+
+- Revert 'Have [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) return a new response immediately if a room subscription has changed and produced a new response. ([\#19714](https://github.com/element-hq/synapse/issues/19714))' (introduced in 1.153.0rc1) due to performance problems. ([\#19784](https://github.com/element-hq/synapse/issues/19784))
+
+
+# Synapse 1.153.0rc2 (2026-05-13)
+
+## Bugfixes
+
+- Correctly handle arbitrary precision integers in `unsigned` field of events. The bug was introduced in 1.153.0rc1. ([\#19769](https://github.com/element-hq/synapse/issues/19769))
+
+
+# Synapse 1.153.0rc1 (2026-05-08)
+
+## Features
+
+- Make ACLs apply to EDUs per [MSC4163](https://github.com/matrix-org/matrix-spec-proposals/pull/4163). ([\#18475](https://github.com/element-hq/synapse/issues/18475))
+- Stabilize [MSC3266: Room summary API](https://github.com/matrix-org/matrix-spec-proposals/pull/3266), removing the experimental config flag `msc3266_enabled`. Contributed by @dasha-uwu. ([\#19720](https://github.com/element-hq/synapse/issues/19720))
+- Partial [MSC4311](https://github.com/matrix-org/matrix-spec-proposals/pull/4311) implementation: `m.room.create` is now a required part of stripped `invite_state`/`knock_state` . Contributed by @FrenchGithubUser @Famedly. ([\#19722](https://github.com/element-hq/synapse/issues/19722))
+- Expose `tombstoned` and `replacement_room` in room details on admin API endpoint `GET /_synapse/admin/v1/rooms/<room_id>`. Contributed by Noah Markert. ([\#19737](https://github.com/element-hq/synapse/issues/19737))
+
+## Bugfixes
+
+- Allow self-requested user erasure (upon account deactivation) to succeed even if Synapse has disabled profile changes. Contributed by Famedly. ([\#19398](https://github.com/element-hq/synapse/issues/19398))
+- Fix Synapse not backfilling new history when attempting to use a pagination token near a backward extremity. ([\#19611](https://github.com/element-hq/synapse/issues/19611))
+- Have [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) return a new response immediately if a room subscription has changed and produced a new response. ([\#19714](https://github.com/element-hq/synapse/issues/19714))
+- Fix a bug where when upgrading a room to room version 12, the power level event in the old room got temporarily mutated to remove the user upgrading the room's power. ([\#19727](https://github.com/element-hq/synapse/issues/19727))
+- Fix packaging for Fedora and EPEL caused by unnecessary bumping `authlib` minimum version requirement in `pyproject.toml` file. Contributed by Oleg Girko. ([\#19742](https://github.com/element-hq/synapse/issues/19742))
+
+## Improved Documentation
+
+- Add warning about known problems when configuring `use_frozen_dicts`. ([\#19711](https://github.com/element-hq/synapse/issues/19711))
+
+## Internal Changes
+
+- Port `Event.signatures` field to Rust. ([\#19706](https://github.com/element-hq/synapse/issues/19706))
+- Port `Event.unsigned` field to Rust. ([\#19708](https://github.com/element-hq/synapse/issues/19708))
+- Add a Rust canonical JSON serializer. ([\#19739](https://github.com/element-hq/synapse/issues/19739), [\#19763](https://github.com/element-hq/synapse/issues/19763))
+- Configure Dependabot to only update Python dependencies in the lockfile, unless widening upper bounds. ([\#19743](https://github.com/element-hq/synapse/issues/19743))
+- Reduce `WORKER_LOCK_MAX_RETRY_INTERVAL` to 5 seconds to reduce idle time after lock is released. ([\#19755](https://github.com/element-hq/synapse/issues/19755))
+- Force keyword-only arguments for `Duration` so time units have to be specified. ([\#19756](https://github.com/element-hq/synapse/issues/19756))
+
+
+# Synapse 1.152.1 (2026-05-07)
+
+## Security Fixes
+
+- Prevent CPU starvation (Denial of Service) under worker lock contention, additionally capping the `WorkerLock` time out interval to a maximum of 60 seconds. Contributed by Famedly. ([\#19394](https://github.com/element-hq/synapse/issues/19394), ELEMENTSEC-2026-1706, [GHSA-8q93-326v-3m7g](https://github.com/element-hq/synapse/security/advisories/GHSA-8q93-326v-3m7g), CVE-2026-45078)
+- Prevent pagination ending when a page is full of rejected events. (ELEMENTSEC-2025-1636, [GHSA-6qf2-7x63-mm6v](https://github.com/element-hq/synapse/security/advisories/GHSA-6qf2-7x63-mm6v), CVE-2026-45076)
+
+
 # Synapse 1.152.0 (2026-04-28)
 
 No significant changes since 1.152.0rc1.

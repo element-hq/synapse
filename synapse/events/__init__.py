@@ -44,8 +44,18 @@ from synapse.api.constants import (
     StickyEvent,
 )
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import EventInternalMetadata
-from synapse.types import JsonDict, StateKey, StrCollection
+from synapse.synapse_rust.events import (
+    EventInternalMetadata,
+    JsonObject,
+    Signatures,
+    Unsigned,
+)
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    StateKey,
+    StrCollection,
+)
 from synapse.util.caches import intern_dict
 from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
@@ -202,17 +212,29 @@ class EventBase(metaclass=abc.ABCMeta):
     ):
         assert room_version.event_format == self.format_version
 
+        if "content" in event_dict:
+            event_dict["content"] = JsonObject(event_dict["content"])
+
+        # We intern these strings because they turn up a lot (especially when
+        # caching).
+        event_dict = intern_dict(event_dict)
+
+        if USE_FROZEN_DICTS:
+            frozen_dict = freeze(event_dict)
+        else:
+            frozen_dict = event_dict
+
         self.room_version = room_version
-        self.signatures = signatures
-        self.unsigned = unsigned
+        self.signatures = Signatures(signatures)
+        self.unsigned = Unsigned(unsigned)
         self.rejected_reason = rejected_reason
 
-        self._dict = event_dict
+        self._dict = frozen_dict
 
         self.internal_metadata = EventInternalMetadata(internal_metadata_dict)
 
     depth: DictProperty[int] = DictProperty("depth")
-    content: DictProperty[JsonDict] = DictProperty("content")
+    content: DictProperty[JsonMapping] = DictProperty("content")
     hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
     sender: DictProperty[str] = DictProperty("sender")
@@ -254,8 +276,33 @@ class EventBase(metaclass=abc.ABCMeta):
         return self._dict.get("state_key")
 
     def get_dict(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for serialisation."""
+
         d = dict(self._dict)
-        d.update({"signatures": self.signatures, "unsigned": dict(self.unsigned)})
+        if "content" in d:
+            # Convert the content (which is a JsonObject) back to a dict. Json
+            # serialization should handle JsonObjects fine, but for sanities
+            # sake we want `get_dict()` and `get_pdu_json()` to return plain
+            # dicts.
+            d["content"] = dict(self.content)
+        d.update(
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_event(),
+            }
+        )
+
+        return d
+
+    def get_dict_for_persistence(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for persistence."""
+        d = dict(self._dict)
+        d.update(
+            {
+                "signatures": self.signatures.as_dict(),
+                "unsigned": self.unsigned.for_persistence(),
+            }
+        )
 
         return d
 
@@ -395,21 +442,12 @@ class FrozenEvent(EventBase):
             for name, sigs in event_dict.pop("signatures", {}).items()
         }
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
-
-        # We intern these strings because they turn up a lot (especially when
-        # caching).
-        event_dict = intern_dict(event_dict)
-
-        if USE_FROZEN_DICTS:
-            frozen_dict = freeze(event_dict)
-        else:
-            frozen_dict = event_dict
+        unsigned = event_dict.pop("unsigned", {})
 
         self._event_id = event_dict["event_id"]
 
         super().__init__(
-            frozen_dict,
+            event_dict,
             room_version=room_version,
             signatures=signatures,
             unsigned=unsigned,
@@ -449,21 +487,12 @@ class FrozenEventV2(EventBase):
 
         assert "event_id" not in event_dict
 
-        unsigned = dict(event_dict.pop("unsigned", {}))
-
-        # We intern these strings because they turn up a lot (especially when
-        # caching).
-        event_dict = intern_dict(event_dict)
-
-        if USE_FROZEN_DICTS:
-            frozen_dict = freeze(event_dict)
-        else:
-            frozen_dict = event_dict
+        unsigned = event_dict.pop("unsigned", {})
 
         self._event_id: str | None = None
 
         super().__init__(
-            frozen_dict,
+            event_dict,
             room_version=room_version,
             signatures=signatures,
             unsigned=unsigned,
@@ -589,7 +618,7 @@ class FrozenEventVMSC4242(FrozenEventV4):
     """FrozenEventVMSC4242, which differs from FrozenEventV4 only in the addition of prev_state_events"""
 
     format_version = EventFormatVersions.ROOM_VMSC4242
-    prev_state_events: DictProperty[list[str]] = DictProperty("prev_state_events")
+    prev_state_events: DictProperty[StrCollection] = DictProperty("prev_state_events")
 
     def __init__(
         self,
