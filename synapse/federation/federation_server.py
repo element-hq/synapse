@@ -57,6 +57,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
 from synapse.events.snapshot import EventPersistencePair
+from synapse.events.utils import parse_stripped_state_event
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -88,6 +89,7 @@ from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
 from synapse.types import JsonDict, StateMap, UserID, get_domain_from_id
+from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
@@ -987,20 +989,31 @@ class FederationServer(FederationBase):
         Returns:
             The stripped room state.
         """
+        time_now = self._clock.time_msec()
+
         _, context = await self._on_send_membership_event(
             origin, content, Membership.KNOCK, room_id
         )
 
-        # Retrieve stripped state events from the room and send them back to the remote
-        # server. This will allow the remote server's clients to display information
-        # related to the room while the knock request is pending.
-        stripped_room_state = (
-            # TODO: Implement MSC4311 and use full PDUs here
-            await self.store.get_stripped_room_state_from_event_context(
-                context, self._room_prejoin_state_types
-            )
+        # MSC4311: For the federation API, format events in `knock_room_state` as full
+        # PDU's
+        #
+        # Find the full events based on the state at the time of the knock
+        state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
+            context, self._room_prejoin_state_types
         )
-        return {"knock_room_state": stripped_room_state}
+        state_events = await self.store.get_events(state_ids)
+        assert set(state_ids) == set(state_events.keys()), (
+            "We should have all events available that were set as stripped state."
+        )
+
+        return {
+            "knock_room_state": [
+                # Use full PDU's according to MSC4311
+                state_event.get_pdu_json(time_now)
+                for state_event in state_events.values()
+            ]
+        }
 
     async def _on_send_membership_event(
         self, origin: str, content: JsonDict, membership_type: str, room_id: str

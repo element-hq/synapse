@@ -146,6 +146,7 @@ class FederationClient(FederationBase):
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
+        self._room_prejoin_state_types = hs.config.api.room_prejoin_state
 
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
@@ -1354,7 +1355,7 @@ class FederationClient(FederationBase):
 
         Args:
             destination:
-            pdu: Invite event. This function assumes that `unsigned.invite_room_state` is filled in.
+            pdu: Invite event
             context:
             room_version:
 
@@ -1371,35 +1372,9 @@ class FederationClient(FederationBase):
         # MSC4311: For the federation API, format events in `invite_room_state` as full
         # PDU's
         #
-        # First get all of the expected stripped state events that should be included.
-        # We will derive these from the `unsigned` part of the PDU which already has
-        # `invite_room_state` calculated but this doesn't include any event ID
-        # information so we need to look it up based on the state at the time of the
-        # invite.
-        #
-        # It would also be reasonable to use `hs.config.api.room_prejoin_state` but we
-        # might as well read from this source of truth to exactly match.
-        stripped_state_types = []
-        unsigned_invite_room_state = pdu.unsigned.get("invite_room_state")
-        # Scrutinize untyped values
-        assert isinstance(unsigned_invite_room_state, list), (
-            f"Expected `unsigned.invite_room_state` on event_id={pdu.event_id} to exist and be a list (found {unsigned_invite_room_state})."
-            "This is a Synapse programming error."
-        )
-        for raw_stripped_event in unsigned_invite_room_state:
-            stripped_state_event = parse_stripped_state_event(raw_stripped_event)
-            # Since this is our own invite, it should always be well-formed
-            assert stripped_state_event is not None, (
-                f"Unable to parse one of the events from the `unsigned.invite_room_state` on event_id={pdu.event_id} as a stripped state event."
-            )
-            stripped_state_types.append(
-                (stripped_state_event.type, stripped_state_event.state_key)
-            )
-
         # Find the full events based on the state at the time of the invite
-        state_filter = StateFilter.from_types(stripped_state_types)
         state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
-            context, state_filter
+            context, self._room_prejoin_state_types
         )
         state_events = await self.store.get_events(state_ids)
         assert set(state_ids) == set(state_events.keys()), (
