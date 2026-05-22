@@ -1175,9 +1175,6 @@ class FederationHandler:
                             "Unable to parse one of the `invite_room_state` event's as a PDU"
                         ) from exc
 
-                    if pdu.type == EventTypes.Create:
-                        includes_create_event = True
-
                     # Validate that it's from the same room
                     assert pdu.room_id == event.room_id, (
                         "PDU must be from the room ID specified in the `/invite` request"
@@ -1191,6 +1188,13 @@ class FederationHandler:
                         raise AssertionError(
                             "PDU must pass signature/hash checks"
                         ) from exc
+
+                    # Mark down whether we saw the create event which we will validate just below
+                    #
+                    # We do this after the above checks to make sure it's a valid event
+                    # from this room.
+                    if pdu.type == EventTypes.Create:
+                        includes_create_event = True
 
                 # Validate `m.room.create` event is included
                 assert includes_create_event, (
