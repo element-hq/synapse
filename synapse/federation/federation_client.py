@@ -1352,6 +1352,12 @@ class FederationClient(FederationBase):
         """Actually sends the invite, first trying v2 API and falling back to
         v1 API if necessary.
 
+        Args:
+            destination:
+            pdu: Invite event. This function assumes that `unsigned.invite_room_state` is filled in.
+            context:
+            room_version:
+
         Returns:
             The event as a dict as returned by the remote server
 
@@ -1366,11 +1372,21 @@ class FederationClient(FederationBase):
         # PDU's
         #
         # First get all of the expected stripped state events that should be included.
-        # We will derive these from the `unsigned` part of the PDU but this doesn't
-        # include any event ID information so we need to look it up based on the state
-        # at the time of the invite.
+        # We will derive these from the `unsigned` part of the PDU which already has
+        # `invite_room_state` calculated but this doesn't include any event ID
+        # information so we need to look it up based on the state at the time of the
+        # invite.
+        #
+        # It would also be reasonable to use `hs.config.api.room_prejoin_state` but we
+        # might as well read from this source of truth to exactly match.
         stripped_state_types = []
-        for raw_stripped_event in pdu.unsigned.get("invite_room_state", []):
+        unsigned_invite_room_state = pdu.unsigned.get("invite_room_state")
+        # Scrutinize untyped values
+        assert isinstance(unsigned_invite_room_state, list), (
+            f"Expected `unsigned.invite_room_state` on {pdu.event_id} to exist and be a list (found {unsigned_invite_room_state})."
+            "This is a Synapse programming error."
+        )
+        for raw_stripped_event in unsigned_invite_room_state:
             stripped_state_event = parse_stripped_state_event(raw_stripped_event)
             # Since this is our own invite, it should always be well-formed
             assert stripped_state_event is not None, (
