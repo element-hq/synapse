@@ -175,7 +175,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         )
 
     def _sign_with_random_key(self, server_name: str, event: EventBase) -> None:
-        non_policyserver_key = signedjson.key.generate_signing_key("meow")
+        non_policyserver_key = signedjson.key.generate_signing_key(
+            "non_policyserver_key"
+        )
         event.signatures = Signatures(
             compute_event_signature(
                 event.room_version,
