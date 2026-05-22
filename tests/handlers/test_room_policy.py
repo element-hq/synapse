@@ -339,7 +339,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.get_success(
             self.handler.ask_policy_server_to_sign_event(event, verify=True)
         )
+        # Standard success case: event has signatures from the origin and the policy server
         self.assertEqual(len(event.signatures), 2)
+        self.assertEqual(len(event.signatures["example.org"]), 1)
         self.assertEqual(len(event.signatures[self.OTHER_SERVER_NAME]), 1)
 
     def test_ask_origin_server_to_sign_event_doesnt_replace_signatures(self) -> None:
@@ -363,6 +365,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.get_success(
             self.handler.ask_policy_server_to_sign_event(event, verify=True)
         )
+        # Less common success case: the event origin server is logically the same as
+        # the policy server, so there will be two signatures from one server name.
+        # It's important to make sure both signatures are preserved.
         self.assertEqual(len(event.signatures), 1)
         self.assertEqual(len(event.signatures[self.OTHER_SERVER_NAME]), 2)
 
