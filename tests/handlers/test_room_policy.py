@@ -108,17 +108,21 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         async def policy_server_signs_event(
             destination: str, pdu: EventBase, timeout: int | None = None
         ) -> JsonDict | None:
-            pdu_dict = pdu.get_dict()
-            # Remove any existing signatures to ensure we only return the new signature
-            # like the policy server spec says.
-            pdu_dict.pop("signatures", None)
             sigs = compute_event_signature(
                 pdu.room_version,
-                pdu_dict,
+                pdu.get_dict(),
                 self.OTHER_SERVER_NAME,
                 self.signing_key,
             )
-            return sigs
+            # Only return the new signature like the policy server spec says,
+            # not any others that were already in the event
+            return {
+                self.OTHER_SERVER_NAME: {
+                    POLICY_SERVER_KEY_ID: sigs[self.OTHER_SERVER_NAME][
+                        POLICY_SERVER_KEY_ID
+                    ]
+                }
+            }
 
         async def policy_server_signs_event_with_wrong_key(
             destination: str, pdu: EventBase, timeout: int | None = None
@@ -334,17 +338,32 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 },
             },
         )
+        # Sign the event as the origin server first, since that's what events passed to
+        # ask_policy_server_to_sign_event will generally look like. The exact key used
+        # here isn't important.
         self._sign_with_random_key("example.org", event)
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
         self.get_success(
             self.handler.ask_policy_server_to_sign_event(event, verify=True)
         )
         # Standard success case: event has signatures from the origin and the policy server
-        self.assertEqual(len(event.signatures), 2)
-        self.assertEqual(len(event.signatures["example.org"]), 1)
-        self.assertEqual(len(event.signatures[self.OTHER_SERVER_NAME]), 1)
+        self.assertEqual(
+            {
+                server: len(signatures)
+                for server, signatures in event.signatures.as_dict().items()
+            },
+            {"example.org": 1, self.OTHER_SERVER_NAME: 1},
+            f"Expected signatures for the origin homeserver (example.org) and policy server ({self.OTHER_SERVER_NAME})",
+        )
 
     def test_ask_origin_server_to_sign_event_doesnt_replace_signatures(self) -> None:
+        """
+        ``ask_policy_server_to_sign_event`` has had bugs where it accidentally overwrote
+        the origin server's signature in the case where the origin server is the same
+        as the policy server. This test is otherwise equivalent to the success case test
+        above, but uses the policy server as the event sender to ensure both signatures
+        are preserved.
+        """
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
         event = make_test_event(
@@ -360,6 +379,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 },
             },
         )
+        # Similar to the test above, sign the event as the origin server, which in this
+        # case is the same as the policy server. The key is expected to be different
+        # than the ed25519:policy_server key in self.signing_key.
         self._sign_with_random_key(self.OTHER_SERVER_NAME, event)
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
         self.get_success(
@@ -368,8 +390,14 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         # Less common success case: the event origin server is logically the same as
         # the policy server, so there will be two signatures from one server name.
         # It's important to make sure both signatures are preserved.
-        self.assertEqual(len(event.signatures), 1)
-        self.assertEqual(len(event.signatures[self.OTHER_SERVER_NAME]), 2)
+        self.assertEqual(
+            {
+                server: len(signatures)
+                for server, signatures in event.signatures.as_dict().items()
+            },
+            {self.OTHER_SERVER_NAME: 2},
+            f"Expected 2 signatures for policy server ({self.OTHER_SERVER_NAME})",
+        )
 
     def test_ask_policy_server_to_sign_event_refuses(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
