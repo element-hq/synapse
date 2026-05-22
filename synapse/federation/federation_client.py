@@ -1383,14 +1383,14 @@ class FederationClient(FederationBase):
         unsigned_invite_room_state = pdu.unsigned.get("invite_room_state")
         # Scrutinize untyped values
         assert isinstance(unsigned_invite_room_state, list), (
-            f"Expected `unsigned.invite_room_state` on {pdu.event_id} to exist and be a list (found {unsigned_invite_room_state})."
+            f"Expected `unsigned.invite_room_state` on event_id={pdu.event_id} to exist and be a list (found {unsigned_invite_room_state})."
             "This is a Synapse programming error."
         )
         for raw_stripped_event in unsigned_invite_room_state:
             stripped_state_event = parse_stripped_state_event(raw_stripped_event)
             # Since this is our own invite, it should always be well-formed
             assert stripped_state_event is not None, (
-                "Unable to parse one of the events from the `invite_room_state` as a stripped state event"
+                f"Unable to parse one of the events from the `unsigned.invite_room_state` on event_id={pdu.event_id} as a stripped state event."
             )
             stripped_state_types.append(
                 (stripped_state_event.type, stripped_state_event.state_key)
