@@ -178,8 +178,14 @@ class Stream:
         # If the minimum current token for the local instance is less than or
         # equal to the last thing we published, we know that there are no
         # updates.
+        #
+        # We only advance last_token to minimal_local_current_token() rather
+        # than current_token. current_token may be inflated by other writers'
+        # positions (via advance()), and jumping last_token past the local
+        # writer's actual position would cause subsequent local writes to be
+        # silently dropped by the early return on the next call.
         if self.last_token >= self.minimal_local_current_token():
-            self.last_token = current_token
+            self.last_token = self.minimal_local_current_token()
             return [], current_token, False
 
         updates, current_token, limited = await self.get_updates_since(
