@@ -1156,9 +1156,8 @@ class FederationHandler:
         # > error (new to the endpoint). For invites to room version 12+ rooms, servers
         # > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
         #
-        # FIXME: Always validate for all room versions after 2027-01-01. Given Synapse
-        # claimed to support room version 12 but didn't adhere to this behavior until
-        # 2026-05-04, we will skip for now.
+        # FIXME: Apply this validation for all room versions after 2027-01-01 (to allow
+        # some time for the ecosystem to adapt and support MSC4311).
         invite_room_state = event.unsigned.get("invite_room_state")
         if room_version.msc4311_stripped_state:
             try:
@@ -1200,7 +1199,7 @@ class FederationHandler:
             except Exception as exc:
                 # FIXME: Reject with 400 `M_MISSING_PARAM` after 2027-01-01. Given Synapse
                 # claimed to support room version 12 but didn't adhere to this behavior until
-                # 2026-05-04, we will only warn for now.
+                # 2026-06-01, we will only warn for now.
                 logger.warning(
                     "Continuing anyway but failed to validate `invite_room_state` on invite %s: %s",
                     event,
