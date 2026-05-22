@@ -27,6 +27,7 @@ from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
+from synapse.synapse_rust.events import Signatures
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
@@ -107,9 +108,13 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         async def policy_server_signs_event(
             destination: str, pdu: EventBase, timeout: int | None = None
         ) -> JsonDict | None:
+            pdu_dict = pdu.get_dict()
+            # Remove any existing signatures to ensure we only return the new signature
+            # like the policy server spec says.
+            pdu_dict.pop("signatures", None)
             sigs = compute_event_signature(
                 pdu.room_version,
-                pdu.get_dict(),
+                pdu_dict,
                 self.OTHER_SERVER_NAME,
                 self.signing_key,
             )
@@ -167,6 +172,17 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             content,
             tok=self.creator_token,
             state_key="",
+        )
+
+    def _sign_with_random_key(self, server_name: str, event: EventBase) -> None:
+        non_policyserver_key = signedjson.key.generate_signing_key("meow")
+        event.signatures = Signatures(
+            compute_event_signature(
+                event.room_version,
+                event.get_dict(),
+                server_name,
+                non_policyserver_key,
+            )
         )
 
     def test_no_policy_event_set(self) -> None:
@@ -316,11 +332,37 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 },
             },
         )
+        self._sign_with_random_key("example.org", event)
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
+        self.assertEqual(len(event.signatures), 2)
+        self.assertEqual(len(event.signatures[self.OTHER_SERVER_NAME]), 1)
+
+    def test_ask_origin_server_to_sign_event_doesnt_replace_signatures(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        event = make_test_event(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:" + self.OTHER_SERVER_NAME,
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is another signed event.",
+                },
+            },
+        )
+        self._sign_with_random_key(self.OTHER_SERVER_NAME, event)
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
         self.get_success(
             self.handler.ask_policy_server_to_sign_event(event, verify=True)
         )
         self.assertEqual(len(event.signatures), 1)
+        self.assertEqual(len(event.signatures[self.OTHER_SERVER_NAME]), 2)
 
     def test_ask_policy_server_to_sign_event_refuses(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
