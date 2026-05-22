@@ -1390,7 +1390,7 @@ class FederationClient(FederationBase):
             stripped_state_event = parse_stripped_state_event(raw_stripped_event)
             # Since this is our own invite, it should always be well-formed
             assert stripped_state_event is not None, (
-                "Unable to parse one of the evnts from the `invite_room_state` as a stripped state event"
+                "Unable to parse one of the events from the `invite_room_state` as a stripped state event"
             )
             stripped_state_types.append(
                 (stripped_state_event.type, stripped_state_event.state_key)
