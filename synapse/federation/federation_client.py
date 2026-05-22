@@ -1399,6 +1399,7 @@ class FederationClient(FederationBase):
                     "event": pdu.get_pdu_json(time_now),
                     "room_version": room_version.identifier,
                     "invite_room_state": [
+                        # Use full PDU's according to MSC4311
                         state_event.get_pdu_json(time_now)
                         for state_event in state_events.values()
                     ],
