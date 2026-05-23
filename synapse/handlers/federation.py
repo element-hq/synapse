@@ -30,6 +30,7 @@ from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Any,
     Iterable,
 )
 
@@ -117,11 +118,6 @@ NUMBER_OF_EVENTS_TO_BACKFILL = 100
 """
 The number of events we try to backfill from other servers in a single request.
 """
-
-
-class StrippedRoomStateType(enum.Enum):
-    INVITE = "invite_room_state"
-    KNOCK = "knock_room_state"
 
 
 # TODO: We can refactor this away now that there is only one backfill point again
@@ -907,15 +903,45 @@ class FederationHandler:
         # This is a bit of a hack and is cribbing off of invites. Basically we
         # store the room state here and retrieve it again when this event appears
         # in the invitee's sync stream. It is stripped out for all other local users.
-        stripped_room_state = knock_response.get("knock_room_state")
+        #
+        # Parse/validate `knock_room_state`
+        try:
+            stripped_room_state = await self._parse_stripped_room_state(
+                stripped_room_state=knock_response.get("knock_room_state"),
+                room_id=event.room_id,
+                room_version=event_format_version,
+            )
+            # Replace with our sanitized `knock_room_state`
+            event.unsigned["knock_room_state"] = [
+                serialize_stripped_state_event(stripped_state_event)
+                for stripped_state_event in stripped_room_state
+            ]
+        except Exception as exc:
+            # FIXME(MSC4311): Apply this validation for all room versions after 2027-06-01 (to allow
+            # some time for the ecosystem to adapt and support MSC4311).
+            if event_format_version.msc4311_stripped_state:
+                # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
+                # after 2027-06-01. Given Synapse claimed to support room version 12 but
+                # didn't adhere to this behavior until 2026-06-01, we will only warn for
+                # now.
+                logger.warning(
+                    "Continuing anyway but failed to validate `knock_room_state` on knock %s (room_version=%s): %s",
+                    event,
+                    event_format_version,
+                    exc,
+                )
 
-        if stripped_room_state is None:
-            raise KeyError("Missing 'knock_room_state' field in send_knock response")
-
-        if not isinstance(stripped_room_state, list):
-            raise TypeError("'knock_room_state' has wrong type")
-
-        event.unsigned["knock_room_state"] = stripped_room_state
+            # FIXME(MSC4311): Remove this whole block after we always enforce the
+            # validation above. The only reason this is here is because the validation
+            # can fail for non-compliant servers but we should still use stripped state.
+            stripped_room_state = self._minimal_parse_stripped_room_state(
+                stripped_room_state=event.unsigned.get("knock_room_state"),
+            )
+            # Replace with our sanitized `knock_room_state`
+            event.unsigned["knock_room_state"] = [
+                serialize_stripped_state_event(stripped_state_event)
+                for stripped_state_event in stripped_room_state
+            ]
 
         context = EventContext.for_outlier(self._storage_controllers)
         stream_id = await self._federation_event_handler.persist_events_and_notify(
@@ -1076,10 +1102,35 @@ class FederationHandler:
         await self._event_auth_handler.check_auth_rules_from_context(event)
         return event
 
+    def _minimal_parse_stripped_room_state(
+        self,
+        *,
+        stripped_room_state: Any,
+    ) -> list[StrippedStateEvent]:
+        """
+        The minimum amount of parsing necessary to ensure
+        `invite_room_state`/`knock_room_state` is at-least a list of stripped state events.
+        """
+
+        # Scrutinize JSON values
+        if not isinstance(stripped_room_state, list):
+            raise TypeError("Stripped state must be a list of PDU's")
+
+        parsed_stripped_room_state = []
+        for raw_stripped_event in stripped_room_state:
+            # Parse and serialize to strip the events down to only the necessary fields
+            parsed_stripped_event = parse_stripped_state_event(raw_stripped_event)
+            if parsed_stripped_event is None:
+                raise ValueError("Unable to parse as stripped event")
+            parsed_stripped_room_state.append(parsed_stripped_event)
+
+        return parsed_stripped_room_state
+
     async def _parse_stripped_room_state(
         self,
-        stripped_room_state_type: StrippedRoomStateType,
-        event: EventBase,
+        *,
+        stripped_room_state: Any,
+        room_id: str,
         room_version: RoomVersion,
     ) -> list[StrippedStateEvent]:
         """
@@ -1096,18 +1147,21 @@ class FederationHandler:
         the events contained within can be full PDU's or stripped state events (older
         version of the Matrix spec).
 
+        Args:
+            stripped_room_state: The raw `invite_room_state`/`knock_room_state` JSON
+            room_id: The room ID the invite/knock is happening in
+            room_version: The version of the room the invite/knock is happening in
+
         Returns:
             A list of parsed `StrippedStateEvent`
 
         Raises:
             `TypeError`/`ValueError` when the stripped room state is invalid
         """
-        stripped_room_state = event.unsigned.get(stripped_room_state_type.value)
-
         # Scrutinize JSON values
         if not isinstance(stripped_room_state, list):
             raise TypeError(
-                f"`{stripped_room_state_type.value}` must be a list of PDU's that includes the `m.room.create` event"
+                "Stripped state must be a list of PDU's that includes the `m.room.create` event"
             )
 
         parsed_stripped_room_state = []
@@ -1118,13 +1172,13 @@ class FederationHandler:
                 pdu = event_from_pdu_json(raw_stripped_event, room_version)
             except Exception as exc:
                 raise ValueError(
-                    f"Unable to parse one of the `{stripped_room_state_type.value}` event's as a PDU"
+                    "Unable to parse one of the stripped state events as a PDU"
                 ) from exc
 
             # Validate that it's from the same room
-            if pdu.room_id != event.room_id:
+            if pdu.room_id != room_id:
                 raise ValueError(
-                    f"PDU from {stripped_room_state_type.value} must be from the room ID specified in the `/invite` request"
+                    "PDU from stripped state must be from the room ID specified in the request"
                 )
             # Validate signature/hashes
             try:
@@ -1133,7 +1187,7 @@ class FederationHandler:
                 )
             except InvalidEventSignatureError as exc:
                 raise ValueError(
-                    f"PDU from {stripped_room_state_type.value} must pass signature/hash checks"
+                    "PDU from stripped state must pass signature/hash checks"
                 ) from exc
 
             # Mark down whether we saw the create event which we will validate just below
@@ -1152,7 +1206,7 @@ class FederationHandler:
         # Validate `m.room.create` event is included
         if not includes_create_event:
             raise ValueError(
-                f"`{stripped_room_state_type.value}` must include `m.room.create` event"
+                "Stripped state must include `m.room.create` event (MSC4311)"
             )
 
         return parsed_stripped_room_state
@@ -1238,7 +1292,9 @@ class FederationHandler:
         # Parse/validate `invite_room_state`
         try:
             stripped_room_state = await self._parse_stripped_room_state(
-                StrippedRoomStateType.INVITE, event, room_version
+                stripped_room_state=event.unsigned.get("invite_room_state"),
+                room_id=event.room_id,
+                room_version=room_version,
             )
             # Replace with our sanitized `invite_room_state`
             event.unsigned["invite_room_state"] = [
@@ -1260,10 +1316,17 @@ class FederationHandler:
                     exc,
                 )
 
-            # We did our best to sanitize `event.unsigned["invite_room_state"]` but
-            # ultimately failed. Leave it as-is for the client to interpret. Another
-            # valid decision would be to strip it from `unsigned` but this is more
-            # forwards compatible.
+            # FIXME(MSC4311): Remove this whole block after we always enforce the
+            # validation above. The only reason this is here is because the validation
+            # can fail for non-compliant servers but we should still use stripped state.
+            stripped_room_state = self._minimal_parse_stripped_room_state(
+                stripped_room_state=event.unsigned.get("invite_room_state"),
+            )
+            # Replace with our sanitized `invite_room_state`
+            event.unsigned["invite_room_state"] = [
+                serialize_stripped_state_event(stripped_state_event)
+                for stripped_state_event in stripped_room_state
+            ]
 
         event.internal_metadata.outlier = True
         event.internal_metadata.out_of_band_membership = True
