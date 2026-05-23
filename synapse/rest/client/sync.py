@@ -514,8 +514,9 @@ class SyncRestServlet(RestServlet):
             # the client with:
             #
             # * A knock state event that they can use for easier internal tracking
-            # * The rough timestamp of when the knock occurred contained within the event
-            knocked_state.append(knock)
+            #
+            # FIXME: Doesn't seem to be in the spec
+            knocked_state.append(strip_event(room.knock))
 
             # Build the `knock_state` dictionary, which will contain the state of the
             # room that the client has knocked on
