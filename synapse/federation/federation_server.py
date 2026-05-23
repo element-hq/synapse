@@ -57,7 +57,6 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
 from synapse.events.snapshot import EventPersistencePair
-from synapse.events.utils import parse_stripped_state_event
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -89,7 +88,6 @@ from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
 from synapse.types import JsonDict, StateMap, UserID, get_domain_from_id
-from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache

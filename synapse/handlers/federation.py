@@ -57,7 +57,7 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase
+from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
 from synapse.events.utils import (
     parse_stripped_state_event,
@@ -117,6 +117,11 @@ NUMBER_OF_EVENTS_TO_BACKFILL = 100
 """
 The number of events we try to backfill from other servers in a single request.
 """
+
+
+class StrippedRoomStateType(enum.Enum):
+    INVITE = "invite_room_state"
+    KNOCK = "knock_room_state"
 
 
 # TODO: We can refactor this away now that there is only one backfill point again
@@ -1071,6 +1076,87 @@ class FederationHandler:
         await self._event_auth_handler.check_auth_rules_from_context(event)
         return event
 
+    async def _parse_stripped_room_state(
+        self,
+        stripped_room_state_type: StrippedRoomStateType,
+        event: EventBase,
+        room_version: RoomVersion,
+    ) -> list[StrippedStateEvent]:
+        """
+        Parse and validate `invite_room_state`/`knock_room_state` according to the
+        Matrix spec (c.f. MSC4311).
+
+        > If any of the events are not a PDU, not for the room ID specified, or fail
+        > signature checks, or the `m.room.create` event is missing, the receiving
+        > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
+        > error (new to the endpoint). For invites to room version 12+ rooms, servers
+        > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+
+        We refer to `invite_room_state`/`knock_room_state` as `stripped_room_state` but
+        the events contained within can be full PDU's or stripped state events (older
+        version of the Matrix spec).
+
+        Returns:
+            A list of parsed `StrippedStateEvent`
+
+        Raises:
+            `TypeError`/`ValueError` when the stripped room state is invalid
+        """
+        stripped_room_state = event.unsigned.get(stripped_room_state_type.value)
+
+        # Scrutinize JSON values
+        if not isinstance(stripped_room_state, list):
+            raise TypeError(
+                f"`{stripped_room_state_type.value}` must be a list of PDU's that includes the `m.room.create` event"
+            )
+
+        parsed_stripped_room_state = []
+        includes_create_event = False
+        for raw_stripped_event in stripped_room_state:
+            # Validate PDU
+            try:
+                pdu = event_from_pdu_json(raw_stripped_event, room_version)
+            except Exception as exc:
+                raise ValueError(
+                    f"Unable to parse one of the `{stripped_room_state_type.value}` event's as a PDU"
+                ) from exc
+
+            # Validate that it's from the same room
+            if pdu.room_id != event.room_id:
+                raise ValueError(
+                    f"PDU from {stripped_room_state_type.value} must be from the room ID specified in the `/invite` request"
+                )
+            # Validate signature/hashes
+            try:
+                pdu = await self.federation_client._check_sigs_and_hash(
+                    room_version, pdu
+                )
+            except InvalidEventSignatureError as exc:
+                raise ValueError(
+                    f"PDU from {stripped_room_state_type.value} must pass signature/hash checks"
+                ) from exc
+
+            # Mark down whether we saw the create event which we will validate just below
+            #
+            # We do this after the above checks to make sure it's a valid event
+            # from this room.
+            if pdu.type == EventTypes.Create:
+                includes_create_event = True
+
+            # Parse the stripped events to ensure it has all of the fields necessary
+            parsed_stripped_event = parse_stripped_state_event(raw_stripped_event)
+            if parsed_stripped_event is None:
+                raise ValueError("Unable to parse as stripped event")
+            parsed_stripped_room_state.append(parsed_stripped_event)
+
+        # Validate `m.room.create` event is included
+        if not includes_create_event:
+            raise ValueError(
+                f"`{stripped_room_state_type.value}` must include `m.room.create` event"
+            )
+
+        return parsed_stripped_room_state
+
     async def on_invite_request(
         self,
         *,
@@ -1149,104 +1235,35 @@ class FederationHandler:
             room_id=event.room_id, room_version=room_version
         )
 
-        # Validate `invite_room_state` according to MSC4311:
-        # > If any of the events are not a PDU, not for the room ID specified, or fail
-        # > signature checks, or the `m.room.create` event is missing, the receiving
-        # > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
-        # > error (new to the endpoint). For invites to room version 12+ rooms, servers
-        # > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
-        #
-        # FIXME(MSC4311): Apply this validation for all room versions after 2027-01-01 (to allow
-        # some time for the ecosystem to adapt and support MSC4311).
-        invite_room_state = event.unsigned.get("invite_room_state")
-        if room_version.msc4311_stripped_state:
-            try:
-                # Scrutinize JSON values
-                assert isinstance(invite_room_state, list), (
-                    "`invite_room_state` must be a list of PDU's that includes the `m.room.create` event"
-                )
-                includes_create_event = False
-                for raw_stripped_event in invite_room_state:
-                    # Validate PDU
-                    try:
-                        pdu = event_from_pdu_json(raw_stripped_event, room_version)
-                    except Exception as exc:
-                        raise AssertionError(
-                            "Unable to parse one of the `invite_room_state` event's as a PDU"
-                        ) from exc
-
-                    # Validate that it's from the same room
-                    assert pdu.room_id == event.room_id, (
-                        "PDU must be from the room ID specified in the `/invite` request"
-                    )
-                    # Validate signature/hashes
-                    try:
-                        pdu = await self.federation_client._check_sigs_and_hash(
-                            room_version, pdu
-                        )
-                    except InvalidEventSignatureError as exc:
-                        raise AssertionError(
-                            "PDU must pass signature/hash checks"
-                        ) from exc
-
-                    # Mark down whether we saw the create event which we will validate just below
-                    #
-                    # We do this after the above checks to make sure it's a valid event
-                    # from this room.
-                    if pdu.type == EventTypes.Create:
-                        includes_create_event = True
-
-                # Validate `m.room.create` event is included
-                assert includes_create_event, (
-                    "`invite_room_state` must include `m.room.create` event"
-                )
-            except Exception as exc:
-                # FIXME(MSC4311): Reject with 400 `M_MISSING_PARAM` after 2027-01-01. Given Synapse
-                # claimed to support room version 12 but didn't adhere to this behavior until
-                # 2026-06-01, we will only warn for now.
+        # Parse/validate `invite_room_state`
+        try:
+            stripped_room_state = await self._parse_stripped_room_state(
+                StrippedRoomStateType.INVITE, event, room_version
+            )
+            # Replace with our sanitized `invite_room_state`
+            event.unsigned["invite_room_state"] = [
+                serialize_stripped_state_event(stripped_state_event)
+                for stripped_state_event in stripped_room_state
+            ]
+        except Exception as exc:
+            # FIXME(MSC4311): Apply this validation for all room versions after 2027-06-01 (to allow
+            # some time for the ecosystem to adapt and support MSC4311).
+            if room_version.msc4311_stripped_state:
+                # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
+                # after 2027-06-01. Given Synapse claimed to support room version 12 but
+                # didn't adhere to this behavior until 2026-06-01, we will only warn for
+                # now.
                 logger.warning(
-                    "Continuing anyway but failed to validate `invite_room_state` on invite %s: %s",
+                    "Continuing anyway but failed to validate `invite_room_state` on invite %s (room_version=%s): %s",
                     event,
+                    room_version,
                     exc,
                 )
 
-        # With MSC4311: `invite_room_state` over federation can use full PDUs so we need
-        # to convert them into "stripped state events" so they don't end up being sent
-        # down to the client as full PDU's.
-        #
-        # We do this separate from the validation above as sending full PDU's can happen
-        # in any room version.
-        if invite_room_state is not None:
-            try:
-                # Scrutinize JSON values
-                assert isinstance(invite_room_state, list), (
-                    "`invite_room_state` must be a list"
-                )
-
-                new_invite_room_state = []
-                for raw_stripped_event in invite_room_state:
-                    # Parse and serialize to strip the events down to only the necessary fields
-                    parsed_stripped_event = parse_stripped_state_event(
-                        raw_stripped_event
-                    )
-                    if parsed_stripped_event is None:
-                        raise AssertionError("Unable to parse as stripped event")
-                    serialized_stripped_event = serialize_stripped_state_event(
-                        parsed_stripped_event
-                    )
-                    new_invite_room_state.append(serialized_stripped_event)
-
-                # Replace with our sanitized `invite_room_state`
-                event.unsigned["invite_room_state"] = new_invite_room_state
-            except AssertionError as exc:
-                # We did our best to sanitize but ultimately failed. Leave it as-is for
-                # the client to interpret. Another valid decision would be to strip it
-                # from `unsigned` but this is more forwards compatible.
-                logger.warning(
-                    "Continuing anyway but failed to sanitize `invite_room_state` on invite %s: %s",
-                    event,
-                    exc,
-                )
+            # We did our best to sanitize `event.unsigned["invite_room_state"]` but
+            # ultimately failed. Leave it as-is for the client to interpret. Another
+            # valid decision would be to strip it from `unsigned` but this is more
+            # forwards compatible.
 
         event.internal_metadata.outlier = True
         event.internal_metadata.out_of_band_membership = True

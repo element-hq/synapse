@@ -61,7 +61,6 @@ from synapse.api.room_versions import (
 )
 from synapse.events import EventBase, builder, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.events.utils import parse_stripped_state_event
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -79,7 +78,6 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
 )
-from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
