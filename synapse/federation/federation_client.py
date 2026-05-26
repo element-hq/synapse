@@ -473,7 +473,7 @@ class FederationClient(FederationBase):
     @tag_args
     async def ask_policy_server_to_sign_event(
         self, destination: str, pdu: EventBase, timeout: int | None = None
-    ) -> JsonDict:
+    ) -> PolicySignResponse:
         """Requests that the destination server (typically a policy server)
         sign the event as not spam.
 
@@ -494,9 +494,10 @@ class FederationClient(FederationBase):
             pdu.event_id,
             destination,
         )
-        return await self.transport_layer.ask_policy_server_to_sign_event(
+        json_response = await self.transport_layer.ask_policy_server_to_sign_event(
             destination, pdu, timeout=timeout
         )
+        return validate_response(json_response, PolicySignResponse)
 
     @trace
     @tag_args

@@ -225,7 +225,7 @@ class RoomPolicyHandler:
 
         # Ask the policy server to sign this event.
         try:
-            signature = await self._federation_client.ask_policy_server_to_sign_event(
+            sign_response = await self._federation_client.ask_policy_server_to_sign_event(
                 policy_server.server_name,
                 event,
                 # We set a smallish timeout here as we don't want to block event sending
@@ -241,7 +241,7 @@ class RoomPolicyHandler:
             # also be implementation bugs. Whoever reads this when removing unstable MSC4284
             # stuff, make a decision on whether to remove this bit.
             # https://github.com/element-hq/synapse/issues/19502
-            if not signature or len(signature) == 0:
+            if len(sign_response.root) == 0:
                 raise SynapseError(
                     403,
                     "This event has been rejected as probable spam by the policy server",
@@ -261,7 +261,14 @@ class RoomPolicyHandler:
             # servers need to manually fetch signatures for. This is the code that allows
             # those events to continue working (because they're legally sent, even if missing
             # the policy server signature).
-            event.signatures.update(signature)
+            for key_id, signature_b64 in sign_response.root.items():
+                if (
+                    event.signatures.get_signature(policy_server.server_name, key_id)
+                    is None
+                ):
+                    event.signatures.add_signature(
+                        policy_server.server_name, key_id, signature_b64
+                    )
         except HttpResponseException as ex:
             # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
             raise ex.to_synapse_error() from ex
