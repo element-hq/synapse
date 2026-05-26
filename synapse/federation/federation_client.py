@@ -24,6 +24,7 @@
 import copy
 import itertools
 import logging
+from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -1395,11 +1396,6 @@ class FederationClient(FederationBase):
                 },
             )
         except HttpResponseException as e:
-            # TODO: MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
-            # error by the sending server over the Client-Server API. This is done
-            # because there's nothing the client can materially do differently to make
-            # the request succeed.
-
             # If an error is received that is due to an unrecognised endpoint,
             # fallback to the v1 endpoint if the room uses old-style event IDs.
             # Otherwise, consider it a legitimate error and raise.
@@ -1411,6 +1407,26 @@ class FederationClient(FederationBase):
                         "User's homeserver does not support this room version",
                         Codes.UNSUPPORTED_ROOM_VERSION,
                     )
+            # MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
+            # error by the sending server over the Client-Server API. This is done
+            # because there's nothing the client can materially do differently to make
+            # the request succeed.
+            elif (
+                err.code == HTTPStatus.BAD_REQUEST
+                and err.errcode == Codes.MISSING_PARAM
+            ):
+                raise SynapseError(
+                    500,
+                    f"Received {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} response from remote homeserver "
+                    "while trying to send the invite over federation. This indicates a compatability problem "
+                    "between your homeserver and the homeserver you're trying to send the invite to "
+                    "(either one could be at fault).",
+                    Codes.UNKNOWN,
+                    additional_fields={
+                        "cause": err.msg,
+                        "destination_server": destination,
+                    },
+                )
             else:
                 raise err
 
@@ -1425,11 +1441,29 @@ class FederationClient(FederationBase):
                 content=pdu.get_pdu_json(time_now),
             )
         except HttpResponseException as e:
-            # TODO: MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
+            # MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
             # error by the sending server over the Client-Server API. This is done
             # because there's nothing the client can materially do differently to make
             # the request succeed.
-            raise e
+            err = e.to_synapse_error()
+            if (
+                err.code == HTTPStatus.BAD_REQUEST
+                and err.errcode == Codes.MISSING_PARAM
+            ):
+                raise SynapseError(
+                    500,
+                    f"Received {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} response from remote homeserver "
+                    "while trying to send the invite over federation. This indicates a compatability problem "
+                    "between your homeserver and the homeserver you're trying to send the invite to "
+                    "(either one could be at fault).",
+                    Codes.UNKNOWN,
+                    additional_fields={
+                        "cause": err.msg,
+                        "destination_server": destination,
+                    },
+                )
+            else:
+                raise err
         return content
 
     async def send_leave(self, destinations: Iterable[str], pdu: EventBase) -> None:
