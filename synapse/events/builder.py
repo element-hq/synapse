@@ -132,7 +132,7 @@ class EventBuilder:
         prev_event_ids: list[str],
         auth_event_ids: list[str] | None,
         depth: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
     ) -> EventBase:
         """Transform into a fully signed and hashed event
 

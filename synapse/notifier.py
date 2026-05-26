@@ -833,15 +833,49 @@ class Notifier:
         return result
 
     async def wait_for_stream_token(self, stream_token: StreamToken) -> bool:
-        """Wait for this worker to catch up with the given stream token."""
+        """
+        Wait for this worker to catch up with the given stream token.
+
+        This is important to ensure that the worker has a proper view of the world
+        before trying to serve a request. For example, one worker can return a response
+        with some `next_batch` token, but then the next request goes to another worker
+        which is behind; if the worker assembles a response up to the token, it could be
+        missing data in the gap between where it's behind and the requested token.
+
+        ### Inavlid future tokens
+
+        We assume the token has already been validated/sanitized before being passed to
+        this function to ensure it's not some invalid future token. We consider a token
+        invalid, if the token has positions ahead of our persisted positions in the
+        database. This is important as we we don't want to wait for the stream to
+        advance in those cases (as it may never do so) (it's a waste of time for the
+        user and server).
+
+        Previously, we would sanitize and `bound_future_token(...)` within this function
+        but that leads to bad patterns upstream where people can continue to use the
+        unbounded token.
+
+        While it was possible for older Synapse versions to erroneously give out invalid
+        future tokens, this is no longer the case and its considered a Synapse
+        programming error if this ever happens. Validation/sanitization is still
+        necessary as a user can intentionally mess with numbers in the tokens being
+        provided.
+
+        Args:
+            stream_token: The token to wait for. We assume the token has already been
+            validated/sanitized to ensure it's not some invalid future token (has a
+            stream position ahead of what is in the DB). (see details above)
+
+        Returns:
+            True when this worker has caught up
+            False when we timed out waiting
+        """
         current_token = self.event_sources.get_current_token()
+        # Return early if we are already caught up
         if stream_token.is_before_or_eq(current_token):
             return True
 
-        # Work around a bug where older Synapse versions gave out tokens "from
-        # the future", i.e. that are ahead of the tokens persisted in the DB.
-        stream_token = await self.event_sources.bound_future_token(stream_token)
-
+        # Start waiting until we've caught up to the `stream_token`
         start = self.clock.time_msec()
         logged = False
         while True:
@@ -851,6 +885,7 @@ class Notifier:
 
             now = self.clock.time_msec()
 
+            # Timed out
             if now - start > 10_000:
                 return False
 

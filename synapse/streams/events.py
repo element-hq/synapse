@@ -85,6 +85,7 @@ class EventSources:
         )
         thread_subscriptions_key = self.store.get_max_thread_subscriptions_stream_id()
         sticky_events_key = self.store.get_max_sticky_events_stream_id()
+        quarantined_media_key = self.store.get_quarantined_media_stream_token()
         profile_updates_key = self.store.get_max_profile_updates_stream_id()
 
         token = StreamToken(
@@ -101,6 +102,7 @@ class EventSources:
             un_partial_stated_rooms_key=un_partial_stated_rooms_key,
             thread_subscriptions_key=thread_subscriptions_key,
             sticky_events_key=sticky_events_key,
+            quarantined_media_key=quarantined_media_key,
             profile_updates_key=profile_updates_key,
         )
         return token
@@ -130,6 +132,7 @@ class EventSources:
             StreamKeyType.UN_PARTIAL_STATED_ROOMS: self.store.get_un_partial_stated_rooms_id_generator(),
             StreamKeyType.THREAD_SUBSCRIPTIONS: self.store.get_thread_subscriptions_stream_id_generator(),
             StreamKeyType.STICKY_EVENTS: self.store.get_sticky_events_stream_id_generator(),
+            StreamKeyType.QUARANTINED_MEDIA: self.store.get_quarantined_media_stream_id_generator(),
             StreamKeyType.PROFILE_UPDATES: self.store.get_profile_updates_stream_id_generator(),
         }
 
@@ -152,6 +155,16 @@ class EventSources:
                     ].get_max_allocated_token()
 
                     if max_token < token_value.get_max_stream_pos():
+                        # Log *something* as we consider this as a Synapse programming error
+                        # (assuming no malicious user manipulation of the token) (we shouldn't be
+                        # handing out future tokens).
+                        #
+                        # We don't assert as the whole point of bounding is so that we can recover
+                        # gracefully.
+                        #
+                        # Old versions of Synapse could advance streams without persisting anything in
+                        # the DB (fixed in https://github.com/element-hq/synapse/pull/17229) and on
+                        # restart, those updates would be lost.
                         logger.error(
                             "Bounding token from the future '%s': token: %s, bound: %s",
                             key,

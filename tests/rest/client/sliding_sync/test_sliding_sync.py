@@ -30,7 +30,7 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
+from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import account_data, devices, login, receipts, room, sync
@@ -47,6 +47,7 @@ from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.server import FakeChannel, TimedOutException
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import create_event
 
 logger = logging.getLogger(__name__)
@@ -308,7 +309,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
                 "invite_room_state": serialized_stripped_state_events
             }
 
-        invite_event = make_event_from_dict(
+        invite_event = make_test_event(
             invite_event_dict,
             room_version=RoomVersions.V10,
         )

@@ -32,15 +32,16 @@ from twisted.internet import defer
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.state import StateHandler, StateResolutionHandler, _make_state_cache_entry
-from synapse.types import MutableStateMap, StateMap
+from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.state import StateFilter
 from synapse.util.macaroons import MacaroonGenerator
 
 from tests import unittest
 from tests.server import get_clock
+from tests.test_utils.event_builders import make_test_event
 from tests.utils import default_config
 
 _next_event_id = 1000
@@ -67,13 +68,14 @@ def create_event(
         else:
             name = "<%s, %s>" % (type, event_id)
 
-    d = {
+    d: JsonDict = {
         "event_id": event_id,
         "type": type,
         "sender": "@user_id:example.com",
         "room_id": "!room_id:example.com",
         "depth": depth,
         "prev_events": prev_events or [],
+        "content": {},
     }
 
     if state_key is not None:
@@ -81,7 +83,7 @@ def create_event(
 
     d.update(kwargs)
 
-    return make_event_from_dict(d)
+    return make_test_event(d)
 
 
 class _DummyStore:

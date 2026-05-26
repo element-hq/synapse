@@ -1,0 +1,1 @@
+Fix a bug in [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) that could prevent user avatars from showing if the room had an empty name.

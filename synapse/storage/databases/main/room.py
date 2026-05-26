@@ -62,12 +62,12 @@ from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
 from synapse.types import (
     JsonDict,
+    MultiWriterStreamToken,
     RetentionPolicy,
     StrCollection,
     ThirdPartyInstanceID,
 )
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import MXC_REGEX
 
@@ -1302,7 +1302,15 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return local_media_ids
 
-    async def get_current_quarantined_media_stream_id(self) -> int:
+    def get_quarantined_media_stream_token(self) -> MultiWriterStreamToken:
+        return MultiWriterStreamToken.from_generator(
+            self._quarantined_media_changes_id_gen
+        )
+
+    def get_quarantined_media_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._quarantined_media_changes_id_gen
+
+    def get_current_quarantined_media_stream_id(self) -> int:
         """Gets the position of the quarantined media changes stream.
 
         Returns:
@@ -1317,74 +1325,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             int - the maximum stream ID
         """
         return await self._quarantined_media_changes_id_gen.get_max_allocated_token()
-
-    async def wait_for_quarantined_media_stream_id(self, target_id: int) -> bool:
-        """Waits until the quarantined media changes stream reaches the given stream ID.
-
-        See https://github.com/element-hq/synapse/pull/19644 for more details.
-
-        TODO: Replace function and call sites with https://github.com/element-hq/synapse/pull/19644
-
-        Args:
-            target_id: The stream ID to wait for.
-
-        Returns:
-            True when caught up to the target stream ID.
-            False when timing out while waiting.
-        """
-        # We ideally would use something like `wait_for_stream_position` in the meantime,
-        # but that short circuits if the instance name matches the current instance name.
-        # Doing so means that if *another* writer is actually leading the to_id, then we'll
-        # assume that we're caught up when we aren't.
-        #
-        # NOTE: Because this is implemented to wait for stream positions by integer ID,
-        # we're technically waiting for *all* workers to catch up rather than just waiting
-        # for *our* worker to catch up. This is okay for now because the quarantined media
-        # stream should be pretty fast to update, and if it's not then the only thing we're
-        # affecting is an admin API that probably has a tool automatically retrying requests
-        # anyway. https://github.com/element-hq/synapse/pull/19644 does the waiting properly
-        # so this should be replaced by that (or similar).
-
-        # Get the minimum shared position/ID across all workers
-        current_id = self._quarantined_media_changes_id_gen.get_current_token()
-        if current_id >= target_id:
-            return True  # nothing to wait for: we're already caught up.
-
-        # "This should never happen". Tokens we hand out via the API should exist. If they
-        # don't, then we're in a bad state and need to explode.
-        max_persisted_position = (
-            await self._quarantined_media_changes_id_gen.get_max_allocated_token()
-        )
-        assert max_persisted_position >= target_id, (
-            f"Unable to wait for invalid future token (token={target_id} has positions "
-            f"ahead of our max persisted position={max_persisted_position})"
-        )
-
-        # Start waiting until we've caught up to the `stream_token`
-        start = self.clock.time_msec()
-        logged = False
-        while True:
-            # Like above, get the minimum shared ID across all workers
-            current_id = self._quarantined_media_changes_id_gen.get_current_token()
-            if current_id >= target_id:
-                return True
-
-            now = self.clock.time_msec()
-
-            # Timed out
-            if now - start > 10_000:
-                return False
-
-            if not logged:
-                logger.info(
-                    "Waiting for current token to reach %s; currently at %s",
-                    target_id,
-                    current_id,
-                )
-                logged = True
-
-            # TODO: be better
-            await self.clock.sleep(Duration(milliseconds=500))
 
     async def get_quarantined_media_changes(
         self, *, from_id: int, to_id: int, limit: int

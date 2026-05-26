@@ -120,8 +120,18 @@ class VerifyJsonRequest:
     ) -> "VerifyJsonRequest":
         """Create a VerifyJsonRequest to verify all signatures on an event
         object for the given server.
+
+        Raises immediately if the event doesn't have any signatures from the
+        given server.
         """
-        key_ids = list(event.signatures.get(server_name, []))
+        if server_name not in event.signatures:
+            raise SynapseError(
+                400,
+                f"Not signed by {server_name}",
+                Codes.UNAUTHORIZED,
+            )
+
+        key_ids = list(event.signatures[server_name])
         return VerifyJsonRequest(
             server_name,
             # We defer creating the redacted json object, as it uses a lot more

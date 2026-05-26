@@ -150,6 +150,23 @@ class SlidingSyncHandler:
         # events or future events if the user is nefariously, manually modifying the
         # token.
         if from_token is not None:
+            # Work around a bug where older Synapse versions gave out tokens "from the
+            # future", i.e. that are ahead of the tokens persisted in the DB. This could
+            # also happen if a user is intentionally messing with the token so this also
+            # acts as sanitization/validation.
+            #
+            # If the token has positions ahead of our persisted positions in the
+            # database (invalid), then we simply use our max persisted position (recover
+            # gracefully); instead of waiting for a position that may never come around.
+            #
+            # FIXME: For Sliding Sync, instead of bounding the token, we should detect
+            # the invalid future position and raise a `M_UNKNOWN_POS` error.
+            from_token = SlidingSyncStreamToken(
+                stream_token=await self.event_sources.bound_future_token(
+                    from_token.stream_token
+                ),
+                connection_position=from_token.connection_position,
+            )
             # We need to make sure this worker has caught up with the token. If
             # this returns false, it means we timed out waiting, and we should
             # just return an empty response.
@@ -167,38 +184,34 @@ class SlidingSyncHandler:
                 timeout_ms -= after_wait_ts - before_wait_ts
                 timeout_ms = max(timeout_ms, 0)
 
-        # Compute a response immediately. We always need to do this before
-        # waiting for new data (unlike in /v3/sync), as the request config might
-        # have changed (e.g. new room subscriptions, etc).
-        now_token = self.event_sources.get_current_token()
-        result = await self.current_sync_for_user(
-            sync_config,
-            from_token=from_token,
-            to_token=now_token,
-        )
-
-        # Return immediately if we have a result, the timeout is 0, or this is
-        # an initial sync.
-        if result or timeout_ms == 0 or from_token is None:
-            return result, did_wait
-
-        # Otherwise, we wait for something to happen and report it to the user.
-        async def current_sync_callback(
-            before_token: StreamToken, after_token: StreamToken
-        ) -> SlidingSyncResult:
-            return await self.current_sync_for_user(
+        # We're going to respond immediately if the timeout is 0 or if this is an
+        # initial sync (without a `from_token`) so we can avoid calling
+        # `notifier.wait_for_events()`.
+        if timeout_ms == 0 or from_token is None:
+            now_token = self.event_sources.get_current_token()
+            result = await self.current_sync_for_user(
                 sync_config,
                 from_token=from_token,
-                to_token=after_token,
+                to_token=now_token,
             )
+        else:
+            # Otherwise, we wait for something to happen and report it to the user.
+            async def current_sync_callback(
+                before_token: StreamToken, after_token: StreamToken
+            ) -> SlidingSyncResult:
+                return await self.current_sync_for_user(
+                    sync_config,
+                    from_token=from_token,
+                    to_token=after_token,
+                )
 
-        result = await self.notifier.wait_for_events(
-            sync_config.user.to_string(),
-            timeout_ms,
-            current_sync_callback,
-            from_token=now_token,
-        )
-        did_wait = True
+            result = await self.notifier.wait_for_events(
+                sync_config.user.to_string(),
+                timeout_ms,
+                current_sync_callback,
+                from_token=from_token.stream_token,
+            )
+            did_wait = True
 
         return result, did_wait
 
@@ -859,20 +872,10 @@ class SlidingSyncHandler:
         # For incremental syncs, we can do this first to determine if something relevant
         # has changed and strategically avoid fetching other costly things.
         room_state_delta_id_map: MutableStateMap[str] = {}
-        name_event_id: str | None = None
         membership_changed = False
         name_changed = False
         avatar_changed = False
-        if initial:
-            # Check whether the room has a name set
-            name_state_ids = await self.get_current_state_ids_at(
-                room_id=room_id,
-                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
-                state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
-                to_token=to_token,
-            )
-            name_event_id = name_state_ids.get((EventTypes.Name, ""))
-        else:
+        if not initial:
             assert from_bound is not None
 
             # TODO: Limit the number of state events we're about to send down
@@ -920,6 +923,27 @@ class SlidingSyncHandler:
                 ):
                     avatar_changed = True
 
+        # If a room has an m.room.name event with an absent, null, or empty
+        # name field, it should be treated the same as a room with no
+        # m.room.name event.
+        # https://spec.matrix.org/v1.17/client-server-api/#mroomname
+        #
+        # TODO: Should we also check for `EventTypes.CanonicalAlias`
+        # (`m.room.canonical_alias`) as a fallback for the room name? see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/4186/changes#r2860107511
+        room_name: str | None = None
+        if initial or name_changed:
+            # Check whether the room has a name set
+            name_states = await self.get_current_state_at(
+                room_id=room_id,
+                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+                state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
+                to_token=to_token,
+            )
+            name_event = name_states.get((EventTypes.Name, ""))
+            if name_event is not None:
+                room_name = name_event.content.get("name")
+
         # We only need the room summary for calculating heroes, however if we do
         # fetch it then we can use it to calculate `joined_count` and
         # `invited_count`.
@@ -936,12 +960,13 @@ class SlidingSyncHandler:
         hero_user_ids: list[str] = []
         # TODO: Should we also check for `EventTypes.CanonicalAlias`
         # (`m.room.canonical_alias`) as a fallback for the room name? see
-        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/4186/changes#r2860107511
         #
-        # We need to fetch the `heroes` if the room name is not set. But we only need to
-        # get them on initial syncs (or the first time we send down the room) or if the
+        # We need to fetch the `heroes` if the room name is not set (taking
+        # care to treat an empty string as unset). But we only need to get them
+        # on initial syncs (or the first time we send down the room) or if the
         # membership has changed which may change the heroes.
-        if name_event_id is None and (initial or (not initial and membership_changed)):
+        if not room_name and (initial or membership_changed):
             # We need the room summary to extract the heroes from
             if room_membership_for_user_at_to_token.membership != Membership.JOIN:
                 # TODO: Figure out how to get the membership summary for left/banned rooms
@@ -1160,8 +1185,6 @@ class SlidingSyncHandler:
             (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
         ]
         meta_room_state = list(hero_room_state)
-        if initial or name_changed:
-            meta_room_state.append((EventTypes.Name, ""))
         if initial or avatar_changed:
             meta_room_state.append((EventTypes.RoomAvatar, ""))
 
@@ -1318,15 +1341,6 @@ class SlidingSyncHandler:
         required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():
             required_room_state = required_state_filter.filter_state(room_state)
-
-        # Find the room name and avatar from the state
-        room_name: str | None = None
-        # TODO: Should we also check for `EventTypes.CanonicalAlias`
-        # (`m.room.canonical_alias`) as a fallback for the room name? see
-        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
-        name_event = room_state.get((EventTypes.Name, ""))
-        if name_event is not None:
-            room_name = name_event.content.get("name")
 
         room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))

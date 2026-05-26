@@ -2824,8 +2824,8 @@ class EventsBackgroundUpdatesStore(
             # with the provided old key.
             if old_verify_key is not None:
                 old_key_id = f"{old_verify_key.alg}:{old_verify_key.version}"
-                server_sigs = event.signatures.get(self.hs.hostname, {})
-                if old_key_id not in server_sigs:
+                old_sig = event.signatures.get_signature(self.hs.hostname, old_key_id)
+                if old_sig is None:
                     # Event wasn't signed with this key ID at all, skip.
                     continue
 
