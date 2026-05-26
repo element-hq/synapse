@@ -359,10 +359,11 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def test_ask_origin_server_to_sign_event_doesnt_replace_signatures(self) -> None:
         """
         ``ask_policy_server_to_sign_event`` has had bugs where it accidentally overwrote
-        the origin server's signature in the case where the origin server is the same
-        as the policy server. This test is otherwise equivalent to the success case test
-        above, but uses the policy server as the event sender to ensure both signatures
-        are preserved.
+        the origin server's signature in the case where the origin server has the same
+        server name as the policy server (each have their own signing key). This test is
+        otherwise equivalent to the success case test above, but the server name for
+        origin event sending server and the policy server are the same and we want to
+        ensure both signatures are preserved.
         """
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
         self._add_policy_server_to_room(public_key=verify_key_str)
@@ -396,7 +397,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 for server, signatures in event.signatures.as_dict().items()
             },
             {self.OTHER_SERVER_NAME: 2},
-            f"Expected 2 signatures for policy server ({self.OTHER_SERVER_NAME})",
+            f"Expected 2 signatures for the origin server and policy server under the same server name ({self.OTHER_SERVER_NAME}) but with different keys",
         )
 
     def test_ask_policy_server_to_sign_event_refuses(self) -> None:
