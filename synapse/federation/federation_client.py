@@ -48,6 +48,7 @@ from synapse.api.errors import (
     Codes,
     FederationDeniedError,
     HttpResponseException,
+    InvalidResponseError,
     RequestSendFailed,
     SynapseError,
     UnsupportedRoomVersionError,
@@ -102,12 +103,6 @@ class PulledPduInfo:
     pdu: EventBase
     # Which homeserver we pulled the PDU from
     pull_origin: str
-
-
-class InvalidResponseError(RuntimeError):
-    """Helper for _try_destination_list: indicates that the server returned a response
-    we couldn't parse
-    """
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)

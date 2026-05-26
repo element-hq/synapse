@@ -806,7 +806,18 @@ class FederationPullAttemptBackoffError(RuntimeError):
 
 class HttpResponseException(CodeMessageException):
     """
-    Represents an HTTP-level failure of an outbound request
+    Represents an HTTP-level failure of an outbound request,
+    where the response has an unexpected status code.
+
+    The response may contain a JSON-encoded Matrix API error
+    with an `errcode` and `error`, but this is optional.
+
+    Analogous to `InvalidResponseError`, but at the response code level
+    rather than the response body level.
+
+    Should not be allowed to bubble to an API response without handling.
+    If it does, it will yield a 500 Internal Server Error as any other
+    unhandled exception.
 
     Attributes:
         response: body of response
@@ -824,7 +835,7 @@ class HttpResponseException(CodeMessageException):
         self.response = response
 
     def to_synapse_error(self) -> SynapseError:
-        """Make a SynapseError based on an HTTPResponseException
+        """Make a SynapseError based on an HttpResponseException
 
         This is useful when a proxied request has failed, and we need to
         decide how to map the failure onto a matrix error to send back to the
@@ -854,6 +865,50 @@ class HttpResponseException(CodeMessageException):
         errmsg = j.pop("error", self.msg)
 
         return ProxiedRequestError(self.code, errmsg, errcode, j)
+
+
+class InvalidResponseError(RuntimeError):
+    """
+    Represents a failure to parse/validate the body returned
+    by an outbound request.
+    Analogous to `HttpResponseException`, but at the response body level
+    rather than the response code level.
+
+    Like `HttpResponseException`, should not be allowed to bubble to
+    an API response without handling.
+    If it does, it will yield a 500 Internal Server Error as any other
+    unhandled exception.
+
+    Attributes:
+        response: body of response
+    """
+
+    def __init__(self, msg: str):
+        """
+        Args:
+            msg: A message for logging purposes.
+        """
+        super().__init__(msg)
+
+    def to_synapse_error(self) -> SynapseError:
+        """Make a SynapseError based on this error.
+
+        The errcode is set to M_UNKNOWN
+        and the error message is set to a generic message.
+        The detail message of this error is not exposed.
+
+        (Maybe we could consider exposing the violating server's name in
+        the error message.)
+
+        Returns:
+            The error converted to a SynapseError.
+        """
+
+        return ProxiedRequestError(
+            HTTPStatus.BAD_GATEWAY,
+            "Remote server presented an invalid response over federation.",
+            Codes.UNKNOWN,
+        )
 
 
 class HomeServerNotSetupException(Exception):
