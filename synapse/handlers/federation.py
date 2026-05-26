@@ -919,6 +919,13 @@ class FederationHandler:
         except Exception as exc:
             # FIXME(MSC4311): Apply this validation for all room versions after 2027-06-01 (to allow
             # some time for the ecosystem to adapt and support MSC4311).
+            #
+            # The Matrix spec says that for "version 12+ rooms, servers SHOULD rather than
+            # MAY respond to such requests with 400 M_MISSING_PARAM". Given we have the
+            # lee-way to enforce this in all room versions, we might as well.
+            #
+            # For now, we'll only log in room versions 12+ where this SHOULD be the case
+            # already.
             if event_format_version.msc4311_stripped_state:
                 # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
                 # after 2027-06-01. Given Synapse claimed to support room version 12 but
@@ -934,14 +941,15 @@ class FederationHandler:
             # FIXME(MSC4311): Remove this whole block after we always enforce the
             # validation above. The only reason this is here is because the validation
             # can fail for non-compliant servers but we should still use stripped state.
-            stripped_room_state = self._minimal_parse_stripped_room_state(
+            stripped_room_state_for_client = self._minimal_parse_stripped_room_state(
                 stripped_room_state=event.unsigned.get("knock_room_state"),
             )
-            # Replace with our sanitized `knock_room_state`
-            event.unsigned["knock_room_state"] = [
-                serialize_stripped_state_event(stripped_state_event)
-                for stripped_state_event in stripped_room_state
-            ]
+            if stripped_room_state_for_client is not None:
+                # Replace with our sanitized `knock_room_state`
+                event.unsigned["knock_room_state"] = [
+                    serialize_stripped_state_event(stripped_state_event)
+                    for stripped_state_event in stripped_room_state_for_client
+                ]
 
         context = EventContext.for_outlier(self._storage_controllers)
         stream_id = await self._federation_event_handler.persist_events_and_notify(
@@ -1106,22 +1114,33 @@ class FederationHandler:
         self,
         *,
         stripped_room_state: Any,
-    ) -> list[StrippedStateEvent]:
+    ) -> list[StrippedStateEvent] | None:
         """
-        The minimum amount of parsing necessary to ensure
-        `invite_room_state`/`knock_room_state` is at-least a list of stripped state events.
+        The goal of this function is to sanitize whatever we got from federation and
+        make it presentable to the client. The minimum amount of parsing necessary to
+        ensure `invite_room_state`/`knock_room_state` is at-least a list of stripped
+        state events (compared to `_parse_stripped_room_state`).
         """
 
         # Scrutinize JSON values
-        if not isinstance(stripped_room_state, list):
+        #
+        # In previous versions of the Matrix spec,
+        # `invite_room_state`/`knock_room_state` was an optional list of stripped state
+        # events which means we can't strictly enforce that this is always present.
+        if stripped_room_state is None:
+            return None
+        # We're going to strictly enforce that they at-least gave us a list.
+        elif not isinstance(stripped_room_state, list):
             raise TypeError("Stripped state must be a list of PDU's")
 
         parsed_stripped_room_state = []
         for raw_stripped_event in stripped_room_state:
-            # Parse and serialize to strip the events down to only the necessary fields
+            # Parse each stripped event
             parsed_stripped_event = parse_stripped_state_event(raw_stripped_event)
             if parsed_stripped_event is None:
-                raise ValueError("Unable to parse as stripped event")
+                # Drop any invalid stripped state events as this is spec'ed and we
+                # might as well save the client from dealing with anything crazy.
+                continue
             parsed_stripped_room_state.append(parsed_stripped_event)
 
         return parsed_stripped_room_state
@@ -1302,8 +1321,16 @@ class FederationHandler:
                 for stripped_state_event in stripped_room_state
             ]
         except Exception as exc:
-            # FIXME(MSC4311): Apply this validation for all room versions after 2027-06-01 (to allow
-            # some time for the ecosystem to adapt and support MSC4311).
+            # FIXME(MSC4311): Apply this validation for all room versions after
+            # 2027-06-01 (to allow some time for the ecosystem to adapt and support
+            # MSC4311).
+            #
+            # The Matrix spec says that for "version 12+ rooms, servers SHOULD rather than
+            # MAY respond to such requests with 400 M_MISSING_PARAM". Given we have the
+            # lee-way to enforce this in all room versions, we might as well.
+            #
+            # For now, we'll only log in room versions 12+ where this SHOULD be the case
+            # already.
             if room_version.msc4311_stripped_state:
                 # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
                 # after 2027-06-01. Given Synapse claimed to support room version 12 but
@@ -1319,14 +1346,15 @@ class FederationHandler:
             # FIXME(MSC4311): Remove this whole block after we always enforce the
             # validation above. The only reason this is here is because the validation
             # can fail for non-compliant servers but we should still use stripped state.
-            stripped_room_state = self._minimal_parse_stripped_room_state(
+            stripped_room_state_for_client = self._minimal_parse_stripped_room_state(
                 stripped_room_state=event.unsigned.get("invite_room_state"),
             )
-            # Replace with our sanitized `invite_room_state`
-            event.unsigned["invite_room_state"] = [
-                serialize_stripped_state_event(stripped_state_event)
-                for stripped_state_event in stripped_room_state
-            ]
+            if stripped_room_state_for_client is not None:
+                # Replace with our sanitized `invite_room_state`
+                event.unsigned["invite_room_state"] = [
+                    serialize_stripped_state_event(stripped_state_event)
+                    for stripped_state_event in stripped_room_state_for_client
+                ]
 
         event.internal_metadata.outlier = True
         event.internal_metadata.out_of_band_membership = True
