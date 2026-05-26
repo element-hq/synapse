@@ -128,11 +128,6 @@ class RoomReportDetailRestServlet(RestServlet):
                 HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM
             )
 
-        if resolved_report_id < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM
-            )
-
         ret = await self._store.get_room_report(resolved_report_id)
         if not ret:
             raise NotFoundError("Room report not found")

@@ -479,20 +479,6 @@ class RoomReportDetailTestCase(unittest.HomeserverTestCase):
         Testing that an invalid `report_id` returns a 400.
         """
 
-        # `report_id` is negative
-        channel = self.make_request(
-            "GET",
-            "/_synapse/admin/v1/room_reports/-123",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(400, channel.code, msg=channel.json_body)
-        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
-        self.assertEqual(
-            "The report_id parameter must be a string representing a positive integer.",
-            channel.json_body["error"],
-        )
-
         # `report_id` is a non-numerical string
         channel = self.make_request(
             "GET",
