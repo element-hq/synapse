@@ -930,7 +930,9 @@ class FederationHandler:
                 # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
                 # after 2027-06-01. Given Synapse claimed to support room version 12 but
                 # didn't adhere to this behavior until 2026-06-01, we will only warn for
-                # now.
+                # now. Don't forget to unskip the
+                # `TestMSC4311RejectInvalidStrippedStateFederation` Complement tests as
+                # well.
                 logger.warning(
                     "Continuing anyway but failed to validate `knock_room_state` on knock %s (room_version=%s): %s",
                     event,
