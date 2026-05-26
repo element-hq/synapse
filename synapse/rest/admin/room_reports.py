@@ -17,9 +17,8 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from synapse.api.constants import Direction
 from synapse.api.errors import Codes, NotFoundError, SynapseError
-from synapse.http.servlet import RestServlet, parse_enum, parse_integer, parse_string
+from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
 from synapse.rest.admin._base import admin_patterns, assert_requester_is_admin
 from synapse.types import JsonDict
@@ -43,8 +42,7 @@ class RoomReportsRestServlet(RestServlet):
 
     Args:
         The parameters `from` and `limit` are required only for pagination.
-        By default, a `limit` of 100 is used.
-        The parameter `dir` can be used to define the order of results.
+        By default, a `limit` of 100 is used, and the `from` parameter defaults to the current time.
         The `room_id` query parameter filters by room id.
         The `user_id` query parameter filters by the user ID of the reporter of the room.
     Returns:
@@ -57,13 +55,14 @@ class RoomReportsRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
+        self._clock = hs.get_clock()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
-        start = parse_integer(request, "from", default=0)
+        now = int(self._clock.time_msec()) + 1
+        start = parse_integer(request, "from", default=now)
         limit = parse_integer(request, "limit", default=100)
-        direction = parse_enum(request, "dir", Direction, Direction.BACKWARDS)
         room_id = parse_string(request, "room_id")
         user_id = parse_string(request, "user_id")
 
@@ -82,11 +81,17 @@ class RoomReportsRestServlet(RestServlet):
             )
 
         room_reports, total = await self._store.get_room_reports_paginate(
-            start, limit, direction, user_id, room_id
+            start, limit, user_id, room_id
         )
-        ret = {"room_reports": room_reports, "total": total}
-        if (start + limit) < total:
-            ret["next_token"] = start + len(room_reports)
+
+        ret = {}
+        has_more = len(room_reports) > limit
+        # trim the extra room if it exists
+        room_reports = room_reports[:limit]
+        if has_more:
+            ret["next_batch"] = room_reports[-1]["received_ts"]
+
+        ret.update({"room_reports": room_reports, "total": total})
 
         return HTTPStatus.OK, ret
 

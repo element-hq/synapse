@@ -2028,18 +2028,18 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             txn: LoggingTransaction, report_id: int
         ) -> dict[str, Any] | None:
             sql = """
-                  SELECT rr.id, \
-                         rr.received_ts, \
-                         rr.room_id, \
-                         rr.user_id, \
-                         rr.reason, \
+                  SELECT report.id, \
+                         report.received_ts, \
+                         report.room_id, \
+                         report.user_id, \
+                         report.reason, \
                          room_stats_state.canonical_alias, \
                          room_stats_state.name, \
                          room_stats_state.topic \
-                  FROM room_reports AS rr
-                  JOIN room_stats_state
-                    ON room_stats_state.room_id = rr.room_id
-                  WHERE rr.id = ? \
+                  FROM room_reports AS report
+                  INNER JOIN room_stats_state
+                    ON room_stats_state.room_id = report.room_id
+                  WHERE report.id = ? \
                   """
 
             txn.execute(sql, [report_id])
@@ -2130,17 +2130,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         self,
         start: int,
         limit: int,
-        direction: Direction = Direction.BACKWARDS,
         user_id: str | None = None,
         room_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """Retrieve a paginated list of room reports
 
         Args:
-            start: event offset to begin the query from
+            start: timestamp to start from
             limit: number of rows to retrieve
-            direction: Whether to fetch the most recent first (backwards) or the
-                oldest first (forwards)
             user_id: search for user_id. Ignored if user_id is None
             room_id: filter reports against a specific room_id. Ignored if room_id is None
         Returns:
@@ -2162,22 +2159,22 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 filters.append("rr.room_id LIKE ?")
                 args.extend(["%" + room_id + "%"])
 
-            if direction == Direction.BACKWARDS:
-                order = "DESC"
-            else:
-                order = "ASC"
-
             where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
 
-            # Don't count reports against rooms which have been deleted/purged
+            # Don't count reports against rooms which have been deleted/purged.
             sql = f"""
                 SELECT COUNT(*) as total_room_reports
                 FROM room_reports AS rr
-                JOIN room_stats_state ON room_stats_state.room_id = rr.room_id
+                INNER JOIN room_stats_state ON room_stats_state.room_id = rr.room_id
                 {where_clause}
             """
             txn.execute(sql, args)
             count = cast(tuple[int], txn.fetchone())[0]
+
+            filters.append("rr.received_ts < ?")
+            args.append(start)
+
+            where_clause = "WHERE " + " AND ".join(filters)
 
             sql = f"""
                 SELECT
@@ -2190,31 +2187,30 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                     room_stats_state.name,
                     room_stats_state.topic
                 FROM room_reports AS rr
-                JOIN room_stats_state
+                INNER JOIN room_stats_state
                     ON room_stats_state.room_id = rr.room_id
                 {where_clause}
-                ORDER BY rr.received_ts {order}
+                ORDER BY rr.received_ts DESC
                 LIMIT ?
-                OFFSET ?
             """
 
-            args += [limit, start]
+            # fetch an extra row to determine if it exists for pagination
+            args.append(limit + 1)
             txn.execute(sql, args)
 
-            room_reports = []
-            for row in txn:
-                room_reports.append(
-                    {
-                        "id": row[0],
-                        "received_ts": row[1],
-                        "room_id": row[2],
-                        "user_id": row[3],
-                        "reason": row[4],
-                        "canonical_alias": row[5],
-                        "name": row[6],
-                        "topic": row[7],
-                    }
-                )
+            room_reports = [
+                {
+                    "id": row[0],
+                    "received_ts": row[1],
+                    "room_id": row[2],
+                    "user_id": row[3],
+                    "reason": row[4],
+                    "canonical_alias": row[5],
+                    "name": row[6],
+                    "topic": row[7],
+                }
+                for row in txn
+            ]
 
             return room_reports, count
 
