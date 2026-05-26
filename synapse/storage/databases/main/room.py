@@ -2681,6 +2681,20 @@ class RoomBackgroundUpdateStore(RoomWorkerStore):
             self._background_populate_rooms_creator_column,
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="room_reports_user_id_idx",
+            index_name="room_reports_user_id_idx",
+            table="room_reports",
+            columns=("user_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="room_reports_room_id_idx",
+            index_name="room_reports_room_id_idx",
+            table="room_reports",
+            columns=("room_id",),
+        )
+
     async def _background_insert_retention(
         self, progress: JsonDict, batch_size: int
     ) -> int:
