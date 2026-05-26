@@ -36,17 +36,17 @@ It returns a JSON body like the following:
             "topic": null
         }
     ],
-    "next_token": 2,
+    "next_batch": 2,
     "total": 4
 }
 ```
 
 Note: Reports for deleted or purged rooms are not returned.
 
-To paginate, check for `next_token` and if present, call the endpoint again with `from`
-set to the value of `next_token`. This will return a new page.
+To paginate, check for `next_batch` and if present, call the endpoint again with `from`
+set to the value of `next_batch`. This will return a new page.
 
-If the endpoint does not return a `next_token` then there are no more reports to
+If the endpoint does not return a `next_batch` then there are no more reports to
 paginate through.
 
 **URL query parameters:**
@@ -77,7 +77,7 @@ The following fields are returned in the JSON response body:
   have a canonical alias set.
 * `name`: string - The name of the room.
 * `topic`: string - The topic of the room. `null` if the room does not have a topic set.
-* `next_token`: integer - Indication for pagination. See above.
+* `next_batch`: integer - Indication for pagination. See above.
 * `total`: integer - Total number of room reports related to the query
   (`user_id` and `room_id`).
 
