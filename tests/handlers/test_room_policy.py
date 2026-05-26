@@ -380,9 +380,11 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 },
             },
         )
-        # Similar to the test above, sign the event as the origin server, which in this
-        # case is the same as the policy server. The key is expected to be different
-        # than the ed25519:policy_server key in self.signing_key.
+        # Sign the event as the origin server that sent the event, which in this case
+        # has the same server name as the policy server. We're using a different key
+        # than `self.signing_key` (for the policy server), as the ed25519:policy_server
+        # key is only used for policy server signatures, not any other federation traffic
+        # even when the origin server and policy are logically the same server.
         self._sign_with_random_key(self.OTHER_SERVER_NAME, event)
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
         self.get_success(
