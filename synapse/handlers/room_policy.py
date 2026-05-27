@@ -269,6 +269,13 @@ class RoomPolicyHandler:
                     event.signatures.add_signature(
                         policy_server.server_name, key_id, signature_b64
                     )
+                else:
+                    logger.warning(
+                        "Policy server %r attempted to overwrite existing signature by key_id = %r on event %s, ignoring",
+                        policy_server.server_name,
+                        key_id,
+                        event.event_id,
+                    )
         except HttpResponseException as ex:
             # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
             raise ex.to_synapse_error() from ex
