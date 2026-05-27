@@ -23,7 +23,6 @@ use super::constants::{
     history_visibility_field, join_rules_field, membership_field, power_levels_field,
     redaction_field,
     unsigned_field::AGE_TS,
-    MAX_PDU_SIZE_BYTES,
 };
 use crate::canonical_json::CanonicalizationOptions;
 use crate::room_versions::{EventFormatVersions, RoomVersion};
