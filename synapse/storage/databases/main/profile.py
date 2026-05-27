@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, Collection, Iterable, Sequence, cast
+from typing import TYPE_CHECKING, Collection, Iterable, cast
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -436,21 +436,23 @@ class ProfileWorkerStore(SQLBaseStore):
         return results
 
     async def add_profile_updates(
-        self, user_id: UserID, updates: Sequence[tuple[str, JsonValue | None]]
+        self,
+        user_id: UserID,
+        updated_fields: list[str],
     ) -> int:
         """Persist profile update markers and return the last stream ID."""
         assert self._can_write_to_profile_updates
 
-        if not updates:
+        if not updated_fields:
             return self._profile_updates_id_gen.get_current_token()
 
         user_id_str = user_id.to_string()
 
         def _add_profile_updates_txn(txn: LoggingTransaction) -> int:
             stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
-                txn, len(updates)
+                txn, len(updated_fields)
             )
-            for stream_id, (field_name, _value) in zip(stream_ids, updates):
+            for stream_id, field_name in zip(stream_ids, updated_fields):
                 self.db_pool.simple_insert_txn(
                     txn,
                     table="profile_updates",

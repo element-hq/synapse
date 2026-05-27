@@ -112,12 +112,12 @@ class ProfileHandler:
         )
 
     async def _record_profile_updates(
-        self, user_id: UserID, updates: list[tuple[str, JsonValue | None]]
+        self, user_id: UserID, updated_fields: list[str]
     ) -> None:
-        if not self._msc4429_enabled or not updates:
+        if not self._msc4429_enabled or not updated_fields:
             return
 
-        stream_id = await self.store.add_profile_updates(user_id, updates)
+        stream_id = await self.store.add_profile_updates(user_id, updated_fields)
         await self._notify_profile_update(user_id, stream_id)
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
@@ -275,7 +275,8 @@ class ProfileHandler:
 
         await self.store.set_profile_displayname(target_user, displayname_to_set)
         await self._record_profile_updates(
-            target_user, [(ProfileFields.DISPLAYNAME, displayname_to_set)]
+            target_user,
+            [ProfileFields.DISPLAYNAME],
         )
 
         profile = await self.store.get_profileinfo(target_user)
@@ -387,7 +388,8 @@ class ProfileHandler:
 
         await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
         await self._record_profile_updates(
-            target_user, [(ProfileFields.AVATAR_URL, avatar_url_to_set)]
+            target_user,
+            [ProfileFields.AVATAR_URL],
         )
 
         profile = await self.store.get_profileinfo(target_user)
@@ -471,7 +473,9 @@ class ProfileHandler:
                 profile_updates.append((field_name, None))
 
         await self.store.delete_profile(target_user)
-        await self._record_profile_updates(target_user, profile_updates)
+        await self._record_profile_updates(
+            target_user, [field_name for field_name, _value in profile_updates]
+        )
 
         await self._third_party_rules.on_profile_update(
             target_user.to_string(),
@@ -625,7 +629,7 @@ class ProfileHandler:
             raise AuthError(403, "Cannot set another user's profile")
 
         await self.store.set_profile_field(target_user, field_name, new_value)
-        await self._record_profile_updates(target_user, [(field_name, new_value)])
+        await self._record_profile_updates(target_user, [field_name])
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
@@ -661,7 +665,7 @@ class ProfileHandler:
             raise AuthError(400, "Cannot set another user's profile")
 
         await self.store.delete_profile_field(target_user, field_name)
-        await self._record_profile_updates(target_user, [(field_name, None)])
+        await self._record_profile_updates(target_user, [field_name])
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
