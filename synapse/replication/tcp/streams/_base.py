@@ -33,6 +33,7 @@ import attr
 
 from synapse.api.constants import AccountDataTypes
 from synapse.replication.http.streams import ReplicationGetStreamUpdates
+from synapse.types import UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -769,8 +770,10 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
 class ProfileUpdatesStreamRow:
     """Stream to inform workers about profile updates."""
 
-    user_id: str
+    user_id: UserID
+    """The full user ID with the profile update."""
     field_name: str
+    """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles """
 
 
 class ProfileUpdatesStream(_StreamFromIdGen):
