@@ -251,8 +251,8 @@ class RoomPolicyHandler:
             # Note: if the policy server and event sender are the same server, the sender
             # might not have added policy server signatures to the event for whatever reason.
             # When this happens, we don't want to obliterate the event's existing signatures
-            # because the event will fail authorization. This is why we add defaults rather
-            # than simply `update` the signatures on the event.
+            # because the event will fail authorization. This is why we add items individually
+            # rather than simply `update` the signatures on the event.
             #
             # This situation can happen if the homeserver and policy server parts are
             # logically the same server, but run by different software. For example, Synapse
