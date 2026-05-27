@@ -68,9 +68,6 @@ pub fn compute_event_reference_hash(
     let json =
         crate::canonical_json::to_string_canonical(&redacted_value_mut, canonicalization_options)
             .map_err(|err| anyhow::anyhow!(err))?;
-    if json.len() > MAX_PDU_SIZE_BYTES {
-        anyhow::bail!("Event larger than max PDU size.");
-    }
 
     let hash = Sha256::digest(json.as_bytes());
 
