@@ -278,6 +278,8 @@ impl Event {
         self.rejected_reason.as_deref()
     }
 
+    /// Returns the list of prev event IDs. The order matches the order
+    /// specified in the event, though there is no meaning to it.
     fn prev_event_ids(&self) -> Vec<String> {
         match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => format.prev_event_ids(),
@@ -287,6 +289,8 @@ impl Event {
         }
     }
 
+    /// Returns the list of auth event IDs. The order matches the order
+    /// specified in the event, though there is no meaning to it.
     fn auth_event_ids(&self) -> PyResult<Vec<String>> {
         match &*self.parsed_event.specific_fields {
             EventFormatEnum::V1(format) => Ok(format.auth_event_ids()),
@@ -312,10 +316,12 @@ impl Event {
         self.parsed_event.common_fields.state_key.is_some()
     }
 
+    /// Get the state key of this event, or None if it's not a state event.
     fn get_state_key(&self) -> Option<&str> {
         self.parsed_event.common_fields.state_key.as_deref_opt()
     }
 
+    /// The EventFormatVersion implemented by this event.
     #[getter]
     fn format_version(&self) -> i32 {
         self.room_version.event_format
