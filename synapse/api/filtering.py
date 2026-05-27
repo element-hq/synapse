@@ -137,7 +137,6 @@ USER_FILTER_SCHEMA = {
         "room": {"$ref": "#/definitions/room_filter"},
         "event_format": {"type": "string", "enum": ["client", "federation"]},
         "event_fields": {"type": "array", "items": {"type": "string"}},
-        "profile_fields": {"$ref": "#/definitions/profile_fields_filter"},
         "org.matrix.msc4429.profile_fields": {
             "$ref": "#/definitions/profile_fields_filter"
         },
@@ -230,11 +229,7 @@ class FilterCollection:
 
         self.profile_fields: list[str] = []
         if hs.config.experimental.msc4429_enabled:
-            profile_fields_filter = filter_json.get("profile_fields")
-            if profile_fields_filter is None:
-                profile_fields_filter = filter_json.get(
-                    "org.matrix.msc4429.profile_fields"
-                )
+            profile_fields_filter = filter_json.get("org.matrix.msc4429.profile_fields")
 
             if isinstance(profile_fields_filter, Mapping):
                 ids = profile_fields_filter.get("ids", [])
