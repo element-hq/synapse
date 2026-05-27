@@ -154,6 +154,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
         prev_state_events: list[str],
         rejected: bool = False,
     ) -> tuple[MSC4242Event, EventContext]:
+        # We use a mock here to allow us to set the `event_id`.
         ev = Mock(spec=EventBase)
         ev.event_id = id
         ev.prev_state_events = prev_state_events
