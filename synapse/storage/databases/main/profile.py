@@ -345,12 +345,14 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_updated_profile_updates_txn(
             txn: LoggingTransaction,
         ) -> list[tuple[int, str, str]]:
-            sql = (
-                "SELECT stream_id, user_id, field_name"
-                " FROM profile_updates"
-                " WHERE ? < stream_id AND stream_id <= ?"
-                " ORDER BY stream_id ASC LIMIT ?"
-            )
+            sql = """
+            SELECT
+                stream_id, user_id, field_name
+            FROM profile_updates
+            WHERE
+                ? < stream_id AND stream_id <= ?
+            ORDER BY stream_id ASC LIMIT ?
+            """
             txn.execute(sql, (from_id, to_id, limit))
             return cast(list[tuple[int, str, str]], txn.fetchall())
 
