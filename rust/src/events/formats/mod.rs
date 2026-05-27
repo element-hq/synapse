@@ -94,11 +94,10 @@ pub use vmsc4242::EventFormatVMSC4242;
 /// boxed into the version-agnostic [`Event`](crate::events::Event)
 /// pyclass.
 ///
-/// The `signatures` and `unsigned` fields are kept as dedicated typed
-/// wrappers because they round-trip between Rust and Python repeatedly
-/// and benefit from caching. `common_fields` and `specific_fields` are
-/// both `#[serde(flatten)]`ed so that the serialised JSON is a single
-/// flat object matching the Matrix spec.
+/// The `signatures` and `unsigned` fields are kept separate from the other
+/// fields as they are mutable (and must be deep-copied if the event is cloned).
+/// `common_fields` and `specific_fields` are both `#[serde(flatten)]`ed so that
+/// the serialised JSON is a single flat object matching the Matrix spec.
 #[derive(Serialize, Deserialize)]
 pub struct FormattedEvent<E = Arc<EventFormatEnum>> {
     /// The event's signatures.
