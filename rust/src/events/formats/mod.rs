@@ -199,6 +199,12 @@ pub struct EventCommonFields {
     #[serde(rename = "type")]
     pub type_: Box<str>,
 
+    /// All other fields that are not required/parsed by the specific/common
+    /// fields. This allows us to round-trip events that contain extra fields.
+    ///
+    /// Generally, optional fields should be handled via `other_fields`, as this
+    /// saves space when they are not present. However, that does mean we don't
+    /// do any type-checking until they get used.
     #[serde(flatten)]
     pub other_fields: HashMap<Box<str>, serde_json::Value>,
 }
