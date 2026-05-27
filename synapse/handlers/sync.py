@@ -2161,13 +2161,12 @@ class SyncHandler:
 
         all_updates: dict[str, dict[str, JsonValue | None]] = {}
         for other_user_id in user_ids:
-            displayname = None
-            avatar_url = None
-            custom_fields: JsonDict = {}
-
             profile_data = profile_data_by_user.get(other_user_id)
-            if profile_data is not None:
-                displayname, avatar_url, custom_fields = profile_data
+            if profile_data is None:
+                # Don't generate anything for users with no profile data
+                continue
+
+            displayname, avatar_url, custom_fields = profile_data
 
             per_user_updates: dict[str, JsonValue | None] = {}
             for field_name in profile_fields:
