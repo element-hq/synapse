@@ -353,10 +353,10 @@ impl Event {
             _ => return None,
         };
 
-        let duration_ms = match sticky_obj.get("duration_ms") {
-            Some(serde_json::Value::Number(num)) if num.is_u64() => num.as_u64().unwrap(),
-            _ => return None,
-        };
+        // Check for a valid duration field. The MSC requires `duration_ms` to
+        // be a non-negative integer. If it's missing or invalid, we treat the
+        // event as non-sticky by returning `None`.
+        let duration_ms = sticky_obj.get("duration_ms")?.as_u64()?;
 
         let duration = SynapseDuration::from_milliseconds(duration_ms);
 
