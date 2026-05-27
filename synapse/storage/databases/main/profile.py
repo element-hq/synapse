@@ -459,6 +459,7 @@ class ProfileWorkerStore(SQLBaseStore):
                         "instance_name": self._instance_name,
                         "user_id": user_id_str,
                         "field_name": field_name,
+                        "inserted_ts": self.clock.time_msec(),
                     },
                 )
 

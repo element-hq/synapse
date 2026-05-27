@@ -16,8 +16,14 @@ CREATE TABLE profile_updates (
   stream_id BIGINT NOT NULL PRIMARY KEY,
   instance_name TEXT NOT NULL,
 
+  -- The full user ID
   user_id TEXT NOT NULL,
-  field_name TEXT NOT NULL
+  -- Profile field name that has been updated,
+  -- see https://spec.matrix.org/unstable/client-server-api/#profiles
+  field_name TEXT NOT NULL,
+
+  -- Unix timestamp for debugging purposes
+  inserted_ts BIGINT NOT NULL
 );
 
 CREATE INDEX profile_updates_by_user ON profile_updates (user_id, stream_id);
