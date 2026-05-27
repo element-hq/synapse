@@ -236,6 +236,9 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         async def check(
             ev: EventBase, state: StateMap[EventBase]
         ) -> tuple[bool, JsonDict | None]:
+            # Try and modify the content, this will fail because the event is
+            # immutable. (We therefore need the type ignore linter, as the
+            # linter will pick this bug up)
             ev.content = {"x": "y"}  # type: ignore[misc]
             return True, None
 
