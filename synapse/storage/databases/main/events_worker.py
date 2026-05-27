@@ -1523,7 +1523,7 @@ class EventsWorkerStore(SQLBaseStore):
                     internal_metadata_dict=internal_metadata,
                     rejected_reason=rejected_reason,
                 )
-            except ValueError:
+            except SynapseError:
                 logger.error("Unable to parse event from database: %s", event_id)
                 continue
 
