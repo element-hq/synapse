@@ -59,6 +59,8 @@ pub mod event_field {
     pub const MEMBERSHIP: &str = "membership";
     /// Event field: replaces_state
     pub const REPLACES_STATE: &str = "replaces_state";
+    /// Event field: msc4354_sticky
+    pub const MSC4354_STICKY: &str = "msc4354_sticky";
 }
 
 pub mod unsigned_field {

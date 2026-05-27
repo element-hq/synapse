@@ -69,7 +69,7 @@ use crate::events::{
 use crate::{
     duration::SynapseDuration,
     events::{
-        constants::event_field::{HASHES, SIGNATURES, UNSIGNED},
+        constants::event_field::{HASHES, MSC4354_STICKY, SIGNATURES, UNSIGNED},
         constants::membership_field::MEMBERSHIP,
         constants::redaction_field::REDACTS,
         constants::unsigned_field::{AGE, AGE_TS, REDACTED_BECAUSE},
@@ -346,7 +346,7 @@ impl Event {
             .parsed_event
             .common_fields
             .other_fields
-            .get("msc4354_sticky");
+            .get(MSC4354_STICKY);
 
         let sticky_obj = match sticky_obj {
             Some(serde_json::Value::Object(obj)) => obj,
@@ -797,7 +797,7 @@ mod tests {
         assert!(event
             .common_fields
             .other_fields
-            .contains_key("msc4354_sticky"));
+            .contains_key(MSC4354_STICKY));
         assert!(event
             .common_fields
             .other_fields
