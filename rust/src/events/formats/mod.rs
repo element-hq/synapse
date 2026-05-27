@@ -14,7 +14,7 @@
  */
 
 //! Over-the-wire representations of Matrix events, parameterised by event
-//! format version.
+//! format version (i.e. the structure we parse the event JSON into).
 //!
 //! # Design
 //!
