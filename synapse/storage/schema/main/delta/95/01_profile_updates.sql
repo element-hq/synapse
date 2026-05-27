@@ -17,11 +17,7 @@ CREATE TABLE profile_updates (
   instance_name TEXT NOT NULL,
 
   user_id TEXT NOT NULL,
-  field_name TEXT NOT NULL,
-
-  CONSTRAINT profile_updates_fk_users
-    FOREIGN KEY (user_id)
-    REFERENCES users(name) ON DELETE CASCADE
+  field_name TEXT NOT NULL
 );
 
 CREATE INDEX profile_updates_by_user ON profile_updates (user_id, stream_id);
