@@ -22,7 +22,12 @@ from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import Codes, HttpResponseException, SynapseError
+from synapse.api.errors import (
+    Codes,
+    HttpResponseException,
+    InvalidResponseError,
+    SynapseError,
+)
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -276,7 +281,7 @@ class RoomPolicyHandler:
                         key_id,
                         event.event_id,
                     )
-        except HttpResponseException as ex:
+        except (HttpResponseException, InvalidResponseError) as ex:
             # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
             raise ex.to_synapse_error() from ex
 
