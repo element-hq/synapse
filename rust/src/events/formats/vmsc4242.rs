@@ -37,19 +37,24 @@ use crate::events::formats::v4::get_room_id_for_optional_room_id;
 use crate::events::formats::v4::validate_optional_room_id;
 use crate::events::formats::EventCommonFields;
 use crate::events::Event;
+use crate::json::AllowMissing;
 
 /// Version-specific fields for the MSC4242 event format.
 #[derive(Serialize, Deserialize)]
 pub struct EventFormatVMSC4242 {
     pub prev_state_events: Vec<String>,
     pub prev_events: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub room_id: Option<Box<str>>,
+    #[serde(
+        default,
+        with = "crate::json::allow_missing",
+        skip_serializing_if = "AllowMissing::is_absent"
+    )]
+    pub room_id: AllowMissing<Box<str>>,
 }
 
 impl EventFormatVMSC4242 {
     pub fn validate(&self, common_fields: &EventCommonFields) -> Result<(), Error> {
-        validate_optional_room_id(self.room_id.as_deref(), common_fields)?;
+        validate_optional_room_id(self.room_id.as_deref_opt(), common_fields)?;
 
         // Ensure that we don't have any `auth_events` or `event_id` fields
         // set.
@@ -68,7 +73,7 @@ impl EventFormatVMSC4242 {
         event_id: &str,
         common_fields: &EventCommonFields,
     ) -> Result<Cow<'_, str>, Error> {
-        get_room_id_for_optional_room_id(self.room_id.as_deref(), event_id, common_fields)
+        get_room_id_for_optional_room_id(self.room_id.as_deref_opt(), event_id, common_fields)
     }
 
     pub fn auth_event_ids(&self, event: &Event) -> PyResult<Vec<String>> {

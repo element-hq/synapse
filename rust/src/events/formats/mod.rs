@@ -71,7 +71,10 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 
-use crate::events::{json_object::JsonObject, signatures::Signatures, unsigned::Unsigned};
+use crate::{
+    events::{json_object::JsonObject, signatures::Signatures, unsigned::Unsigned},
+    json::AllowMissing,
+};
 
 mod v1;
 mod v2v3;
@@ -179,8 +182,12 @@ pub struct EventCommonFields {
     pub hashes: HashMap<Box<str>, Box<str>>,
     pub origin_server_ts: i64,
     pub sender: Box<str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state_key: Option<Box<str>>,
+    #[serde(
+        default,
+        with = "crate::json::allow_missing",
+        skip_serializing_if = "AllowMissing::is_absent"
+    )]
+    pub state_key: AllowMissing<Box<str>>,
 
     /// The `type` field of the event (we use `type_` in Rust to avoid the
     /// reserved keyword).
@@ -195,7 +202,7 @@ impl EventCommonFields {
     /// Helper method to check if the event is a state event and return the
     /// tuple of `(type, state_key)` if so.
     fn type_state_key_tuple(&self) -> Option<(&str, &str)> {
-        if let Some(state_key) = &self.state_key {
+        if let AllowMissing::Some(state_key) = &self.state_key {
             Some((&self.type_, state_key))
         } else {
             None

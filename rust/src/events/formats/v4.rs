@@ -32,20 +32,27 @@ use std::borrow::Cow;
 use anyhow::{bail, ensure, Error};
 use serde::{Deserialize, Serialize};
 
-use crate::events::{constants::event_type::M_ROOM_CREATE, formats::EventCommonFields};
+use crate::{
+    events::{constants::event_type::M_ROOM_CREATE, formats::EventCommonFields},
+    json::AllowMissing,
+};
 
 /// Version-specific fields for room version 11.
 #[derive(Serialize, Deserialize)]
 pub struct EventFormatV4 {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub room_id: Option<Box<str>>,
+    #[serde(
+        default,
+        with = "crate::json::allow_missing",
+        skip_serializing_if = "AllowMissing::is_absent"
+    )]
+    pub room_id: AllowMissing<Box<str>>,
     pub auth_events: Vec<String>,
     pub prev_events: Vec<String>,
 }
 
 impl EventFormatV4 {
     pub fn validate(&self, common_fields: &EventCommonFields) -> Result<(), Error> {
-        validate_optional_room_id(self.room_id.as_deref(), common_fields)?;
+        validate_optional_room_id(self.room_id.as_deref_opt(), common_fields)?;
 
         // Ensure that we don't have an event_id set.
         if common_fields.other_fields.contains_key("event_id") {
@@ -60,7 +67,7 @@ impl EventFormatV4 {
         event_id: &str,
         common_fields: &EventCommonFields,
     ) -> Result<Cow<'_, str>, Error> {
-        get_room_id_for_optional_room_id(self.room_id.as_deref(), event_id, common_fields)
+        get_room_id_for_optional_room_id(self.room_id.as_deref_opt(), event_id, common_fields)
     }
 
     pub fn auth_event_ids(&self, common_fields: &EventCommonFields) -> Result<Vec<String>, Error> {
@@ -76,7 +83,7 @@ impl EventFormatV4 {
         // replacing the leading '!' with '$'.
         let room_id = self
             .room_id
-            .as_deref()
+            .as_deref_opt()
             .ok_or_else(|| anyhow::anyhow!("non-create event has no room_id"))?;
 
         let mut create_event_id = String::with_capacity(room_id.len());

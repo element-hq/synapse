@@ -313,7 +313,7 @@ impl Event {
     }
 
     fn get_state_key(&self) -> Option<&str> {
-        self.parsed_event.common_fields.state_key.as_deref()
+        self.parsed_event.common_fields.state_key.as_deref_opt()
     }
 
     #[getter]
@@ -482,7 +482,7 @@ impl Event {
     // We can't call this `state_key` because that would generate a
     // `get_state_key` method which already exists.
     fn state_key_attr(&self) -> PyResult<&str> {
-        let Some(state_key) = self.parsed_event.common_fields.state_key.as_deref() else {
+        let Some(state_key) = self.parsed_event.common_fields.state_key.as_deref_opt() else {
             return Err(PyAttributeError::new_err("state_key"));
         };
         Ok(state_key)
@@ -614,7 +614,7 @@ mod tests {
         let parsed_value = serde_json::to_value(&event).unwrap();
 
         assert_eq!(&*event.common_fields.type_, "m.room.message");
-        assert_eq!(event.common_fields.state_key, None);
+        assert!(event.common_fields.state_key.is_absent());
         assert_eq!(&*event.specific_fields.room_id, "!room:localhost");
         assert_eq!(&*event.specific_fields.event_id, "$event1:localhost");
 
@@ -639,7 +639,7 @@ mod tests {
 
         assert_eq!(&*event.common_fields.type_, "m.room.message");
         assert_eq!(
-            event.specific_fields.room_id.as_deref(),
+            event.specific_fields.room_id.as_deref_opt(),
             Some("!room:localhost")
         );
         assert_eq!(
@@ -663,7 +663,7 @@ mod tests {
         let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
         let parsed_value = serde_json::to_value(&event).unwrap();
 
-        assert!(event.specific_fields.room_id.is_none());
+        assert!(event.specific_fields.room_id.is_absent());
         assert_eq!(&*event.common_fields.type_, M_ROOM_CREATE);
 
         // Create events have no implicit auth events.
@@ -732,11 +732,11 @@ mod tests {
             vec!["$pstate1".to_string(), "$pstate2".to_string()]
         );
         assert_eq!(
-            event.specific_fields.room_id.as_deref(),
+            event.specific_fields.room_id.as_deref_opt(),
             Some("!room:localhost")
         );
         assert_eq!(
-            event.common_fields.state_key.as_deref(),
+            event.common_fields.state_key.as_deref_opt(),
             Some("@user:localhost")
         );
 
