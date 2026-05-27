@@ -479,6 +479,8 @@ impl Event {
     }
 
     #[getter(state_key)]
+    // We can't call this `state_key` because that would generate a
+    // `get_state_key` method which already exists.
     fn state_key_attr(&self) -> PyResult<&str> {
         let Some(state_key) = self.parsed_event.common_fields.state_key.as_deref() else {
             return Err(PyAttributeError::new_err("state_key"));
