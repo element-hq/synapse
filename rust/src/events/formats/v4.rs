@@ -111,7 +111,16 @@ pub fn validate_optional_room_id(
     match (is_create_event, room_id) {
         // For non-create events, room_id must be present.
         (false, None) => bail!("non-create event must have a room ID"),
-        (false, Some(_)) => {}
+        (false, Some(room_id)) => {
+            // We later derive the create event ID from the room ID by replacing
+            // the leading '!' with '$', so we require the room ID to start with
+            // '!'.
+            ensure!(
+                room_id.starts_with("!"),
+                "room_id must start with '!': {}",
+                room_id
+            );
+        }
 
         // For create events, room_id must be absent.
         (true, Some(_)) => bail!("create event must not have a room ID"),
