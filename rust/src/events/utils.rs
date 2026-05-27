@@ -397,7 +397,7 @@ mod tests {
         let original = json!(
             {
                 // "type": "missing_type"
-                "bad_key":"bad_value",
+                "unknown_key":"unknown_value",
                 "auth_events":[
                     "$gbHO7IPUHybc7ULFnT7P0r3iWlZFHGmr6zBfEYCUyKw",
                     "$hy1eZFYcgNxMFNNBgCD5fyOzyWRcBkxfNcrUI5ZpZlE",
@@ -457,7 +457,7 @@ mod tests {
     fn test_redact_missing_content() {
         let original = json!(
             {
-                "bad_key":"bad_value",
+                "unknown_key":"unknown_value",
                 "auth_events":[
                     "$gbHO7IPUHybc7ULFnT7P0r3iWlZFHGmr6zBfEYCUyKw",
                     "$hy1eZFYcgNxMFNNBgCD5fyOzyWRcBkxfNcrUI5ZpZlE",
@@ -512,7 +512,7 @@ mod tests {
     fn test_redact_m_room_message() {
         let original = json!(
             {
-                "bad_key":"bad_value",
+                "unknown_key":"unknown_value",
                 "auth_events":[
                     "$gbHO7IPUHybc7ULFnT7P0r3iWlZFHGmr6zBfEYCUyKw",
                     "$hy1eZFYcgNxMFNNBgCD5fyOzyWRcBkxfNcrUI5ZpZlE",
@@ -684,7 +684,7 @@ mod tests {
             {
                 "type":"m.room.member",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "membership":"join",
                     "join_authorised_via_users_server":"server",
                     "third_party_invite":{
@@ -770,7 +770,7 @@ mod tests {
                 "type":"m.room.create",
                 "room_id": "!roomid",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "other_key":"value",
                     "creator":"user",
                 },
@@ -782,7 +782,7 @@ mod tests {
                 "type":"m.room.create",
                 "room_id": "!roomid",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "other_key":"value",
                     "creator":"user",
                 },
@@ -792,7 +792,7 @@ mod tests {
             {
                 "type":"m.room.create",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "other_key":"value",
                     "creator":"user",
                 },
@@ -848,7 +848,7 @@ mod tests {
             {
                 "type":"m.room.join_rules",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "join_rule":"invite",
                     "allow":"user",
                 },
@@ -913,7 +913,7 @@ mod tests {
             {
                 "type":"m.room.power_levels",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "users":{},
                     "users_default":{},
                     "events":{},
@@ -996,7 +996,7 @@ mod tests {
             {
                 "type":"m.room.aliases",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "aliases":{},
                 },
             }
@@ -1057,7 +1057,7 @@ mod tests {
             {
                 "type":"m.room.history_visibility",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "history_visibility":"visibility",
                 },
             }
@@ -1099,7 +1099,7 @@ mod tests {
             {
                 "type":"m.room.redaction",
                 "content":{
-                    "bad_key":"bad_value",
+                    "unknown_key":"unknown_value",
                     "redacts":"event",
                 },
             }
