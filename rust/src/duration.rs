@@ -38,7 +38,10 @@ impl SynapseDuration {
     /// For now we only need to create durations from milliseconds.
     pub const fn from_milliseconds(milliseconds: u64) -> Self {
         Self {
-            microseconds: milliseconds * 1_000,
+            // We saturate at u64::MAX microseconds to avoid overflow, which
+            // means that the maximum duration we can represent is approximately
+            // 584,942 years.
+            microseconds: milliseconds.saturating_mul(1_000),
         }
     }
 }
