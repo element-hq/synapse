@@ -47,7 +47,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ThumbnailProvider
-from synapse.types import JsonDict
+from synapse.types import JsonDict, JsonMapping, get_domain_from_id
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -893,6 +893,42 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         self.media_repo.mark_recently_accessed(None, media_id)
 
 
+class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
+    """
+    Implements a federation API endpoint for searching a server's user directory.
+    POST /_matrix/federation/v3/user_directory/search
+    Request:
+    {
+        "requester": "@user:example.com"
+    }
+    Response:
+    {
+        "limited": false,
+        "results": [
+            {
+                "user_id": "@user:example.com",
+                "display_name": "Display Name",
+                "avatar_url": "mxc://example.com/avatar",
+                "m.user_directory.visibility": "local"
+            }
+        ]
+    }
+    """
+
+    PATH = "/user_directory/search"
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/de.bwi.federated_user_dir"
+    RATELIMIT = True
+
+    async def on_POST(
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonMapping]:
+        requester = content.get("requester")
+        if requester is None or get_domain_from_id(requester) != origin:
+            raise SynapseError(400, "Missing or invalid requester", Codes.BAD_JSON)
+
+        return await self.handler.on_user_directory_search_request(requester, origin)
+
+
 FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationSendServlet,
     FederationEventServlet,
@@ -925,4 +961,5 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationUserDirectorySearchServlet,
 )

@@ -657,6 +657,39 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             [_UserDirProfile(user_id, display_name, avatar_url)],
         )
 
+    async def upsert_federated_remote_users(
+        self,
+        cache_room_id: str,
+        users: Sequence[tuple[str, str | None, str | None]],
+    ) -> None:
+        """Upsert remote users discovered via federated user directory sync.
+
+        Updates profile and search index entries and marks the users as visible
+        in user directory searches via the federated cache room.
+        """
+        if not users:
+            return
+
+        profiles = [
+            _UserDirProfile(user_id, display_name, avatar_url)
+            for user_id, display_name, avatar_url in users
+        ]
+
+        def _upsert_federated_remote_users_txn(txn: LoggingTransaction) -> None:
+            self._update_profiles_in_user_dir_txn(txn, profiles)
+            self.db_pool.simple_upsert_many_txn(
+                txn,
+                table="users_in_public_rooms",
+                key_names=["user_id", "room_id"],
+                key_values=[(profile.user_id, cache_room_id) for profile in profiles],
+                value_names=(),
+                value_values=(),
+            )
+
+        await self.db_pool.runInteraction(
+            "upsert_federated_remote_users", _upsert_federated_remote_users_txn
+        )
+
     def _update_profiles_in_user_dir_txn(
         self,
         txn: LoggingTransaction,
@@ -1156,6 +1189,49 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 for r in results[0:limit]
             ],
         }
+
+    async def get_users_in_user_dir(self) -> SearchResult:
+        """Get every user stored in the user directory.
+
+        Unlike :meth:`search_user_dir`, this does not match a search term: it
+        returns all profiles in the ``user_directory`` table. It is used by the
+        federation responder to hand a server's full local directory to a
+        remote homeserver.
+
+        Returns:
+            A ``SearchResult`` of the form::
+
+                {
+                    "limited": False,  # always False; no term/limit is applied
+                    "results": [
+                        {
+                            "user_id": <user_id>,
+                            "display_name": <display_name>,
+                            "avatar_url": <avatar_url>,
+                        }
+                    ]
+                }
+        """
+        rows = cast(
+            list[tuple[str, str | None, str | None]],
+            await self.db_pool.simple_select_list(
+                table="user_directory",
+                keyvalues=None,
+                retcols=("user_id", "display_name", "avatar_url"),
+                desc="get_users_in_user_dir",
+            ),
+        )
+
+        results: list[UserProfile] = [
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+                "avatar_url": avatar_url,
+            }
+            for user_id, display_name, avatar_url in rows
+        ]
+
+        return {"limited": False, "results": results}
 
 
 def _filter_text_for_index(text: str) -> str:

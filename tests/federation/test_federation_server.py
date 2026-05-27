@@ -55,6 +55,19 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         login.register_servlets,
     ]
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["user_directory"] = {
+            "enabled": True,
+            "search_all_users": True,
+        }
+        # The federation user directory search responder is only registered when
+        # the experimental feature is enabled.
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+        }
+        return config
+
     @parameterized.expand([(b"",), (b"foo",), (b'{"limit": Infinity}',)])
     def test_bad_request(self, query_content: bytes) -> None:
         """
@@ -92,6 +105,60 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+    def test_federation_user_directory_search_servlet(self) -> None:
+        """Test that the federation user directory search servlet works correctly."""
+        self.register_user("userlambda", "password")
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "POST",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
+            content={
+                "requester": "@requester:other.example.com",
+            },
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body.get("limited", None), False)
+        results = channel.json_body.get("results", [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].get("user_id"), "@userlambda:test")
+
+    def test_federation_user_directory_search_servlet_invalid_request(self) -> None:
+        """Test that the federation user directory search servlet rejects invalid requests."""
+        self.register_user("user", "password")
+
+        # Make a request with a missing requester
+        channel = self.make_signed_federation_request(
+            "POST",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
+            content={},
+        )
+
+        # Check that the response is an error
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
+
+    def test_federation_user_directory_search_servlet_no_results(self) -> None:
+        """An empty local directory yields no results."""
+        # No local users are registered, so the directory is empty.
+
+        # Make a request to the servlet
+        channel = self.make_signed_federation_request(
+            "POST",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
+            content={
+                "requester": "@requester:other.example.com",
+            },
+        )
+
+        # Check that the response is correct
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body.get("limited", None), False)
+        results = channel.json_body.get("results", [])
+        self.assertEqual(len(results), 0)
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:

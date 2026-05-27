@@ -136,7 +136,10 @@ from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
 from synapse.handlers.thread_subscriptions import ThreadSubscriptionsHandler
 from synapse.handlers.typing import FollowerTypingHandler, TypingWriterHandler
-from synapse.handlers.user_directory import UserDirectoryHandler
+from synapse.handlers.user_directory import (
+    UserDirectoryFederationHandler,
+    UserDirectoryHandler,
+)
 from synapse.handlers.worker_lock import WorkerLocksHandler
 from synapse.http.client import (
     InsecureInterceptableContextFactory,
@@ -1028,6 +1031,10 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_user_directory_handler(self) -> UserDirectoryHandler:
+        # Only load the federation-aware variant when the experimental feature
+        # is enabled; otherwise use the plain, federation-agnostic handler.
+        if self.config.experimental.bwi_federated_user_dir_enabled:
+            return UserDirectoryFederationHandler(self)
         return UserDirectoryHandler(self)
 
     @cache_in_self

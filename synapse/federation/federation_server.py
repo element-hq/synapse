@@ -87,7 +87,13 @@ from synapse.replication.http.federation import (
 from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
-from synapse.types import JsonDict, StateMap, UserID, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    StateMap,
+    UserID,
+    get_domain_from_id,
+)
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
@@ -1476,6 +1482,49 @@ class FederationServer(FederationBase):
             server_name
         ):
             raise AuthError(code=403, msg="Server is banned from room")
+
+    async def on_user_directory_search_request(
+        self, requester_id: str, origin: str
+    ) -> tuple[int, JsonMapping]:
+        """Handle a user directory request from a remote server.
+
+        Returns every searchable local user, since the federation endpoint
+        always syncs the full local directory rather than matching a term.
+
+        Args:
+            requester_id: The user ID of the requester on the origin server.
+            origin: The server that sent the request.
+
+        Returns:
+            A tuple of (response code, response json)
+        """
+        return 200, await self._search_all_users()
+
+    async def _search_all_users(self) -> JsonDict:
+        """Return all of this server's own users from the user directory.
+
+        Reads the directory straight from the database and filters to locally
+        owned users, since the federation endpoint must only expose this
+        homeserver's own users (the table may also hold cached remote users).
+
+        Returns:
+            A dict of the form ``{"limited": False, "results": [...]}``.
+        """
+        results = await self.store.get_users_in_user_dir()
+
+        # Federation endpoint: only return users local to this homeserver.
+        filtered_results = []
+        for user in results.get("results", []):
+            try:
+                if self.hs.is_mine_id(user["user_id"]):
+                    filtered_results.append(user)
+            except SynapseError:
+                # Ignore malformed user IDs.
+                continue
+
+        # The federation endpoint never truncates: it always returns the full
+        # local directory.
+        return {"limited": False, "results": filtered_results}
 
 
 class FederationHandlerRegistry:

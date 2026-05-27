@@ -36,10 +36,13 @@ from typing import (
     Optional,
     Sequence,
     TypeVar,
+    cast,
 )
 
 import attr
 from prometheus_client import Counter
+
+from twisted.internet import defer
 
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
 from synapse.api.errors import (
@@ -68,15 +71,24 @@ from synapse.federation.federation_base import (
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
+from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.types import (
+    JsonDict,
+    RemoteUserDirectoryEntry,
+    StrCollection,
+    UserID,
+    get_domain_from_id,
+)
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 
 if TYPE_CHECKING:
+    from synapse.handlers.user_directory import UserDirectoryFederationHandler
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -87,6 +99,10 @@ sent_queries_counter = Counter(
 
 
 PDU_RETRY_TIME_MS = 1 * 60 * 1000
+
+# Localpart of the synthetic requester MXID used when querying remote homeservers
+# during the periodic federated user directory sync.
+FEDERATED_USER_DIR_SYNC_REQUESTER_LOCALPART = "_user_directory_sync"
 
 T = TypeVar("T")
 
@@ -134,6 +150,9 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
+        self.user_directory_search_timeout = (
+            hs.config.experimental.bwi_federated_user_dir_federation_search_timeout
+        )
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
@@ -169,6 +188,25 @@ class FederationClient(FederationBase):
             expiry_ms=5 * 60 * 1000,
             reset_expiry_on_get=False,
         )
+
+        # Synthetic requester used for the federated user directory sync. The
+        # remote server requires the requester to belong to our server.
+        self._federated_user_dir_sync_requester = (
+            f"@{FEDERATED_USER_DIR_SYNC_REQUESTER_LOCALPART}:{self.server_name}"
+        )
+
+        # Periodically sync remote homeservers' user directories into our own,
+        # but only on the worker that runs background tasks.
+        if (
+            hs.config.experimental.bwi_federated_user_dir_enabled
+            and hs.config.worker.run_background_tasks
+        ):
+            self._clock.looping_call(
+                self._sync_federated_user_directory,
+                Duration(
+                    milliseconds=hs.config.experimental.bwi_federated_user_dir_sync_interval_ms
+                ),
+            )
 
     def _clear_tried_cache(self) -> None:
         """Clear pdu_destination_tried cache"""
@@ -1915,6 +1953,181 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def user_directory_search(
+        self,
+        requester: str,
+        destination: str,
+        timeout: int,
+    ) -> JsonDict:
+        """Fetch users from the user directory of a remote server.
+
+        The federation endpoint always returns the remote server's full local
+        directory, so no result limit is sent.
+
+        Args:
+            requester: The user that initiated the request.
+            destination: The server to query.
+            timeout: Timeout in milliseconds for the request.
+
+        Returns:
+            The results containing a list of users from the remote directory.
+        """
+        try:
+            response = await self.transport_layer.user_directory_search(
+                requester, destination, timeout
+            )
+            return response
+        except Exception as e:
+            # If something goes wrong, we still want to return what we have
+            logger.exception(
+                "Error searching user directory across federation[destination=%s] : %s",
+                destination,
+                e,
+            )
+            return {"limited": False, "results": []}
+
+    async def search_user_directory_across_federation(
+        self,
+        requester: str,
+        destinations: Collection[str],
+        limit: int = 10,
+    ) -> JsonDict:
+        """Fetch users from the directories of multiple federated servers.
+
+        Args:
+            requester: The user that initiated the request.
+            destinations: The servers to query.
+            limit: Maximum number of results to return per server.
+
+        Returns:
+            Combined results from all servers.
+        """
+
+        if not destinations:
+            return {"limited": False, "results": []}
+
+        # Query each server individually and collect results
+        combined_results = []
+        limited = False
+
+        # Create a list of deferreds to query each server
+        query_tasks = []
+        for destination in destinations:
+            if not self._is_mine_server_name(destination):
+                # Convert coroutine to Deferred
+                deferred = defer.ensureDeferred(
+                    self.user_directory_search(
+                        requester,
+                        destination,
+                        self.user_directory_search_timeout,
+                    )
+                )
+                query_tasks.append(deferred)
+
+        # Execute all queries in parallel
+        if query_tasks:
+            server_results = await make_deferred_yieldable(
+                defer.gatherResults(
+                    query_tasks,
+                    consumeErrors=True,
+                )
+            )
+
+            # Process results from each server
+            for result in server_results:
+                if result.get("limited", False):
+                    limited = True
+                combined_results.extend(result.get("results", []))
+
+        # Limit the total number of results
+        if len(combined_results) > limit:
+            combined_results = combined_results[:limit]
+            limited = True
+
+        return {"limited": limited, "results": combined_results}
+
+    @staticmethod
+    def _parse_remote_user_directory_results(
+        response: JsonDict,
+    ) -> list[RemoteUserDirectoryEntry]:
+        """Parse a remote user directory search response into typed entries.
+
+        Malformed entries are skipped. This keeps the federation wire format
+        contained within the federation layer.
+        """
+        entries: list[RemoteUserDirectoryEntry] = []
+        for user in response.get("results", []):
+            if not isinstance(user, dict):
+                continue
+
+            user_id = user.get("user_id")
+            if not isinstance(user_id, str):
+                continue
+
+            display_name = user.get("display_name")
+            if not isinstance(display_name, str):
+                display_name = None
+
+            avatar_url = user.get("avatar_url")
+            if not isinstance(avatar_url, str):
+                avatar_url = None
+
+            entries.append(
+                RemoteUserDirectoryEntry(
+                    user_id=user_id,
+                    display_name=display_name,
+                    avatar_url=avatar_url,
+                )
+            )
+
+        return entries
+
+    @wrap_as_background_process("federated_user_directory_sync")
+    async def _sync_federated_user_directory(self) -> None:
+        """Periodically fetch users from known homeservers' user directories
+        and hand them to the local user directory for storage.
+
+        This is the federation-side background job: it decides which servers to
+        contact and how to query them. Persisting the results is delegated to
+        the user directory handler, which knows nothing about federation.
+        """
+        destinations = await self.store.get_known_destinations()
+        if not destinations:
+            logger.debug("Federated user directory sync: no known destinations")
+            return
+
+        # De-duplicate by user id across destinations.
+        entries_by_user: dict[str, RemoteUserDirectoryEntry] = {}
+
+        for destination in destinations:
+            if self._is_mine_server_name(destination):
+                continue
+
+            response = await self.user_directory_search(
+                self._federated_user_dir_sync_requester,
+                destination,
+                self.user_directory_search_timeout,
+            )
+
+            for entry in self._parse_remote_user_directory_results(response):
+                entries_by_user[entry.user_id] = entry
+
+        if not entries_by_user:
+            logger.debug("Federated user directory sync found no remote users")
+            return
+
+        # This job is only scheduled when the feature is enabled, in which case
+        # the homeserver exposes the federation-aware handler variant.
+        handler = cast(
+            "UserDirectoryFederationHandler", self.hs.get_user_directory_handler()
+        )
+        await handler.upsert_remote_users(list(entries_by_user.values()))
+
+        logger.info(
+            "Federated user directory sync upserted %d remote users",
+            len(entries_by_user),
+        )
 
     async def federation_download_media(
         self,

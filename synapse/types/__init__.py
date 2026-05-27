@@ -1643,6 +1643,20 @@ class UserProfile(TypedDict):
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
+class RemoteUserDirectoryEntry:
+    """A remote user directory entry fetched from another homeserver.
+
+    This is the boundary type used to hand parsed remote users from the
+    federation layer to the user directory, so the user directory does not need
+    to know anything about the federation wire format.
+    """
+
+    user_id: str
+    display_name: str | None = None
+    avatar_url: str | None = None
+
+
+@attr.s(auto_attribs=True, frozen=True, slots=True)
 class RetentionPolicy:
     min_lifetime: int | None = None
     max_lifetime: int | None = None

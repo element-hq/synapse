@@ -28,10 +28,17 @@ from synapse.api.constants import UserTypes
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.appservice import ApplicationService
+from synapse.handlers.user_directory import UserDirectoryFederationHandler
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import JsonDict, UserID, UserProfile, create_requester
+from synapse.types import (
+    JsonDict,
+    RemoteUserDirectoryEntry,
+    UserID,
+    UserProfile,
+    create_requester,
+)
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1433,3 +1440,111 @@ class UserDirectoryRemoteProfileTestCase(unittest.HomeserverTestCase):
                     display_name="Sir Bruce Bruceson", avatar_url="mxc://remote/789"
                 ),
             )
+
+
+class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
+    """Tests for ingesting remote users into the user directory.
+
+    The handler is intentionally unaware of federation; it only persists
+    already-parsed `RemoteUserDirectoryEntry` objects.
+    """
+
+    servlets = [
+        login.register_servlets,
+        register.register_servlets,
+        user_directory.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        # Enable updating the user directory on this (main) process.
+        config["update_user_directory_from_worker"] = None
+        # Enabling the feature makes get_user_directory_handler() return the
+        # federation-aware subclass.
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+        }
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        handler = hs.get_user_directory_handler()
+        # Enabling the feature makes the getter return the federation subclass.
+        assert isinstance(handler, UserDirectoryFederationHandler)
+        self.handler = handler
+        self.user_dir_helper = GetUserDirectoryTables(self.store)
+
+    def test_upsert_remote_users_persists_profiles_and_visibility(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@alice:remote.example.com",
+                        display_name="Alice Remote",
+                        avatar_url="mxc://remote.example.com/abc",
+                    )
+                ]
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertEqual(
+            profiles.get("@alice:remote.example.com"),
+            ProfileInfo(
+                display_name="Alice Remote",
+                avatar_url="mxc://remote.example.com/abc",
+            ),
+        )
+
+        public_rooms = self.get_success(
+            self.user_dir_helper.get_users_in_public_rooms()
+        )
+        self.assertIn(
+            (
+                "@alice:remote.example.com",
+                self.handler._federated_cache_room_id,
+            ),
+            public_rooms,
+        )
+
+    def test_upsert_remote_users_ignores_local_users(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@localuser:test",
+                        display_name="Local User",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertNotIn("@localuser:test", profiles)
+
+    def test_search_users_returns_cached_remote_users(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@carol:remote.example.com",
+                        display_name="Carol Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        results = self.get_success(
+            self.handler.search_users("@searcher:test", "carol", 10)
+        )
+
+        self.assertIn(
+            "@carol:remote.example.com",
+            {user["user_id"] for user in results["results"]},
+        )
