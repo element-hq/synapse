@@ -24,8 +24,10 @@ use super::constants::{
     redaction_field,
     unsigned_field::AGE_TS,
 };
-use crate::canonical_json::CanonicalizationOptions;
 use crate::room_versions::{EventFormatVersions, RoomVersion};
+use crate::{
+    canonical_json::CanonicalizationOptions, events::constants::event_field::PREV_STATE_EVENTS,
+};
 
 /// Calculates the event_id of an event.
 ///
@@ -99,13 +101,20 @@ pub fn redact(event: &Value, room_version: &RoomVersion) -> anyhow::Result<Value
         (STATE_KEY),
         (DEPTH),
         (PREV_EVENTS),
-        (AUTH_EVENTS),
         (ORIGIN_SERVER_TS),
     ]);
 
     // Earlier room versions had additional allowed keys
     if !room_version.updated_redaction_rules {
         allowed_keys.extend([PREV_STATE, MEMBERSHIP, ORIGIN]);
+    }
+
+    // Room versions with MSC4242 have `prev_state_events` instead of
+    // `auth_events`.
+    if room_version.msc4242_state_dags {
+        allowed_keys.insert(PREV_STATE_EVENTS);
+    } else {
+        allowed_keys.insert(AUTH_EVENTS);
     }
 
     let event_type = event
