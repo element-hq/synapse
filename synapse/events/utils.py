@@ -99,7 +99,12 @@ def prune_event(event: EventBase) -> EventBase:
 
 
 def clone_event(event: EventBase) -> EventBase:
-    """Take a copy of the event."""
+    """Take a copy of the event.
+
+    Most fields of the event are immutable, however fields such as `unsigned`,
+    `signatures` and `internal_metadata` are mutable. Cloning the event allows
+    us to edit such fields without affecting the original event.
+    """
 
     return event.deep_copy()
 
