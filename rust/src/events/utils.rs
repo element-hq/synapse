@@ -57,6 +57,7 @@ pub fn compute_event_reference_hash(
 
     redacted_value_mut.remove(SIGNATURES);
     redacted_value_mut.remove(UNSIGNED);
+    redacted_value_mut.remove(AGE_TS);
 
     let canonicalization_options = if room_version.strict_canonicaljson {
         CanonicalizationOptions::strict()
