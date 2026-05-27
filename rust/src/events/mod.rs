@@ -614,6 +614,7 @@ mod tests {
         let parsed_value = serde_json::to_value(&event).unwrap();
 
         assert_eq!(&*event.common_fields.type_, "m.room.message");
+        assert_eq!(event.common_fields.state_key, None);
         assert_eq!(&*event.specific_fields.room_id, "!room:localhost");
         assert_eq!(&*event.specific_fields.event_id, "$event1:localhost");
 
