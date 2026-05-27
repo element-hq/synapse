@@ -101,11 +101,17 @@ pub use vmsc4242::EventFormatVMSC4242;
 /// flat object matching the Matrix spec.
 #[derive(Serialize, Deserialize)]
 pub struct FormattedEvent<E = Arc<EventFormatEnum>> {
-    /// The event's signatures. This is a mutable field.
+    /// The event's signatures.
+    ///
+    /// Kept separate from common/specific fields as this this is a mutable
+    /// field.
     #[serde(default)]
     pub signatures: Signatures,
 
-    /// The event's unsigned data. This is a mutable field.
+    /// The event's unsigned data.
+    ///
+    /// Kept separate from common/specific fields as this this is a mutable
+    /// field.
     #[serde(default)]
     pub unsigned: Unsigned,
 
