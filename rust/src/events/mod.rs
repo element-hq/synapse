@@ -369,6 +369,7 @@ impl Event {
     //
     // These are rarely used, so we take the easy approach of re-serializing the
     // event to a Python dict and then delegating to the standard dict methods.
+    // We can't remove these functions as third-party modules may rely on them.
 
     fn __contains__<'py>(&self, py: Python<'py>, key: &str) -> PyResult<bool> {
         let dict = self.get_dict(py)?;
