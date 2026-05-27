@@ -396,6 +396,7 @@ mod tests {
     fn test_redact_missing_type() {
         let original = json!(
             {
+                // "type": "missing_type"
                 "bad_key":"bad_value",
                 "auth_events":[
                     "$gbHO7IPUHybc7ULFnT7P0r3iWlZFHGmr6zBfEYCUyKw",
