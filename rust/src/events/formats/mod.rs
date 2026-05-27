@@ -181,6 +181,9 @@ pub struct EventCommonFields {
     pub sender: Box<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state_key: Option<Box<str>>,
+
+    /// The `type` field of the event (we use `type_` in Rust to avoid the
+    /// reserved keyword).
     #[serde(rename = "type")]
     pub type_: Box<str>,
 
