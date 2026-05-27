@@ -106,11 +106,16 @@ pub fn validate_optional_room_id(
     room_id: Option<&str>,
     common_fields: &EventCommonFields,
 ) -> Result<(), Error> {
-    if room_id.is_none() {
-        // Only create events can have a missing room_id.
-        if common_fields.type_state_key_tuple() != Some((M_ROOM_CREATE, "")) {
-            bail!("room_id is required for non-create events");
-        }
+    let is_create_event = common_fields.type_state_key_tuple() == Some((M_ROOM_CREATE, ""));
+
+    match (is_create_event, room_id) {
+        // For non-create events, room_id must be present.
+        (false, None) => bail!("non-create event must have a room ID"),
+        (false, Some(_)) => {}
+
+        // For create events, room_id must be absent.
+        (true, Some(_)) => bail!("create event must not have a room ID"),
+        (true, None) => {}
     }
 
     Ok(())
