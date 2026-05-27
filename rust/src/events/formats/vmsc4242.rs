@@ -28,7 +28,7 @@ use std::borrow::Cow;
 
 use anyhow::bail;
 use anyhow::Error;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::PyAssertionError;
 use pyo3::PyResult;
 use serde::{Deserialize, Serialize};
 
@@ -86,7 +86,7 @@ impl EventFormatVMSC4242 {
         if event.parsed_event.common_fields.type_state_key_tuple() != Some((M_ROOM_CREATE, ""))
             && auth_event_ids.is_empty()
         {
-            return Err(PyRuntimeError::new_err(format!(
+            return Err(PyAssertionError::new_err(format!(
                 "auth_event_ids has not been calculated : {}",
                 event.event_id
             )));
