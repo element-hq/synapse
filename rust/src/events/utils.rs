@@ -89,8 +89,6 @@ pub fn compute_event_reference_hash(
 ///
 /// Events redacted with this function are meant to be sent over federation.
 pub fn redact(event: &Value, room_version: &RoomVersion) -> anyhow::Result<Value> {
-    // TODO: add redacted because when needed
-
     let mut allowed_keys = BTreeSet::from([
         (EVENT_ID),
         (SENDER),
