@@ -94,8 +94,6 @@ class RoomComplexityTests(unittest.FederatingHomeserverTestCase):
             {"membership": "join"},
         )
 
-        self.pump()
-
         # The request failed with a SynapseError saying the resource limit was
         # exceeded.
         f = self.get_failure(d, SynapseError)
@@ -124,8 +122,6 @@ class RoomComplexityTests(unittest.FederatingHomeserverTestCase):
             UserID.from_string(u1),
             {"membership": "join"},
         )
-
-        self.pump()
 
         # The request failed with a SynapseError saying the resource limit was
         # exceeded.
@@ -169,8 +165,6 @@ class RoomComplexityTests(unittest.FederatingHomeserverTestCase):
             UserID.from_string(u1),
             {"membership": "join"},
         )
-
-        self.pump()
 
         # The request failed with a SynapseError saying the resource limit was
         # exceeded.
@@ -221,8 +215,6 @@ class RoomComplexityAdminTests(unittest.FederatingHomeserverTestCase):
             {"membership": "join"},
         )
 
-        self.pump()
-
         # The request failed with a SynapseError saying the resource limit was
         # exceeded.
         f = self.get_failure(d, SynapseError)
@@ -250,8 +242,6 @@ class RoomComplexityAdminTests(unittest.FederatingHomeserverTestCase):
             UserID.from_string(u1),
             {"membership": "join"},
         )
-
-        self.pump()
 
         # The request success since the user is an admin
         self.get_success(d)
