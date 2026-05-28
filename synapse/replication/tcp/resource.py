@@ -248,7 +248,7 @@ class ReplicationStreamer:
                             continue
 
                         logger.info(
-                            "Streaming %s: %s -> %s (limited: %s, updates: %s, max token: %s)",
+                            "Sending update for %s: %s -> %s (limited: %s, updates: %s, max token: %s)",
                             stream.NAME,
                             last_token,
                             updates[-1][0],

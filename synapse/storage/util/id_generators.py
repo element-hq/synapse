@@ -780,7 +780,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # `_current_position` into `_persisted_upto_position` unless we have unfinished
         # writes (since we know that any future write that happens locally will have
         # a higher stream ID than any of the other writers' current positions). In other
-        # words, and we have no outstanding writes, then the new `_persisted_upto_position`
+        # words, when we have no outstanding writes, then the new `_persisted_upto_position`
         # can be the minimum of all *other* writers' current positions,
         #
         our_current_position = self._current_positions.get(self._instance_name, 0)
@@ -834,7 +834,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             and self._stream_name == "to_device"
         ):
             issue9533_logger.debug(
-                "stream id %i now persisted; _current_positions=%s _unfinished_ids=%s, _known_persisted_positions=%s _persisted_upto_position=%i min_curr=%i",
+                "stream_id=%i now persisted for stream=%s; _current_positions=%s _unfinished_ids=%s, _known_persisted_positions=%s _persisted_upto_position=%i min_curr=%i",
                 new_id,
                 self._current_positions,
                 self._unfinished_ids,
