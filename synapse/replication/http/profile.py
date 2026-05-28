@@ -63,7 +63,7 @@ class ReplicationProfileSetFieldValue(ReplicationEndpoint):
     async def _serialize_payload(  # type: ignore[override]
         requester_id: str,
         field_name: str,
-        new_value: str | None,
+        new_value: str,
         by_admin: bool = False,
         propagate: bool = False,
         authenticated_entity: str | None = None,
@@ -84,7 +84,9 @@ class ReplicationProfileSetFieldValue(ReplicationEndpoint):
         # ie an admin who has done the request on behalf of the user.
         requester = create_requester(
             user_id=user_id,
-            authenticated_entity=content["authenticated_entity"] if content["by_admin"] else None,
+            authenticated_entity=content["authenticated_entity"]
+            if content["by_admin"]
+            else None,
         )
         await self._profile_handler.set_field(
             target_user=UserID.from_string(user_id),
