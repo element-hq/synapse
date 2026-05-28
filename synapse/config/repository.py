@@ -21,14 +21,17 @@
 
 import logging
 import os
-from typing import Any
+from typing import Annotated, Any
+from urllib.parse import urlparse
 
 import attr
+from pydantic import AfterValidator, BeforeValidator, ValidationError
 
 from synapse.config.server import generate_ip_set, parse_proxy_config
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
 from synapse.util.module_loader import load_module
+from synapse.util.pydantic_models import ParseModel
 
 from ._base import Config, ConfigError
 
@@ -139,6 +142,21 @@ class MediaUploadLimit:
 
     can_upgrade: bool = False
     """Whether the user can upgrade their plan to increase the limit. This is returned in the M_USER_LIMIT_EXCEEDED error."""
+
+
+def _validate_info_uri(value: str | None) -> str | None:
+    if value and not urlparse(value).scheme:
+        raise ValueError(f"info_uri must be a valid URI with a scheme, got: {value!r}")
+    return value
+
+
+class MediaUploadLimitConfigModel(ParseModel):
+    """Internal model for parsing a single media_upload_limits config entry."""
+
+    max_size: Annotated[int, BeforeValidator(Config.parse_size)]
+    time_period: Annotated[int, BeforeValidator(Config.parse_duration)]
+    info_uri: Annotated[str | None, AfterValidator(_validate_info_uri)] = None
+    can_upgrade: bool = False
 
 
 class ContentRepositoryConfig(Config):
@@ -311,13 +329,17 @@ class ContentRepositoryConfig(Config):
         self.enable_authenticated_media = config.get("enable_authenticated_media", True)
 
         self.media_upload_limits: list[MediaUploadLimit] = []
-        for limit_config in config.get("media_upload_limits", []):
-            time_period_ms = self.parse_duration(limit_config["time_period"])
-            max_bytes = self.parse_size(limit_config["max_size"])
-            info_uri = limit_config.get("info_uri", "")
-            can_upgrade = bool(limit_config.get("can_upgrade", False))
+        for raw_entry in config.get("media_upload_limits", []):
+            try:
+                entry = MediaUploadLimitConfigModel(**raw_entry)
+            except ValidationError as e:
+                raise ConfigError(
+                    "Could not validate media_upload_limits entry",
+                    ("media_upload_limits",),
+                ) from e
 
-            if info_uri == "":
+            info_uri = entry.info_uri
+            if not info_uri:
                 logger.warning(
                     "Empty info_uri provided for media upload limit, using static fallback value instead. You should specify an info_uri that points to more information about the upload limits imposed."
                 )
@@ -325,10 +347,10 @@ class ContentRepositoryConfig(Config):
 
             self.media_upload_limits.append(
                 MediaUploadLimit(
-                    max_bytes,
-                    time_period_ms,
-                    info_uri,
-                    can_upgrade,
+                    max_bytes=entry.max_size,
+                    time_period_ms=entry.time_period,
+                    info_uri=info_uri,
+                    can_upgrade=entry.can_upgrade,
                 )
             )
 
