@@ -914,7 +914,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 )
 
                 message_json, msgid = _serialize_to_device_message(
-                    user_id, "*", messages_by_device["*"]
+                    user_id=user_id, device_id="*", msg=messages_by_device["*"]
                 )
                 for device_id in devices:
                     # Add the message for all devices for this user on this
@@ -943,7 +943,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                     # this server
                     msg = messages_by_device[device_id]
                     message_json, msgid = _serialize_to_device_message(
-                        user_id, device_id, msg
+                        user_id=user_id, device_id=device_id, msg=msg
                     )
                     messages_json_for_user[device_id] = (message_json, msgid)
 
@@ -1061,7 +1061,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
 
 def _serialize_to_device_message(
-    user_id: str, device_id: str, msg: JsonDict
+    *, user_id: str, device_id: str, msg: JsonDict
 ) -> tuple[str, str]:
     """Serialiize a to-device message, ready to add to the device_inbox table.
 

@@ -183,7 +183,9 @@ class ReplicationStreamer:
 
                         for stream in all_streams:
                             self._send_position_command(
-                                stream.NAME, stream.last_token, stream.last_token
+                                stream_name=stream.NAME,
+                                prev_token=stream.last_token,
+                                new_token=stream.last_token,
                             )
 
                     for stream in all_streams:
@@ -243,7 +245,9 @@ class ReplicationStreamer:
                             # cause them to check if there were any missing
                             # updates between X and X+1.
                             self._send_position_command(
-                                stream.NAME, last_token, current_token
+                                stream_name=stream.NAME,
+                                prev_token=last_token,
+                                new_token=current_token,
                             )
                             continue
 
@@ -282,7 +286,9 @@ class ReplicationStreamer:
                         # to tell other workers the actual current position.
                         if updates[-1][0] < current_token:
                             self._send_position_command(
-                                stream.NAME, updates[-1][0], current_token
+                                stream_name=stream.NAME,
+                                prev_token=updates[-1][0],
+                                new_token=current_token,
                             )
 
             logger.debug("No more pending updates, breaking poke loop")
@@ -291,7 +297,7 @@ class ReplicationStreamer:
             self.is_looping = False
 
     def _send_position_command(
-        self, stream_name: str, prev_token: int, new_token: int
+        self, *, stream_name: str, prev_token: int, new_token: int
     ) -> None:
         """Send a POSITION command over replication"""
         logger.info(
