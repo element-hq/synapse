@@ -109,6 +109,9 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
+        self._is_profile_worker = (
+            hs.get_instance_name() in hs.config.worker.writers.profile_updates
+        )
         if hs.config.experimental.msc4133_enabled:
             self.PATTERNS.append(
                 re.compile(
@@ -157,6 +160,13 @@ class ProfileFieldRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
+        if not self._is_profile_worker:
+            raise SynapseError(
+                HTTPStatus.METHOD_NOT_ALLOWED,
+                "Can only handle PUT /profile on instances configured to handle the profile_updates stream writer",
+                Codes.UNRECOGNIZED,
+            )
+
         if not UserID.is_valid(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
@@ -222,6 +232,12 @@ class ProfileFieldRestServlet(RestServlet):
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
+        if not self._is_profile_worker:
+            raise SynapseError(
+                HTTPStatus.METHOD_NOT_ALLOWED,
+                "Can only handle DELETE /profile on instances configured to handle the profile_updates stream writer",
+                Codes.UNRECOGNIZED,
+            )
         if not UserID.is_valid(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
@@ -284,17 +300,9 @@ class UnstableProfileFieldRestServlet(ProfileFieldRestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    # Updating user profiles requires the ability to write to the
-    # `profile_updates` stream.
-    if hs.get_instance_name() in hs.config.worker.writers.profile_updates:
-        # The specific field endpoint *must* appear before the generic profile
-        # endpoint (below).
+    ProfileFieldRestServlet(hs).register(http_server)
 
-        # TODO: Is it possible to still allow any generic_worker to handle the
-        # `GET` endpoint?
-        ProfileFieldRestServlet(hs).register(http_server)
-
-        if hs.config.experimental.msc4133_enabled:
-            UnstableProfileFieldRestServlet(hs).register(http_server)
+    if hs.config.experimental.msc4133_enabled:
+        UnstableProfileFieldRestServlet(hs).register(http_server)
 
     ProfileRestServlet(hs).register(http_server)
