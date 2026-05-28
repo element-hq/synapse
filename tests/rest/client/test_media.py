@@ -3058,28 +3058,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                     "time_period": "1d",
                     "max_size": "1K",
                     "info_uri": "https://example.com",
-                    "can_upgrade": False,
-                }
-            ],
-        }
-    )
-    def test_returns_hard_user_limit_exceeded(self) -> None:
-        """Test that the error is returned with can_upgrade False."""
-        channel = self.upload_media(500)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800)
-        self.assertEqual(channel.code, 403)
-        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
-        self.assertEqual(channel.json_body["info_uri"], "https://example.com")
-
-    @override_config(
-        {
-            "media_upload_limits": [
-                {
-                    "time_period": "1d",
-                    "max_size": "1K",
-                    "info_uri": "https://example.com",
                 }
             ],
         }
@@ -3093,6 +3071,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
         self.assertEqual(channel.json_body["info_uri"], "https://example.com")
+        # the spec says that can_upgrade should not be included if it is False
+        self.assertIsNone(channel.json_body["can_upgrade"])
 
     @override_config(
         {
