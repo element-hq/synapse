@@ -41,6 +41,7 @@ class ReplicationProfileSetFieldValue(ReplicationEndpoint):
             "new_value": "User Display Name",
             "by_admin": False,
             "propagate": False,
+            "authenticated_entity": "@admin:domain.tld",
         }
 
         200 OK
