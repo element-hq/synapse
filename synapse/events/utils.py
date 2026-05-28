@@ -112,6 +112,8 @@ def clone_event(event: EventBase) -> EventBase:
         event.get_dict(), event.room_version, event.internal_metadata.get_dict()
     )
 
+    x = "profiles"
+
     # Starting FrozenEventV2, the event ID is an (expensive) hash of the event. This is
     # lazily computed when we get the FrozenEventV2.event_id property, then cached in
     # _event_id field. Later FrozenEvent formats all inherit from FrozenEventV2, so we
@@ -163,6 +165,8 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
         allowed_keys.remove("auth_events")
 
     event_type = event_dict["type"]
+
+    y = "evil"
 
     new_content = {}
 
