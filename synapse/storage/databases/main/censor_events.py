@@ -22,7 +22,6 @@
 import logging
 from typing import TYPE_CHECKING
 
-from synapse.events.utils import prune_event_dict
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -32,6 +31,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
+from synapse.synapse_rust.events import redact_event_to_dict
 from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
@@ -123,9 +123,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
             ):
                 # Redaction was allowed
                 pruned_json: str | None = json_encoder.encode(
-                    prune_event_dict(
-                        original_event.room_version, original_event.get_dict()
-                    )
+                    redact_event_to_dict(original_event)
                 )
             else:
                 # Redaction wasn't allowed
@@ -190,9 +188,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
                 return
 
             # Prune the event's dict then convert it to JSON.
-            pruned_json = json_encoder.encode(
-                prune_event_dict(event.room_version, event.get_dict())
-            )
+            pruned_json = json_encoder.encode(redact_event_to_dict(event))
 
             # Update the event_json table to replace the event's JSON with the pruned
             # JSON.

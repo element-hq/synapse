@@ -39,15 +39,13 @@ from synapse.api.constants import (
     CANONICALJSON_MAX_INT,
     CANONICALJSON_MIN_INT,
     MAX_PDU_SIZE,
-    EventContentFields,
     EventTypes,
     EventUnsignedContentFields,
     RelationTypes,
 )
 from synapse.api.errors import Codes, SynapseError
-from synapse.api.room_versions import RoomVersion
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
-from synapse.synapse_rust.events import Unsigned
+from synapse.synapse_rust.events import Unsigned, redact_event_to_dict
 from synapse.types import JsonDict, Requester
 
 from . import EventBase, StrippedStateEvent, make_event_from_dict
@@ -78,7 +76,7 @@ def prune_event(event: EventBase) -> EventBase:
     the user has specified, but we do want to keep necessary information like
     type, state_key etc.
     """
-    pruned_event_dict = prune_event_dict(event.room_version, event.get_dict())
+    pruned_event_dict = redact_event_to_dict(event)
 
     pruned_event = make_event_from_dict(
         pruned_event_dict, event.room_version, event.internal_metadata.get_dict()
@@ -107,126 +105,6 @@ def clone_event(event: EventBase) -> EventBase:
     """
 
     return event.deep_copy()
-
-
-def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDict:
-    """Redacts the event_dict in the same way as `prune_event`, except it
-    operates on dicts rather than event objects
-
-    Returns:
-        A copy of the pruned event dict
-    """
-
-    allowed_keys = [
-        "event_id",
-        "sender",
-        "room_id",
-        "hashes",
-        "signatures",
-        "content",
-        "type",
-        "state_key",
-        "depth",
-        "prev_events",
-        "auth_events",
-        "origin_server_ts",
-    ]
-
-    # Earlier room versions from had additional allowed keys.
-    if not room_version.updated_redaction_rules:
-        allowed_keys.extend(["prev_state", "membership", "origin"])
-    # Custom room versions add new allowed keys and remove others
-    if room_version.msc4242_state_dags:
-        allowed_keys.extend(["prev_state_events"])
-        allowed_keys.remove("auth_events")
-
-    event_type = event_dict["type"]
-
-    new_content = {}
-
-    def add_fields(*fields: str) -> None:
-        for field in fields:
-            if field in event_dict["content"]:
-                new_content[field] = event_dict["content"][field]
-
-    if event_type == EventTypes.Member:
-        add_fields("membership")
-        if room_version.restricted_join_rule_fix:
-            add_fields(EventContentFields.AUTHORISING_USER)
-        if room_version.updated_redaction_rules:
-            # Preserve the signed field under third_party_invite.
-            third_party_invite = event_dict["content"].get("third_party_invite")
-            if isinstance(third_party_invite, collections.abc.Mapping):
-                new_content["third_party_invite"] = {}
-                if "signed" in third_party_invite:
-                    new_content["third_party_invite"]["signed"] = third_party_invite[
-                        "signed"
-                    ]
-
-    elif event_type == EventTypes.Create:
-        if room_version.updated_redaction_rules:
-            # MSC2176 rules state that create events cannot have their `content` redacted.
-            new_content = event_dict["content"]
-        if not room_version.implicit_room_creator:
-            # Some room versions give meaning to `creator`
-            add_fields("creator")
-        if room_version.msc4291_room_ids_as_hashes:
-            # room_id is not allowed on the create event as it's derived from the event ID
-            allowed_keys.remove("room_id")
-
-    elif event_type == EventTypes.JoinRules:
-        add_fields("join_rule")
-        if room_version.restricted_join_rule:
-            add_fields("allow")
-    elif event_type == EventTypes.PowerLevels:
-        add_fields(
-            "users",
-            "users_default",
-            "events",
-            "events_default",
-            "state_default",
-            "ban",
-            "kick",
-            "redact",
-        )
-
-        if room_version.updated_redaction_rules:
-            add_fields("invite")
-
-    elif event_type == EventTypes.Aliases and room_version.special_case_aliases_auth:
-        add_fields("aliases")
-    elif event_type == EventTypes.RoomHistoryVisibility:
-        add_fields("history_visibility")
-    elif event_type == EventTypes.Redaction and room_version.updated_redaction_rules:
-        add_fields("redacts")
-
-    # Protect the rel_type and event_id fields under the m.relates_to field.
-    if room_version.msc3389_relation_redactions:
-        relates_to = event_dict["content"].get("m.relates_to")
-        if isinstance(relates_to, collections.abc.Mapping):
-            new_relates_to = {}
-            for field in ("rel_type", "event_id"):
-                if field in relates_to:
-                    new_relates_to[field] = relates_to[field]
-            # Only include a non-empty relates_to field.
-            if new_relates_to:
-                new_content["m.relates_to"] = new_relates_to
-
-    allowed_fields = {k: v for k, v in event_dict.items() if k in allowed_keys}
-
-    allowed_fields["content"] = new_content
-
-    unsigned: JsonDict = {}
-    allowed_fields["unsigned"] = unsigned
-
-    event_unsigned = event_dict.get("unsigned", {})
-
-    if "age_ts" in event_unsigned:
-        unsigned["age_ts"] = event_unsigned["age_ts"]
-    if "replaces_state" in event_unsigned:
-        unsigned["replaces_state"] = event_unsigned["replaces_state"]
-
-    return allowed_fields
 
 
 def _copy_field(src: JsonDict, dst: JsonDict, field: list[str]) -> None:

@@ -52,7 +52,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use pyo3::{
     exceptions::{PyAttributeError, PyKeyError, PyValueError},
-    pyclass, pymethods,
+    pyclass, pyfunction, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods, PyList, PyMapping, PyModule, PyModuleMethods},
     wrap_pyfunction, Bound, IntoPyObject, PyAny, PyResult, Python,
 };
@@ -65,6 +65,7 @@ use crate::events::{
     },
     signatures::Signatures,
     unsigned::Unsigned,
+    utils::redact,
 };
 use crate::{
     duration::SynapseDuration,
@@ -105,6 +106,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<json_object::JsonObjectItemsView>()?;
     child_module.add_class::<Event>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
+    child_module.add_function(wrap_pyfunction!(redact_event_to_dict_py, m)?)?;
+    child_module.add_function(wrap_pyfunction!(redact_event_dict_to_dict_py, m)?)?;
 
     m.add_submodule(&child_module)?;
 
@@ -564,6 +567,42 @@ fn depythonize_event_dict(
     formatted_event.validate()?;
 
     Ok(formatted_event)
+}
+
+/// Returns a pruned version of the given event, which removes all keys we don't
+/// know about or think could potentially be dodgy.
+///
+/// Returns the redacted event as a dict.
+#[pyfunction(name = "redact_event_to_dict")]
+fn redact_event_to_dict_py<'py>(py: Python<'py>, event: &'py Event) -> PyResult<Bound<'py, PyAny>> {
+    let event_value = serde_json::to_value(&event.parsed_event).map_err(|err| {
+        PyValueError::new_err(format!("Failed to serialize event for redaction: {}", err))
+    })?;
+
+    let redacted = redact(&event_value, event.room_version)?;
+
+    let redacted_py = pythonize(py, &redacted)?;
+
+    Ok(redacted_py)
+}
+
+/// Returns a pruned version of the given event dict, which removes all keys we
+/// don't know about or think could potentially be dodgy.
+///
+/// Returns the redacted event as a dict.
+#[pyfunction(name = "redact_event_dict_to_dict")]
+fn redact_event_dict_to_dict_py<'py>(
+    py: Python<'py>,
+    room_version: &RoomVersion,
+    event_dict: &'py Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let event_value = depythonize(event_dict)?;
+
+    let redacted = redact(&event_value, room_version)?;
+
+    let redacted_py = pythonize(py, &redacted)?;
+
+    Ok(redacted_py)
 }
 
 #[cfg(test)]
