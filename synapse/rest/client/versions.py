@@ -200,6 +200,8 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
                     # MSC4306: Support for thread subscriptions
                     "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
+                    # MSC4446: Allow moving the fully read marker backwards.
+                    "com.beeper.msc4446": self.config.experimental.msc4446_enabled,
                     # MSC4169: Backwards-compatible redaction sending using `/send`
                     "com.beeper.msc4169": self.config.experimental.msc4169_enabled,
                     # MSC4354: Sticky events
