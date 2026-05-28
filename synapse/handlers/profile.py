@@ -599,6 +599,42 @@ class ProfileHandler:
 
             return result.get(field_name)
 
+    async def set_field(
+        self,
+        *,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        new_value: str,
+        by_admin: bool = False,
+        propagate: bool = False,
+    ) -> None:
+        """Wrapper function for setting any profile field for a user."""
+        if field_name == ProfileFields.DISPLAYNAME:
+            await self.set_displayname(
+                target_user=target_user,
+                requester=requester,
+                new_displayname=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
+        elif field_name == ProfileFields.AVATAR_URL:
+            await self.set_avatar_url(
+                target_user=target_user,
+                requester=requester,
+                new_avatar_url=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
+        else:
+            await self.set_profile_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=by_admin,
+            )
+
     async def set_profile_field(
         self,
         target_user: UserID,

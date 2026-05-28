@@ -35,6 +35,7 @@ from synapse.http.servlet import (
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
+from synapse.replication.http.profile import ReplicationProfileSetFieldValue
 from synapse.rest.client._base import client_patterns
 from synapse.types import JsonDict, JsonValue, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
@@ -160,13 +161,6 @@ class ProfileFieldRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
-        if not self._is_profile_worker:
-            raise SynapseError(
-                HTTPStatus.METHOD_NOT_ALLOWED,
-                "Can only handle PUT /profile on instances configured to handle the profile_updates stream writer",
-                Codes.UNRECOGNIZED,
-            )
-
         if not UserID.is_valid(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
@@ -214,17 +208,32 @@ class ProfileFieldRestServlet(RestServlet):
                 Codes.USER_ACCOUNT_SUSPENDED,
             )
 
-        if field_name == ProfileFields.DISPLAYNAME:
-            await self.profile_handler.set_displayname(
-                user, requester, new_value, by_admin=is_admin, propagate=propagate
-            )
-        elif field_name == ProfileFields.AVATAR_URL:
-            await self.profile_handler.set_avatar_url(
-                user, requester, new_value, by_admin=is_admin, propagate=propagate
+        if self._is_profile_worker:
+            await self.profile_handler.set_field(
+                target_user=user,
+                requester=requester,
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=is_admin,
+                propagate=propagate,
             )
         else:
-            await self.profile_handler.set_profile_field(
-                user, requester, field_name, new_value, by_admin=is_admin
+            # Offload to the right worker via http replication
+            set_profile_data_client = ReplicationProfileSetFieldValue.make_client(
+                self.hs
+            )
+            profile_updates_writer_instance = (
+                self.hs.config.worker.writers.profile_updates[0]
+            )
+            await set_profile_data_client(
+                instance_name=profile_updates_writer_instance,
+                user_id=user.to_string(),
+                requester_id=requester.user.to_string(),
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=is_admin,
+                propagate=propagate,
+                authenticated_entity=requester.authenticated_entity,
             )
 
         return 200, {}
