@@ -902,6 +902,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         for user_id, messages_by_device in messages_by_user_then_device.items():
             messages_json_for_user = {}
             devices = list(messages_by_device.keys())
+            if not devices:
+                continue
+
             if len(devices) == 1 and devices[0] == "*":
                 # Handle wildcard device_ids.
                 # We exclude hidden devices (such as cross-signing keys) here as they are
@@ -913,6 +916,17 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                     retcol="device_id",
                 )
 
+                # Don't bother to serialize if there are no devices for this user
+                if not devices:
+                    if issue9533_logger.isEnabledFor(logging.DEBUG):
+                        msgid = _get_msgid_for_message(messages_by_device["*"])
+                        issue9533_logger.debug(
+                            "Dropping wildcard to-device message for user %s with no devices (msgid %s)",
+                            user_id,
+                            msgid,
+                        )
+                    continue
+
                 message_json, msgid = _serialize_to_device_message(
                     user_id=user_id, device_id="*", msg=messages_by_device["*"]
                 )
@@ -921,9 +935,6 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                     # server.
                     messages_json_for_user[device_id] = (message_json, msgid)
             else:
-                if not devices:
-                    continue
-
                 # We exclude hidden devices (such as cross-signing keys) here as they are
                 # not expected to receive to-device messages.
                 rows = cast(
@@ -946,6 +957,20 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                         user_id=user_id, device_id=device_id, msg=msg
                     )
                     messages_json_for_user[device_id] = (message_json, msgid)
+
+                if issue9533_logger.isEnabledFor(logging.DEBUG):
+                    # Log any messags we are dropping
+                    unmapped_devices = (
+                        messages_by_device.keys() - messages_json_for_user.keys()
+                    )
+                    if unmapped_devices:
+                        issue9533_logger.debug(
+                            "Dropping to-device messages for unknown devices: %s",
+                            [
+                                f"{user_id}/{device_id} (msgid {_get_msgid_for_message(messages_by_device[device_id])})"
+                                for device_id in unmapped_devices
+                            ],
+                        )
 
             if messages_json_for_user:
                 local_by_user_then_device[user_id] = messages_json_for_user
@@ -1068,7 +1093,7 @@ def _serialize_to_device_message(
     Returns a tuple (message_json, msgid).
     """
     with start_active_span("serialise_to_device_message"):
-        msgid: str = msg["content"].get(EventContentFields.TO_DEVICE_MSGID, "")
+        msgid = _get_msgid_for_message(msg)
         set_tag(SynapseTags.TO_DEVICE_TYPE, msg["type"])
         set_tag(SynapseTags.TO_DEVICE_SENDER, msg["sender"])
         set_tag(SynapseTags.TO_DEVICE_RECIPIENT, user_id)
@@ -1076,6 +1101,11 @@ def _serialize_to_device_message(
         set_tag(SynapseTags.TO_DEVICE_MSGID, msgid)
         message_json = json_encoder.encode(msg)
     return message_json, msgid
+
+
+def _get_msgid_for_message(msg: JsonDict) -> str:
+    """Extract the message ID from a to-device message."""
+    return str(msg["content"].get(EventContentFields.TO_DEVICE_MSGID, ""))
 
 
 class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
