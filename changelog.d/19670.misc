@@ -1,0 +1,1 @@
+Refactor `_TransactionQueueManager` to delineate transaction preparation and completion.
