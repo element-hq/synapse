@@ -1201,24 +1201,31 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # We only want to import redis module if we're using it, as we have
         # `txredisapi` as an optional dependency.
-        from synapse.replication.tcp.redis import lazyConnection, lazyUnixConnection
+        from synapse.replication.tcp.redis import (
+            lazyConnection,
+            lazySentinelConnection,
+            lazyUnixConnection,
+        )
 
-        if self.config.redis.redis_path is None:
+        # Handle sentinel mode
+        if self.config.redis.redis_type == "sentinel":
             logger.info(
-                "Connecting to redis (host=%r port=%r) for external cache",
-                self.config.redis.redis_host,
-                self.config.redis.redis_port,
+                "Connecting to redis via sentinel (master=%r sentinels=%r) for external cache",
+                self.config.redis.redis_sentinel_master,
+                self.config.redis.redis_sentinel_hosts,
             )
 
-            return lazyConnection(
+            return lazySentinelConnection(
                 hs=self,
-                host=self.config.redis.redis_host,
-                port=self.config.redis.redis_port,
+                sentinel_hosts=self.config.redis.redis_sentinel_hosts,
+                master_name=self.config.redis.redis_sentinel_master,
                 dbid=self.config.redis.redis_dbid,
                 password=self.config.redis.redis_password,
-                reconnect=True,
+                sentinel_password=self.config.redis.redis_sentinel_password,
             )
-        else:
+
+        # Handle Unix socket connection
+        if self.config.redis.redis_path is not None:
             logger.info(
                 "Connecting to redis (path=%r) for external cache",
                 self.config.redis.redis_path,
@@ -1231,6 +1238,22 @@ class HomeServer(metaclass=abc.ABCMeta):
                 password=self.config.redis.redis_password,
                 reconnect=True,
             )
+
+        # Handle standalone mode (TCP connection)
+        logger.info(
+            "Connecting to redis (host=%r port=%r) for external cache",
+            self.config.redis.redis_host,
+            self.config.redis.redis_port,
+        )
+
+        return lazyConnection(
+            hs=self,
+            host=self.config.redis.redis_host,
+            port=self.config.redis.redis_port,
+            dbid=self.config.redis.redis_dbid,
+            password=self.config.redis.redis_password,
+            reconnect=True,
+        )
 
     def should_send_federation(self) -> bool:
         "Should this server be sending federation traffic directly?"
