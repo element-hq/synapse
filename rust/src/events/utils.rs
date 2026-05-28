@@ -24,9 +24,12 @@ use super::constants::{
     redaction_field,
     unsigned_field::AGE_TS,
 };
-use crate::room_versions::{EventFormatVersions, RoomVersion};
 use crate::{
     canonical_json::CanonicalizationOptions, events::constants::event_field::PREV_STATE_EVENTS,
+};
+use crate::{
+    events::constants::event_field::M_RELATES_TO,
+    room_versions::{EventFormatVersions, RoomVersion},
 };
 
 /// Calculates the event_id of an event.
@@ -224,6 +227,30 @@ pub fn redact(event: &Value, room_version: &RoomVersion) -> anyhow::Result<Value
     {
         if allowed_keys.contains(&k.as_str()) {
             allowed_fields_mut.insert(k.clone(), v.clone());
+        }
+    }
+
+    if room_version.msc3389_relation_redactions {
+        if let Some(relates_to) = event
+            .get(CONTENT)
+            .and_then(|content| content.get(M_RELATES_TO))
+        {
+            if relates_to.is_object() {
+                let mut new_relates_to = serde_json::json!({});
+                let new_relates_to_mut = new_relates_to
+                    .as_object_mut()
+                    .context("Failed getting `new_relates_to` as mutable object")?;
+
+                for field in ["rel_type", "event_id"] {
+                    if let Some(value) = relates_to.get(field) {
+                        new_relates_to_mut.insert(field.to_string(), value.clone());
+                    }
+                }
+
+                if !new_relates_to_mut.is_empty() {
+                    new_content_mut.insert(M_RELATES_TO.to_string(), new_relates_to);
+                }
+            }
         }
     }
 

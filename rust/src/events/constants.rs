@@ -63,6 +63,8 @@ pub mod event_field {
     pub const MSC4354_STICKY: &str = "msc4354_sticky";
     // Event field: prev_state_events
     pub const PREV_STATE_EVENTS: &str = "prev_state_events";
+    // Event field: m.relates_to
+    pub const M_RELATES_TO: &str = "m.relates_to";
 }
 
 pub mod unsigned_field {
