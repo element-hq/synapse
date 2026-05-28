@@ -3042,7 +3042,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                         {
                             "time_period": "1d",
                             "max_size": "1K",
-                            "msc4335_info_uri": "https://example.com",
+                            //  We're specifically testing that having no `info_uri` results in some warning logs
+                            // "info_uri": "https://example.com",
                         }
                     ],
                     **config_dict,
