@@ -2921,6 +2921,85 @@ properties:
     default: true
     examples:
       - false
+  turn_cloudflare_enabled:
+    type: boolean
+    description: >-
+      Whether to fetch dynamic TURN credentials from Cloudflare's TURN API
+      before falling back to the locally configured TURN server.
+    default: false
+    examples:
+      - true
+  turn_cloudflare_key_id:
+    type: ["string", "null"]
+    description: >-
+      The Cloudflare TURN key ID used to generate short-lived ICE server
+      credentials.
+    default: null
+    examples:
+      - YOUR_CLOUDFLARE_TURN_KEY_ID
+  turn_cloudflare_api_token:
+    type: ["string", "null"]
+    description: >-
+      The Cloudflare API token used to request short-lived TURN credentials.
+    default: null
+    examples:
+      - YOUR_CLOUDFLARE_API_TOKEN
+  turn_cloudflare_api_token_path:
+    type: ["string", "null"]
+    description: >-
+      An alternative to [`turn_cloudflare_api_token`](#turn_cloudflare_api_token):
+      allows the Cloudflare API token to be specified in an external file.
+
+
+      The file should be a plain text file, containing only the API token.
+      Synapse reads the token from the given file once at startup.
+    default: null
+    examples:
+      - /path/to/secrets/file
+  turn_cloudflare_api_base_url:
+    type: string
+    description: The base URL for Cloudflare's TURN credential API.
+    default: https://rtc.live.cloudflare.com/v1
+    examples:
+      - https://rtc.live.cloudflare.com/v1
+  turn_federation_deployment:
+    type: boolean
+    description: >-
+      Whether this homeserver is part of a federated deployment that should
+      fetch TURN credentials from a shared TURN broker instead of calling
+      Cloudflare directly. If false, `turn_broker_url` is ignored.
+    default: false
+    examples:
+      - true
+  turn_broker_url:
+    type: ["string", "null"]
+    description: >-
+      The URL of a TURN broker endpoint that returns Matrix-style TURN
+      credentials (`username`, `password`, `ttl`, `uris`). This is only used
+      when `turn_federation_deployment` is true.
+    default: null
+    examples:
+      - https://turn-broker.example.com/credentials
+  turn_broker_api_token:
+    type: ["string", "null"]
+    description: >-
+      The Bearer token used to authenticate requests to the TURN broker.
+      This is only used when `turn_federation_deployment` is true.
+    default: null
+    examples:
+      - YOUR_TURN_BROKER_API_TOKEN
+  turn_broker_api_token_path:
+    type: ["string", "null"]
+    description: >-
+      An alternative to [`turn_broker_api_token`](#turn_broker_api_token):
+      allows the TURN broker API token to be specified in an external file.
+
+
+      The file should be a plain text file, containing only the token.
+      Synapse reads the token from the given file once at startup.
+    default: null
+    examples:
+      - /path/to/secrets/file
   matrix_rtc:
     type: object 
     description: >-

@@ -2608,6 +2608,107 @@ Example configuration:
 turn_allow_guests: false
 ```
 ---
+### `turn_mode`
+
+*(string)* Selects the TURN credential source. Valid values:
+- `coturn` (default): use local CoTURN directly. Backward compatible.
+- `cf`: fetch credentials from Cloudflare Realtime TURN, falling back to local CoTURN on failure.
+- `broker`: fetch credentials from a federated TURN broker, falling back to local CoTURN on failure.
+
+Example configuration:
+```yaml
+turn_mode: cf
+```
+---
+### `turn_cloudflare_enabled`
+
+*(boolean)* Whether to fetch dynamic TURN credentials from Cloudflare's TURN API. This must be set to `true` when `turn_mode` is `cf`. Defaults to `false`.
+
+Example configuration:
+```yaml
+turn_cloudflare_enabled: true
+```
+---
+### `turn_cloudflare_key_id`
+
+*(string|null)* The Cloudflare TURN key ID used to generate short-lived ICE server credentials. Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_cloudflare_key_id: YOUR_CLOUDFLARE_TURN_KEY_ID
+```
+---
+### `turn_cloudflare_api_token`
+
+*(string|null)* The Cloudflare API token used to request short-lived TURN credentials. Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_cloudflare_api_token: YOUR_CLOUDFLARE_API_TOKEN
+```
+---
+### `turn_cloudflare_api_token_path`
+
+*(string|null)* An alternative to [`turn_cloudflare_api_token`](#turn_cloudflare_api_token): allows the Cloudflare API token to be specified in an external file.
+
+The file should be a plain text file, containing only the API token. Synapse reads the token from the given file once at startup.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_cloudflare_api_token_path: /path/to/secrets/file
+```
+---
+### `turn_cloudflare_api_base_url`
+
+*(string)* The base URL for Cloudflare's TURN credential API. Defaults to `https://rtc.live.cloudflare.com/v1`.
+
+Example configuration:
+```yaml
+turn_cloudflare_api_base_url: https://rtc.live.cloudflare.com/v1
+```
+---
+### `turn_federation_deployment`
+
+*(boolean)* Whether this homeserver is part of a federated deployment that should fetch TURN credentials from a shared TURN broker. This must be set to `true` when `turn_mode` is `broker`. If false, `turn_broker_url` is ignored. Defaults to `false`.
+
+Example configuration:
+```yaml
+turn_federation_deployment: true
+```
+---
+### `turn_broker_url`
+
+*(string|null)* The URL of a TURN broker endpoint that returns Matrix-style TURN credentials (`username`, `password`, `ttl`, `uris`). This is only used when `turn_federation_deployment` is true. Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_broker_url: https://turn-broker.example.com/credentials
+```
+---
+### `turn_broker_api_token`
+
+*(string|null)* The Bearer token used to authenticate requests to the TURN broker. This is only used when `turn_federation_deployment` is true. Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_broker_api_token: YOUR_TURN_BROKER_API_TOKEN
+```
+---
+### `turn_broker_api_token_path`
+
+*(string|null)* An alternative to [`turn_broker_api_token`](#turn_broker_api_token): allows the TURN broker API token to be specified in an external file.
+
+The file should be a plain text file, containing only the token. Synapse reads the token from the given file once at startup.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+turn_broker_api_token_path: /path/to/secrets/file
+```
+---
 ### `matrix_rtc`
 
 *(object)* Options related to MatrixRTC. Defaults to `{}`.

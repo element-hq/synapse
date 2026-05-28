@@ -1,0 +1,1 @@
+Add optional Cloudflare TURN credential fetching for `/_matrix/client/*/voip/turnServer`, plus an optional TURN broker mode for federated deployments, with automatic fallback to the existing TURN configuration.
