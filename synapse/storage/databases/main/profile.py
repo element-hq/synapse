@@ -27,7 +27,7 @@ from canonicaljson import encode_canonical_json
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, StoreError
 from synapse.replication.tcp.streams._base import ProfileUpdatesStream
-from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
+from synapse.storage._base import SQLBaseStore, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -408,32 +408,33 @@ class ProfileWorkerStore(SQLBaseStore):
 
     async def get_profile_data_for_users(
         self, user_ids: Collection[str]
-    ) -> dict[str, tuple[str | None, str | None, JsonDict]]:
+    ) -> dict[str, dict[str, str | JsonDict | None]]:
         """Fetch displayname/avatar_url/custom fields for a list of users."""
         if not user_ids:
             return {}
 
-        rows = cast(
-            list[tuple[str, str | None, str | None, object | None]],
-            await self.db_pool.simple_select_many_batch(
-                table="profiles",
-                column="full_user_id",
-                iterable=user_ids,
-                retcols=("full_user_id", "displayname", "avatar_url", "fields"),
-                desc="get_profile_data_for_users",
-            ),
+        rows = await self.db_pool.simple_select_many_batch(
+            table="profiles",
+            column="full_user_id",
+            iterable=user_ids,
+            retcols=("full_user_id", "displayname", "avatar_url", "fields"),
+            desc="get_profile_data_for_users",
         )
 
-        results: dict[str, tuple[str | None, str | None, JsonDict]] = {}
+        results: dict[str, dict[str, str | JsonDict | None]] = {}
         for full_user_id, displayname, avatar_url, fields in rows:
-            if fields is None:
-                fields_dict: JsonDict = {}
-            elif isinstance(fields, (str, bytes, bytearray, memoryview)):
-                fields_dict = cast(JsonDict, db_to_json(fields))
-            else:
-                fields_dict = cast(JsonDict, fields)
+            user_fields = fields
+            # The SQLite driver doesn't automatically convert JSON to
+            # Python objects
+            if isinstance(self.database_engine, Sqlite3Engine) and fields:
+                user_fields = json.loads(fields)
+            base_fields = {
+                ProfileFields.DISPLAYNAME: displayname,
+                ProfileFields.AVATAR_URL: avatar_url,
+            }
+            user_fields.update(base_fields)
 
-            results[full_user_id] = (displayname, avatar_url, fields_dict)
+            results[full_user_id] = user_fields
 
         return results
 

@@ -26,6 +26,7 @@ from typing import (
     Any,
     Mapping,
     Sequence,
+    cast,
 )
 
 import attr
@@ -37,7 +38,6 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
-    ProfileFields,
     StickyEvent,
 )
 from synapse.api.filtering import FilterCollection
@@ -2159,29 +2159,27 @@ class SyncHandler:
 
         profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
 
-        all_updates: dict[str, dict[str, JsonValue | None]] = {}
+        # Serialise the profile updates into the sync response format.
+        profile_updates: dict[str, dict[str, JsonValue | None]] = {}
         for other_user_id in user_ids:
             profile_data = profile_data_by_user.get(other_user_id)
             if profile_data is None:
                 # Don't generate anything for users with no profile data
+                # in initial sync.
                 continue
 
-            displayname, avatar_url, custom_fields = profile_data
-
-            per_user_updates: dict[str, JsonValue | None] = {}
+            per_user_updates: dict[str, JsonValue] = {}
             for field_name in profile_fields:
-                if displayname and field_name == ProfileFields.DISPLAYNAME:
-                    per_user_updates[field_name] = displayname
-                elif avatar_url and field_name == ProfileFields.AVATAR_URL:
-                    per_user_updates[field_name] = avatar_url
-                elif custom_fields.get(field_name):
-                    per_user_updates[field_name] = custom_fields.get(field_name)
+                if profile_data.get(field_name):
+                    per_user_updates[field_name] = cast(
+                        JsonValue, profile_data[field_name]
+                    )
 
-            if len(all_updates.keys()):
-                all_updates[other_user_id] = per_user_updates
+            if per_user_updates:
+                profile_updates[other_user_id] = per_user_updates
 
-        sync_result_builder.profile_updates = all_updates
-        return
+        if profile_updates:
+            sync_result_builder.profile_updates = profile_updates
 
     async def _generate_sync_entry_for_profile_updates(
         self, sync_result_builder: "SyncResultBuilder"
@@ -2246,22 +2244,19 @@ class SyncHandler:
         # Serialise the profile updates into the sync response format.
         profile_updates: dict[str, dict[str, JsonValue | None]] = {}
         for other_user_id, fields in user_fields.items():
-            displayname = None
-            avatar_url = None
-            custom_fields: JsonDict = {}
-
             profile_data = profile_data_by_user.get(other_user_id)
-            if profile_data is not None:
-                displayname, avatar_url, custom_fields = profile_data
+            if profile_data is None:
+                # No profile data for this user, just return a blank dictionary
+                # in incremental sync, telling the clients to remove all profile
+                # information for this user.
+                profile_updates[other_user_id] = {}
+                continue
 
-            per_user_updates: dict[str, JsonValue | None] = {}
+            per_user_updates: dict[str, JsonValue] = {}
             for field_name in fields:
-                if field_name == ProfileFields.DISPLAYNAME:
-                    per_user_updates[field_name] = displayname
-                elif field_name == ProfileFields.AVATAR_URL:
-                    per_user_updates[field_name] = avatar_url
-                else:
-                    per_user_updates[field_name] = custom_fields.get(field_name)
+                per_user_updates[field_name] = cast(
+                    JsonValue, profile_data.get(field_name)
+                )
 
             if per_user_updates:
                 profile_updates[other_user_id] = per_user_updates
