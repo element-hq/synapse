@@ -594,20 +594,39 @@ class DeviceListsStream(_StreamFromIdGen):
         if signatures_limited:
             upper_limit_token = min(upper_limit_token, signatures_to_token)
 
-        device_updates = [
-            (stream_id, (entity, False, hosts))
-            for stream_id, (entity, hosts) in device_updates
-            if stream_id <= upper_limit_token
-        ]
+        # Deduplicate device updates by (user_id, hosts) key, keeping only the
+        # max stream_id for each. The RDATA rows only contain user_id (no
+        # device_id), so multiple rows for the same user are redundant cache
+        # invalidation signals. This reduces Redis pubsub traffic when many
+        # devices change for the same user (e.g. bulk device deletion).
+        seen_device_updates: dict[tuple[str, bool], int] = {}
+        for stream_id, (entity, hosts) in device_updates:
+            if stream_id > upper_limit_token:
+                continue
+            key = (entity, hosts)
+            if key not in seen_device_updates or stream_id > seen_device_updates[key]:
+                seen_device_updates[key] = stream_id
 
-        signatures_updates = [
+        filtered_device_updates = sorted(
+            (
+                (stream_id, (entity, False, hosts))
+                for (entity, hosts), stream_id in seen_device_updates.items()
+            ),
+            key=lambda row: row[0],
+        )
+
+        filtered_signatures_updates = (
             (stream_id, (entity, True, False))
             for stream_id, (entity,) in signatures_updates
             if stream_id <= upper_limit_token
-        ]
+        )
 
         updates = list(
-            heapq.merge(device_updates, signatures_updates, key=lambda row: row[0])
+            heapq.merge(
+                filtered_device_updates,
+                filtered_signatures_updates,
+                key=lambda row: row[0],
+            )
         )
 
         return updates, upper_limit_token, devices_limited or signatures_limited
