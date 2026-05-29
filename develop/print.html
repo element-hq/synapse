@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-dc217516.js";
+            window.path_to_searchindex_js = "searchindex-5fc2c347.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -8471,6 +8471,39 @@ loggers:
 <p>The above logging config will set Synapse as ‘INFO’ logging level by default,
 with the SQL layer at ‘WARNING’, and will log JSON formatted messages to a
 remote endpoint at 10.1.2.3:9999.</p>
+<h2 id="google-cloud-logging-gke"><a class="header" href="#google-cloud-logging-gke">Google Cloud Logging (GKE)</a></h2>
+<p>When running Synapse on GKE, use <code>synapse.logging.GcpJsonFormatter</code>. It outputs
+JSON to stdout with a <code>severity</code> field that Google Cloud Logging maps to the
+correct per-entry severity. Without this, GKE assigns <code>ERROR</code> to everything
+written to stderr regardless of the actual Python log level.</p>
+<p>Example output:</p>
+<pre><code class="language-json">{"severity":"INFO","message":"Processed request: 3.481sec 200 GET /sync","logger":"synapse.access.http.8008","time":"2026-05-12T13:40:37.829Z"}
+</code></pre>
+<p>Configuration:</p>
+<pre><code class="language-yaml">version: 1
+disable_existing_loggers: false
+
+formatters:
+    gcp_json:
+        class: synapse.logging.GcpJsonFormatter
+
+handlers:
+    console:
+        class: logging.StreamHandler
+        formatter: gcp_json
+        stream: ext://sys.stdout
+
+loggers:
+    synapse.storage.SQL:
+        level: WARNING
+    twisted:
+        handlers: [console]
+        propagate: false
+
+root:
+    level: INFO
+    handlers: [console]
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="templates-1"><a class="header" href="#templates-1">Templates</a></h1>
 <p>Synapse uses parametrised templates to generate the content of emails it sends and
