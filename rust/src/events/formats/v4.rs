@@ -92,7 +92,7 @@ impl EventFormatV4 {
 
         ensure!(
             !self.auth_events.contains(&create_event_id),
-            "create event ID should not already be in auth_events"
+            "The create event ID is implicitly part of the auth chain and should not be explicitly be in the auth_events"
         );
 
         let mut auth_events = self.auth_events.clone();
