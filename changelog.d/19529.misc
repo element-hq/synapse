@@ -1,0 +1,1 @@
+Reduce `device_lists` replicaiton traffic by batching outbound device list poke replication notifications.
