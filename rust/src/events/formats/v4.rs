@@ -102,10 +102,12 @@ impl EventFormatV4 {
 }
 
 /// Validation helper for v4+ events that can have an optional room ID.
-pub fn validate_optional_room_id(
-    room_id: Option<&str>,
-    common_fields: &EventCommonFields,
-) -> Result<(), Error> {
+///
+/// Returns the validated room ID (which will be `None` for create events).
+pub fn validate_optional_room_id<'a>(
+    room_id: Option<&'a str>,
+    common_fields: &'_ EventCommonFields,
+) -> Result<Option<&'a str>, Error> {
     let is_create_event = common_fields.type_state_key_tuple() == Some((M_ROOM_CREATE, ""));
 
     match (is_create_event, room_id) {
@@ -120,14 +122,14 @@ pub fn validate_optional_room_id(
                 "room_id must start with '!': {}",
                 room_id
             );
+
+            Ok(Some(room_id))
         }
 
         // For create events, room_id must be absent.
         (true, Some(_)) => bail!("create event must not have a room ID"),
-        (true, None) => {}
+        (true, None) => Ok(None),
     }
-
-    Ok(())
 }
 
 /// Room ID derivation helper for v4+ events, which can have an optional room
@@ -137,18 +139,11 @@ pub fn get_room_id_for_optional_room_id<'a>(
     event_id: &str,
     common_fields: &EventCommonFields,
 ) -> Result<Cow<'a, str>, Error> {
-    let is_create_event = common_fields.type_state_key_tuple() == Some((M_ROOM_CREATE, ""));
-
-    match (is_create_event, room_id) {
-        // For non-create events, room_id must be present.
-        (false, None) => bail!("Event '{}' has no room ID", event_id),
-        (false, Some(room_id)) => Ok(room_id.into()),
-
-        // For create events, room_id must be absent.
-        (true, Some(_)) => bail!("Create event '{}' has unexpected room_id", event_id),
-        (true, None) => {
-            // The room ID is derived from the event ID by replacing the
-            // leading '$' with a '!'.
+    match validate_optional_room_id(room_id, common_fields)? {
+        Some(room_id) => Ok(room_id.into()),
+        None => {
+            // This is the create event, where the room ID is derived from the
+            // event ID by replacing the leading '$' with '!'.
             if !event_id.starts_with('$') {
                 bail!("Create event ID does not start with '$': {}", event_id);
             }
