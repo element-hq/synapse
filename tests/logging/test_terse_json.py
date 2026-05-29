@@ -28,7 +28,11 @@ from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
 from synapse.http.site import SynapseRequest
-from synapse.logging._terse_json import GcpJsonFormatter, JsonFormatter, TerseJsonFormatter
+from synapse.logging._terse_json import (
+    GcpJsonFormatter,
+    JsonFormatter,
+    TerseJsonFormatter,
+)
 from synapse.logging.context import LoggingContext, LoggingContextFilter
 from synapse.types import JsonDict
 

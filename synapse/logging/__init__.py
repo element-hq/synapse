@@ -22,7 +22,11 @@
 import logging
 
 from synapse.logging._remote import RemoteHandler
-from synapse.logging._terse_json import GcpJsonFormatter, JsonFormatter, TerseJsonFormatter
+from synapse.logging._terse_json import (
+    GcpJsonFormatter,
+    JsonFormatter,
+    TerseJsonFormatter,
+)
 
 # These are imported to allow for nicer logging configuration files.
 __all__ = ["RemoteHandler", "JsonFormatter", "TerseJsonFormatter", "GcpJsonFormatter"]
