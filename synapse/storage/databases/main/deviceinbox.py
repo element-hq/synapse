@@ -899,10 +899,16 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         # A map from user id, to device id, to a pair of (serialized message, msgid).
         local_by_user_then_device: dict[str, dict[str, tuple[str, str]]] = {}
+
         for user_id, messages_by_device in messages_by_user_then_device.items():
-            messages_json_for_user = {}
+            # Mesages to send to this specific user. A map
+            # from device id, to a pair of (serialized message, msgid).
+            messages_json_for_user: dict[str, tuple[str, str]] = {}
+
             devices = list(messages_by_device.keys())
             if not devices:
+                # No to-device messages for this user. (For example, someone has
+                # hit `/sendToDevice` with an empty {device: message} dict.)
                 continue
 
             if len(devices) == 1 and devices[0] == "*":
@@ -935,6 +941,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                     # server.
                     messages_json_for_user[device_id] = (message_json, msgid)
             else:
+                # Query the database to determine which of the target devices actually
+                # exist.
+                #
                 # We exclude hidden devices (such as cross-signing keys) here as they are
                 # not expected to receive to-device messages.
                 rows = cast(
