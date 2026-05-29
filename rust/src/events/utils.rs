@@ -37,15 +37,27 @@ use crate::{
 /// The event_id is the `reference_hash` of the redacted event json, preceded by a `$`.
 /// `calculate_event_id` can be used to determine the `event_id` for events in room versions V3+.
 pub fn calculate_event_id(event: &Value, room_version: &RoomVersion) -> anyhow::Result<Box<str>> {
-    if room_version.event_format == EventFormatVersions::ROOM_V1_V2 {
-        anyhow::bail!(
-            "Attempted to calculate event_id using reference hash for room version v1/v2"
-        );
+    match room_version.event_format {
+        EventFormatVersions::ROOM_V1_V2 => {
+            anyhow::bail!(
+                "Attempted to calculate event_id using reference hash for room version v1/v2"
+            );
+        }
+        EventFormatVersions::ROOM_V3
+        | EventFormatVersions::ROOM_V4_PLUS
+        | EventFormatVersions::ROOM_V11_HYDRA_PLUS
+        | EventFormatVersions::ROOM_VMSC4242 => {
+            let reference_hash = compute_event_reference_hash(event, room_version)?;
+
+            Ok(format!("${reference_hash}").into_boxed_str())
+        }
+        _ => {
+            unimplemented!(
+                "Unknown event format version {}. This is a Synapse Programming error.",
+                room_version.event_format
+            );
+        }
     }
-
-    let reference_hash = compute_event_reference_hash(event, room_version)?;
-
-    Ok(format!("${reference_hash}").into_boxed_str())
 }
 
 /// Computes the event reference hash. This is the hash of the redacted event.
