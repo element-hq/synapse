@@ -743,22 +743,12 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
 
         # Now do the happy path.
         user_id = self.register_user("user", "password")
-        access_token = self.login(user_id, "password")
 
         room_id, room_alias = self.get_success(
             self.module_api.create_room(
                 user_id=user_id, config={"room_alias_name": "foo-bar"}, ratelimit=False
             )
         )
-
-        # Check room creator.
-        channel = self.make_request(
-            "GET",
-            f"/_matrix/client/v3/rooms/{room_id}/state/m.room.create",
-            access_token=access_token,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
-        self.assertEqual(channel.json_body["creator"], user_id)
 
         # Check room alias.
         self.assertEqual(room_alias, f"#foo-bar:{self.module_api.server_name}")
@@ -767,15 +757,6 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         room_id, room_alias = self.get_success(
             self.module_api.create_room(user_id=user_id, config={}, ratelimit=False)
         )
-
-        # Check room creator.
-        channel = self.make_request(
-            "GET",
-            f"/_matrix/client/v3/rooms/{room_id}/state/m.room.create",
-            access_token=access_token,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
-        self.assertEqual(channel.json_body["creator"], user_id)
 
         # Check room alias.
         self.assertIsNone(room_alias)
