@@ -44,6 +44,15 @@ impl SynapseDuration {
             microseconds: milliseconds.saturating_mul(1_000),
         }
     }
+
+    pub const fn from_hours(hours: u64) -> Self {
+        Self {
+            // We saturate at u64::MAX microseconds to avoid overflow, which
+            // means that the maximum duration we can represent is approximately
+            // 584,942 years.
+            microseconds: hours.saturating_mul(3_600_000_000),
+        }
+    }
 }
 
 impl<'py> IntoPyObject<'py> for SynapseDuration {

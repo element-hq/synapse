@@ -349,7 +349,7 @@ impl Event {
     /// `SynapseDuration` representing the sticky duration. Otherwise returns
     /// `None`.
     fn sticky_duration(&self) -> Option<SynapseDuration> {
-        const MAX_DURATION: SynapseDuration = SynapseDuration::from_milliseconds(3600 * 1000);
+        const MAX_DURATION: SynapseDuration = SynapseDuration::from_hours(1);
 
         let sticky_obj = self
             .parsed_event
