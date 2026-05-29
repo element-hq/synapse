@@ -61,6 +61,7 @@ class ReplicationProfileSetFieldValue(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
+        user_id: str,
         requester_id: str,
         field_name: str,
         new_value: str,
