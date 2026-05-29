@@ -119,32 +119,6 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.152.0
 
-## Profile Updates Stream Writer Workers
-
-This version of Synapse adds a new `profile_updates` writer stream. The
-following endpoints may now only be handled by either the main process, or a
-worker that is designed a "profile_updates" writer. If you are already routing
-the following endpoints to a worker:
-
-```
-/_matrix/client/(api/v1|r0|v3)/profile/<user_id>/(<field_name>?)
-/_matrix/client/unstable/uk.tcpip.msc4133/profile/<user_id>/(<field_name>?)
-```
-
-those worker(s) need to be marked as a stream writer for the `profile_updates`
-stream in the shared config, using the
-[`stream_writers`](https://element-hq.github.io/synapse/v1.151/usage/configuration/config_documentation.html#stream_writers)
-config option:
-
-```yaml
-stream_writers:
-    profile_updates: worker1
-```
-
-as well as included in the
-[`instance_map`](https://element-hq.github.io/synapse/v1.151/usage/configuration/config_documentation.html#instance_map)
-config option.
-
 ## Workers which quarantine media must be stream writers
 
 A new [`quarantined_media_changes` stream writer](./workers.md#the-quarantined_media_changes-stream) is
