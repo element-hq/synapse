@@ -123,8 +123,10 @@ connection errors.
 
 The client should keep track of the token in the last RDATA command
 received for each stream so that on reconnection it can start streaming
-from the correct place. Note: not all RDATA have valid tokens due to
-batching. See `RdataCommand` for more details.
+from the correct place.
+
+> [!NOTE]
+> Not all RDATA have valid tokens due to batching. See `RdataCommand` for more details.
 
 ### Example
 
