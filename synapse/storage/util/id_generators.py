@@ -836,6 +836,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             issue9533_logger.debug(
                 "stream_id=%i now persisted for stream=%s; _current_positions=%s _unfinished_ids=%s, _known_persisted_positions=%s _persisted_upto_position=%i min_curr=%i",
                 new_id,
+                self._stream_name,
                 self._current_positions,
                 self._unfinished_ids,
                 self._known_persisted_positions,
