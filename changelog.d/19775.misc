@@ -1,0 +1,1 @@
+Add `GcpJsonFormatter` logging formatter for use with Google Cloud Logging and GKE deployments.
