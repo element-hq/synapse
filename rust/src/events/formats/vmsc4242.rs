@@ -87,7 +87,7 @@ impl EventFormatVMSC4242 {
             && auth_event_ids.is_empty()
         {
             return Err(PyAssertionError::new_err(format!(
-                "auth_event_ids has not been calculated : {}",
+                "auth_event_ids has not been calculated for event_id='{}'. This is most likely a Synapse programming error.",
                 event.event_id
             )));
         }
