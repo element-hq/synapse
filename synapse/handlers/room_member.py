@@ -831,6 +831,26 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             ):
                 raise SynapseError(403, "This avatar is not allowed", Codes.FORBIDDEN)
 
+        # Check if the displayname in the membership event differs from what's
+        # stored in the user's profile when changing displayname is disabled.
+        if (
+            self.hs.is_mine(target)
+            and "displayname" in content
+            and not self.hs.config.registration.enable_set_displayname
+        ):
+            is_admin = await self.auth.is_server_admin(requester)
+            if not is_admin:
+                profile = await self.store.get_profileinfo(target)
+                if (
+                    profile.display_name is not None
+                    and content["displayname"] != profile.display_name
+                ):
+                    raise SynapseError(
+                        400,
+                        "Changing display name is disabled on this server",
+                        Codes.FORBIDDEN,
+                    )
+
         # The event content should *not* include the authorising user as
         # it won't be properly signed. Strip it out since it might come
         # back from a client updating a display name / avatar.
