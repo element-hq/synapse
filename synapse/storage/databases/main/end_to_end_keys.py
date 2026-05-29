@@ -60,6 +60,11 @@ from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_decoder, json_encoder
 
+# When invalidating the `get_e2e_unused_fallback_key_types` cache for many
+# devices of the same user, switch from per-device invalidations to a single
+# user-level prefix invalidation to reduce RDATA replication traffic.
+_FALLBACK_KEY_INVALIDATION_PREFIX_THRESHOLD = 10
+
 if TYPE_CHECKING:
     from synapse.handlers.e2e_keys import SignatureListItem
     from synapse.server import HomeServer
@@ -1316,8 +1321,23 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             device_results[f"{algorithm}:{key_id}"] = json_decoder.decode(key_json)
             seen_user_device.add((user_id, device_id))
 
+        # Group by user: if a user has many devices affected, use a single
+        # prefix invalidation instead of per-device invalidations to reduce
+        # RDATA replication traffic.
+        devices_by_user: dict[str, set[str]] = {}
+        for uid, did in seen_user_device:
+            devices_by_user.setdefault(uid, set()).add(did)
+
+        invalidation_keys: list[tuple[str, ...]] = []
+        for uid, device_ids in devices_by_user.items():
+            if len(device_ids) > _FALLBACK_KEY_INVALIDATION_PREFIX_THRESHOLD:
+                invalidation_keys.append((uid,))
+            else:
+                for did in device_ids:
+                    invalidation_keys.append((uid, did))
+
         self._invalidate_cache_and_stream_bulk(
-            txn, self.get_e2e_unused_fallback_key_types, seen_user_device
+            txn, self.get_e2e_unused_fallback_key_types, invalidation_keys
         )
 
         return results
@@ -1328,6 +1348,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
     ) -> dict[str, dict[str, dict[str, JsonDict]]]:
         """Naive, inefficient implementation of claim_e2e_fallback_keys for SQLite."""
         results: dict[str, dict[str, dict[str, JsonDict]]] = {}
+        invalidated: set[tuple[str, str]] = set()
         for user_id, device_id, algorithm, mark_as_used in query_list:
             row = await self.db_pool.simple_select_one(
                 table="e2e_fallback_keys_json",
@@ -1358,12 +1379,28 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                     updatevalues={"used": True},
                     desc="_get_fallback_key_set_used",
                 )
-                await self.invalidate_cache_and_stream(
-                    "get_e2e_unused_fallback_key_types", (user_id, device_id)
-                )
+                invalidated.add((user_id, device_id))
 
             device_results = results.setdefault(user_id, {}).setdefault(device_id, {})
             device_results[f"{algorithm}:{key_id}"] = json_decoder.decode(key_json)
+
+        # Group by user: if a user has many devices affected, use a single
+        # prefix invalidation instead of per-device invalidations to reduce
+        # RDATA replication traffic.
+        devices_by_user: dict[str, set[str]] = {}
+        for user_id, device_id in invalidated:
+            devices_by_user.setdefault(user_id, set()).add(device_id)
+
+        for user_id, device_ids in devices_by_user.items():
+            if len(device_ids) > _FALLBACK_KEY_INVALIDATION_PREFIX_THRESHOLD:
+                await self.invalidate_cache_and_stream(
+                    "get_e2e_unused_fallback_key_types", (user_id,)
+                )
+            else:
+                for device_id in device_ids:
+                    await self.invalidate_cache_and_stream(
+                        "get_e2e_unused_fallback_key_types", (user_id, device_id)
+                    )
 
         return results
 
