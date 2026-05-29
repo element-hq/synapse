@@ -48,7 +48,7 @@
 //!   string describing why auth rejected the event.
 //!
 
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 use pyo3::{
     exceptions::{PyAttributeError, PyKeyError, PyValueError},
@@ -137,6 +137,12 @@ pub struct Event {
     /// construction time and cached here.
     event_id: Arc<str>,
 
+    /// The calculated room ID.
+    ///
+    /// For some room versions this may be derived, e.g. for create events in
+    /// v4.
+    room_id: Arc<str>,
+
     /// Synapse-internal per-event state that lives outside the federated
     /// JSON (e.g. outlier flag, soft-failure, stream positions).
     #[pyo3(get)]
@@ -205,10 +211,32 @@ impl Event {
             }
         };
 
+        let room_id = match &*parsed_event.specific_fields {
+            EventFormatEnum::V1(format) => Arc::clone(&format.room_id),
+            EventFormatEnum::V2V3(format) => Arc::clone(&format.room_id),
+            EventFormatEnum::V4(format) => format
+                .room_id(&event_id, &parsed_event.common_fields)
+                .map_err(|err| {
+                PyValueError::new_err(format!(
+                    "Failed to calculate room_id for event {}: {}",
+                    event_id, err
+                ))
+            })?,
+            EventFormatEnum::VMSC4242(format) => format
+                .room_id(&event_id, &parsed_event.common_fields)
+                .map_err(|err| {
+                    PyValueError::new_err(format!(
+                        "Failed to calculate room_id for event {}: {}",
+                        event_id, err
+                    ))
+                })?,
+        };
+
         Ok(Self {
             parsed_event,
 
             event_id,
+            room_id,
             room_version,
             rejected_reason,
             internal_metadata,
@@ -341,6 +369,7 @@ impl Event {
             room_version: self.room_version,
             rejected_reason: self.rejected_reason.clone(),
             event_id: self.event_id.clone(),
+            room_id: self.room_id.clone(),
         };
         Ok(new_event)
     }
@@ -432,17 +461,8 @@ impl Event {
     }
 
     #[getter]
-    fn room_id(&self) -> PyResult<Cow<'_, str>> {
-        match &*self.parsed_event.specific_fields {
-            EventFormatEnum::V1(format) => Ok(format.room_id.as_ref().into()),
-            EventFormatEnum::V2V3(format) => Ok(format.room_id.as_ref().into()),
-            EventFormatEnum::V4(format) => {
-                Ok(format.room_id(&self.event_id, &self.parsed_event.common_fields)?)
-            }
-            EventFormatEnum::VMSC4242(format) => {
-                Ok(format.room_id(&self.event_id, &self.parsed_event.common_fields)?)
-            }
-        }
+    fn room_id(&self) -> &str {
+        &self.room_id
     }
 
     #[getter]

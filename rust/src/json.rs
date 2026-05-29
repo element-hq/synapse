@@ -64,6 +64,14 @@ impl<T> AllowMissing<T> {
             AllowMissing::Absent => None,
         }
     }
+
+    /// Converts to `Option<&T>`.
+    pub fn as_ref_opt(&self) -> Option<&T> {
+        match self {
+            AllowMissing::Some(inner) => Some(inner),
+            AllowMissing::Absent => None,
+        }
+    }
 }
 
 /// A module that provides the serialization and deserialization logic for

@@ -35,7 +35,7 @@ use crate::events::formats::EventCommonFields;
 pub struct EventFormatV1 {
     pub auth_events: Vec<(String, HashMap<String, String>)>,
     pub prev_events: Vec<(String, HashMap<String, String>)>,
-    pub room_id: Box<str>,
+    pub room_id: Arc<str>,
     pub event_id: Arc<str>,
 }
 

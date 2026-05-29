@@ -27,7 +27,7 @@
 //! [`EventFormatV4::room_id`] and [`EventFormatV4::auth_event_ids`]
 //! expose the derived values to callers.
 
-use std::borrow::Cow;
+use std::sync::Arc;
 
 use anyhow::{bail, ensure, Error};
 use serde::{Deserialize, Serialize};
@@ -45,15 +45,13 @@ pub struct EventFormatV4 {
         with = "crate::json::allow_missing",
         skip_serializing_if = "AllowMissing::is_absent"
     )]
-    pub room_id: AllowMissing<Box<str>>,
+    pub room_id: AllowMissing<Arc<str>>,
     pub auth_events: Vec<String>,
     pub prev_events: Vec<String>,
 }
 
 impl EventFormatV4 {
     pub fn validate(&self, common_fields: &EventCommonFields) -> Result<(), Error> {
-        validate_optional_room_id(self.room_id.as_deref_opt(), common_fields)?;
-
         // Ensure that we don't have an event_id set.
         if common_fields.other_fields.contains_key("event_id") {
             bail!("v4 events must not have an explicit event_id");
@@ -66,8 +64,8 @@ impl EventFormatV4 {
         &self,
         event_id: &str,
         common_fields: &EventCommonFields,
-    ) -> Result<Cow<'_, str>, Error> {
-        get_room_id_for_optional_room_id(self.room_id.as_deref_opt(), event_id, common_fields)
+    ) -> Result<Arc<str>, Error> {
+        get_room_id_for_optional_room_id(self.room_id.as_ref_opt(), event_id, common_fields)
     }
 
     pub fn auth_event_ids(&self, common_fields: &EventCommonFields) -> Result<Vec<String>, Error> {
@@ -104,10 +102,10 @@ impl EventFormatV4 {
 /// Validation helper for v4+ events that can have an optional room ID.
 ///
 /// Returns the validated room ID (which will be `None` for create events).
-pub fn validate_optional_room_id<'a>(
-    room_id: Option<&'a str>,
+pub fn validate_optional_room_id(
+    room_id: Option<&Arc<str>>,
     common_fields: &'_ EventCommonFields,
-) -> Result<Option<&'a str>, Error> {
+) -> Result<Option<Arc<str>>, Error> {
     let is_create_event = common_fields.type_state_key_tuple() == Some((M_ROOM_CREATE, ""));
 
     match (is_create_event, room_id) {
@@ -123,7 +121,7 @@ pub fn validate_optional_room_id<'a>(
                 room_id
             );
 
-            Ok(Some(room_id))
+            Ok(Some(Arc::clone(room_id)))
         }
 
         // For create events, room_id must be absent.
@@ -134,13 +132,13 @@ pub fn validate_optional_room_id<'a>(
 
 /// Room ID derivation helper for v4+ events, which can have an optional room
 /// ID.
-pub fn get_room_id_for_optional_room_id<'a>(
-    room_id: Option<&'a str>,
+pub fn get_room_id_for_optional_room_id(
+    room_id: Option<&Arc<str>>,
     event_id: &str,
     common_fields: &EventCommonFields,
-) -> Result<Cow<'a, str>, Error> {
+) -> Result<Arc<str>, Error> {
     match validate_optional_room_id(room_id, common_fields)? {
-        Some(room_id) => Ok(room_id.into()),
+        Some(room_id) => Ok(room_id),
         None => {
             // This is the create event, where the room ID is derived from the
             // event ID by replacing the leading '$' with '!'.

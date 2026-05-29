@@ -29,6 +29,8 @@
 //! [`SimpleAuthPrevEvents`] is shared with [`v4`](super::v4) since the
 //! flat-list encoding carries forward unchanged.
 
+use std::sync::Arc;
+
 use anyhow::{bail, Error};
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +39,7 @@ use crate::events::formats::EventCommonFields;
 /// Version-specific fields for room versions 3-10.
 #[derive(Serialize, Deserialize)]
 pub struct EventFormatV2V3 {
-    pub room_id: Box<str>,
+    pub room_id: Arc<str>,
     pub auth_events: Vec<String>,
     pub prev_events: Vec<String>,
 }

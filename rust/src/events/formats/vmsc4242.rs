@@ -24,7 +24,7 @@
 //!
 //! [MSC4242]: https://github.com/matrix-org/matrix-spec-proposals/pull/4242
 
-use std::borrow::Cow;
+use std::sync::Arc;
 
 use anyhow::bail;
 use anyhow::Error;
@@ -34,7 +34,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::constants::event_type::M_ROOM_CREATE;
 use crate::events::formats::v4::get_room_id_for_optional_room_id;
-use crate::events::formats::v4::validate_optional_room_id;
 use crate::events::formats::EventCommonFields;
 use crate::events::Event;
 use crate::json::AllowMissing;
@@ -49,13 +48,11 @@ pub struct EventFormatVMSC4242 {
         with = "crate::json::allow_missing",
         skip_serializing_if = "AllowMissing::is_absent"
     )]
-    pub room_id: AllowMissing<Box<str>>,
+    pub room_id: AllowMissing<Arc<str>>,
 }
 
 impl EventFormatVMSC4242 {
     pub fn validate(&self, common_fields: &EventCommonFields) -> Result<(), Error> {
-        validate_optional_room_id(self.room_id.as_deref_opt(), common_fields)?;
-
         // Ensure that we don't have any `auth_events` or `event_id` fields
         // set.
         if common_fields.other_fields.contains_key("auth_events") {
@@ -72,8 +69,8 @@ impl EventFormatVMSC4242 {
         &self,
         event_id: &str,
         common_fields: &EventCommonFields,
-    ) -> Result<Cow<'_, str>, Error> {
-        get_room_id_for_optional_room_id(self.room_id.as_deref_opt(), event_id, common_fields)
+    ) -> Result<Arc<str>, Error> {
+        get_room_id_for_optional_room_id(self.room_id.as_ref_opt(), event_id, common_fields)
     }
 
     pub fn auth_event_ids(&self, event: &Event) -> PyResult<Vec<String>> {
