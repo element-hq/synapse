@@ -1,20 +1,119 @@
-# Synapse 1.152.0rc1 (2026-04-22)
+# Synapse 1.154.0rc1 (2026-05-27)
+
+## Features
+
+- Add support for [MSC4452: Preview URL capabilities API](https://github.com/matrix-org/matrix-spec-proposals/pull/4452) which exposes a `io.element.msc4452.preview_url` capability.
+  If `experimental_features.msc4452_enabled` is `true`, the `/_matrix/(client/v1/media|media/v3)/preview_url` endpoint
+  now responds with a 403 status code when the capability is disabled. ([\#19715](https://github.com/element-hq/synapse/issues/19715))
+
+## Bugfixes
+
+- Fix a bug in [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) that could prevent user avatars from showing if the room had an empty name. ([\#19468](https://github.com/element-hq/synapse/issues/19468), [\#19791](https://github.com/element-hq/synapse/issues/19791))
+- Fix access token cache not being invalidated for sessions using refresh tokens. Contributed by @FrenchGithubUser @ Famedly. ([\#19483](https://github.com/element-hq/synapse/issues/19483))
+- Fix bug where Synapse would return 400 (`M_BAD_JSON`) when sending a message with a `mentions` field and Synapse module `check_event_allowed` callback registered (frozen event). Contributed by @gaetan-sbt. ([\#19634](https://github.com/element-hq/synapse/issues/19634))
+- Fix long-standing but niche bug with `/sync` where it could attempt to fetch data with flawed invalid future tokens. ([\#19644](https://github.com/element-hq/synapse/issues/19644))
+- Fix `/sync` failing when [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) are enabled and the sync request filters out Ephemeral Data Units (EDUs). ([\#19787](https://github.com/element-hq/synapse/issues/19787))
+- Fix packaging for Fedora and EPEL caused by unnecessary bumping `attrs` minimum version requirement in `pyproject.toml` file. Contributed by Oleg Girko. ([\#19789](https://github.com/element-hq/synapse/issues/19789))
+- Fix merging signatures when a policy server is running under the same server name as Synapse. The bug was re-introduced in v1.153.0rc1 after being fixed earlier in v1.151.0rc1. Contributed by @tulir @ Beeper. ([\#19797](https://github.com/element-hq/synapse/issues/19797))
+
+## Improved Documentation
+
+- Added details about how Synapse syncs the picture claim when `update_profile_information` setting is true. ([\#19508](https://github.com/element-hq/synapse/issues/19508))
+
+## Internal Changes
+
+- Port `Event.content` field to Rust. ([\#19725](https://github.com/element-hq/synapse/issues/19725))
+- Prefer close backfill points (absolute distance). ([\#19748](https://github.com/element-hq/synapse/issues/19748))
+- Replace unique `quarantined_media` waiting patterns with standard `wait_for_stream_token(...)`. ([\#19764](https://github.com/element-hq/synapse/issues/19764))
+- Improve Synapse logging around when someone encounters `We can't get valid state history.` so you can correlate everything by `event_id`. ([\#19765](https://github.com/element-hq/synapse/issues/19765))
+- Tidy up Rust `RoomVersion` structs. ([\#19766](https://github.com/element-hq/synapse/issues/19766))
+- Update `WorkerLock` tests to better stress the `WORKER_LOCK_MAX_RETRY_INTERVAL`. ([\#19772](https://github.com/element-hq/synapse/issues/19772))
+- Refactor [MSC4242: State DAG](https://github.com/matrix-org/matrix-spec-proposals/pull/4242) checks behind a single `TypeIs` helper to avoid scattered `isinstance` casts. ([\#19774](https://github.com/element-hq/synapse/issues/19774))
+- Use `StrCollection` for `prev_state_events`. ([\#19777](https://github.com/element-hq/synapse/issues/19777))
+- Fix up the construction of events in tests, ahead of the Rust event port. ([\#19781](https://github.com/element-hq/synapse/issues/19781))
+
+
+
+
+# Synapse 1.153.0 (2026-05-19)
+
+No significant changes since 1.153.0rc3.
+
+
+# Synapse 1.153.0rc3 (2026-05-15)
+
+## Bugfixes
+
+- Revert 'Have [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) return a new response immediately if a room subscription has changed and produced a new response. ([\#19714](https://github.com/element-hq/synapse/issues/19714))' (introduced in 1.153.0rc1) due to performance problems. ([\#19784](https://github.com/element-hq/synapse/issues/19784))
+
+
+# Synapse 1.153.0rc2 (2026-05-13)
+
+## Bugfixes
+
+- Correctly handle arbitrary precision integers in `unsigned` field of events. The bug was introduced in 1.153.0rc1. ([\#19769](https://github.com/element-hq/synapse/issues/19769))
+
+
+# Synapse 1.153.0rc1 (2026-05-08)
+
+## Features
+
+- Make ACLs apply to EDUs per [MSC4163](https://github.com/matrix-org/matrix-spec-proposals/pull/4163). ([\#18475](https://github.com/element-hq/synapse/issues/18475))
+- Stabilize [MSC3266: Room summary API](https://github.com/matrix-org/matrix-spec-proposals/pull/3266), removing the experimental config flag `msc3266_enabled`. Contributed by @dasha-uwu. ([\#19720](https://github.com/element-hq/synapse/issues/19720))
+- Partial [MSC4311](https://github.com/matrix-org/matrix-spec-proposals/pull/4311) implementation: `m.room.create` is now a required part of stripped `invite_state`/`knock_state` . Contributed by @FrenchGithubUser @Famedly. ([\#19722](https://github.com/element-hq/synapse/issues/19722))
+- Expose `tombstoned` and `replacement_room` in room details on admin API endpoint `GET /_synapse/admin/v1/rooms/<room_id>`. Contributed by Noah Markert. ([\#19737](https://github.com/element-hq/synapse/issues/19737))
+
+## Bugfixes
+
+- Allow self-requested user erasure (upon account deactivation) to succeed even if Synapse has disabled profile changes. Contributed by Famedly. ([\#19398](https://github.com/element-hq/synapse/issues/19398))
+- Fix Synapse not backfilling new history when attempting to use a pagination token near a backward extremity. ([\#19611](https://github.com/element-hq/synapse/issues/19611))
+- Have [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) return a new response immediately if a room subscription has changed and produced a new response. ([\#19714](https://github.com/element-hq/synapse/issues/19714))
+- Fix a bug where when upgrading a room to room version 12, the power level event in the old room got temporarily mutated to remove the user upgrading the room's power. ([\#19727](https://github.com/element-hq/synapse/issues/19727))
+- Fix packaging for Fedora and EPEL caused by unnecessary bumping `authlib` minimum version requirement in `pyproject.toml` file. Contributed by Oleg Girko. ([\#19742](https://github.com/element-hq/synapse/issues/19742))
+
+## Improved Documentation
+
+- Add warning about known problems when configuring `use_frozen_dicts`. ([\#19711](https://github.com/element-hq/synapse/issues/19711))
+
+## Internal Changes
+
+- Port `Event.signatures` field to Rust. ([\#19706](https://github.com/element-hq/synapse/issues/19706))
+- Port `Event.unsigned` field to Rust. ([\#19708](https://github.com/element-hq/synapse/issues/19708))
+- Add a Rust canonical JSON serializer. ([\#19739](https://github.com/element-hq/synapse/issues/19739), [\#19763](https://github.com/element-hq/synapse/issues/19763))
+- Configure Dependabot to only update Python dependencies in the lockfile, unless widening upper bounds. ([\#19743](https://github.com/element-hq/synapse/issues/19743))
+- Reduce `WORKER_LOCK_MAX_RETRY_INTERVAL` to 5 seconds to reduce idle time after lock is released. ([\#19755](https://github.com/element-hq/synapse/issues/19755))
+- Force keyword-only arguments for `Duration` so time units have to be specified. ([\#19756](https://github.com/element-hq/synapse/issues/19756))
+
+
+# Synapse 1.152.1 (2026-05-07)
+
+## Security Fixes
+
+- Prevent CPU starvation (Denial of Service) under worker lock contention, additionally capping the `WorkerLock` time out interval to a maximum of 60 seconds. Contributed by Famedly. ([\#19394](https://github.com/element-hq/synapse/issues/19394), ELEMENTSEC-2026-1706, [GHSA-8q93-326v-3m7g](https://github.com/element-hq/synapse/security/advisories/GHSA-8q93-326v-3m7g), CVE-2026-45078)
+- Prevent pagination ending when a page is full of rejected events. (ELEMENTSEC-2025-1636, [GHSA-6qf2-7x63-mm6v](https://github.com/element-hq/synapse/security/advisories/GHSA-6qf2-7x63-mm6v), CVE-2026-45076)
+
+
+# Synapse 1.152.0 (2026-04-28)
+
+No significant changes since 1.152.0rc1.
+
+## Configuration changes needed for deployments using workers
 
 For deployments using workers, please note that this version introduces a new `quarantined_media_changes` stream writer, which may require configuration changes.
 Please see the [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11520) for details.
 
 Without configuring this new stream writer, only the main process will be able to handle the `/media/quarantine` admin API endpoints for quarantining media.
 
+# Synapse 1.152.0rc1 (2026-04-22)
 
 ## Features
 
-- Add a ["Listing quarantined media changes" Admin API](https://element-hq.github.io/synapse/latest/admin_api/media_admin_api.html#listing-quarantined-media-changes) for retrieving a paginated record of when media became (un)quarantined. ([\#19558](https://github.com/element-hq/synapse/issues/19558), [\#19677](https://github.com/element-hq/synapse/issues/19677))
+- Add a ["Listing quarantined media changes" Admin API](https://element-hq.github.io/synapse/latest/admin_api/media_admin_api.html#listing-quarantined-media-changes) for retrieving a paginated record of when media became (un)quarantined. ([\#19558](https://github.com/element-hq/synapse/issues/19558), [\#19677](https://github.com/element-hq/synapse/issues/19677), [\#19694](https://github.com/element-hq/synapse/issues/19694))
 - Advertise [MSC4445](https://github.com/matrix-org/matrix-spec-proposals/pull/4445) sync timeline order in `unstable_features`. ([\#19642](https://github.com/element-hq/synapse/issues/19642))
 - Report the Rust compiler version used in the Prometheus metrics. Contributed by Noah Markert. ([\#19643](https://github.com/element-hq/synapse/issues/19643))
 - Passthrough 'article' and 'profile' OpenGraph metadata on URL preview requests. ([\#19659](https://github.com/element-hq/synapse/issues/19659))
 - Add a way to re-sign local events with a new signing key. ([\#19668](https://github.com/element-hq/synapse/issues/19668))
 - Support [MSC4450: Identity Provider selection for User-Interactive Authentication with Legacy Single Sign-On](https://github.com/matrix-org/matrix-spec-proposals/pull/4450). ([\#19693](https://github.com/element-hq/synapse/issues/19693))
-- Add a ["Listing quarantined media changes" Admin API](https://element-hq.github.io/synapse/latest/admin_api/media_admin_api.html#listing-quarantined-media-changes) for retrieving a paginated record of when media became (un)quarantined. ([\#19694](https://github.com/element-hq/synapse/issues/19694))
 - Add experimental support for [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242): State DAGs. Excludes federation support. ([\#19424](https://github.com/element-hq/synapse/issues/19424))
 - Adds [Admin API](https://element-hq.github.io/synapse/latest/usage/administration/admin_api/index.html) endpoints to
   list, fetch and delete user reports. ([\#19657](https://github.com/element-hq/synapse/issues/19657))
@@ -30,7 +129,7 @@ Without configuring this new stream writer, only the main process will be able t
 
 - Include a workaround for running the unit tests with SQLite under recent versions of MacOS. ([\#19615](https://github.com/element-hq/synapse/issues/19615))
 - Fix Docker image link typo in worker docs. ([\#19645](https://github.com/element-hq/synapse/issues/19645))
-- Update developer stream docs for creating a new stream to point out `_setup_sequence(...)` in `portdb`. ([\#19675](https://github.com/element-hq/synapse/issues/19675))
+- Update the developer stream docs for creating a new stream to point out `_setup_sequence(...)` in `portdb`. ([\#19675](https://github.com/element-hq/synapse/issues/19675))
 - Update the developer stream docs for creating a new stream to highlight places that require documentation updates. ([\#19696](https://github.com/element-hq/synapse/issues/19696))
 
 ## Internal Changes
