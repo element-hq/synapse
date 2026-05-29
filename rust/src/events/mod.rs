@@ -622,8 +622,8 @@ mod tests {
         let event: FormattedEvent<EventFormatV2V3> = serde_json::from_str(json).unwrap();
         let parsed_value = serde_json::to_value(&event).unwrap();
 
+        // Check a couple of fields are as expected as a sanity check.
         assert_eq!(&*event.common_fields.type_, M_ROOM_CREATE);
-
         assert_eq!(
             &*event.specific_fields.room_id,
             "!qVoJSympOqdUQRUfiC:localhost:8800"
@@ -658,6 +658,7 @@ mod tests {
         let event: FormattedEvent<EventFormatV1> = serde_json::from_str(json).unwrap();
         let parsed_value = serde_json::to_value(&event).unwrap();
 
+        // Check a few fields are as expected as a sanity check.
         assert_eq!(&*event.common_fields.type_, "m.room.message");
         assert!(event.common_fields.state_key.is_absent());
         assert_eq!(&*event.specific_fields.room_id, "!room:localhost");
@@ -682,6 +683,7 @@ mod tests {
         let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
         let parsed_value = serde_json::to_value(&event).unwrap();
 
+        // Check a few fields are as expected as a sanity check.
         assert_eq!(&*event.common_fields.type_, "m.room.message");
         assert_eq!(
             event.specific_fields.room_id.as_deref_opt(),
@@ -708,6 +710,7 @@ mod tests {
         let event: FormattedEvent<EventFormatV4> = serde_json::from_str(json).unwrap();
         let parsed_value = serde_json::to_value(&event).unwrap();
 
+        // Check a few fields are as expected as a sanity check.
         assert!(event.specific_fields.room_id.is_absent());
         assert_eq!(&*event.common_fields.type_, M_ROOM_CREATE);
 
