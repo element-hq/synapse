@@ -949,7 +949,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                     messages_json_for_user[device_id] = (message_json, msgid)
 
                 if issue9533_logger.isEnabledFor(logging.DEBUG):
-                    # Log any messags we are dropping
+                    # Log any messages we are dropping
                     unmapped_devices = (
                         messages_by_device.keys() - messages_json_for_user.keys()
                     )
