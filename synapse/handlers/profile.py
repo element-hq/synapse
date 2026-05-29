@@ -102,7 +102,23 @@ class ProfileHandler:
         )
         self._worker_locks = hs.get_worker_locks_handler()
 
-    async def _notify_profile_update(self, user_id: UserID, stream_id: int) -> None:
+    async def _record_profile_updates(
+        self, user_id: UserID, updated_fields: list[str]
+    ) -> None:
+        """
+        Record user profile updates to our stream updates table.
+
+        Args:
+            user_id: The user whose profile has had updates.
+            updated_fields: A list of the names of the fields that were updated.
+
+        Returns:
+            None
+        """
+        if not self._msc4429_enabled or not updated_fields:
+            return
+
+        stream_id = await self.store.add_profile_updates(user_id, updated_fields)
         room_ids = await self.store.get_rooms_for_user(user_id.to_string())
         if not room_ids:
             return
@@ -110,15 +126,6 @@ class ProfileHandler:
         self._notifier.on_new_event(
             StreamKeyType.PROFILE_UPDATES, stream_id, rooms=room_ids
         )
-
-    async def _record_profile_updates(
-        self, user_id: UserID, updated_fields: list[str]
-    ) -> None:
-        if not self._msc4429_enabled or not updated_fields:
-            return
-
-        stream_id = await self.store.add_profile_updates(user_id, updated_fields)
-        await self._notify_profile_update(user_id, stream_id)
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
