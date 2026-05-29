@@ -2170,14 +2170,15 @@ class SyncHandler:
 
             per_user_updates: dict[str, JsonValue | None] = {}
             for field_name in profile_fields:
-                if field_name == ProfileFields.DISPLAYNAME:
+                if displayname and field_name == ProfileFields.DISPLAYNAME:
                     per_user_updates[field_name] = displayname
-                elif field_name == ProfileFields.AVATAR_URL:
+                elif avatar_url and field_name == ProfileFields.AVATAR_URL:
                     per_user_updates[field_name] = avatar_url
-                else:
+                elif custom_fields.get(field_name):
                     per_user_updates[field_name] = custom_fields.get(field_name)
 
-            all_updates[other_user_id] = per_user_updates
+            if len(all_updates.keys()):
+                all_updates[other_user_id] = per_user_updates
 
         sync_result_builder.profile_updates = all_updates
         return
