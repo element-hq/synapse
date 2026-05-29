@@ -133,6 +133,11 @@ impl FormattedEvent {
         FormattedEvent {
             signatures: self.signatures.deep_copy(),
             unsigned: self.unsigned.deep_copy(),
+            // These fields can safely be shared among all of the copies as they
+            // are immutable (they're behind an Arc and so you can't get a
+            // mutable reference and they have no interior mutability) and these
+            // write protections extend into Python land as well (i.e. you can't
+            // accidentally do the wrong thing and mutate)
             specific_fields: Arc::clone(&self.specific_fields),
             common_fields: Arc::clone(&self.common_fields),
         }
