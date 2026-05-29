@@ -58,13 +58,9 @@ Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
 bugs where we accidentally share e.g. signature dicts. However, converting a
 dict to frozen_dicts is expensive.
 
-NOTE: This is overridden by the configuration by the Synapse worker apps, but
-for the sake of tests, it is set here because it cannot be configured on the
-homeserver object itself.
-
-FIXME: Because of how this option works (changing the underlying types), it causes
-subtle downstream bugs that makes type comparisons brittle, tracked by
-https://github.com/element-hq/synapse/issues/18117
+FIXME: This is no longer used as when we switched to using the Rust
+implementation, all events are immutable already (and so don't benefit from
+freezing).
 """
 
 
