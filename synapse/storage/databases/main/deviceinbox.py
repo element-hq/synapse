@@ -905,23 +905,19 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             if not devices:
                 continue
 
-            # Look up the user's active devices, so that we can avoid saving messages
-            # for non-existent devices.
-            #
-            # We exclude hidden devices (such as cross-signing keys) here as they are
-            # not expected to receive to-device messages.
-            known_devices = self.db_pool.simple_select_onecol_txn(
-                txn,
-                table="devices",
-                keyvalues={"user_id": user_id, "hidden": False},
-                retcol="device_id",
-            )
-
             if len(devices) == 1 and devices[0] == "*":
                 # Handle wildcard device_ids.
+                # We exclude hidden devices (such as cross-signing keys) here as they are
+                # not expected to receive to-device messages.
+                devices = self.db_pool.simple_select_onecol_txn(
+                    txn,
+                    table="devices",
+                    keyvalues={"user_id": user_id, "hidden": False},
+                    retcol="device_id",
+                )
 
                 # Don't bother to serialize if there are no devices for this user
-                if not known_devices:
+                if not devices:
                     if issue9533_logger.isEnabledFor(logging.DEBUG):
                         msgid = _get_msgid_for_message(messages_by_device["*"])
                         issue9533_logger.debug(
@@ -934,12 +930,26 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 message_json, msgid = _serialize_to_device_message(
                     user_id=user_id, device_id="*", msg=messages_by_device["*"]
                 )
-                for device_id in known_devices:
+                for device_id in devices:
                     # Add the message for all devices for this user on this
                     # server.
                     messages_json_for_user[device_id] = (message_json, msgid)
             else:
-                for device_id in known_devices:
+                # We exclude hidden devices (such as cross-signing keys) here as they are
+                # not expected to receive to-device messages.
+                rows = cast(
+                    list[tuple[str]],
+                    self.db_pool.simple_select_many_txn(
+                        txn,
+                        table="devices",
+                        keyvalues={"user_id": user_id, "hidden": False},
+                        column="device_id",
+                        iterable=devices,
+                        retcols=("device_id",),
+                    ),
+                )
+
+                for (device_id,) in rows:
                     # Only insert into the local inbox if the device exists on
                     # this server
                     msg = messages_by_device[device_id]
