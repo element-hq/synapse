@@ -215,6 +215,7 @@ class FileStorageProviderBackend(StorageProvider):
 
     @trace_with_opname("FileStorageProviderBackend.delete")
     async def delete(self, path: str, file_info: FileInfo) -> None:
+        # Convert to an absolute path.
         fn = os.path.join(self.base_directory, path)
         if os.path.isfile(fn):
             os_remove: Callable[[str], None] = os.remove
