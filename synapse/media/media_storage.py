@@ -469,9 +469,9 @@ class MediaStorage:
         Args:
             file_info: Metadata about the media file
         """
-        paths = self._file_info_to_path(file_info)
+        path = self._file_info_to_path(file_info)
         for provider in filter(None, [self.local_provider, *self.storage_providers]):
-            await provider.delete(paths, file_info)
+            await provider.delete(path, file_info)
 
 
 @trace
