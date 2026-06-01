@@ -62,7 +62,7 @@ from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
-from synapse.synapse_rust.events import redact_event_to_dict
+from synapse.synapse_rust.events import redact_event
 from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -2831,7 +2831,7 @@ class EventsBackgroundUpdatesStore(
 
                 # Verify the signature is genuinely from this key. We prune
                 # first since signatures are computed over the redacted form.
-                pruned = redact_event_to_dict(event)
+                pruned = redact_event(event).get_pdu_json()
                 try:
                     verify_signed_json(pruned, self.hs.hostname, old_verify_key)
                 except SignatureVerifyException:

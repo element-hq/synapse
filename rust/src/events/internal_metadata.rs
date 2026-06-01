@@ -726,7 +726,7 @@ impl EventInternalMetadata {
         attr_err(self.read_inner()?.get_redacted(), "redacted")
     }
     #[setter]
-    fn set_redacted(&self, obj: bool) -> PyResult<()> {
+    pub fn set_redacted(&self, obj: bool) -> PyResult<()> {
         self.write_inner()?.set_redacted(obj);
         Ok(())
     }

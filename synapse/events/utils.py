@@ -45,10 +45,10 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
-from synapse.synapse_rust.events import Unsigned, redact_event_to_dict
+from synapse.synapse_rust.events import Unsigned, redact_event
 from synapse.types import JsonDict, Requester
 
-from . import EventBase, StrippedStateEvent, make_event_from_dict
+from . import EventBase, StrippedStateEvent
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
@@ -76,24 +76,7 @@ def prune_event(event: EventBase) -> EventBase:
     the user has specified, but we do want to keep necessary information like
     type, state_key etc.
     """
-    pruned_event_dict = redact_event_to_dict(event)
-
-    pruned_event = make_event_from_dict(
-        pruned_event_dict, event.room_version, event.internal_metadata.get_dict()
-    )
-
-    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`
-    pruned_event.internal_metadata.stream_ordering = (
-        event.internal_metadata.stream_ordering
-    )
-    pruned_event.internal_metadata.instance_name = event.internal_metadata.instance_name
-    pruned_event.internal_metadata.outlier = event.internal_metadata.outlier
-    pruned_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
-
-    # Mark the event as redacted
-    pruned_event.internal_metadata.redacted = True
-
-    return pruned_event
+    return redact_event(event)
 
 
 def clone_event(event: EventBase) -> EventBase:

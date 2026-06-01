@@ -35,7 +35,7 @@ from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
 from synapse.events.utils import prune_event
 from synapse.logging.opentracing import trace
-from synapse.synapse_rust.events import redact_event_dict_to_dict
+from synapse.synapse_rust.events import redact_event_dict
 from synapse.types import JsonDict, UserID
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ def compute_event_signature(
     Returns:
         a dictionary in the same format of an event's signatures field.
     """
-    redact_json = redact_event_dict_to_dict(room_version, event_dict)
+    redact_json = redact_event_dict(room_version, event_dict)
     redact_json.pop("age_ts", None)
     redact_json.pop("unsigned", None)
     if logger.isEnabledFor(logging.DEBUG):

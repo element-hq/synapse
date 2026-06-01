@@ -309,16 +309,12 @@ class Event:
         ``SynapseDuration`` representing the sticky duration. Otherwise returns
         ``None``."""
 
-def redact_event_to_dict(event: Event) -> JsonDict:
+def redact_event(event: Event) -> Event:
     """Returns a pruned version of the given event, which removes all keys we
     don't know about or think could potentially be dodgy.
-
-    Returns the redacted event as a dict.
     """
 
-def redact_event_dict_to_dict(
-    room_version: RoomVersion, event_dict: JsonMapping
-) -> JsonDict:
+def redact_event_dict(room_version: RoomVersion, event_dict: JsonMapping) -> JsonDict:
     """Returns a pruned version of the given event dict, which removes all keys
     we don't know about or think could potentially be dodgy.
 

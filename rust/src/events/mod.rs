@@ -50,6 +50,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Error;
 use pyo3::{
     exceptions::{PyAttributeError, PyKeyError, PyValueError},
     pyclass, pyfunction, pymethods,
@@ -106,8 +107,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<json_object::JsonObjectItemsView>()?;
     child_module.add_class::<Event>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
-    child_module.add_function(wrap_pyfunction!(redact_event_to_dict_py, m)?)?;
-    child_module.add_function(wrap_pyfunction!(redact_event_dict_to_dict_py, m)?)?;
+    child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
+    child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;
 
     m.add_submodule(&child_module)?;
 
@@ -589,29 +590,80 @@ fn depythonize_event_dict(
     Ok(formatted_event)
 }
 
+/// Converts an event dict as [`serde_json::Value`] into a [`FormattedEvent`].
+fn event_dict_from_value(
+    room_version: &RoomVersion,
+    event_dict: serde_json::Value,
+) -> Result<FormattedEvent, Error> {
+    let formatted_event: FormattedEvent = match room_version.event_format {
+        EventFormatVersions::ROOM_V1_V2 => {
+            let event_format: FormattedEvent<EventFormatV1> = serde_json::from_value(event_dict)?;
+
+            event_format.into()
+        }
+        EventFormatVersions::ROOM_V3 | EventFormatVersions::ROOM_V4_PLUS => {
+            let event_format: FormattedEvent<EventFormatV2V3> = serde_json::from_value(event_dict)?;
+            event_format.into()
+        }
+        EventFormatVersions::ROOM_V11_HYDRA_PLUS => {
+            let event_format: FormattedEvent<EventFormatV4> = serde_json::from_value(event_dict)?;
+            event_format.into()
+        }
+        EventFormatVersions::ROOM_VMSC4242 => {
+            let event_format: FormattedEvent<EventFormatVMSC4242> =
+                serde_json::from_value(event_dict)?;
+            event_format.into()
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported room version: {}",
+                room_version
+            ));
+        }
+    };
+
+    formatted_event.validate()?;
+
+    Ok(formatted_event)
+}
+
 /// Returns a pruned version of the given event, which removes all keys we don't
 /// know about or think could potentially be dodgy.
 ///
 /// Returns the redacted event as a dict.
-#[pyfunction(name = "redact_event_to_dict")]
-fn redact_event_to_dict_py<'py>(py: Python<'py>, event: &'py Event) -> PyResult<Bound<'py, PyAny>> {
+#[pyfunction(name = "redact_event")]
+fn redact_event_py(event: &Event) -> PyResult<Event> {
     let event_value = serde_json::to_value(&event.parsed_event).map_err(|err| {
         PyValueError::new_err(format!("Failed to serialize event for redaction: {}", err))
     })?;
 
-    let redacted = redact(&event_value, event.room_version)?;
+    let redacted_value = redact(&event_value, event.room_version)?;
+    let redacted_formatted_event = event_dict_from_value(event.room_version, redacted_value)
+        .map_err(|err| {
+            PyValueError::new_err(format!("Failed to deserialize redacted event: {}", err))
+        })?;
 
-    let redacted_py = pythonize(py, &redacted)?;
+    let redacted_event = Event {
+        parsed_event: redacted_formatted_event,
+        event_id: Arc::clone(&event.event_id),
+        room_id: Arc::clone(&event.room_id),
+        room_version: event.room_version,
+        rejected_reason: event.rejected_reason.clone(),
+        internal_metadata: event.internal_metadata.deep_copy()?,
+    };
 
-    Ok(redacted_py)
+    // Mark event as redacted
+    redacted_event.internal_metadata.set_redacted(true)?;
+
+    Ok(redacted_event)
 }
 
 /// Returns a pruned version of the given event dict, which removes all keys we
 /// don't know about or think could potentially be dodgy.
 ///
 /// Returns the redacted event as a dict.
-#[pyfunction(name = "redact_event_dict_to_dict")]
-fn redact_event_dict_to_dict_py<'py>(
+#[pyfunction(name = "redact_event_dict")]
+fn redact_event_dict<'py>(
     py: Python<'py>,
     room_version: &RoomVersion,
     event_dict: &'py Bound<'py, PyAny>,
