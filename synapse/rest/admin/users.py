@@ -1495,9 +1495,14 @@ class UserByThreePid(RestServlet):
 
 class RedactUser(RestServlet):
     """
-    Redact all the events of a given user in the given rooms or if empty dict is provided
-    then all events in all rooms user is member of. Kicks off a background process and
-    returns an id that can be used to check on the progress of the redaction progress.
+    Redact all the events of a given user in the given rooms in the given time period.
+    Kicks off a background process and returns an id that can be used to check on the
+    progress of the redaction progress.
+    If empty rooms dict is provided then all events in all rooms user is member of will
+    be affected.
+    Parameters before_ts and after_ts are millisecond timestamps in server timezone.
+    If both are omitted, then messages will be redacted regardless the time they were sent.
+    If only one parameter is sent, then all messages before or after given time will be redacted.
     """
 
     PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
@@ -1512,6 +1517,8 @@ class RedactUser(RestServlet):
         reason: StrictStr | None = None
         limit: StrictInt | None = None
         use_admin: StrictBool | None = None
+        before_ts: StrictInt | None = None
+        after_ts: StrictInt | None = None
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -1543,8 +1550,18 @@ class RedactUser(RestServlet):
         if not use_admin:
             use_admin = False
 
+        before_ts = body.before_ts
+        after_ts = body.after_ts
+
         redact_id = await self.admin_handler.start_redact_events(
-            user_id, rooms, requester.serialize(), use_admin, body.reason, limit
+            user_id,
+            rooms,
+            requester.serialize(),
+            use_admin,
+            body.reason,
+            before_ts,
+            after_ts,
+            limit,
         )
 
         return HTTPStatus.OK, {"redact_id": redact_id}
