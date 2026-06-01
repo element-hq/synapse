@@ -379,6 +379,85 @@ class EmailPusherTests(HomeserverTestCase):
 
         self.assertIn("_matrix/media/v1/thumbnail/DUMMY_MEDIA_ID", html)
 
+    def test_allows_https_link(self) -> None:
+        # allowed_link is a html https link which is sent via an
+        # `org.matrix.custom.html` message. This link should should be included in an email
+        # notification. sanitized_link has the rel attribute that is added by
+        # bleach. It is expected to be in the resulting mail.
+        allowed_link = '<a href="https://example.com">click me</a>'
+        sanitized_link = '<a href="https://example.com" rel="nofollow">click me</a>'
+
+        # Create a room
+        room = self.helper.create_room_as(self.user_id, tok=self.access_token)
+
+        self.helper.invite(
+            room=room, src=self.user_id, tok=self.access_token, targ=self.others[0].id
+        )
+        self.helper.join(room=room, user=self.others[0].id, tok=self.others[0].token)
+
+        self.helper.send_event(
+            room,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "format": "org.matrix.custom.html",
+                "formatted_body": allowed_link,
+                "body": "click me",  # Plain-text Fallback
+            },
+            tok=self.others[0].token,
+        )
+
+        args, kwargs = self._check_for_mail()
+        msg: bytes = args[5]
+        html_message = email.message_from_bytes(msg).get_payload(i=1)
+        assert isinstance(html_message, email.message.Message)
+
+        # Extract the `bytes` from the html Message object, and decode to a `str`.
+        html = html_message.get_payload(decode=True)
+        assert isinstance(html, bytes)
+        html = html.decode()
+
+        self.assertIn(sanitized_link, html)
+
+    def test_strips_javascript(self) -> None:
+        # This tests whether we sanitize email notifications correctly, that contain
+        # messages of the type `org.matrix.custom.html` which contain Javascript.
+        disallowed_javascript = (
+            '<a href="javascript:stealCookies()" rel="nofollow">click me</a>'
+        )
+        disallowed_javascript_sanitized = "<a>click me</a>"
+        room = self.helper.create_room_as(self.user_id, tok=self.access_token)
+
+        self.helper.invite(
+            room=room, src=self.user_id, tok=self.access_token, targ=self.others[0].id
+        )
+        self.helper.join(room=room, user=self.others[0].id, tok=self.others[0].token)
+
+        self.helper.send_event(
+            room,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "format": "org.matrix.custom.html",
+                "formatted_body": disallowed_javascript,
+                "body": "click me",  # plain-text fallback
+            },
+            tok=self.others[0].token,
+        )
+
+        args, kwargs = self._check_for_mail()
+        msg: bytes = args[5]
+        html_message = email.message_from_bytes(msg).get_payload(i=1)
+        assert isinstance(html_message, email.message.Message)
+
+        # extract the `bytes` from the html message object, and decode to a `str`.
+        html = html_message.get_payload(decode=True)
+        assert isinstance(html, bytes)
+        html = html.decode()
+
+        self.assertNotIn(disallowed_javascript, html)
+        self.assertIn(disallowed_javascript_sanitized, html)
+
     def test_empty_room(self) -> None:
         """All users leaving a room shouldn't cause the pusher to break."""
         # Create a simple room with two users

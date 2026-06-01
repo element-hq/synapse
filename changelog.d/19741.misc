@@ -1,0 +1,1 @@
+Use bleach default protocols for email notification sanitization. Added tests to check that mail notification can contain https links, but no javascript. Contributed by Noah Markert.
