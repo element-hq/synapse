@@ -15,17 +15,34 @@
 
 use pyo3::prelude::*;
 
+#[derive(Copy, Clone, Debug)]
+pub enum DatabaseEngine {
+    Sqlite,
+    Postgres,
+}
+
+impl DatabaseEngine {
+    //[inline]
+    pub fn supports_using_any_list(&self) -> bool {
+        match self {
+            DatabaseEngine::Sqlite => false,
+            DatabaseEngine::Postgres => true,
+        }
+    }
+}
+
 /// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
 pub struct LoggingTransactionWrapper<'py> {
-    /// The underlying LoggingTransaction
+    /// The underlying `LoggingTransaction`
     raw: &'py PyAny,
 
     database_engine: DatabaseEngine,
 }
 
 impl<'source> FromPyObject<'source> for LoggingTransactionWrapper<'source> {
-    fn extract(ob: &'source PyAny) -> PyResult<Self> {
-        let database_engine = match ob
+    /// From Python `LoggingTransaction`
+    fn extract(logging_transaction_python_object: &'source PyAny) -> PyResult<Self> {
+        let database_engine = match logging_transaction_python_object
             .getattr("database_engine")?
             .get_type()
             .name()
@@ -36,7 +53,7 @@ impl<'source> FromPyObject<'source> for LoggingTransactionWrapper<'source> {
             other => panic!("Unknown engine {other:?}"),
         };
         Ok(Self {
-            raw: ob,
+            raw: logging_transaction_python_object,
             database_engine,
         })
     }
@@ -54,8 +71,15 @@ impl<'py> LoggingTransactionWrapper<'py> {
         sql: &str,
         args: T,
     ) -> PyResult<Vec<R>> {
-        let execute_fn = self.raw.getattr(intern!(self.raw.py(), "execute_values"))?;
-        Ok(execute_fn.call1((sql, args))?.extract()?)
+        match self.database_engine {
+            DatabaseEngine::Postgres => {
+                let execute_fn = self.raw.getattr(intern!(self.raw.py(), "execute_values"))?;
+                Ok(execute_fn.call1((sql, args))?.extract()?)
+            }
+            DatabaseEngine::Sqlite => {
+                unimplemented!("execute_values is not supported when using SQLite. This is a Synapse programming error");
+            }
+        }
     }
 
     pub fn fetchall<T: FromPyObject<'py> + ValidDatabaseReturnType>(
@@ -63,21 +87,5 @@ impl<'py> LoggingTransactionWrapper<'py> {
     ) -> anyhow::Result<Vec<T>> {
         let fetch_fn = self.raw.getattr(intern!(self.raw.py(), "fetchall"))?;
         Ok(fetch_fn.call0()?.extract()?)
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum DatabaseEngine {
-    Sqlite,
-    Postgres,
-}
-
-impl DatabaseEngine {
-    //[inline]
-    pub fn supports_using_any_list(&self) -> bool {
-        match self {
-            DatabaseEngine::Sqlite => false,
-            DatabaseEngine::Postgres => true,
-        }
     }
 }
