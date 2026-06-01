@@ -2128,6 +2128,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_room_reports_paginate(
         self,
+        *,
         start: int | None,
         limit: int,
         user_id: str | None = None,

@@ -80,7 +80,7 @@ class RoomReportsRestServlet(RestServlet):
             )
 
         room_reports, total = await self._store.get_room_reports_paginate(
-            start, limit, user_id, room_id
+            start=start, limit=limit, user_id=user_id, room_id=room_id
         )
 
         ret = {}
