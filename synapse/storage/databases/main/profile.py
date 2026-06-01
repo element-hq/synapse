@@ -431,7 +431,17 @@ class ProfileWorkerStore(SQLBaseStore):
     async def get_profile_data_for_users(
         self, user_ids: Collection[str]
     ) -> dict[str, dict[str, str | JsonDict | None]]:
-        """Fetch displayname/avatar_url/custom fields for a list of users."""
+        """Fetch displayname/avatar_url/custom fields for a list of users.
+
+        Currently, this returns only local users as the `profiles` table only
+        tracks local users.
+
+        Args:
+            user_ids: List of user IDs to filter against.
+
+        Returns:
+            Dictionary of displayname/avatar_url/custom fields for a list of users.
+        """
         if not user_ids:
             return {}
 

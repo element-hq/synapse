@@ -2142,10 +2142,7 @@ class SyncHandler:
         Build an initial sync entry for profile updates and attach it to the
         given `sync_result_builder`.
 
-        Note: Only the profile information for local users is returned. This is
-        to prevent fetching *too* many profiles in one request. Clients should
-        ideally instead first fetch profiles on-demand, then track updates for
-        all users via incremental `/sync`.
+        Note: Currently, only profile updates of local users are generated.
 
         Args:
             user_id: The Matrix ID of the user to generate the sync entry for.
