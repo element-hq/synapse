@@ -13,7 +13,7 @@
  *
  */
 
-use pyo3::prelude::*;
+use pyo3::{ffi::PyObject, intern, prelude::*};
 
 #[derive(Copy, Clone, Debug)]
 pub enum DatabaseEngine {
@@ -34,58 +34,40 @@ impl DatabaseEngine {
 /// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
 pub struct LoggingTransactionWrapper<'py> {
     /// The underlying `LoggingTransaction`
-    raw: &'py PyAny,
+    raw: Bound<'py, PyObject>,
 
     database_engine: DatabaseEngine,
 }
 
-impl<'source> FromPyObject<'source> for LoggingTransactionWrapper<'source> {
+impl<'py> FromPyObject<'_, 'py> for LoggingTransactionWrapper<'py> {
+    type Error = PyErr;
+
     /// From Python `LoggingTransaction`
-    fn extract(logging_transaction_python_object: &'source PyAny) -> PyResult<Self> {
+    fn extract(logging_transaction_python_object: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
         let database_engine = match logging_transaction_python_object
-            .getattr("database_engine")?
+            .getattr("database_engine")
+            .expect("Expected the Python object you passed to be `LoggingTransaction` which should have `database_engine` attr")
             .get_type()
             .name()
-            .expect("DB engine should have a type name")
+            .expect("Expected `LoggingTransaction.database_engine` to have a type name")
+            .to_str()
+            .expect("Expected to be able to convert the `LoggingTransaction.database_engine` type to a string")
         {
             "PostgresEngine" => DatabaseEngine::Postgres,
             "Sqlite3Engine" => DatabaseEngine::Sqlite,
-            other => panic!("Unknown engine {other:?}"),
+            other => unimplemented!("Unknown database engine {other:?}. This is a Synapse programming error."),
         };
         Ok(Self {
-            raw: logging_transaction_python_object,
+            raw: logging_transaction_python_object.cast()?.to_owned(),
             database_engine,
         })
     }
 }
 
 impl<'py> LoggingTransactionWrapper<'py> {
-    pub fn execute<T: IntoPy<PyObject>>(&mut self, sql: &str, args: T) -> PyResult<()> {
+    pub fn execute(&mut self, sql: &str, args: &'py Bound<'py, PyAny>) -> PyResult<()> {
         let execute_fn = self.raw.getattr(intern!(self.raw.py(), "execute"))?;
         execute_fn.call1((sql, args))?;
         Ok(())
-    }
-
-    pub fn execute_values<T: IntoPy<PyObject>, R: FromPyObject<'py> + ValidDatabaseReturnType>(
-        &mut self,
-        sql: &str,
-        args: T,
-    ) -> PyResult<Vec<R>> {
-        match self.database_engine {
-            DatabaseEngine::Postgres => {
-                let execute_fn = self.raw.getattr(intern!(self.raw.py(), "execute_values"))?;
-                Ok(execute_fn.call1((sql, args))?.extract()?)
-            }
-            DatabaseEngine::Sqlite => {
-                unimplemented!("execute_values is not supported when using SQLite. This is a Synapse programming error");
-            }
-        }
-    }
-
-    pub fn fetchall<T: FromPyObject<'py> + ValidDatabaseReturnType>(
-        &mut self,
-    ) -> anyhow::Result<Vec<T>> {
-        let fetch_fn = self.raw.getattr(intern!(self.raw.py(), "fetchall"))?;
-        Ok(fetch_fn.call0()?.extract()?)
     }
 }
