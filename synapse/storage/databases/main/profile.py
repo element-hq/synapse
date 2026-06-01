@@ -477,18 +477,31 @@ class ProfileWorkerStore(SQLBaseStore):
             stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
                 txn, len(updated_fields)
             )
+            values = []
+            inserted_ts = self.clock.time_msec()
             for stream_id, field_name in zip(stream_ids, updated_fields):
-                self.db_pool.simple_insert_txn(
-                    txn,
-                    table="profile_updates",
-                    values={
-                        "stream_id": stream_id,
-                        "instance_name": self._instance_name,
-                        "user_id": user_id_str,
-                        "field_name": field_name,
-                        "inserted_ts": self.clock.time_msec(),
-                    },
+                values.append(
+                    [
+                        stream_id,
+                        self._instance_name,
+                        user_id_str,
+                        field_name,
+                        inserted_ts,
+                    ]
                 )
+
+            self.db_pool.simple_insert_many_txn(
+                txn,
+                table="profile_updates",
+                keys=[
+                    "stream_id",
+                    "instance_name",
+                    "user_id",
+                    "field_name",
+                    "inserted_ts",
+                ],
+                values=values,
+            )
 
             return stream_ids[-1]
 
