@@ -242,6 +242,7 @@ class SyncResult:
     next_batch: StreamToken
     presence: list[UserPresenceState]
     account_data: list[JsonDict]
+    # user ID -> {profile field -> value | null if unset }
     profile_updates: dict[str, dict[str, JsonValue | None]]
     joined: list[JoinedSyncResult]
     invited: list[InvitedSyncResult]
@@ -2239,6 +2240,7 @@ class SyncHandler:
         )
 
         # Serialise the profile updates into the sync response format.
+        # user ID -> {profile field -> value | null if unset }
         profile_updates: dict[str, dict[str, JsonValue | None]] = {}
         for other_user_id, fields in user_fields.items():
             profile_data = profile_data_by_user.get(other_user_id)
