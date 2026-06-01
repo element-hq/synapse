@@ -560,7 +560,12 @@ class ExperimentalConfig(Config):
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
         # MSC4429: Profile updates for legacy /sync
-        self.msc4429_enabled: bool = experimental.get("msc4429_enabled", False)
+        self.msc4429_enabled: bool = bool(
+            experimental.get("msc4429_enabled", False)
+            or
+            # Allow an alias outside the "experimental" section.
+            config.get("msc4429_enabled", False)
+        )
 
         # MSC4143: Matrix RTC Transport using Livekit Backend
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
