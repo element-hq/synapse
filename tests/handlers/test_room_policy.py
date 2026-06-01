@@ -27,6 +27,7 @@ from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
+from synapse.synapse_rust.events import Signatures
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
@@ -113,7 +114,15 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 self.OTHER_SERVER_NAME,
                 self.signing_key,
             )
-            return sigs
+            # Only return the new signature like the policy server spec says,
+            # not any others that were already in the event
+            return {
+                self.OTHER_SERVER_NAME: {
+                    POLICY_SERVER_KEY_ID: sigs[self.OTHER_SERVER_NAME][
+                        POLICY_SERVER_KEY_ID
+                    ]
+                }
+            }
 
         async def policy_server_signs_event_with_wrong_key(
             destination: str, pdu: EventBase, timeout: int | None = None
@@ -167,6 +176,19 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             content,
             tok=self.creator_token,
             state_key="",
+        )
+
+    def _sign_with_random_key(self, server_name: str, event: EventBase) -> None:
+        non_policyserver_key = signedjson.key.generate_signing_key(
+            "non_policyserver_key"
+        )
+        event.signatures = Signatures(
+            compute_event_signature(
+                event.room_version,
+                event.get_dict(),
+                server_name,
+                non_policyserver_key,
+            )
         )
 
     def test_no_policy_event_set(self) -> None:
@@ -316,11 +338,69 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 },
             },
         )
+        # Sign the event as the origin server first, since that's what events passed to
+        # ask_policy_server_to_sign_event will generally look like. The exact key used
+        # here isn't important.
+        self._sign_with_random_key("example.org", event)
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
         self.get_success(
             self.handler.ask_policy_server_to_sign_event(event, verify=True)
         )
-        self.assertEqual(len(event.signatures), 1)
+        # Standard success case: event has signatures from the origin and the policy server
+        self.assertEqual(
+            {
+                server: len(signatures)
+                for server, signatures in event.signatures.as_dict().items()
+            },
+            {"example.org": 1, self.OTHER_SERVER_NAME: 1},
+            f"Expected signatures for the origin homeserver (example.org) and policy server ({self.OTHER_SERVER_NAME})",
+        )
+
+    def test_ask_origin_server_to_sign_event_doesnt_replace_signatures(self) -> None:
+        """
+        ``ask_policy_server_to_sign_event`` has had bugs where it accidentally overwrote
+        the origin server's signature in the case where the origin server has the same
+        server name as the policy server (each have their own signing key). This test is
+        otherwise equivalent to the success case test above, but the server name for
+        origin event sending server and the policy server are the same and we want to
+        ensure both signatures are preserved.
+        """
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        event = make_test_event(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:" + self.OTHER_SERVER_NAME,
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is another signed event.",
+                },
+            },
+        )
+        # Sign the event as the origin server that sent the event, which in this case
+        # has the same server name as the policy server. We're using a different key
+        # than `self.signing_key` (for the policy server), as the ed25519:policy_server
+        # key is only used for policy server signatures, not any other federation traffic
+        # even when the origin server and policy are logically the same server.
+        self._sign_with_random_key(self.OTHER_SERVER_NAME, event)
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
+        # Less common success case: the event origin server is logically the same as
+        # the policy server, so there will be two signatures from one server name.
+        # It's important to make sure both signatures are preserved.
+        self.assertEqual(
+            {
+                server: len(signatures)
+                for server, signatures in event.signatures.as_dict().items()
+            },
+            {self.OTHER_SERVER_NAME: 2},
+            f"Expected 2 signatures for the origin server and policy server under the same server name ({self.OTHER_SERVER_NAME}) but with different keys",
+        )
 
     def test_ask_policy_server_to_sign_event_refuses(self) -> None:
         verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
