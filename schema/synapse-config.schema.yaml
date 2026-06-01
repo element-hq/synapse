@@ -5883,6 +5883,47 @@ properties:
         only_for_direct_messages: true
         only_from_local_users: true
         worker_to_run_on: worker_1
+  safety_policy:
+    type: object
+    description: >-
+      Controls various aspects of the user and content safety policy for the homeserver.
+      
+      Safety policy is currently provided by the "server-centric" API of 
+      [policyserv](https://github.com/matrix-org/policyserv).
+
+      NOTE: policyserv is a specific implementation of a Matrix policy server. Other policy 
+      server implementations may not work with Synapse. Refer to your policy server's 
+      documentation for details on what it supports.
+      
+      NOTE: This section is expected to gain more options in the future.
+    properties:
+      policyserv_url:
+        type: string
+        description: >-
+          The base URL to use when contacting the policyserv instance. When empty or not 
+          provided, the safety policy support is disabled.
+        default: null
+      policyserv_api_key:
+        type: string
+        description: >-
+          The API key for the server-centric API of the above-provided policyserv instance. 
+          When empty or not provided, the safety policy support is disabled.
+        default: null
+      enable_search_redirection:
+        type: boolean
+        description: >-
+          Whether to check room directory searches with against the safety policy (via the 
+          above-configured policyserv instance). Defaults to `false`.
+          
+          NOTE: The specific policies or filters which determine a room search to be unsafe 
+          or harmful is dependent on that policyserv community's settings. In general, when 
+          an unsafe search is performed, the caller is met with zero results and possible 
+          deterrence messaging to discourage repeated or similar searches.
+        default: false
+    examples:
+      - policyserv_url: https://beta2.matrix.org
+        policyserv_api_key: "your_secret_ps_api_key"
+        enable_search_redirection: true
 $defs:
   bytes:
     type: ["string", "integer"]

@@ -4785,3 +4785,27 @@ auto_accept_invites:
   only_from_local_users: true
   worker_to_run_on: worker_1
 ```
+---
+### `safety_policy`
+
+*(object)* Controls various aspects of the user and content safety policy for the homeserver.
+Safety policy is currently provided by the "server-centric" API of  [policyserv](https://github.com/matrix-org/policyserv).
+NOTE: policyserv is a specific implementation of a Matrix policy server. Other policy  server implementations may not work with Synapse. Refer to your policy server's  documentation for details on what it supports.
+NOTE: This section is expected to gain more options in the future.
+
+This setting has the following sub-options:
+
+* `policyserv_url` (string): The base URL to use when contacting the policyserv instance. When empty or not  provided, the safety policy support is disabled. Defaults to `null`.
+
+* `policyserv_api_key` (string): The API key for the server-centric API of the above-provided policyserv instance.  When empty or not provided, the safety policy support is disabled. Defaults to `null`.
+
+* `enable_search_redirection` (boolean): Whether to check room directory searches with against the safety policy (via the  above-configured policyserv instance). Defaults to `false`.
+  NOTE: The specific policies or filters which determine a room search to be unsafe  or harmful is dependent on that policyserv community's settings. In general, when  an unsafe search is performed, the caller is met with zero results and possible  deterrence messaging to discourage repeated or similar searches. Defaults to `false`.
+
+Example configuration:
+```yaml
+safety_policy:
+  policyserv_url: https://beta2.matrix.org
+  policyserv_api_key: your_secret_ps_api_key
+  enable_search_redirection: true
+```
