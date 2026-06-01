@@ -31,11 +31,27 @@ impl DatabaseEngine {
     }
 }
 
+/// Wrapper for a `DatabasePool` from the Python side of Synapse.
+pub struct DatabasePool<'py> {
+    /// The underlying `DatabasePool`
+    raw: Bound<'py, PyAny>,
+}
+
+impl<'py> DatabasePool<'py> {
+    pub fn get_transaction(&mut self, description: &str) -> LoggingTransactionWrapper {
+        todo!("TODO");
+        // let execute_fn = self.raw.getattr(intern!(self.raw.py(), "runInteraction"))?;
+        // execute_fn.call1((sql, args))?;
+        // Ok(())
+    }
+}
+
 /// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
 pub struct LoggingTransactionWrapper<'py> {
     /// The underlying `LoggingTransaction`
     raw: Bound<'py, PyAny>,
 
+    /// Dissambiguate which underyling database engine we're working with
     database_engine: DatabaseEngine,
 }
 
