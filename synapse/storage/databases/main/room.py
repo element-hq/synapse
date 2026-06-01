@@ -2128,7 +2128,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_room_reports_paginate(
         self,
-        start: int,
+        start: int | None,
         limit: int,
         user_id: str | None = None,
         room_id: str | None = None,
@@ -2136,7 +2136,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """Retrieve a paginated list of room reports
 
         Args:
-            start: timestamp to start from
+            start: id to start from - the most recent report if None
             limit: number of rows to retrieve
             user_id: search for user_id. Ignored if user_id is None
             room_id: filter reports against a specific room_id. Ignored if room_id is None
@@ -2174,10 +2174,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             txn.execute(sql, args)
             count = cast(tuple[int], txn.fetchone())[0]
 
-            filters.append("rr.received_ts < ?")
-            args.append(start)
+            if start is not None:
+                filters.append("rr.id < ?")
+                args.append(start)
 
-            where_clause = "WHERE " + " AND ".join(filters)
+            where_clause = "WHERE " + " AND ".join(filters) if filters else ""
 
             sql = f"""
                 SELECT
@@ -2193,7 +2194,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 INNER JOIN room_stats_state
                     ON room_stats_state.room_id = rr.room_id
                 {where_clause}
-                ORDER BY rr.received_ts DESC
+                ORDER BY rr.id DESC
                 LIMIT ?
             """
 

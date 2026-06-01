@@ -42,7 +42,8 @@ class RoomReportsRestServlet(RestServlet):
 
     Args:
         The parameters `from` and `limit` are required only for pagination.
-        By default, a `limit` of 100 is used, and the `from` parameter defaults to the current time.
+        By default, a `limit` of 100 is used, and the `from` parameter defaults to the
+        most recent report.
         The `room_id` query parameter filters by room id.
         The `user_id` query parameter filters by the user ID of the reporter of the room.
     Returns:
@@ -55,18 +56,16 @@ class RoomReportsRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
-        self._clock = hs.get_clock()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
-        now = int(self._clock.time_msec()) + 1
-        start = parse_integer(request, "from", default=now)
+        start = parse_integer(request, "from")
         limit = parse_integer(request, "limit", default=100)
         room_id = parse_string(request, "room_id")
         user_id = parse_string(request, "user_id")
 
-        if start < 0:
+        if start is not None and start < 0:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "The start parameter must be a positive integer.",
@@ -89,7 +88,7 @@ class RoomReportsRestServlet(RestServlet):
         # trim the extra room if it exists
         room_reports = room_reports[:limit]
         if has_more:
-            ret["next_batch"] = room_reports[-1]["received_ts"]
+            ret["next_batch"] = room_reports[-1]["id"]
 
         ret.update({"room_reports": room_reports, "total": total})
 
