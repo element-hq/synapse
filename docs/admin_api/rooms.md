@@ -40,6 +40,8 @@ The following query parameters are available:
   the query. When the flag is absent (the default), **both** public and non-public rooms are included in the search results.
 * `empty_rooms` - Optional flag to filter empty rooms. A room is empty if joined_members is zero. If `true`, only empty rooms are queried. If `false`, empty rooms are excluded from
   the query. When the flag is absent (the default), **both** empty and non-empty rooms are included in the search results.
+* `room_type` - The type of the room from the room's creation event; for example "m.space" if the room is a space.
+  For rooms without a type defined, leave the parameter as an empty string.
 
   Defaults to no filtering.
 

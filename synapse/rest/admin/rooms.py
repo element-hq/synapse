@@ -296,6 +296,7 @@ class ListRoomRestServlet(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
+        room_type = parse_string(request, "room_type")
         public_rooms = parse_boolean(request, "public_rooms")
         empty_rooms = parse_boolean(request, "empty_rooms")
 
@@ -311,6 +312,7 @@ class ListRoomRestServlet(RestServlet):
             search_term,
             public_rooms,
             empty_rooms,
+            room_type,
         )
 
         response = {
