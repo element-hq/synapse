@@ -13,9 +13,16 @@
 #
 #
 
-from typing import Annotated
+from typing import Annotated, TypeVar
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, StrictStr, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    RootModel,
+    StrictStr,
+    StringConstraints,
+)
 
 from synapse.api.errors import SynapseError
 from synapse.types import EventID
@@ -42,10 +49,23 @@ class ParseModel(BaseModel):
     server operators.
 
     Subclassing in this way is recommended by
-    https://pydantic-docs.helpmanual.io/usage/model_config/#change-behaviour-globally
+    https://pydantic.dev/docs/validation/latest/concepts/config/#change-behaviour-globally
+    [accessed at 2026-05-26]
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+
+
+T = TypeVar("T")
+
+
+class StrictRootModel(RootModel[T]):
+    """
+    A custom version of Pydantic's RootModel, in the same vein as `ParseModel`.
+    Refer to `ParseModel` above for the configuration details.
+    """
+
+    model_config = ConfigDict(frozen=True, strict=True)
 
 
 def validate_event_id_v1_and_2(value: str) -> str:

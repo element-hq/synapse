@@ -22,7 +22,12 @@ from signedjson.key import decode_verify_key_bytes
 from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import Codes, HttpResponseException, SynapseError
+from synapse.api.errors import (
+    Codes,
+    HttpResponseException,
+    InvalidResponseError,
+    SynapseError,
+)
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -225,7 +230,7 @@ class RoomPolicyHandler:
 
         # Ask the policy server to sign this event.
         try:
-            signature = await self._federation_client.ask_policy_server_to_sign_event(
+            sign_response = await self._federation_client.ask_policy_server_to_sign_event(
                 policy_server.server_name,
                 event,
                 # We set a smallish timeout here as we don't want to block event sending
@@ -241,7 +246,7 @@ class RoomPolicyHandler:
             # also be implementation bugs. Whoever reads this when removing unstable MSC4284
             # stuff, make a decision on whether to remove this bit.
             # https://github.com/element-hq/synapse/issues/19502
-            if not signature or len(signature) == 0:
+            if len(sign_response.root) == 0:
                 raise SynapseError(
                     403,
                     "This event has been rejected as probable spam by the policy server",
@@ -261,10 +266,22 @@ class RoomPolicyHandler:
             # servers need to manually fetch signatures for. This is the code that allows
             # those events to continue working (because they're legally sent, even if missing
             # the policy server signature).
-            signatures = signature.get(policy_server.server_name, {})
-            for key_id, sig in signatures.items():
-                event.signatures.add_signature(policy_server.server_name, key_id, sig)
-        except HttpResponseException as ex:
+            for key_id, signature_b64 in sign_response.root.items():
+                if (
+                    event.signatures.get_signature(policy_server.server_name, key_id)
+                    is None
+                ):
+                    event.signatures.add_signature(
+                        policy_server.server_name, key_id, signature_b64
+                    )
+                else:
+                    logger.warning(
+                        "Policy server %r attempted to overwrite existing signature by key_id = %r on event %s, ignoring",
+                        policy_server.server_name,
+                        key_id,
+                        event.event_id,
+                    )
+        except (HttpResponseException, InvalidResponseError) as ex:
             # re-wrap HTTP errors as `SynapseError` so they can be proxied to clients directly
             raise ex.to_synapse_error() from ex
 

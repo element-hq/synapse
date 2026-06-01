@@ -19,8 +19,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
-
 import copy
 import itertools
 import logging
@@ -37,10 +35,12 @@ from typing import (
     Optional,
     Sequence,
     TypeVar,
+    overload,
 )
 
 import attr
 from prometheus_client import Counter
+from pydantic import ValidationError
 
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
 from synapse.api.errors import (
@@ -48,6 +48,7 @@ from synapse.api.errors import (
     Codes,
     FederationDeniedError,
     HttpResponseException,
+    InvalidResponseError,
     RequestSendFailed,
     SynapseError,
     UnsupportedRoomVersionError,
@@ -72,9 +73,11 @@ from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types.federation.policy import PolicySignResponse
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
+from synapse.util.pydantic_models import ParseModel, StrictRootModel
 from synapse.util.retryutils import NotRetryingDestination
 
 if TYPE_CHECKING:
@@ -104,12 +107,6 @@ class PulledPduInfo:
     pull_origin: str
 
 
-class InvalidResponseError(RuntimeError):
-    """Helper for _try_destination_list: indicates that the server returned a response
-    we couldn't parse
-    """
-
-
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class SendJoinResult:
     # The event to persist.
@@ -125,6 +122,41 @@ class SendJoinResult:
     # If 'partial_state' is set, a set of the servers in the room (otherwise empty).
     # Always contains the server we joined off.
     servers_in_room: AbstractSet[str]
+
+
+MODEL_ROOT = TypeVar("MODEL_ROOT", bound=StrictRootModel)
+MODEL_PARSE = TypeVar("MODEL_PARSE", bound=ParseModel)
+
+
+@overload
+def validate_response(
+    content: JsonDict, model_type: type[MODEL_ROOT]
+) -> MODEL_ROOT: ...
+
+
+@overload
+def validate_response(
+    content: JsonDict, model_type: type[MODEL_PARSE]
+) -> MODEL_PARSE: ...
+
+
+# note: this signature is supposed to be ignored by the overload,
+# but yet required, with `no-untyped-def` error given if omitted
+def validate_response(
+    content: JsonDict, model_type: type[MODEL_ROOT] | type[MODEL_PARSE]
+) -> MODEL_ROOT | MODEL_PARSE:
+    """Validate a deserialized JSON object using the given pydantic model.
+
+    Raises:
+        SynapseError if the request body couldn't be decoded as JSON or
+            if it wasn't a JSON object.
+    """
+    try:
+        instance = model_type.model_validate(content)
+    except ValidationError as e:
+        raise InvalidResponseError(str(e))
+
+    return instance
 
 
 class FederationClient(FederationBase):
@@ -441,7 +473,7 @@ class FederationClient(FederationBase):
     @tag_args
     async def ask_policy_server_to_sign_event(
         self, destination: str, pdu: EventBase, timeout: int | None = None
-    ) -> JsonDict:
+    ) -> PolicySignResponse:
         """Requests that the destination server (typically a policy server)
         sign the event as not spam.
 
@@ -462,9 +494,10 @@ class FederationClient(FederationBase):
             pdu.event_id,
             destination,
         )
-        return await self.transport_layer.ask_policy_server_to_sign_event(
+        json_response = await self.transport_layer.ask_policy_server_to_sign_event(
             destination, pdu, timeout=timeout
         )
+        return validate_response(json_response, PolicySignResponse)
 
     @trace
     @tag_args
