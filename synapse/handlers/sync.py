@@ -2186,6 +2186,8 @@ class SyncHandler:
         Build a sync entry for profile updates and attach it to the given
         `sync_result_builder`.
 
+        Currently only local profiles updates will be included in the sync response.
+
         Args:
             sync_result_builder:
         """
