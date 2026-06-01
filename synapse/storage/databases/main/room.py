@@ -2028,18 +2028,18 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             txn: LoggingTransaction, report_id: int
         ) -> dict[str, Any] | None:
             sql = """
-                  SELECT report.id, \
-                         report.received_ts, \
-                         report.room_id, \
-                         report.user_id, \
-                         report.reason, \
-                         room_stats_state.canonical_alias, \
-                         room_stats_state.name, \
-                         room_stats_state.topic \
+                  SELECT report.id,
+                         report.received_ts,
+                         report.room_id,
+                         report.user_id,
+                         report.reason,
+                         room_stats_state.canonical_alias,
+                         room_stats_state.name,
+                         room_stats_state.topic
                   FROM room_reports AS report
                   INNER JOIN room_stats_state
                     ON room_stats_state.room_id = report.room_id
-                  WHERE report.id = ? \
+                  WHERE report.id = ?
                   """
 
             txn.execute(sql, [report_id])
