@@ -2209,13 +2209,26 @@ These settings can be overridden using the `get_media_upload_limits_for_user` mo
 
 Defaults to `[]`.
 
+Options for each entry include:
+
+* `time_period` (duration): The time period over which the limit applies. Required.
+
+* `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
+
+* `info_uri` (string): URI return to the client for where the user can find information about the upload limit. Optional. If not set then a static `data:text/html` URI is returned with a simple message. It is recommended to provide an `info_uri` that points to a page with more information about the upload limit and how users can reduce their upload usage or request an upload limit increase.
+
+* `can_upgrade` (boolean): Value returned to the client for whether the limit can be increased. Optional default `false`. Defaults to `false`.
+
 Example configuration:
 ```yaml
 media_upload_limits:
 - time_period: 1h
   max_size: 100M
+  info_uri: https://example.com/quota#hour
 - time_period: 1w
   max_size: 500M
+  info_uri: https://example.com/quota
+  can_upgrade: true
 ```
 ---
 ### `max_image_pixels`

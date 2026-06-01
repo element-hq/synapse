@@ -40,6 +40,7 @@ from synapse.api.errors import (
     NotFoundError,
     RequestSendFailed,
     SynapseError,
+    UserLimitExceededError,
     cs_error,
 )
 from synapse.api.ratelimiting import Ratelimiter
@@ -396,8 +397,12 @@ class MediaRepository:
                     sent_bytes=uploaded_media_size,
                     attempted_bytes=content_length,
                 )
-                raise SynapseError(
-                    400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
+
+                raise UserLimitExceededError(
+                    403,
+                    "Media upload limit exceeded",
+                    limit.info_uri,
+                    limit.can_upgrade,
                 )
 
         if is_new_media:
