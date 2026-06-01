@@ -1509,6 +1509,41 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                         "last_receipt_stream_ordering": stream_ordering,
                     },
                 )
+                # If no summary row exists yet for a thread that has pending push
+                # actions (room active but not yet through a rotation cycle), the
+                # UPDATE above is a silent no-op for that thread and
+                # last_receipt_stream_ordering is never persisted.
+                # _rotate_notifs_before_txn would then INSERT the row with
+                # last_receipt_stream_ordering=NULL, causing the badge query to
+                # include every event before the receipt as unread.  Pre-populate
+                # rows for every thread with pending push actions so rotation
+                # only counts events that arrive after this receipt.
+                txn.execute(
+                    """
+                    SELECT DISTINCT thread_id
+                    FROM event_push_actions
+                    WHERE user_id = ? AND room_id = ?
+                    """,
+                    (user_id, room_id),
+                )
+                pending_thread_ids = [row[0] for row in txn]
+                for pending_thread_id in pending_thread_ids:
+                    self.db_pool.simple_upsert_txn(
+                        txn,
+                        table="event_push_summary",
+                        keyvalues={
+                            "user_id": user_id,
+                            "room_id": room_id,
+                            "thread_id": pending_thread_id,
+                        },
+                        values={},
+                        insertion_values={
+                            "notif_count": 0,
+                            "unread_count": 0,
+                            "stream_ordering": old_rotate_stream_ordering,
+                            "last_receipt_stream_ordering": stream_ordering,
+                        },
+                    )
 
             # For a threaded receipt, we *always* want to update that receipt,
             # event if there are no new notifications in that thread. This ensures
@@ -1517,8 +1552,10 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 unread_counts = [(0, 0, thread_id)]
 
             # Then any updated threads get their notification count and unread
-            # count updated.
-            self.db_pool.simple_update_many_txn(
+            # count updated.  Use upsert so that a row is created if none exists
+            # yet (same race as the unthreaded case above: without this, rotation
+            # would INSERT with last_receipt_stream_ordering=NULL).
+            self.db_pool.simple_upsert_many_txn(
                 txn,
                 table="event_push_summary",
                 key_names=("room_id", "user_id", "thread_id"),
