@@ -54,8 +54,8 @@ paginate through.
 
 * `limit`: positive integer - Optional. Used for pagination, denoting the maximum number
   of items to return in this call. Defaults to `100` if not provided.
-* `from`: positive integer - Optional. Used for pagination, denoting the unix ms timestamp to return results
-   from in descending order. Defaults to the current time. 
+* `from`: positive integer - Optional. Used for pagination, report id to return results
+   from in descending order. Defaults to the most recent report if not provided. 
 * `user_id`: string - Optional. Filter by the user ID of the reporter. This is the user who
   reported the room.
 * `room_id`: string - Optional. Filter by room id.
