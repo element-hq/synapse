@@ -58,9 +58,9 @@ Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
 bugs where we accidentally share e.g. signature dicts. However, converting a
 dict to frozen_dicts is expensive.
 
-FIXME: This is no longer used as when we switched to using the Rust
-implementation, all events are immutable already (and so don't benefit from
-freezing).
+FIXME: Remove `USE_FROZEN_DICTS` and `use_frozen_dicts` config as this is no
+longer used since we switched to using the Rust implementation, all events are
+immutable already (and so don't benefit from freezing).
 """
 
 
