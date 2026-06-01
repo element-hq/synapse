@@ -1020,15 +1020,6 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
-    # MSC4311: Ensure the create event is available on invites and knocks.
-    # TODO: Implement the rest of MSC4311
-    if (
-        event.room_version.msc4291_room_ids_as_hashes
-        and event.type == EventTypes.Create
-        and event.get_state_key() == ""
-    ):
-        return event.get_pdu_json()
-
     return {
         "type": event.type,
         "state_key": event.state_key,
@@ -1062,3 +1053,12 @@ def parse_stripped_state_event(raw_stripped_event: Any) -> StrippedStateEvent | 
             )
 
     return None
+
+
+def serialize_stripped_state_event(stripped_event: StrippedStateEvent) -> JsonDict:
+    return {
+        "type": stripped_event.type,
+        "state_key": stripped_event.state_key,
+        "sender": stripped_event.sender,
+        "content": stripped_event.content,
+    }

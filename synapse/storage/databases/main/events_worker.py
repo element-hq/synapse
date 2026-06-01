@@ -1149,19 +1149,46 @@ class EventsWorkerStore(SQLBaseStore):
             filter = StateFilter.from_types(types)
         else:
             filter = state_keys_to_include
-        selected_state_ids = await context.get_current_state_ids(filter)
+
+        selected_state_ids = await self.get_stripped_room_state_ids_from_event_context(
+            context, filter
+        )
+
+        state_to_include = await self.get_events(selected_state_ids)
+
+        return [strip_event(e) for e in state_to_include.values()]
+
+    async def get_stripped_room_state_ids_from_event_context(
+        self,
+        context: EventContext,
+        state_keys_to_include: StateFilter,
+    ) -> list[str]:
+        """
+        Retrieve the stripped state IDs for an event, given an event context to retrieve state
+        from as well as the state types to include. Optionally, include the membership
+        events from a specific user.
+
+        "Stripped" state means that only the `type`, `state_key`, `content` and `sender` keys
+        are included from each state event.
+
+        Args:
+            context: The event context to retrieve state of the room from.
+            state_keys_to_include: The state events to include, for each event type.
+
+        Returns:
+            A list of event_ids, each representing the stripped state event to include for this event
+        """
+        selected_state_ids = await context.get_current_state_ids(state_keys_to_include)
 
         # We know this event is not an outlier, so this must be
         # non-None.
         assert selected_state_ids is not None
 
-        # Confusingly, get_current_state_events may return events that are discarded by
-        # the filter, if they're in context._state_delta_due_to_event. Strip these away.
-        selected_state_ids = filter.filter_state(selected_state_ids)
+        # Confusingly, `get_current_state_ids` may return events that are discarded by
+        # the filter, if they're in `context._state_delta_due_to_event`. Strip these away.
+        selected_state_ids = state_keys_to_include.filter_state(selected_state_ids)
 
-        state_to_include = await self.get_events(selected_state_ids.values())
-
-        return [strip_event(e) for e in state_to_include.values()]
+        return list(selected_state_ids.values())
 
     def _maybe_start_fetch_thread(self) -> None:
         """Starts an event fetch thread if we are not yet at the maximum number."""

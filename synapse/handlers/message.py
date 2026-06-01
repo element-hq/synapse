@@ -2088,7 +2088,7 @@ class EventCreationHandler:
                         # to get them to sign the event.
 
                         returned_invite = await federation_handler.send_invite(
-                            invitee.domain, event
+                            invitee.domain, event, context
                         )
 
                         # TODO: Make sure the signatures actually are correct.

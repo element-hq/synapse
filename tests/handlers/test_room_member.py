@@ -564,9 +564,9 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
 
         f = self.get_failure(
             self.fed_handler.on_invite_request(
-                remote_server,
-                invite_event,
-                invite_event.room_version,
+                origin=remote_server,
+                event=invite_event,
+                room_version=invite_event.room_version,
             ),
             SynapseError,
         ).value
@@ -610,9 +610,9 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
 
         f = self.get_failure(
             self.fed_handler.on_invite_request(
-                remote_server,
-                invite_event,
-                invite_event.room_version,
+                origin=remote_server,
+                event=invite_event,
+                room_version=invite_event.room_version,
             ),
             SynapseError,
         ).value
@@ -725,9 +725,9 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
 
         f = self.get_failure(
             self.fed_handler.on_invite_request(
-                remote_server,
-                invite_event,
-                invite_event.room_version,
+                origin=remote_server,
+                event=invite_event,
+                room_version=invite_event.room_version,
             ),
             SynapseError,
         ).value
