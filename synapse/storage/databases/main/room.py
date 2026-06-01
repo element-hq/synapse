@@ -2154,11 +2154,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             args: list[object] = []
 
             if user_id:
-                filters.append("rr.user_id LIKE ?")
-                args.extend(["%" + user_id + "%"])
+                filters.append("rr.user_id = ?")
+                args.extend([user_id])
             if room_id:
-                filters.append("rr.room_id LIKE ?")
-                args.extend(["%" + room_id + "%"])
+                filters.append("rr.room_id = ?")
+                args.extend([room_id])
 
             where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
 
