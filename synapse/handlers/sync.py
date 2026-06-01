@@ -2149,8 +2149,8 @@ class SyncHandler:
             sync_result_builder:
             profile_fields: The list of field IDs to filter for.
         """
-        user_ids = await self.store.get_users_who_share_room_with_user(user_id)
-        user_ids = {u for u in user_ids if self._is_mine_id(u)}
+        # Currently, limited to only local profiles, so filter remote servers out
+        user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
         if not user_ids:
             return
 

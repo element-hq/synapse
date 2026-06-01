@@ -982,6 +982,17 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return user_who_share_room
 
+    async def get_local_users_who_share_room_with_user(self, user_id: str) -> set[str]:
+        """Returns the set of local users who share a room with `user_id`"""
+        room_ids = await self.get_rooms_for_user(user_id)
+
+        user_who_share_room: set[str] = set()
+        for room_id in room_ids:
+            user_ids = await self.get_local_users_in_room(room_id)
+            user_who_share_room.update(user_ids)
+
+        return user_who_share_room
+
     @cached(cache_context=True, iterable=True)
     async def get_mutual_rooms_between_users(
         self, user_ids: frozenset[str], cache_context: _CacheContext
