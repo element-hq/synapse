@@ -139,7 +139,7 @@ pub struct Event {
 
     /// The calculated room ID.
     ///
-    /// For some room versions this may be derived, e.g. for create events in
+    /// For some room versions, this may be derived, e.g. for create events in
     /// v4.
     room_id: Arc<str>,
 
