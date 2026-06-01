@@ -35,6 +35,7 @@ from synapse.http.servlet import (
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
+from synapse.replication.http.profile import ReplicationProfileSetFieldValue
 from synapse.rest.client._base import client_patterns
 from synapse.types import JsonDict, JsonValue, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
@@ -58,7 +59,7 @@ def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
 
 
 class ProfileRestServlet(RestServlet):
-    PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)", v1=True)
+    PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
     CATEGORY = "Event sending requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -109,6 +110,9 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
+        self._is_profile_worker = (
+            hs.get_instance_name() in hs.config.worker.writers.profile_updates
+        )
         if hs.config.experimental.msc4133_enabled:
             self.PATTERNS.append(
                 re.compile(
@@ -204,17 +208,32 @@ class ProfileFieldRestServlet(RestServlet):
                 Codes.USER_ACCOUNT_SUSPENDED,
             )
 
-        if field_name == ProfileFields.DISPLAYNAME:
-            await self.profile_handler.set_displayname(
-                user, requester, new_value, by_admin=is_admin, propagate=propagate
-            )
-        elif field_name == ProfileFields.AVATAR_URL:
-            await self.profile_handler.set_avatar_url(
-                user, requester, new_value, by_admin=is_admin, propagate=propagate
+        if self._is_profile_worker:
+            await self.profile_handler.set_field(
+                target_user=user,
+                requester=requester,
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=is_admin,
+                propagate=propagate,
             )
         else:
-            await self.profile_handler.set_profile_field(
-                user, requester, field_name, new_value, by_admin=is_admin
+            # Offload to the right worker via http replication
+            set_profile_data_client = ReplicationProfileSetFieldValue.make_client(
+                self.hs
+            )
+            profile_updates_writer_instance = (
+                self.hs.config.worker.writers.profile_updates[0]
+            )
+            await set_profile_data_client(
+                instance_name=profile_updates_writer_instance,
+                user_id=user.to_string(),
+                requester_id=requester.user.to_string(),
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=is_admin,
+                propagate=propagate,
+                authenticated_entity=requester.authenticated_entity,
             )
 
         return 200, {}
@@ -261,17 +280,32 @@ class ProfileFieldRestServlet(RestServlet):
                 Codes.USER_ACCOUNT_SUSPENDED,
             )
 
-        if field_name == ProfileFields.DISPLAYNAME:
-            await self.profile_handler.set_displayname(
-                user, requester, "", by_admin=is_admin, propagate=propagate
-            )
-        elif field_name == ProfileFields.AVATAR_URL:
-            await self.profile_handler.set_avatar_url(
-                user, requester, "", by_admin=is_admin, propagate=propagate
+        if self._is_profile_worker:
+            await self.profile_handler.set_field(
+                target_user=user,
+                requester=requester,
+                field_name=field_name,
+                new_value="",
+                by_admin=is_admin,
+                propagate=propagate,
             )
         else:
-            await self.profile_handler.delete_profile_field(
-                user, requester, field_name, by_admin=is_admin
+            # Offload to the right worker via http replication
+            set_profile_data_client = ReplicationProfileSetFieldValue.make_client(
+                self.hs
+            )
+            profile_updates_writer_instance = (
+                self.hs.config.worker.writers.profile_updates[0]
+            )
+            await set_profile_data_client(
+                instance_name=profile_updates_writer_instance,
+                user_id=user.to_string(),
+                requester_id=requester.user.to_string(),
+                field_name=field_name,
+                new_value="",
+                by_admin=is_admin,
+                propagate=propagate,
+                authenticated_entity=requester.authenticated_entity,
             )
 
         return 200, {}
@@ -284,8 +318,9 @@ class UnstableProfileFieldRestServlet(ProfileFieldRestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    # The specific field endpoint *must* appear before the generic profile endpoint.
     ProfileFieldRestServlet(hs).register(http_server)
-    ProfileRestServlet(hs).register(http_server)
+
     if hs.config.experimental.msc4133_enabled:
         UnstableProfileFieldRestServlet(hs).register(http_server)
+
+    ProfileRestServlet(hs).register(http_server)

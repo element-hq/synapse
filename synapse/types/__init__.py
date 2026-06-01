@@ -1061,6 +1061,7 @@ class StreamKeyType(Enum):
     THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
     STICKY_EVENTS = "sticky_events_key"
     QUARANTINED_MEDIA = "quarantined_media_key"
+    PROFILE_UPDATES = "profile_updates_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1068,7 +1069,7 @@ class StreamToken:
     """A collection of keys joined together by underscores in the following
     order and which represent the position in their respective streams.
 
-    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242_4141_4343`
+    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242_4141_4343_4444`
         1. `room_key`: `s2633508` which is a `RoomStreamToken`
            - `RoomStreamToken`'s can also look like `t426-2633508` or `m56~2.58~3.59`
            - See the docstring for `RoomStreamToken` for more details.
@@ -1084,6 +1085,7 @@ class StreamToken:
         11. `thread_subscriptions_key`: 4242
         12. `sticky_events_key`: 4141
         13. `quarantined_media_key`: 4343
+        14. `profile_updates_key`: 4444
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
@@ -1147,6 +1149,7 @@ class StreamToken:
     quarantined_media_key: MultiWriterStreamToken = attr.ib(
         validator=attr.validators.instance_of(MultiWriterStreamToken)
     )
+    profile_updates_key: int
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1177,6 +1180,7 @@ class StreamToken:
                 thread_subscriptions_key,
                 sticky_events_key,
                 quarantined_media_key,
+                profile_updates_key,
             ) = keys
 
             return cls(
@@ -1197,6 +1201,7 @@ class StreamToken:
                 quarantined_media_key=await MultiWriterStreamToken.parse(
                     store, quarantined_media_key
                 ),
+                profile_updates_key=int(profile_updates_key),
             )
         except CancelledError:
             raise
@@ -1222,6 +1227,7 @@ class StreamToken:
                 str(self.thread_subscriptions_key),
                 str(self.sticky_events_key),
                 await self.quarantined_media_key.to_string(store),
+                str(self.profile_updates_key),
             ]
         )
 
@@ -1295,6 +1301,7 @@ class StreamToken:
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
             StreamKeyType.STICKY_EVENTS,
+            StreamKeyType.PROFILE_UPDATES,
         ],
     ) -> int: ...
 
@@ -1351,8 +1358,9 @@ class StreamToken:
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
             f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
-            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}"
+            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}, "
             f"quarantined_media: {self.quarantined_media_key})"
+            f"profile_updates: {self.profile_updates_key})"
         )
 
 
@@ -1370,6 +1378,7 @@ StreamToken.START = StreamToken(
     thread_subscriptions_key=0,
     sticky_events_key=0,
     quarantined_media_key=MultiWriterStreamToken(stream=0),
+    profile_updates_key=0,
 )
 
 

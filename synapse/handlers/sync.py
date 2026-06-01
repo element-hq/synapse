@@ -26,6 +26,7 @@ from typing import (
     Any,
     Mapping,
     Sequence,
+    cast,
 )
 
 import attr
@@ -64,6 +65,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    JsonValue,
     MultiWriterStreamToken,
     MutableStateMap,
     Requester,
@@ -224,6 +226,7 @@ class SyncResult:
         next_batch: Token for the next sync
         presence: List of presence events for the user.
         account_data: List of account_data events for the user.
+        profile_updates: Map of user_id to profile field updates for that user.
         joined: JoinedSyncResult for each joined room.
         invited: InvitedSyncResult for each invited room.
         knocked: KnockedSyncResult for each knocked on room.
@@ -239,6 +242,8 @@ class SyncResult:
     next_batch: StreamToken
     presence: list[UserPresenceState]
     account_data: list[JsonDict]
+    # user ID -> {profile field -> value | null if unset }
+    profile_updates: dict[str, dict[str, JsonValue | None]]
     joined: list[JoinedSyncResult]
     invited: list[InvitedSyncResult]
     knocked: list[KnockedSyncResult]
@@ -260,6 +265,7 @@ class SyncResult:
             or self.knocked
             or self.archived
             or self.account_data
+            or self.profile_updates
             or self.to_device
             or self.device_lists
         )
@@ -275,6 +281,7 @@ class SyncResult:
             next_batch=next_batch,
             presence=[],
             account_data=[],
+            profile_updates={},
             joined=[],
             invited=[],
             knocked=[],
@@ -291,6 +298,7 @@ class SyncHandler:
         self.server_name = hs.hostname
         self.hs_config = hs.config
         self.store = hs.get_datastores().main
+        self._is_mine_id = hs.is_mine_id
         self.notifier = hs.get_notifier()
         self.presence_handler = hs.get_presence_handler()
         self._relations_handler = hs.get_relations_handler()
@@ -1758,6 +1766,9 @@ class SyncHandler:
         if not sync_config.filter_collection.blocks_all_global_account_data():
             await self._generate_sync_entry_for_account_data(sync_result_builder)
 
+        if self.hs_config.experimental.msc4429_enabled:
+            await self._generate_sync_entry_for_profile_updates(sync_result_builder)
+
         # Presence data is included if the server has it enabled and not filtered out.
         include_presence_data = bool(
             self.hs_config.server.presence_enabled
@@ -1857,6 +1868,7 @@ class SyncHandler:
         return SyncResult(
             presence=sync_result_builder.presence,
             account_data=sync_result_builder.account_data,
+            profile_updates=sync_result_builder.profile_updates,
             joined=sync_result_builder.joined,
             invited=sync_result_builder.invited,
             knocked=sync_result_builder.knocked,
@@ -2120,6 +2132,138 @@ class SyncHandler:
         )
 
         sync_result_builder.account_data = account_data_for_user
+
+    async def _generate_initial_sync_entry_for_profile_updates(
+        self,
+        user_id: str,
+        sync_result_builder: "SyncResultBuilder",
+        profile_fields: list[str],
+    ) -> None:
+        """
+        Build an initial sync entry for profile updates and attach it to the
+        given `sync_result_builder`.
+
+        Note: Currently, only profile updates of local users are generated.
+
+        Args:
+            user_id: The Matrix ID of the user to generate the sync entry for.
+            sync_result_builder:
+            profile_fields: The list of field IDs to filter for.
+        """
+        # Currently, limited to only local profiles, so filter remote servers out
+        user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
+        if not user_ids:
+            return
+
+        profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
+
+        # Serialise the profile updates into the sync response format.
+        profile_updates: dict[str, dict[str, JsonValue | None]] = {}
+        for other_user_id in user_ids:
+            profile_data = profile_data_by_user.get(other_user_id)
+            if profile_data is None:
+                # Don't generate anything for users with no profile data
+                # in initial sync.
+                continue
+
+            per_user_updates: dict[str, JsonValue] = {}
+            for field_name in profile_fields:
+                if profile_data.get(field_name):
+                    per_user_updates[field_name] = cast(
+                        JsonValue, profile_data[field_name]
+                    )
+
+            if per_user_updates:
+                profile_updates[other_user_id] = per_user_updates
+
+        if profile_updates:
+            sync_result_builder.profile_updates = profile_updates
+
+    async def _generate_sync_entry_for_profile_updates(
+        self, sync_result_builder: "SyncResultBuilder"
+    ) -> None:
+        """
+        Build a sync entry for profile updates and attach it to the given
+        `sync_result_builder`.
+
+        Currently only local profiles updates will be included in the sync response.
+
+        Args:
+            sync_result_builder:
+        """
+        sync_config = sync_result_builder.sync_config
+        profile_fields = sync_config.filter_collection.profile_fields
+        if not profile_fields:
+            return
+
+        user_id = sync_config.user.to_string()
+        since_token = sync_result_builder.since_token
+        now_token = sync_result_builder.now_token
+
+        if since_token is None:
+            await self._generate_initial_sync_entry_for_profile_updates(
+                user_id, sync_result_builder, profile_fields
+            )
+            return
+
+        if since_token.profile_updates_key == now_token.profile_updates_key:
+            return
+
+        updates = await self.store.get_profile_updates_for_fields(
+            from_id=since_token.profile_updates_key,
+            to_id=now_token.profile_updates_key,
+            field_names=profile_fields,
+        )
+        if not updates:
+            return
+
+        updated_user_ids = {update.user_id for update in updates}
+        shared_user_ids = await self.store.do_users_share_a_room(
+            user_id, updated_user_ids
+        )
+        shared_user_ids.add(user_id)
+
+        user_fields: dict[str, set[str]] = {}
+        for update in updates:
+            if update.user_id not in shared_user_ids:
+                continue
+            user_fields.setdefault(update.user_id, set()).add(update.field_name)
+
+        # Note: there's a small race condition here where a profile update may
+        # occur between fetching `now_token` above and reaching this step. In
+        # that case, the profile information will be newer than `now_token`.
+        # This is fine, as users will generally always want the latest profile
+        # information. However, it does mean that on the next sync, the same
+        # profile update will come down a second time.
+        #
+        # Hopefully clients can just filter these out.
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            user_fields.keys()
+        )
+
+        # Serialise the profile updates into the sync response format.
+        # user ID -> {profile field -> value | null if unset }
+        profile_updates: dict[str, dict[str, JsonValue | None]] = {}
+        for other_user_id, fields in user_fields.items():
+            profile_data = profile_data_by_user.get(other_user_id)
+            if profile_data is None:
+                # No profile data for this user, just return a blank dictionary
+                # in incremental sync, telling the clients to remove all profile
+                # information for this user.
+                profile_updates[other_user_id] = {}
+                continue
+
+            per_user_updates: dict[str, JsonValue] = {}
+            for field_name in fields:
+                per_user_updates[field_name] = cast(
+                    JsonValue, profile_data.get(field_name)
+                )
+
+            if per_user_updates:
+                profile_updates[other_user_id] = per_user_updates
+
+        if profile_updates:
+            sync_result_builder.profile_updates = profile_updates
 
     async def _generate_sync_entry_for_presence(
         self,
@@ -3137,6 +3281,7 @@ class SyncResultBuilder:
         # The following mirror the fields in a sync response
         presence
         account_data
+        profile_updates
         joined
         invited
         knocked
@@ -3155,6 +3300,7 @@ class SyncResultBuilder:
 
     presence: list[UserPresenceState] = attr.Factory(list)
     account_data: list[JsonDict] = attr.Factory(list)
+    profile_updates: dict[str, dict[str, JsonValue | None]] = attr.Factory(dict)
     joined: list[JoinedSyncResult] = attr.Factory(list)
     invited: list[InvitedSyncResult] = attr.Factory(list)
     knocked: list[KnockedSyncResult] = attr.Factory(list)

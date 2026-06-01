@@ -42,6 +42,7 @@ from synapse.types import (
     JsonValue,
     Requester,
     ScheduledTask,
+    StreamKeyType,
     TaskStatus,
     UserID,
     create_requester,
@@ -75,6 +76,8 @@ class ProfileHandler:
         self.clock = hs.get_clock()  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self.hs = hs
+        self._notifier = hs.get_notifier()
+        self._msc4429_enabled = hs.config.experimental.msc4429_enabled
 
         self.federation = hs.get_federation_client()
         hs.get_federation_registry().register_query_handler(
@@ -98,6 +101,31 @@ class ProfileHandler:
             self._update_join_states_task, UPDATE_JOIN_STATES_ACTION_NAME
         )
         self._worker_locks = hs.get_worker_locks_handler()
+
+    async def _record_profile_updates(
+        self, user_id: UserID, updated_fields: list[str]
+    ) -> None:
+        """
+        Record user profile updates to our stream updates table.
+
+        Args:
+            user_id: The user whose profile has had updates.
+            updated_fields: A list of the names of the fields that were updated.
+
+        Returns:
+            None
+        """
+        if not self._msc4429_enabled or not updated_fields:
+            return
+
+        stream_id = await self.store.add_profile_updates(user_id, updated_fields)
+        room_ids = await self.store.get_rooms_for_user(user_id.to_string())
+        if not room_ids:
+            return
+
+        self._notifier.on_new_event(
+            StreamKeyType.PROFILE_UPDATES, stream_id, rooms=room_ids
+        )
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
@@ -253,6 +281,10 @@ class ProfileHandler:
             )
 
         await self.store.set_profile_displayname(target_user, displayname_to_set)
+        await self._record_profile_updates(
+            target_user,
+            [ProfileFields.DISPLAYNAME],
+        )
 
         profile = await self.store.get_profileinfo(target_user)
 
@@ -362,6 +394,10 @@ class ProfileHandler:
             )
 
         await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
+        await self._record_profile_updates(
+            target_user,
+            [ProfileFields.AVATAR_URL],
+        )
 
         profile = await self.store.get_profileinfo(target_user)
 
@@ -406,7 +442,47 @@ class ProfileHandler:
             # have it.
             raise AuthError(400, "Cannot remove another user's profile")
 
+        profile_updates: list[tuple[str, JsonValue | None]] = []
+        current_profile: ProfileInfo | None = None
+        if not by_admin:
+            current_profile = await self.store.get_profileinfo(target_user)
+            if not self.hs.config.registration.enable_set_displayname:
+                if current_profile.display_name:
+                    # SUSPICIOUS: It seems strange to block deactivation on this,
+                    # though this is preserving previous behaviour.
+                    raise SynapseError(
+                        400,
+                        "Changing display name is disabled on this server",
+                        Codes.FORBIDDEN,
+                    )
+
+            if not self.hs.config.registration.enable_set_avatar_url:
+                if current_profile.avatar_url:
+                    # SUSPICIOUS: It seems strange to block deactivation on this,
+                    # though this is preserving previous behaviour.
+                    raise SynapseError(
+                        400,
+                        "Changing avatar is disabled on this server",
+                        Codes.FORBIDDEN,
+                    )
+
+        if self._msc4429_enabled:
+            if current_profile is None:
+                current_profile = await self.store.get_profileinfo(target_user)
+
+            if current_profile.display_name is not None:
+                profile_updates.append((ProfileFields.DISPLAYNAME, None))
+            if current_profile.avatar_url is not None:
+                profile_updates.append((ProfileFields.AVATAR_URL, None))
+
+            custom_fields = await self.store.get_profile_fields(target_user)
+            for field_name in custom_fields.keys():
+                profile_updates.append((field_name, None))
+
         await self.store.delete_profile(target_user)
+        await self._record_profile_updates(
+            target_user, [field_name for field_name, _value in profile_updates]
+        )
 
         await self._third_party_rules.on_profile_update(
             target_user.to_string(),
@@ -530,6 +606,52 @@ class ProfileHandler:
 
             return result.get(field_name)
 
+    async def set_field(
+        self,
+        *,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        new_value: str,
+        by_admin: bool = False,
+        propagate: bool = False,
+    ) -> None:
+        """Wrapper function for setting any profile field for a user."""
+        if field_name == ProfileFields.DISPLAYNAME:
+            await self.set_displayname(
+                target_user=target_user,
+                requester=requester,
+                new_displayname=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
+        elif field_name == ProfileFields.AVATAR_URL:
+            await self.set_avatar_url(
+                target_user=target_user,
+                requester=requester,
+                new_avatar_url=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
+        else:
+            # For custom fields, we need to call a separate delete method
+            # for empty strings.
+            if new_value == "":
+                await self.delete_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=field_name,
+                    by_admin=by_admin,
+                )
+            else:
+                await self.set_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=field_name,
+                    new_value=new_value,
+                    by_admin=by_admin,
+                )
+
     async def set_profile_field(
         self,
         target_user: UserID,
@@ -560,6 +682,7 @@ class ProfileHandler:
             raise AuthError(403, "Cannot set another user's profile")
 
         await self.store.set_profile_field(target_user, field_name, new_value)
+        await self._record_profile_updates(target_user, [field_name])
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
@@ -595,6 +718,7 @@ class ProfileHandler:
             raise AuthError(400, "Cannot set another user's profile")
 
         await self.store.delete_profile_field(target_user, field_name)
+        await self._record_profile_updates(target_user, [field_name])
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)

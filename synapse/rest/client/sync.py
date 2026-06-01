@@ -124,6 +124,7 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
+        self._msc4429_enabled = hs.config.experimental.msc4429_enabled
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
@@ -351,6 +352,12 @@ class SyncRestServlet(RestServlet):
 
         if sync_result.to_device:
             response["to_device"] = {"events": sync_result.to_device}
+
+        if self._msc4429_enabled and sync_result.profile_updates:
+            response["org.matrix.msc4429.users"] = {
+                user_id: {"profile_updates": updates}
+                for user_id, updates in sync_result.profile_updates.items()
+            }
 
         if sync_result.device_lists.changed:
             response["device_lists"]["changed"] = list(sync_result.device_lists.changed)

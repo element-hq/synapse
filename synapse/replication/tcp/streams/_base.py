@@ -33,6 +33,7 @@ import attr
 
 from synapse.api.constants import AccountDataTypes
 from synapse.replication.http.streams import ReplicationGetStreamUpdates
+from synapse.types import UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -757,6 +758,51 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
                 (user_id, room_id, event_id),
             )
             for stream_id, user_id, room_id, event_id in updates
+        ]
+
+        if not rows:
+            return [], to_token, False
+
+        return rows, rows[-1][0], len(updates) == limit
+
+
+@attr.s(slots=True, auto_attribs=True)
+class ProfileUpdatesStreamRow:
+    """Stream to inform workers about profile updates."""
+
+    user_id: UserID
+    """The full user ID with the profile update."""
+    field_name: str
+    """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles """
+
+
+class ProfileUpdatesStream(_StreamFromIdGen):
+    """A user profile field was changed."""
+
+    NAME = "profile_updates"
+    ROW_TYPE = ProfileUpdatesStreamRow
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        super().__init__(
+            hs.get_instance_name(),
+            self._update_function,
+            self.store._profile_updates_id_gen,
+        )
+
+    async def _update_function(
+        self, instance_name: str, from_token: int, to_token: int, limit: int
+    ) -> StreamUpdateResult:
+        updates = await self.store.get_updated_profile_updates(
+            from_id=from_token, to_id=to_token, limit=limit
+        )
+        rows = [
+            (
+                stream_id,
+                # These are the args to `ProfileUpdatesStreamRow`
+                (user_id, field_name),
+            )
+            for stream_id, user_id, field_name in updates
         ]
 
         if not rows:
