@@ -615,6 +615,8 @@ class RoomCreationHandler:
             (EventTypes.ServerACL, ""),
             (EventTypes.PowerLevels, ""),
         ]
+        # Add custom event types configured in the homeserver
+        types_to_copy.extend(self.config.room.event_types_to_copy_on_room_upgrade)
 
         room_type = old_room_create_event.content.get(EventContentFields.ROOM_TYPE)
         if room_type is not None:
