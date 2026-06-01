@@ -13,7 +13,7 @@
  *
  */
 
-use pyo3::{ffi::PyObject, intern, prelude::*};
+use pyo3::{intern, prelude::*};
 
 #[derive(Copy, Clone, Debug)]
 pub enum DatabaseEngine {
@@ -34,7 +34,7 @@ impl DatabaseEngine {
 /// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
 pub struct LoggingTransactionWrapper<'py> {
     /// The underlying `LoggingTransaction`
-    raw: Bound<'py, PyObject>,
+    raw: Bound<'py, PyAny>,
 
     database_engine: DatabaseEngine,
 }
@@ -51,7 +51,7 @@ impl<'py> FromPyObject<'_, 'py> for LoggingTransactionWrapper<'py> {
             .name()
             .expect("Expected `LoggingTransaction.database_engine` to have a type name")
             .to_str()
-            .expect("Expected to be able to convert the `LoggingTransaction.database_engine` type to a string")
+            .expect("Expected to be able to convert the `LoggingTransaction.database_engine` type name to a string")
         {
             "PostgresEngine" => DatabaseEngine::Postgres,
             "Sqlite3Engine" => DatabaseEngine::Sqlite,
