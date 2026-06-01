@@ -137,28 +137,3 @@ class RoomReportDetailRestServlet(RestServlet):
             raise NotFoundError("Room report not found")
 
         return HTTPStatus.OK, ret
-
-    async def on_DELETE(
-        self, request: SynapseRequest, report_id: str
-    ) -> tuple[int, JsonDict]:
-        await assert_requester_is_admin(self._auth, request)
-
-        message = (
-            "The report_id parameter must be a string representing a positive integer."
-        )
-        try:
-            resolved_report_id = int(report_id)
-        except ValueError:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM
-            )
-
-        if resolved_report_id < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM
-            )
-
-        if await self._store.delete_room_report(resolved_report_id):
-            return HTTPStatus.OK, {}
-
-        raise NotFoundError("Room report not found")

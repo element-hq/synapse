@@ -121,17 +121,3 @@ The following fields are returned in the JSON response body:
 * `canonical_alias`: string - The canonical alias of the room. `null` if the room does not
   have a canonical alias set.
 * `topic`: string - The topic of the room. `null` if the room does not have a topic set.
-
-# Delete a specific room report
-
-This API deletes a specific room report. If the request is successful, the response body
-will be an empty JSON object.
-
-The api is:
-```
-DELETE /_synapse/admin/v1/room_reports/<report_id>
-```
-
-**URL parameters:**
-
-* `report_id`: string - The ID of the room report to delete.
