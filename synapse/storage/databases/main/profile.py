@@ -336,9 +336,20 @@ class ProfileWorkerStore(SQLBaseStore):
         return self._profile_updates_id_gen
 
     async def get_updated_profile_updates(
-        self, from_id: int, to_id: int, limit: int
+        self, *, from_id: int, to_id: int, limit: int
     ) -> list[tuple[int, str, str]]:
-        """Get profile updates that have changed, for the profile_updates stream."""
+        """Get updates to profile updates between two stream IDs.
+
+        Bounds: from_id < ... <= to_id
+
+        Args:
+            from_id: The starting stream ID (exclusive)
+            to_id: The ending stream ID (inclusive)
+            limit: The maximum number of rows to return
+
+        Returns:
+            list of tuples representing stream_id, user_id and field_name
+        """
         if from_id == to_id:
             return []
 
@@ -367,7 +378,18 @@ class ProfileWorkerStore(SQLBaseStore):
         to_id: int,
         field_names: Iterable[str],
     ) -> list[ProfileUpdate]:
-        """Get profile update markers for the given fields in a stream range."""
+        """Get profile update markers for the given fields in a stream range.
+
+        Bounds: from_id < ... <= to_id
+
+        Args:
+            from_id: The starting stream ID (exclusive)
+            to_id: The ending stream ID (inclusive)
+            field_names: List of field names to filter against.
+
+        Returns:
+            list of ProfileUpdates update rows
+        """
         if from_id == to_id:
             return []
 
