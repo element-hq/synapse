@@ -12,6 +12,7 @@ pub mod events;
 pub mod http;
 pub mod http_client;
 pub mod identifier;
+pub mod json;
 pub mod matrix_const;
 pub mod msc4388_rendezvous;
 pub mod push;

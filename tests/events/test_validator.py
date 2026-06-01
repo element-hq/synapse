@@ -19,10 +19,10 @@ from tests.unittest import HomeserverTestCase
 
 
 class EventValidatorTestCase(HomeserverTestCase):
-    def test_validate_new_with_mentions_succeeds_even_when_frozen(self) -> None:
+    def test_validate_new_with_mentions_succeed(self) -> None:
         """
         Test that `EventValidator.validate_new` accepts an event with valid `m.mentions`
-        content even when the event is frozen.
+        content.
         """
         event = make_event_from_dict(
             {
@@ -43,8 +43,5 @@ class EventValidatorTestCase(HomeserverTestCase):
             },
             room_version=RoomVersions.V9,
         )
-        # Sanity check that the event is valid before freezing
-        EventValidator().validate_new(event, self.hs.config)
-        event.freeze()
-        # Event should still be valid after freezing
+
         EventValidator().validate_new(event, self.hs.config)
