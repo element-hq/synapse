@@ -2162,6 +2162,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
 
             # Don't count reports against rooms which have been deleted/purged.
+            # This is intentional as these reports are not returned by the pagination query below
+            # and represent reports that cannot be acted upon - as the rooms they reference no
+            # longer exist on the server
             sql = f"""
                 SELECT COUNT(*) as total_room_reports
                 FROM room_reports AS rr
