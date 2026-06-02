@@ -1523,8 +1523,8 @@ class EventsWorkerStore(SQLBaseStore):
                     internal_metadata_dict=internal_metadata,
                     rejected_reason=rejected_reason,
                 )
-            except SynapseError:
-                logger.error("Unable to parse event from database: %s", event_id)
+            except SynapseError as e:
+                logger.error("Unable to parse event from database %s: %s", event_id, e)
                 continue
 
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
