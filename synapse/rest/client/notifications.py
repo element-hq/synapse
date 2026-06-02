@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from synapse.api.constants import ReceiptTypes
 from synapse.events.utils import (
+    FilteredEvent,
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
 )
@@ -111,7 +112,7 @@ class NotificationsServlet(RestServlet):
                 "ts": pa.received_ts,
                 "event": (
                     await self._event_serializer.serialize_event(
-                        notif_events[pa.event_id],
+                        FilteredEvent(event=notif_events[pa.event_id], membership=None),
                         now,
                         config=serialize_options,
                     )

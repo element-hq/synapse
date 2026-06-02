@@ -39,16 +39,16 @@ from synapse.api.constants import (
     CANONICALJSON_MAX_INT,
     CANONICALJSON_MIN_INT,
     MAX_PDU_SIZE,
-    EventContentFields,
     EventTypes,
+    EventUnsignedContentFields,
     RelationTypes,
 )
 from synapse.api.errors import Codes, SynapseError
-from synapse.api.room_versions import RoomVersion
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
+from synapse.synapse_rust.events import Unsigned, redact_event
 from synapse.types import JsonDict, Requester
 
-from . import EventBase, FrozenEventV2, StrippedStateEvent, make_event_from_dict
+from . import EventBase, StrippedStateEvent
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
@@ -76,173 +76,18 @@ def prune_event(event: EventBase) -> EventBase:
     the user has specified, but we do want to keep necessary information like
     type, state_key etc.
     """
-    pruned_event_dict = prune_event_dict(event.room_version, event.get_dict())
-
-    pruned_event = make_event_from_dict(
-        pruned_event_dict, event.room_version, event.internal_metadata.get_dict()
-    )
-
-    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`
-    pruned_event.internal_metadata.stream_ordering = (
-        event.internal_metadata.stream_ordering
-    )
-    pruned_event.internal_metadata.instance_name = event.internal_metadata.instance_name
-    pruned_event.internal_metadata.outlier = event.internal_metadata.outlier
-    pruned_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
-
-    # Mark the event as redacted
-    pruned_event.internal_metadata.redacted = True
-
-    return pruned_event
+    return redact_event(event)
 
 
 def clone_event(event: EventBase) -> EventBase:
     """Take a copy of the event.
 
-    This is mostly useful because it does a *shallow* copy of the `unsigned` data,
-    which means it can then be updated without corrupting the in-memory cache. Note that
-    other properties of the event, such as `content`, are *not* (currently) copied here.
-    """
-    # XXX: We rely on at least one of `event.get_dict()` and `make_event_from_dict()`
-    #   making a copy of `unsigned`. Currently, both do, though I don't really know why.
-    #   Still, as long as they do, there's not much point doing yet another copy here.
-    new_event = make_event_from_dict(
-        event.get_dict(), event.room_version, event.internal_metadata.get_dict()
-    )
-
-    # Starting FrozenEventV2, the event ID is an (expensive) hash of the event. This is
-    # lazily computed when we get the FrozenEventV2.event_id property, then cached in
-    # _event_id field. Later FrozenEvent formats all inherit from FrozenEventV2, so we
-    # can use the same logic here.
-    if isinstance(event, FrozenEventV2) and isinstance(new_event, FrozenEventV2):
-        # If we already pre-computed the event ID, use it.
-        new_event._event_id = event._event_id
-
-    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`.
-    new_event.internal_metadata.stream_ordering = (
-        event.internal_metadata.stream_ordering
-    )
-    new_event.internal_metadata.instance_name = event.internal_metadata.instance_name
-    new_event.internal_metadata.outlier = event.internal_metadata.outlier
-    new_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
-
-    return new_event
-
-
-def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDict:
-    """Redacts the event_dict in the same way as `prune_event`, except it
-    operates on dicts rather than event objects
-
-    Returns:
-        A copy of the pruned event dict
+    Most fields of the event are immutable, however fields such as `unsigned`,
+    `signatures` and `internal_metadata` are mutable. Cloning the event allows
+    us to edit such fields without affecting the original event.
     """
 
-    allowed_keys = [
-        "event_id",
-        "sender",
-        "room_id",
-        "hashes",
-        "signatures",
-        "content",
-        "type",
-        "state_key",
-        "depth",
-        "prev_events",
-        "auth_events",
-        "origin_server_ts",
-    ]
-
-    # Earlier room versions from had additional allowed keys.
-    if not room_version.updated_redaction_rules:
-        allowed_keys.extend(["prev_state", "membership", "origin"])
-
-    event_type = event_dict["type"]
-
-    new_content = {}
-
-    def add_fields(*fields: str) -> None:
-        for field in fields:
-            if field in event_dict["content"]:
-                new_content[field] = event_dict["content"][field]
-
-    if event_type == EventTypes.Member:
-        add_fields("membership")
-        if room_version.restricted_join_rule_fix:
-            add_fields(EventContentFields.AUTHORISING_USER)
-        if room_version.updated_redaction_rules:
-            # Preserve the signed field under third_party_invite.
-            third_party_invite = event_dict["content"].get("third_party_invite")
-            if isinstance(third_party_invite, collections.abc.Mapping):
-                new_content["third_party_invite"] = {}
-                if "signed" in third_party_invite:
-                    new_content["third_party_invite"]["signed"] = third_party_invite[
-                        "signed"
-                    ]
-
-    elif event_type == EventTypes.Create:
-        if room_version.updated_redaction_rules:
-            # MSC2176 rules state that create events cannot have their `content` redacted.
-            new_content = event_dict["content"]
-        if not room_version.implicit_room_creator:
-            # Some room versions give meaning to `creator`
-            add_fields("creator")
-        if room_version.msc4291_room_ids_as_hashes:
-            # room_id is not allowed on the create event as it's derived from the event ID
-            allowed_keys.remove("room_id")
-
-    elif event_type == EventTypes.JoinRules:
-        add_fields("join_rule")
-        if room_version.restricted_join_rule:
-            add_fields("allow")
-    elif event_type == EventTypes.PowerLevels:
-        add_fields(
-            "users",
-            "users_default",
-            "events",
-            "events_default",
-            "state_default",
-            "ban",
-            "kick",
-            "redact",
-        )
-
-        if room_version.updated_redaction_rules:
-            add_fields("invite")
-
-    elif event_type == EventTypes.Aliases and room_version.special_case_aliases_auth:
-        add_fields("aliases")
-    elif event_type == EventTypes.RoomHistoryVisibility:
-        add_fields("history_visibility")
-    elif event_type == EventTypes.Redaction and room_version.updated_redaction_rules:
-        add_fields("redacts")
-
-    # Protect the rel_type and event_id fields under the m.relates_to field.
-    if room_version.msc3389_relation_redactions:
-        relates_to = event_dict["content"].get("m.relates_to")
-        if isinstance(relates_to, collections.abc.Mapping):
-            new_relates_to = {}
-            for field in ("rel_type", "event_id"):
-                if field in relates_to:
-                    new_relates_to[field] = relates_to[field]
-            # Only include a non-empty relates_to field.
-            if new_relates_to:
-                new_content["m.relates_to"] = new_relates_to
-
-    allowed_fields = {k: v for k, v in event_dict.items() if k in allowed_keys}
-
-    allowed_fields["content"] = new_content
-
-    unsigned: JsonDict = {}
-    allowed_fields["unsigned"] = unsigned
-
-    event_unsigned = event_dict.get("unsigned", {})
-
-    if "age_ts" in event_unsigned:
-        unsigned["age_ts"] = event_unsigned["age_ts"]
-    if "replaces_state" in event_unsigned:
-        unsigned["replaces_state"] = event_unsigned["replaces_state"]
-
-    return allowed_fields
+    return event.deep_copy()
 
 
 def _copy_field(src: JsonDict, dst: JsonDict, field: list[str]) -> None:
@@ -417,6 +262,50 @@ def format_event_for_client_v2_without_room_id(d: JsonDict) -> JsonDict:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
+class FilteredEvent:
+    """An event annotated with per-user data for client serialization.
+
+    Produced by filter_and_transform_events_for_client. Carries the user's
+    membership at the time of the event so serialization can inject it into
+    unsigned.membership (MSC4115) without cloning the underlying event.
+    """
+
+    event: "EventBase"
+    """The event to be serialized."""
+
+    membership: str | None
+    """The user whose requesting the event's membership at the time of the
+    event was sent.
+
+    This is None if we didn't compute the membership. In Synapse this happens a)
+    when returning state events to state endpoints, or b) when the event is
+    returned to an admin.
+
+    According to the spec we don't have to include the membership for any events
+    if we don't want to, especially if its expensive to compute. In practice
+    clients really only care about events in the room timeline so that in
+    encrypted room they can determine if they should be able to decrypt the
+    event or not.
+    """
+
+    @classmethod
+    def state(cls, event: "EventBase") -> "FilteredEvent":
+        """Wrap a state event with no per-user membership annotation.
+
+        The event must be a state event (i.e. have a state_key).
+        """
+        assert event.is_state(), (
+            f"FilteredEvent.state() called with non-state event {event.event_id}"
+        )
+        return cls(event=event, membership=None)
+
+    @classmethod
+    def admin_override(cls, event: "EventBase") -> "FilteredEvent":
+        """Wrap an event that bypasses visibility filtering due to admin privileges."""
+        return cls(event=event, membership=None)
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
 class SerializeEventConfig:
     as_client_event: bool = True
     # Function to convert from federation format to client format
@@ -435,6 +324,9 @@ class SerializeEventConfig:
     # only server admins can see through other configuration. For example,
     # whether an event was soft failed by the server.
     include_admin_metadata: bool = False
+    # Whether MSC4354 (sticky events) is enabled. When True, the sticky TTL
+    # will be computed and included in the unsigned section of sticky events.
+    msc4354_enabled: bool = False
 
     @only_event_fields.validator
     def _validate_only_event_fields(
@@ -461,6 +353,7 @@ def _serialize_event(
     time_now_ms: int,
     *,
     config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
+    membership: str | None = None,
 ) -> JsonDict:
     """Serialize event for clients
 
@@ -468,6 +361,8 @@ def _serialize_event(
         e
         time_now_ms
         config: Event serialization config
+        membership: The requesting user's membership at the time of the event,
+            to be injected into unsigned.membership (MSC4115).
 
     Returns:
         The serialized event dictionary.
@@ -564,6 +459,23 @@ def _serialize_event(
         if e.internal_metadata.policy_server_spammy:
             d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
 
+    if config.msc4354_enabled:
+        sticky_duration = e.sticky_duration()
+        if sticky_duration:
+            expires_at = (
+                # min() ensures that the origin server can't lie about the time and
+                # send the event 'in the future', as that would allow them to exceed
+                # the 1 hour limit on stickiness duration.
+                min(e.origin_server_ts, time_now_ms) + sticky_duration.as_millis()
+            )
+            if expires_at > time_now_ms:
+                d["unsigned"][EventUnsignedContentFields.STICKY_TTL] = (
+                    expires_at - time_now_ms
+                )
+
+    if membership is not None:
+        d["unsigned"][EventUnsignedContentFields.MEMBERSHIP] = membership
+
     return d
 
 
@@ -577,13 +489,15 @@ class EventClientSerializer:
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
         self._auth = hs.get_auth()
+        self._config = hs.config
+        self._clock = hs.get_clock()
         self._add_extra_fields_to_unsigned_client_event_callbacks: list[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
 
     async def serialize_event(
         self,
-        event: JsonDict | EventBase,
+        event: JsonDict | FilteredEvent,
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -605,7 +519,7 @@ class EventClientSerializer:
             The serialized event
         """
         # To handle the case of presence events and the like
-        if not isinstance(event, EventBase):
+        if not isinstance(event, FilteredEvent):
             return event
 
         # Force-enable server admin metadata because the only time an event with
@@ -617,11 +531,16 @@ class EventClientSerializer:
         ):
             config = make_config_for_admin(config)
 
-        serialized_event = _serialize_event(event, time_now, config=config)
+        if self._config.experimental.msc4354_enabled:
+            config = attr.evolve(config, msc4354_enabled=True)
+
+        serialized_event = _serialize_event(
+            event.event, time_now, config=config, membership=event.membership
+        )
 
         # If the event was redacted, fetch the redaction event from the database
         # and include it in the serialized event's unsigned section.
-        redacted_by: str | None = event.internal_metadata.redacted_by
+        redacted_by: str | None = event.event.internal_metadata.redacted_by
         if redacted_by is not None:
             serialized_event.setdefault("unsigned", {})["redacted_by"] = redacted_by
             if redaction_map is not None:
@@ -648,7 +567,7 @@ class EventClientSerializer:
 
         new_unsigned = {}
         for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:
-            u = await callback(event)
+            u = await callback(event.event)
             new_unsigned.update(u)
 
         if new_unsigned:
@@ -666,9 +585,9 @@ class EventClientSerializer:
 
         # Check if there are any bundled aggregations to include with the event.
         if bundle_aggregations:
-            if event.event_id in bundle_aggregations:
+            if event.event.event_id in bundle_aggregations:
                 await self._inject_bundled_aggregations(
-                    event,
+                    event.event,
                     time_now,
                     config,
                     bundle_aggregations,
@@ -720,7 +639,7 @@ class EventClientSerializer:
             # `sender` of the edit; however MSC3925 proposes extending it to the whole
             # of the edit, which is what we do here.
             serialized_aggregations[RelationTypes.REPLACE] = await self.serialize_event(
-                event_aggregations.replace,
+                FilteredEvent(event=event_aggregations.replace, membership=None),
                 time_now,
                 config=config,
             )
@@ -730,7 +649,7 @@ class EventClientSerializer:
             thread = event_aggregations.thread
 
             serialized_latest_event = await self.serialize_event(
-                thread.latest_event,
+                FilteredEvent(event=thread.latest_event, membership=None),
                 time_now,
                 config=config,
                 bundle_aggregations=bundled_aggregations,
@@ -755,7 +674,7 @@ class EventClientSerializer:
     @trace
     async def serialize_events(
         self,
-        events: Collection[JsonDict | EventBase],
+        events: Collection[JsonDict | FilteredEvent],
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -780,11 +699,13 @@ class EventClientSerializer:
         )
 
         # Batch-fetch all redaction events in one go rather than one per event.
-        redaction_ids = {
-            e.internal_metadata.redacted_by
-            for e in events
-            if isinstance(e, EventBase) and e.internal_metadata.redacted_by is not None
-        }
+        redaction_ids: set[str] = set()
+        for e in events:
+            base = e.event if isinstance(e, FilteredEvent) else e
+            if isinstance(base, EventBase):
+                redacted_by = base.internal_metadata.redacted_by
+                if redacted_by is not None:
+                    redaction_ids.add(redacted_by)
         redaction_map = (
             await self._store.get_events(redaction_ids) if redaction_ids else {}
         )
@@ -906,7 +827,7 @@ def validate_canonicaljson(value: Any) -> None:
 
 
 def maybe_upsert_event_field(
-    event: EventBase, container: JsonDict, key: str, value: object
+    event: EventBase, container: Unsigned, key: str, value: object
 ) -> bool:
     """Upsert an event field, but only if this doesn't make the event too large.
 
@@ -950,7 +871,7 @@ def strip_event(event: EventBase) -> JsonDict:
     return {
         "type": event.type,
         "state_key": event.state_key,
-        "content": event.content,
+        "content": dict(event.content),
         "sender": event.sender,
     }
 

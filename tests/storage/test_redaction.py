@@ -26,7 +26,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.builder import EventBuilder
 from synapse.server import HomeServer
 from synapse.synapse_rust.events import EventInternalMetadata
@@ -152,7 +152,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {"body": "t", "msgtype": "message"},
             },
             event,
@@ -173,7 +173,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {},
             },
             event,
@@ -191,7 +191,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Member,
-                "user_id": self.u_bob.to_string(),
+                "sender": self.u_bob.to_string(),
                 "content": {"membership": Membership.JOIN, "blue": "red"},
             },
             event,
@@ -212,7 +212,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Member,
-                "user_id": self.u_bob.to_string(),
+                "sender": self.u_bob.to_string(),
                 "content": {"membership": Membership.JOIN},
             },
             event,
@@ -232,16 +232,22 @@ class RedactionTestCase(unittest.HomeserverTestCase):
                 prev_event_ids: list[str],
                 auth_event_ids: list[str] | None,
                 depth: int | None = None,
+                prev_state_events: list[str] | None = None,
             ) -> EventBase:
                 built_event = await self._base_builder.build(
                     prev_event_ids=prev_event_ids, auth_event_ids=auth_event_ids
                 )
 
-                built_event._event_id = self._event_id  # type: ignore[attr-defined]
-                built_event._dict["event_id"] = self._event_id
-                assert built_event.event_id == self._event_id
+                event_dict = built_event.get_dict()
+                event_dict["event_id"] = self._event_id
+                rebuilt_event = make_event_from_dict(
+                    event_dict,
+                    room_version=built_event.room_version,
+                    internal_metadata_dict=built_event.internal_metadata.get_dict(),
+                )
+                assert rebuilt_event.event_id == self._event_id
 
-                return built_event
+                return rebuilt_event
 
             @property
             def room_id(self) -> str:
@@ -328,7 +334,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {"body": "t", "msgtype": "message"},
             },
             event,
@@ -347,7 +353,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {},
             },
             event,

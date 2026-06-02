@@ -26,7 +26,7 @@ jobs:
       linting: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting }}
       linting_readme: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting_readme }}
     steps:
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
         # We only check on PRs
         if: startsWith(github.ref, 'refs/pull/')
@@ -91,7 +91,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
@@ -157,7 +157,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
@@ -174,7 +174,7 @@ jobs:
       # Cribbed from
       # https://github.com/AustinScola/mypy-cache-github-action/blob/85ea4f2972abed39b33bd02c36e341b28ca59213/src/restore.ts#L10-L17
       - name: Restore/persist mypy's cache
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .mypy_cache
@@ -221,7 +221,7 @@ jobs:
         with:
           components: clippy
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo clippy -- -D warnings
 
@@ -240,7 +240,7 @@ jobs:
         with:
           toolchain: nightly-2026-02-01
           components: clippy
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo clippy --all-features -- -D warnings
 
@@ -257,7 +257,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
@@ -296,7 +296,7 @@ jobs:
           # `.rustfmt.toml`.
           toolchain: nightly-2025-04-23
           components: rustfmt
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo fmt --check
 
@@ -393,7 +393,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
@@ -437,7 +437,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       # There aren't wheels for some of the older deps, so we need to install
       # their build dependencies
@@ -552,7 +552,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Run SyTest
         run: /bootstrap.sh synapse
@@ -561,7 +561,7 @@ jobs:
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
       - name: Upload SyTest logs
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() }}
         with:
           name: Sytest Logs - ${{ job.status }} - (${{ join(matrix.job.*, ', ') }})
@@ -658,7 +658,7 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: postgres
       - name: "Upload schema differences"
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ failure() && !cancelled() && steps.run_tester_script.outcome == 'failure' }}
         with:
           name: Schema dumps
@@ -668,145 +668,11 @@ jobs:
             schema_diff
 
   complement:
+    uses: ./.github/workflows/complement_tests.yml
     if: "${{ !failure() && !cancelled() && needs.changes.outputs.integration == 'true' }}"
     needs:
       - linting-done
       - changes
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arrangement: monolith
-            database: SQLite
-
-          - arrangement: monolith
-            database: Postgres
-
-          - arrangement: workers
-            database: Postgres
-
-    steps:
-      - name: Checkout synapse codebase
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          path: synapse
-
-      # Log Docker system info for debugging (compare with your local environment) and
-      # tracking GitHub runner changes over time (can easily compare a run from last
-      # week with the current one in question).
-      - run: docker system info
-        shell: bash
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
-
-      # We use `poetry` in `complement.sh`
-      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
-        with:
-          poetry-version: "2.2.1"
-          # Matches the `path` where we checkout Synapse above
-          working-directory: "synapse"
-
-      - name: Prepare Complement's Prerequisites
-        run: synapse/.ci/scripts/setup_complement_prerequisites.sh
-
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
-        with:
-          cache-dependency-path: complement/go.sum
-          go-version-file: complement/go.mod
-
-      # Run the image sanity check test first as this is the first thing we want to know
-      # about (are we actually testing what we expect?) and we don't want to debug
-      # downstream failures (wild goose chase).
-      - name: Sanity check Complement image
-        id: run_sanity_check_complement_image_test
-        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
-        #     are underpowered and don't like running tons of Synapse instances at once.
-        # -json: Output JSON format so that gotestfmt can parse it.
-        #
-        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
-        run: |
-          set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 | tee /tmp/gotest-sanity-check-complement.log
-        shell: bash
-        env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
-          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-
-      - name: Formatted sanity check Complement test logs
-        # Always run this step if we attempted to run the Complement tests.
-        if: always() && steps.run_sanity_check_complement_image_test.outcome != 'skipped'
-        # We do not hide successful tests in `gotestfmt` here as the list of sanity
-        # check tests is so short. Feel free to change this when we get more tests.
-        #
-        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
-        # it derives several values under `$settings` and passes them to our
-        # custom `.ci/complement_package.gotpl` template to render the output.
-        run: cat /tmp/gotest-sanity-check-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
-
-      - name: Run Complement Tests
-        id: run_complement_tests
-        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
-        #     are underpowered and don't like running tons of Synapse instances at once.
-        # -json: Output JSON format so that gotestfmt can parse it.
-        #
-        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
-        run: |
-          set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
-        shell: bash
-        env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
-          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-
-      - name: Formatted Complement test logs (only failing are shown)
-        # Always run this step if we attempted to run the Complement tests.
-        if: always() && steps.run_complement_tests.outcome != 'skipped'
-        # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
-        #
-        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
-        # it derives several values under `$settings` and passes them to our
-        # custom `.ci/complement_package.gotpl` template to render the output.
-        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
-
-      - name: Run in-repo Complement Tests
-        id: run_in_repo_complement_tests
-        # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
-        #     are underpowered and don't like running tons of Synapse instances at once.
-        # -json: Output JSON format so that gotestfmt can parse it.
-        #
-        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
-        run: |
-          set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
-        shell: bash
-        env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
-          WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
-
-      - name: Formatted in-repo Complement test logs (only failing are shown)
-        # Always run this step if we attempted to run the Complement tests.
-        if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
-        # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
-        #
-        # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
-        # it derives several values under `$settings` and passes them to our
-        # custom `.ci/complement_package.gotpl` template to render the output.
-        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
   cargo-test:
     if: ${{ needs.changes.outputs.rust == 'true' }}
@@ -822,7 +688,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo test
 
@@ -842,7 +708,7 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
           toolchain: nightly-2022-12-01
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo bench --no-run
 

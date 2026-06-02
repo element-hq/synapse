@@ -1,1 +1,0 @@
-Introduce a [configuration option](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#matrix_authentication_service) to allow using HTTP/2 over plaintext when Synapse connects to Matrix Authentication Service.
