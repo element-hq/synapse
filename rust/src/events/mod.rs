@@ -417,6 +417,10 @@ impl Event {
         // `<Event event_id=$def:example.com, type=m.room.message>`
         let mut fields: Vec<(&str, &str)> = Vec::with_capacity(6);
 
+        if let Some(reason) = self.rejected_reason.as_deref() {
+            fields.push(("REJECTED", reason));
+        };
+
         fields.push(("event_id", &self.event_id));
         fields.push(("type", self.r#type()));
 
@@ -438,10 +442,6 @@ impl Event {
         if is_outlier {
             fields.push(("outlier", "true"));
         }
-
-        if let Some(reason) = self.rejected_reason.as_deref() {
-            fields.push(("REJECTED", reason));
-        };
 
         let fields_str = fields
             .into_iter()
