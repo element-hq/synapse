@@ -5,7 +5,7 @@ This API returns information about reported rooms.
 To use it, you will need to authenticate by providing an `access_token`
 for a server admin: see [Admin API](../usage/administration/admin_api/).
 
-The api is:
+The API is:
 ```
 GET /_synapse/admin/v1/room_reports
 ```
@@ -36,12 +36,12 @@ It returns a JSON body like the following:
             "topic": null
         }
     ],
-    "next_batch": 2,
+    "next_batch": 2
 }
 ```
 
-Note: Reports for deleted or purged rooms are not returned. The endpoint returns reports in descending
-chronological order.
+Note: Reports for deleted or purged rooms are not returned. The endpoint returns reports in reverse
+chronological order - most recent first, oldest last.
 
 To paginate, check for `next_batch` and if present, call the endpoint again with `from`
 set to the value of `next_batch`. This will return a new page.
@@ -53,8 +53,7 @@ paginate through.
 
 * `limit`: positive integer - Optional. Used for pagination, denoting the maximum number
   of items to return in this call. Defaults to `100` if not provided.
-* `from`: positive integer - Optional. Used for pagination, report id to return results
-   from in descending order. Defaults to the most recent report if not provided. 
+* `from`: string - Pagination token. This token can be obtained from the `next_batch` returned by a previous response from this endpoint.
 * `user_id`: string - Optional. Filter by the user ID of the reporter. This is the user who
   reported the room.
 * `room_id`: string - Optional. Filter by room id.

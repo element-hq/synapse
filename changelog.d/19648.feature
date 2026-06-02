@@ -1,1 +1,1 @@
-Add [Admin API](https://matrix-org.github.io/synapse/develop/usage/administration/admin_api/index.html) endpoints to list, fetch and delete room reports.
+Add [Admin API](https://matrix-org.github.io/synapse/develop/usage/administration/admin_api/index.html) endpoints to list and fetch room reports.
