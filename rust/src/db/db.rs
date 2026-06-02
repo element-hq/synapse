@@ -15,32 +15,58 @@
 
 use crate::db::python_db_pool::DatabasePool as PythonDatabasePool;
 
-/// A `tokio-postgres` looking thing that we can use on the Rust side to interact with
-/// the database
-pub trait Database {
-    pub fn query(&self) -> None {
+/// A [`tokio_postgres::Transaction`] looking thing that we can use on the Rust side to
+/// interact with the database
+pub trait Transaction {
+    pub fn query(&self, sql: &str, args: &[&str]) -> None {
         todo!("TODO");
     }
 }
 
 /// Database access backed by the database pool we already have in the Python side of Synapse
-struct SynapsePythonDatabase {
+struct SynapsePythonTransaction {
     db_pool: PythonDatabasePool,
 }
 
-impl Database for SynapsePythonDatabase {
-    pub fn query(&self) -> None {
+impl Transaction for SynapsePythonTransaction {
+    fn query(&self, sql: &str, args: &[&str]) -> None {
         todo!("TODO");
     }
 }
 
 /// Native Rust database access backed by `tokio-postgres` (for use in synapse-rust-apps)
-struct TokioPostgresDatabase {
-    // TODO
-}
+// struct TokioPostgresTransaction {
+//     db_pool: bb8::Pool<PostgresConnectionManager<MakeTlsConnector>>,
+// }
 
-impl Database for TokioPostgresDatabase {
-    pub fn query(&self) -> None {
-        todo!("TODO");
-    }
-}
+// impl Transaction for TokioPostgresTransaction {
+//     fn query(&self, sql: &str, args: &[&str]) -> None {
+//         todo!("TODO");
+
+//         // TODO: Set isolation level
+
+//         let mut conn = self
+//             .db_pool
+//             .get()
+//             .instrument(tracing::info_span!("acquire database connection"))
+//             .await
+//             .map_err(|e| {
+//                 sentry::capture_error(&e);
+//                 tracing::error!(
+//                     error = e.to_string(),
+//                     "Failed to acquire database connection"
+//                 );
+//                 anyhow::anyhow!("Failed to acquire database connection: {e}")
+//             })?;
+
+//         let txn = conn
+//             .transaction()
+//             .instrument(tracing::info_span!("start transaction"))
+//             .await
+//             .context("Failed to start transaction")?;
+
+//         let rows = txn.query(sql, args).await?;
+
+//         rows
+//     }
+// }
