@@ -579,7 +579,7 @@ class LoggingTransaction:
             secs = time.time() - start
             sql_logger.debug("[SQL time] {%s} %f sec", self.name, secs)
             sql_query_timer.labels(
-                verb=one_line_sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
+                verb=sql.split(maxsplit=1)[0], **{SERVER_NAME_LABEL: self.server_name}
             ).observe(secs)
 
     def close(self) -> None:
