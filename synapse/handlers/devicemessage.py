@@ -464,7 +464,7 @@ def split_device_messages_into_edus(
     ):
         # The returned subset might be larger than the soft max size if it
         # contains a single entry that is larger than the soft max size.
-        if estimated_size <= SOFT_MAX_EDU_SIZE - base_edu_size:
+        if estimated_size <= SOFT_MAX_EDU_SIZE:
             # This message fits in a single EDU, add it as is.
             content = create_new_to_device_edu_content(
                 sender_user_id, message_type, subset_messages
