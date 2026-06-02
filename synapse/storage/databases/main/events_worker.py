@@ -37,6 +37,7 @@ from typing import (
 
 import attr
 from prometheus_client import Gauge
+from typing_extensions import assert_never
 
 from twisted.internet import defer
 
@@ -775,6 +776,14 @@ class EventsWorkerStore(SQLBaseStore):
                     continue
                 elif redact_behaviour == EventRedactBehaviour.redact:
                     event = entry.redacted_event
+                elif redact_behaviour == EventRedactBehaviour.as_is:
+                    # Allow event through as is
+                    pass
+                else:
+                    # We (should) have covered all possible values of
+                    # redact_behaviour, so this is unreachable.
+                    assert_never(redact_behaviour)
+                    raise ValueError(f"Unknown redact_behaviour {redact_behaviour}")
 
             events.append(event)
 
@@ -1507,12 +1516,17 @@ class EventsWorkerStore(SQLBaseStore):
                     )
                     continue
 
-            original_ev = make_event_from_dict(
-                event_dict=d,
-                room_version=room_version,
-                internal_metadata_dict=internal_metadata,
-                rejected_reason=rejected_reason,
-            )
+            try:
+                original_ev = make_event_from_dict(
+                    event_dict=d,
+                    room_version=room_version,
+                    internal_metadata_dict=internal_metadata,
+                    rejected_reason=rejected_reason,
+                )
+            except SynapseError:
+                logger.error("Unable to parse event from database: %s", event_id)
+                continue
+
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
             original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier

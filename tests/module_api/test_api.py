@@ -841,10 +841,10 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         create_event = state[(EventTypes.Create, "")]
 
         # `.user_id` is a deprecated alias for `.sender`.
-        self.assertEqual(create_event.user_id, user_id)
+        self.assertEqual(create_event.user_id, user_id)  # type: ignore[attr-defined]
 
         # The event supports looking up keys via `__getitem__` although deprecated
-        self.assertEqual(create_event["room_id"], room_id)
+        self.assertEqual(create_event["room_id"], room_id)  # type: ignore[index]
 
 
 class ModuleApiWorkerTestCase(BaseModuleApiTestCase, BaseMultiWorkerStreamTestCase):
