@@ -433,9 +433,9 @@ impl Event {
             }
         }
 
-        let is_outlier = self.internal_metadata.is_outlier()?.to_string();
-        if is_outlier == "true" {
-            fields.push(("outlier", &is_outlier));
+        let is_outlier = self.internal_metadata.is_outlier()?;
+        if is_outlier {
+            fields.push(("outlier", "true"));
         }
 
         if let Some(reason) = self.rejected_reason.as_deref() {
