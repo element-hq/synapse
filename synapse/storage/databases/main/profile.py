@@ -455,7 +455,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         results: dict[str, dict[str, str | JsonDict | None]] = {}
         for full_user_id, displayname, avatar_url, fields in rows:
-            user_fields = fields
+            user_fields = fields or {}
             # The SQLite driver doesn't automatically convert JSON to
             # Python objects
             if isinstance(self.database_engine, Sqlite3Engine) and fields:
