@@ -1766,9 +1766,6 @@ class SyncHandler:
         if not sync_config.filter_collection.blocks_all_global_account_data():
             await self._generate_sync_entry_for_account_data(sync_result_builder)
 
-        if self.hs_config.experimental.msc4429_enabled:
-            await self._generate_sync_entry_for_profile_updates(sync_result_builder)
-
         # Presence data is included if the server has it enabled and not filtered out.
         include_presence_data = bool(
             self.hs_config.server.presence_enabled
@@ -1863,6 +1860,12 @@ class SyncHandler:
                 "events_in_result": num_events,
             }
         )
+
+        # Note, this needs to be after we collect `joined` sync results
+        # since we want to utilize the work we did to collect users into the
+        # lazy loading members cache
+        if self.hs_config.experimental.msc4429_enabled:
+            await self._generate_sync_entry_for_profile_updates(sync_result_builder)
 
         logger.debug("Sync response calculation complete")
         return SyncResult(
@@ -2152,6 +2155,15 @@ class SyncHandler:
         """
         # Currently, limited to only local profiles, so filter remote servers out
         user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
+
+        sync_config = sync_result_builder.sync_config
+        lazy_load_members = sync_config.filter_collection.lazy_load_members()
+        if lazy_load_members:
+            # Only include members we've collected for lazy loading
+            cache_key = (sync_config.user.to_string(), sync_config.device_id)
+            cache = self.get_lazy_loaded_members_cache(cache_key)
+            user_ids = {user_id for user_id in user_ids if cache.get(user_id)}
+
         if not user_ids:
             return
 
