@@ -20,7 +20,6 @@ import psycopg.errors
 import psycopg.sql
 
 from twisted.enterprise.adbapi import Connection as TxConnection
-
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.engines._base import IsolationLevel
 
@@ -89,11 +88,7 @@ class PsycopgEngine(
     def attempt_to_set_autocommit(
         self, conn: psycopg.Connection, autocommit: bool
     ) -> None:
-        # Sometimes this gets called with a Twisted connection instead, unwrap
-        # it because it doesn't support __setattr__.
-        if isinstance(conn, TxConnection):
-            conn = conn._connection
-        conn.autocommit = autocommit
+        conn.set_autocommit(autocommit)
 
     def attempt_to_set_isolation_level(
         self, conn: psycopg.Connection, isolation_level: IsolationLevel | None = None
