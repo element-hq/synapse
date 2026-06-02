@@ -60,6 +60,7 @@ use pyo3::{
 use pythonize::{depythonize, pythonize};
 
 use crate::events::{
+    constants::event_type::M_ROOM_MEMBER,
     formats::{
         EventFormatEnum, EventFormatV1, EventFormatV2V3, EventFormatV4, EventFormatVMSC4242,
         FormattedEvent,
@@ -424,7 +425,7 @@ impl Event {
         };
 
         // Include the membership field for membership events.
-        if self.r#type() == MEMBERSHIP && self.is_state() {
+        if self.r#type() == M_ROOM_MEMBER && self.is_state() {
             let content = &self.parsed_event.common_fields.content;
             let membership_field = content.get_field(MEMBERSHIP).and_then(|m| m.as_str());
 
