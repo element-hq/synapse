@@ -404,6 +404,53 @@ impl Event {
         Some(duration)
     }
 
+    fn __str__(&self) -> PyResult<String> {
+        self.__repr__()
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        // We want to include some representative fields in the repr for
+        // debugging purposes.
+        //
+        // The end result will look something like:
+        // `<Event event_id=$def:example.com, type=m.room.message>`
+        let mut fields: Vec<(&str, &str)> = Vec::with_capacity(6);
+
+        fields.push(("event_id", &self.event_id));
+        fields.push(("type", self.r#type()));
+
+        if let Some(state_key) = self.get_state_key() {
+            fields.push(("state_key", state_key));
+        };
+
+        // Include the membership field for membership events.
+        if self.r#type() == MEMBERSHIP && self.is_state() {
+            let content = &self.parsed_event.common_fields.content;
+            let membership_field = content.get_field(MEMBERSHIP).and_then(|m| m.as_str());
+
+            if let Some(membership_str) = membership_field {
+                fields.push(("membership", membership_str));
+            }
+        }
+
+        let is_outlier = self.internal_metadata.is_outlier()?.to_string();
+        if is_outlier == "true" {
+            fields.push(("outlier", &is_outlier));
+        }
+
+        if let Some(reason) = self.rejected_reason.as_deref() {
+            fields.push(("REJECTED", reason));
+        };
+
+        let fields_str = fields
+            .into_iter()
+            .map(|(name, value)| format!("{}={}", name, value))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        Ok(format!("<Event {}>", fields_str))
+    }
+
     // Below are the methods for interacting with the event as a mapping.
     //
     // These are rarely used, so we take the easy approach of re-serializing the
