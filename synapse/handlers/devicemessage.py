@@ -442,7 +442,7 @@ def split_device_messages_into_edus(
     This function takes many to-device messages and fits/splits them into several EDUs
     as necessary. We split the messages up as the overall request can overrun the
     `max_request_body_size` and prevent outbound federation traffic because of the size
-    of the transaction (cf. `MAX_EDU_SIZE`).
+    of the transaction (cf. `SOFT_MAX_EDU_SIZE`).
 
     Args:
         sender_user_id: The user that is sending the to-device messages.
