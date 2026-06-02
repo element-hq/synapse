@@ -1,7 +1,8 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2025 New Vector Ltd
+# Copyright (C) 2025-2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -18,11 +19,13 @@
 #
 #
 
+
 import yaml
 
 from synapse.config._base import ConfigError, RootConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.server import ServerConfig, generate_ip_set, is_threepid_reserved
+from synapse.types import JsonDict
 
 from tests import unittest
 
@@ -188,6 +191,45 @@ class ServerConfigTestCase(unittest.TestCase):
         )
 
         self.assertEqual(conf["listeners"], expected_listeners)
+
+    def test_max_delayed_events_enforces_positive(self) -> None:
+        def generate_config(value: int) -> JsonDict:
+            return {"max_event_delay_duration": value}
+
+        _read_config(generate_config(1))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(0))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(-1))
+
+    def test_max_delayed_events_per_user_enforces_positive(self) -> None:
+        def generate_config(value: int) -> JsonDict:
+            return {
+                "experimental_features": {"msc4140_max_delayed_events_per_user": value}
+            }
+
+        _read_config(generate_config(1))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(0))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(-1))
+
+
+def _read_config(config_values: JsonDict) -> None:
+    ServerConfig(RootConfig()).read_config(
+        yaml.safe_load(
+            HomeServerConfig().generate_config(
+                config_dir_path="CONFDIR",
+                data_dir_path="/data_dir_path",
+                server_name="che.org",
+            )
+        )
+        | config_values
+    )
 
 
 class GenerateIpSetTestCase(unittest.TestCase):

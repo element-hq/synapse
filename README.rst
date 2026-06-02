@@ -104,7 +104,7 @@ Copyright and Licensing
   | Copyright 2014–2017 OpenMarket Ltd
   | Copyright 2017 Vector Creations Ltd
   | Copyright 2017–2025 New Vector Ltd
-  | Copyright 2025 Element Creations Ltd
+  | Copyright 2025-2026 Element Creations Ltd
 
 This software is dual-licensed by Element Creations Ltd (Element). It can be
 used either:

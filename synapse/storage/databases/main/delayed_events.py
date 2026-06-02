@@ -1,7 +1,8 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2024 New Vector, Ltd
+# Copyright (C) 2024-2025 New Vector Ltd
+# Copyright (C) 2025-2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -17,7 +18,7 @@ from typing import TYPE_CHECKING, NewType
 
 import attr
 
-from synapse.api.errors import NotFoundError
+from synapse.api.errors import LimitExceededError, NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -123,6 +124,7 @@ class DelayedEventsStore(SQLBaseStore):
         origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
+        limit: int,
         sticky_duration_ms: int | None,
     ) -> tuple[DelayID, Timestamp]:
         """
@@ -131,11 +133,39 @@ class DelayedEventsStore(SQLBaseStore):
         Returns: The generated ID assigned to the added delayed event,
             and the send time of the next delayed event to be sent,
             which is either the event just added or one added earlier.
+
+        Raises:
+            LimitExceededError: if the user has reached the limit of
+                how many delayed events they may have scheduled at once.
         """
+        assert limit > 0  # Should be enforced at config read time
         delay_id = _generate_delay_id()
         send_ts = Timestamp(creation_ts + delay)
 
         def add_delayed_event_txn(txn: LoggingTransaction) -> Timestamp:
+            num_existing: int = self.db_pool.simple_select_one_onecol_txn(
+                txn,
+                table="delayed_events",
+                keyvalues={"user_localpart": user_localpart},
+                retcol="COUNT(*)",
+            )
+            if num_existing >= limit:
+                next_send_ms: int = self.db_pool.simple_select_one_onecol_txn(
+                    txn,
+                    table="delayed_events",
+                    keyvalues={
+                        "is_processed": False,
+                        "user_localpart": user_localpart,
+                    },
+                    retcol="MIN(send_ts)",
+                )
+                e = LimitExceededError(
+                    limiter_name="add_delayed_event",
+                    retry_after_ms=next_send_ms - creation_ts,
+                )
+                e.msg = "The maximum number of delayed events has been reached."
+                raise e
+
             self.db_pool.simple_insert_txn(
                 txn,
                 table="delayed_events",

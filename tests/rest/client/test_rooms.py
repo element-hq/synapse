@@ -4,7 +4,8 @@
 # Copyright 2019 The Matrix.org Foundation C.I.C.
 # Copyright 2017 Vector Creations Ltd
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023-2024 New Vector, Ltd
+# Copyright (C) 2023-2025 New Vector Ltd
+# Copyright (C) 2025-2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -24,6 +25,7 @@
 """Tests REST events for /rooms paths."""
 
 import json
+import math
 from http import HTTPStatus
 from typing import Any, Iterable, Literal
 from unittest.mock import AsyncMock, Mock, call, patch
@@ -2503,7 +2505,10 @@ class RoomDelayedEventTestCase(RoomBase):
             {},
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertNotIn("org.matrix.msc4140.errcode", channel.json_body)
+        self.assertTrue(
+            channel.json_body.get("errcode", "").startswith("M_"),
+            channel.json_body,
+        )
 
     def test_delayed_event_unsupported_by_default(self) -> None:
         """Test that sending a delayed event is unsupported with the default config."""
@@ -2517,8 +2522,8 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_UNSUPPORTED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("errcode"),
             channel.json_body,
         )
 
@@ -2535,10 +2540,68 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_EXCEEDED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("errcode"),
             channel.json_body,
         )
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 1,
+            },
+        }
+    )
+    def test_delayed_event_user_limit_exceeded(self) -> None:
+        """Test that users cannot have more delayed events scheduled at once than allowed."""
+        send_after_ms = 15000
+        args = (
+            "POST",
+            (
+                f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after_ms}"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        wait_ms = 2000
+        self.reactor.advance(wait_ms / 1000.0)
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertEqual(
+            Codes.LIMIT_EXCEEDED,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+        step_ms = 100  # The simulated duration of each make_request
+        expected_retry_after_ms = send_after_ms - wait_ms - step_ms
+        self.assertEqual(
+            expected_retry_after_ms,
+            channel.json_body["retry_after_ms"],
+            channel.json_body,
+        )
+        retry_header = channel.headers.getRawHeaders("Retry-After")
+        assert retry_header
+        self.assertSequenceEqual(
+            [str(math.ceil(expected_retry_after_ms / 1000))],
+            retry_header,
+        )
+
+        # Confirm that ratelimit overrides do not unblock this kind of limit
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
+        )
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertIn("retry_after_ms", channel.json_body)
+        assert channel.headers.getRawHeaders("Retry-After")
+
+        self.reactor.advance(expected_retry_after_ms)
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_delayed_event_with_negative_delay(self) -> None:

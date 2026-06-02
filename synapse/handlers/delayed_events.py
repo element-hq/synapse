@@ -1,7 +1,8 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2024 New Vector, Ltd
+# Copyright (C) 2024-2025 New Vector Ltd
+# Copyright (C) 2025-2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -385,6 +386,7 @@ class DelayedEventsHandler:
             origin_server_ts=origin_server_ts,
             content=content,
             delay=delay,
+            limit=self._config.server.max_delayed_events_per_user,
             sticky_duration_ms=sticky_duration_ms,
         )
 
