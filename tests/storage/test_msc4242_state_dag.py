@@ -156,8 +156,9 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
     ) -> tuple[MSC4242Event, EventContext]:
         # We use a mock here to allow us to set the `event_id`.
         #
-        # FIXME: It would be better to use a real event here, but that is more
-        # complex to set up.
+        # FIXME: Having consistent human-readable event IDs in these tests is
+        # nice but the `Mock` is less than ideal. It would be better to use a
+        # real event but that is more complex to set up.
         ev = Mock(spec=EventBase)
         ev.event_id = id
         ev.prev_state_events = prev_state_events
