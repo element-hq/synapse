@@ -17,6 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import json
 from http import HTTPStatus
 from typing import Collection, ContextManager
 from unittest.mock import AsyncMock, Mock, patch
@@ -55,6 +56,7 @@ from synapse.util.duration import Duration
 import tests.unittest
 import tests.utils
 from tests.test_utils.event_builders import make_test_pdu_event
+from tests.unittest import override_config
 
 _request_key = 0
 
@@ -1150,6 +1152,171 @@ def generate_sync_config(
         device_id=device_id,
         use_state_after=use_state_after,
     )
+
+
+class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
+    """Tests Sync Handler for profile updates."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.sync_handler = self.hs.get_sync_handler()
+        self.store = self.hs.get_datastores().main
+        self.user = self.register_user("user", "password")
+        self.tok = self.login("user", "password")
+        self.other_user = self.register_user("other_user", "password")
+        self.other_tok = self.login("other_user", "password")
+        self.joined_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=UserID.from_string(self.user),
+                field_name="m.status",
+                new_value=json.dumps(
+                    {"text": "Swimming in the Great Lakes!", "emoji": "🏊"}
+                ),
+            )
+        )
+        self.helper.join(
+            room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
+
+    def test_initial_sync_no_profile_updates_if_not_enabled(self) -> None:
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    self.user,
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(initial_result.profile_updates, {})
+
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_initial_sync_no_profile_updates_if_not_filtered_for(self) -> None:
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            initial_result.profile_updates,
+            {},
+        )
+
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_initial_sync_responds_with_all_known_profiles(self) -> None:
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@user:test"]["m.status"],
+            '{"text": "Swimming in the Great Lakes!", "emoji": "\\ud83c\\udfca"}',
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@user:test"]["displayname"], "user"
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@other_user:test"]["displayname"],
+            "other_user",
+        )
+        self.assertCountEqual(
+            initial_result.profile_updates.keys(),
+            [
+                "@other_user:test",
+                "@user:test",
+            ],
+        )
+
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_initial_sync_lazy_loading_responds_with_only_profiles_with_events(
+        self,
+    ) -> None:
+        """
+        This test ensures lazy loading sync only returns profiles that we also have
+        events for in the sync response. The second room in this test has the most
+        recent events from "third_user" and thus we don't get the profile of
+        "other_user" down the line, who is in the the same rooms as the syncer,
+        but not in the second room.
+        """
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        second_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.join(
+            room=second_room,
+            user=third_user,
+            tok=third_tok,
+        )
+
+        requester = create_requester(self.user)
+
+        self.helper.send_messages(room_id=second_room, num_events=10, tok=third_tok)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@user:test"]["m.status"],
+            '{"text": "Swimming in the Great Lakes!", "emoji": "\\ud83c\\udfca"}',
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@user:test"]["displayname"], "user"
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@third_user:test"]["displayname"],
+            "third_user",
+        )
+        self.assertCountEqual(
+            initial_result.profile_updates.keys(),
+            [
+                "@third_user:test",
+                "@user:test",
+            ],
+        )
 
 
 class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
