@@ -2129,43 +2129,47 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
     async def get_room_reports_paginate(
         self,
         *,
-        start: int | None,
+        from_id: int | None,
         limit: int,
         user_id: str | None = None,
         room_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         """Retrieve a paginated list of room reports
 
         Args:
-            start: id to start from - the most recent report if None
+            from_id: the room report id to start from - if not provided the reports will
+            start at the most recent report (largest report id) and descend
             limit: number of rows to retrieve
             user_id: search for user_id. Ignored if user_id is None
             room_id: filter reports against a specific room_id. Ignored if room_id is None
         Returns:
             Tuple of:
                 json list of room reports
-                total number of room reports matching the filter criteria
+                a boolean indicating whether there are more reports available
         """
 
         def _get_room_reports_paginate_txn(
             txn: LoggingTransaction,
-        ) -> list[dict[str, Any]]:
+        ) -> tuple[list[dict[str, Any]], bool]:
             filters = []
-            args: list[object] = []
+            args: list[str | int] = []
 
             if user_id:
                 filters.append("rr.user_id = ?")
-                args.extend([user_id])
+                args.append(user_id)
             if room_id:
                 filters.append("rr.room_id = ?")
-                args.extend([room_id])
+                args.append(room_id)
 
-            if start is not None:
+            if from_id is not None:
                 filters.append("rr.id < ?")
-                args.append(start)
+                args.append(from_id)
 
             where_clause = "WHERE " + " AND ".join(filters) if filters else ""
 
+            # By the nature of the `INNER JOIN`, this avoid reports from rooms that have
+            # been deleted/purged. This is useful as it removes duplicate/stale reports for
+            # rooms that have already been "actioned".
             sql = f"""
                 SELECT
                     rr.id,
@@ -2202,7 +2206,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 for row in txn
             ]
 
-            return room_reports
+            limited = len(room_reports) > limit
+            # trim the extra rooms if it exists
+            if limited:
+                room_reports = room_reports[:limit]
+
+            return room_reports, limited
 
         return await self.db_pool.runInteraction(
             "get_room_reports_paginate", _get_room_reports_paginate_txn
@@ -2328,27 +2337,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_event_reports_paginate", _get_event_reports_paginate_txn
         )
-
-    async def delete_room_report(self, report_id: int) -> bool:
-        """Remove a room report from database.
-
-        Args:
-            report_id: Report to delete
-
-        Returns:
-            Whether the report was successfully deleted or not.
-        """
-        try:
-            await self.db_pool.simple_delete_one(
-                table="room_reports",
-                keyvalues={"id": report_id},
-                desc="delete_room_report",
-            )
-        except StoreError:
-            # Deletion failed because report does not exist
-            return False
-
-        return True
 
     async def delete_event_report(self, report_id: int) -> bool:
         """Remove an event report from database.

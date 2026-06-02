@@ -42,13 +42,12 @@ class RoomReportsRestServlet(RestServlet):
 
     Args:
         The parameters `from` and `limit` are required only for pagination.
-        By default, a `limit` of 100 is used, and the `from` parameter defaults to the
-        most recent report.
+        By default, a `limit` of 100 is used, and the `from` parameter defaults to None,
+        indicating that the most recent report (largest report id) should be returned.
         The `room_id` query parameter filters by room id.
         The `user_id` query parameter filters by the user ID of the reporter of the room.
     Returns:
-        A list of reported rooms and an integer representing the total number of
-        reported rooms that exist given this query
+        A list of reported rooms filtered by the query parameters
     """
 
     PATTERNS = admin_patterns("/room_reports$")
@@ -60,34 +59,25 @@ class RoomReportsRestServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
-        start = parse_integer(request, "from")
+        from_id = parse_integer(request, "from")
         limit = parse_integer(request, "limit", default=100)
         room_id = parse_string(request, "room_id")
         user_id = parse_string(request, "user_id")
 
-        if start is not None and start < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "The start parameter must be a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
-        if limit < 0:
+        if limit <= 0:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "The limit parameter must be a positive integer.",
                 errcode=Codes.INVALID_PARAM,
             )
 
-        room_reports = await self._store.get_room_reports_paginate(
-            start=start, limit=limit, user_id=user_id, room_id=room_id
+        room_reports, limited = await self._store.get_room_reports_paginate(
+            from_id=from_id, limit=limit, user_id=user_id, room_id=room_id
         )
 
         ret = {}
-        has_more = len(room_reports) > limit
-        # trim the extra room if it exists
-        room_reports = room_reports[:limit]
-        if has_more:
+
+        if limited:
             ret["next_batch"] = room_reports[-1]["id"]
 
         ret.update({"room_reports": room_reports})
@@ -122,9 +112,7 @@ class RoomReportDetailRestServlet(RestServlet):
     ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
-        message = (
-            "The report_id parameter must be a string representing a positive integer."
-        )
+        message = "The report_id parameter must be a string representing a room report ID (positive integer)."
         try:
             resolved_report_id = int(report_id)
         except ValueError:
