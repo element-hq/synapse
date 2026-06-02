@@ -204,8 +204,8 @@ def split_dict_to_fit_to_size(
     will be larger than `soft_max_size` when encoded as JSON.
 
     Args:
-        original_dict: The dict to split. soft_max_size: The maximum size of
-            each dict when encoded as JSON.
+        original_dict: The dict to split.
+        soft_max_size: The maximum size of each dict when encoded as JSON.
         wrapping_object_size: The estimated size of the JSON encoding of the
             payload when empty.
 
