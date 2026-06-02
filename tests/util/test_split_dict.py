@@ -12,18 +12,12 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-import logging
-from typing import TypeVar
 
 from canonicaljson import encode_canonical_json
 
 from synapse.util import split_dict_to_fit_to_size
 
 from tests.unittest import TestCase
-
-logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 class SplitDictTestCase(TestCase):
