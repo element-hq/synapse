@@ -591,7 +591,7 @@ fn depythonize_event_dict(
 }
 
 /// Converts an event dict as [`serde_json::Value`] into a [`FormattedEvent`].
-fn event_dict_from_value(
+fn event_dict_from_json_value(
     room_version: &RoomVersion,
     event_dict: serde_json::Value,
 ) -> Result<FormattedEvent, Error> {
@@ -638,10 +638,10 @@ fn redact_event_py(event: &Event) -> PyResult<Event> {
     })?;
 
     let redacted_value = redact(&event_value, event.room_version)?;
-    let redacted_formatted_event = event_dict_from_value(event.room_version, redacted_value)
+    let redacted_formatted_event = event_dict_from_json_value(event.room_version, redacted_value)
         .map_err(|err| {
-            PyValueError::new_err(format!("Failed to deserialize redacted event: {}", err))
-        })?;
+        PyValueError::new_err(format!("Failed to deserialize redacted event: {}", err))
+    })?;
 
     let redacted_event = Event {
         parsed_event: redacted_formatted_event,
