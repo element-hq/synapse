@@ -69,9 +69,6 @@ class PsycopgEngine(
         cursor.execute(query_str.as_string())
 
     def convert_param_style(self, sql: str) -> str:
-        # if isinstance(sql, psycopg.sql.Composed):
-        #     return sql
-
         return sql.replace("?", "%s")
 
     def is_deadlock(self, error: Exception) -> bool:
