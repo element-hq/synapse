@@ -417,6 +417,10 @@ class LoggingTransaction:
         """
 
         if isinstance(self.database_engine, Psycopg2Engine):
+            # This is narrowed to the only be used by psycopg2 as it is imported from
+            # that module. Internally, `execute_batch()` just injects a given grouping
+            # of parameters into the query and then appends multiple of those queries
+            # together with a `;`, leading to large reduction of 'round-tripping'.
             from psycopg2.extras import execute_batch
 
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
@@ -433,6 +437,9 @@ class LoggingTransaction:
             # suggests that the outer collection may be iterable, but
             # https://docs.python.org/3/library/sqlite3.html?highlight=sqlite3#how-to-use-placeholders-to-bind-values-in-sql-queries
             # suggests that the inner collection should be a sequence or dict.
+            # In the case of psycopg v3+ usage, `executemany()` uses a postgres
+            # optimization called pipelining to vastly speed up processing of the query
+            # when there are many args.
             self.executemany(sql, args)
 
     def execute_values(
