@@ -700,6 +700,10 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             # server name
 
             if isinstance(self.database_engine, Psycopg2Engine):
+                # `execute_values()` is the performative go-to with psycopg2. It differs
+                # from psycopg(v3+) below in that the `template` needs to be separated
+                # from the query itself so that the value variables can be bound and
+                # expanded before being inserted into the final query.
                 template = """
                     (
                         %s,
@@ -733,6 +737,10 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
                     fetch=False,
                 )
             elif isinstance(self.database_engine, PsycopgEngine):
+                # Unlike psycopg2, psycopg(v3+) can not use `execute_values()` at this
+                # time. However, `executemany()` on psycopg uses it's internal pipeline
+                # mode to be much faster than an iterative `execute()`, especially on
+                # writes.
                 sql = """
                     INSERT INTO user_directory_search(user_id, vector)
                     VALUES
