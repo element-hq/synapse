@@ -75,15 +75,14 @@ pub fn compute_event_reference_hash(
     redacted_value_mut.remove(UNSIGNED);
     redacted_value_mut.remove(AGE_TS);
 
-    let canonicalization_options = if room_version.strict_canonicaljson {
-        CanonicalizationOptions::strict()
-    } else {
-        CanonicalizationOptions::relaxed()
-    };
-
-    let json =
-        crate::canonical_json::to_string_canonical(&redacted_value_mut, canonicalization_options)
-            .map_err(|err| anyhow::anyhow!(err))?;
+    // We use `CanonicalizationOptions::relaxed()` as we have some events that
+    // have already been accepted with int fields outside the valid range. We
+    // still want to be able to load them and calculate their event ID.
+    let json = crate::canonical_json::to_string_canonical(
+        &redacted_value_mut,
+        CanonicalizationOptions::relaxed(),
+    )
+    .map_err(|err| anyhow::anyhow!(err))?;
 
     let hash = Sha256::digest(json.as_bytes());
 
