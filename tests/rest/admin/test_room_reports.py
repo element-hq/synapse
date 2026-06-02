@@ -95,7 +95,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 10)
         self.assertNotIn("next_batch", channel.json_body)
         self._check_fields(channel.json_body["room_reports"])
@@ -119,7 +118,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 5)
         self.assertEqual(channel.json_body["next_batch"], report_5["id"])
         self._check_fields(channel.json_body["room_reports"])
@@ -144,7 +142,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 5)
         self.assertNotIn("next_batch", channel.json_body)
         self._check_fields(channel.json_body["room_reports"])
@@ -171,7 +168,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 3)
         self.assertEqual(channel.json_body["next_batch"], report_5["id"])
         self._check_fields(channel.json_body["room_reports"])
@@ -188,7 +184,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 1)
         self.assertEqual(len(channel.json_body["room_reports"]), 1)
         self.assertNotIn("next_batch", channel.json_body)
         self._check_fields(channel.json_body["room_reports"])
@@ -208,7 +203,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 5)
         self.assertEqual(len(channel.json_body["room_reports"]), 5)
         self.assertNotIn("next_batch", channel.json_body)
         self._check_fields(channel.json_body["room_reports"])
@@ -228,7 +222,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 1)
         self.assertEqual(len(channel.json_body["room_reports"]), 1)
         self.assertNotIn("next_batch", channel.json_body)
         self._check_fields(channel.json_body["room_reports"])
@@ -282,7 +275,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 10)
         self.assertNotIn("next_batch", channel.json_body)
 
@@ -298,7 +290,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 10)
         self.assertNotIn("next_batch", channel.json_body)
 
@@ -311,7 +302,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 9)
         self.assertEqual(channel.json_body["next_batch"], report_9["id"])
 
@@ -325,7 +315,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(channel.json_body["total"], 10)
         self.assertEqual(len(channel.json_body["room_reports"]), 1)
         self.assertNotIn("next_batch", channel.json_body)
 
@@ -373,11 +362,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        # The 'total' field is 9 because only 9 reports will actually
-        # be retrievable since we deleted the row in the room_stats_state
-        # table.
-        self.assertEqual(channel.json_body["total"], 9)
-        # This is consistent with the number of rows actually returned.
         self.assertEqual(len(channel.json_body["room_reports"]), 9)
 
 

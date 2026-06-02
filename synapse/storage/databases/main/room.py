@@ -2133,7 +2133,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         limit: int,
         user_id: str | None = None,
         room_id: str | None = None,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> list[dict[str, Any]]:
         """Retrieve a paginated list of room reports
 
         Args:
@@ -2149,7 +2149,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def _get_room_reports_paginate_txn(
             txn: LoggingTransaction,
-        ) -> tuple[list[dict[str, Any]], int]:
+        ) -> list[dict[str, Any]]:
             filters = []
             args: list[object] = []
 
@@ -2159,21 +2159,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             if room_id:
                 filters.append("rr.room_id = ?")
                 args.extend([room_id])
-
-            where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
-
-            # Don't count reports against rooms which have been deleted/purged.
-            # This is intentional as these reports are not returned by the pagination query below
-            # and represent reports that cannot be acted upon - as the rooms they reference no
-            # longer exist on the server
-            sql = f"""
-                SELECT COUNT(*) as total_room_reports
-                FROM room_reports AS rr
-                INNER JOIN room_stats_state ON room_stats_state.room_id = rr.room_id
-                {where_clause}
-            """
-            txn.execute(sql, args)
-            count = cast(tuple[int], txn.fetchone())[0]
 
             if start is not None:
                 filters.append("rr.id < ?")
@@ -2217,7 +2202,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 for row in txn
             ]
 
-            return room_reports, count
+            return room_reports
 
         return await self.db_pool.runInteraction(
             "get_room_reports_paginate", _get_room_reports_paginate_txn

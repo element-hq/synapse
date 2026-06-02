@@ -37,7 +37,6 @@ It returns a JSON body like the following:
         }
     ],
     "next_batch": 2,
-    "total": 4
 }
 ```
 
@@ -76,8 +75,7 @@ The following fields are returned in the JSON response body:
 * `name`: string - The name of the room.
 * `topic`: string - The topic of the room. `null` if the room does not have a topic set.
 * `next_batch`: integer - Indication for pagination. See above.
-* `total`: integer - Total number of room reports related to the query
-  (`user_id` and `room_id`).
+
 
 # Show details of a specific room report
 

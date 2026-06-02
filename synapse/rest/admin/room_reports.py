@@ -79,7 +79,7 @@ class RoomReportsRestServlet(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
-        room_reports, total = await self._store.get_room_reports_paginate(
+        room_reports = await self._store.get_room_reports_paginate(
             start=start, limit=limit, user_id=user_id, room_id=room_id
         )
 
@@ -90,7 +90,7 @@ class RoomReportsRestServlet(RestServlet):
         if has_more:
             ret["next_batch"] = room_reports[-1]["id"]
 
-        ret.update({"room_reports": room_reports, "total": total})
+        ret.update({"room_reports": room_reports})
 
         return HTTPStatus.OK, ret
 
