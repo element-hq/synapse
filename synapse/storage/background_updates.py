@@ -36,7 +36,7 @@ from typing import (
 import attr
 from pydantic import BaseModel
 
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
 from synapse.util.clock import Clock
@@ -834,6 +834,8 @@ class BackgroundUpdater:
                 conn.engine.attempt_to_set_autocommit(conn.conn, False)
 
         def create_index_sqlite(conn: "LoggingDatabaseConnection") -> None:
+            assert isinstance(self.db_pool.engine, Sqlite3Engine)
+
             # Sqlite doesn't support concurrent creation of indexes.
             #
             # We assume that sqlite doesn't give us invalid indices; however
