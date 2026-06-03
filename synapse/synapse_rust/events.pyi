@@ -10,9 +10,11 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Mapping
+from typing import Any, Iterator, Mapping
 
-from synapse.types import JsonDict
+from synapse.synapse_rust.room_versions import RoomVersion
+from synapse.types import JsonDict, JsonMapping, StrSequence
+from synapse.util.duration import Duration
 
 class EventInternalMetadata:
     def __init__(self, internal_metadata_dict: JsonDict): ...
@@ -153,4 +155,168 @@ def event_visible_to_server(
 
     Returns:
         Whether the server is allowed to see the unredacted event.
+    """
+
+class Signatures:
+    """A class representing the signatures on an event."""
+
+    def __init__(self, signatures: Mapping[str, Mapping[str, str]] | None = None): ...
+    def get_signature(self, server_name: str, key_id: str) -> str | None:
+        """Get the signature for the given server name and key ID, if it exists."""
+
+    def __getitem__(self, server_name: str) -> Mapping[str, str]:
+        """Get the signatures for the given server name. Raises KeyError if there
+        are no signatures for that server."""
+
+    def __contains__(self, server_name: Any) -> bool:
+        """Check if there are signatures for the given server name."""
+
+    def __len__(self) -> int:
+        """Return the number of servers that have signatures."""
+
+    def add_signature(self, server_name: str, key_id: str, signature: str) -> None:
+        """Add a signature for the given server name and key ID."""
+
+    def update(self, signatures: Mapping[str, Mapping[str, str]]) -> None:
+        """Update the signatures with the given signatures.
+
+        Will overwrite all existing signatures for the server names provided.
+        """
+
+    def as_dict(self) -> dict[str, dict[str, str]]:
+        """Return a copy of the signatures as a dictionary."""
+
+class Unsigned:
+    """A class representing the unsigned data of an event."""
+
+    def __init__(self, unsigned_json: str): ...
+    def __getitem__(self, key: str) -> Any:
+        """Get the value for the given key.
+
+        Raises KeyError if the key is unset or not recognised."""
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set the value for the given key.
+
+        Raises KeyError if the key is not recognised."""
+
+    def __delitem__(self, key: str) -> None:
+        """Delete the value for the given key.
+
+        Raises KeyError if the key is unset or not recognised."""
+
+    def __contains__(self, key: Any) -> bool: ...
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get the value for the given key, or ``default`` if the key is unset."""
+
+    def for_persistence(self) -> JsonDict:
+        """Return a dict of the fields that should be persisted to the database."""
+
+    def for_event(self) -> JsonDict:
+        """Return a dict of all unsigned fields, including those only kept in
+        memory, suitable for inclusion in an event."""
+
+class JsonObject(Mapping[str, Any]):
+    """Immutable JSON object mapping."""
+
+    def __init__(self, content_dict: JsonMapping | None = None): ...
+    def __len__(self) -> int: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def __iter__(self) -> Iterator[str]: ...
+    def __eq__(self, other: object) -> bool: ...
+
+class Event:
+    """Represents a Matrix event."""
+
+    def __init__(
+        self,
+        event_json: str,
+        room_version: RoomVersion,
+        internal_metadata_dict: JsonDict,
+        rejected_reason: str | None,
+    ) -> None: ...
+    def get_dict(self) -> JsonDict:
+        """Convert the event to a dictionary suitable for serialisation."""
+
+    def get_dict_for_persistence(self) -> JsonDict:
+        """Like ``get_dict``, but serializes ``unsigned`` in a form suitable for
+        persistence."""
+
+    def get_pdu_json(self, time_now: int | None = None) -> JsonDict:
+        """Like ``get_dict``, but serializes ``unsigned`` in a form suitable
+        for sending over federation."""
+
+    def get_templated_pdu_json(self) -> JsonDict:
+        """Like ``get_dict``, except strips fields like ``signatures``,
+        ``hashes`` and ``unsigned`` so that the result is suitable as a template for
+        creating new events. Used in make_{join,leave,knock} flows."""
+
+    @property
+    def event_id(self) -> str: ...
+    @property
+    def room_id(self) -> str: ...
+    @property
+    def signatures(self) -> Signatures: ...
+    @property
+    def content(self) -> JsonMapping: ...
+    @property
+    def depth(self) -> int: ...
+    @property
+    def hashes(self) -> dict[str, str]: ...
+    @property
+    def origin_server_ts(self) -> int: ...
+    @property
+    def sender(self) -> str: ...
+    @property
+    def state_key(self) -> str: ...
+    @property
+    def type(self) -> str: ...
+    @property
+    def unsigned(self) -> Unsigned: ...
+    @property
+    def internal_metadata(self) -> EventInternalMetadata: ...
+    @property
+    def rejected_reason(self) -> str | None: ...
+    @property
+    def room_version(self) -> RoomVersion: ...
+    @property
+    def format_version(self) -> int:
+        """The EventFormatVersion implemented by this event."""
+
+    @property
+    def membership(self) -> Any: ...
+    @property
+    def redacts(self) -> Any | None: ...
+    def prev_event_ids(self) -> StrSequence:
+        """Returns the list of prev event IDs."""
+
+    def auth_event_ids(self) -> StrSequence:
+        """Returns the list of auth event IDs"""
+
+    def is_state(self) -> bool: ...
+    def get_state_key(self) -> str | None:
+        """Get the state key of this event, or None if it's not a state event."""
+    def __contains__(self, key: str) -> bool: ...
+    def get(self, key: str, default: Any = None) -> Any: ...
+    def items(self) -> list[tuple[str, Any]]: ...
+    def keys(self) -> list[str]: ...
+    def deep_copy(self) -> "Event":
+        """Returns a deep copy of this object, such that modifying the copy will
+        not affect the original."""
+
+    def sticky_duration(self) -> Duration | None:
+        """If this event has the ``msc4354_sticky`` top-level field, returns a
+        ``SynapseDuration`` representing the sticky duration. Otherwise returns
+        ``None``."""
+
+def redact_event(event: Event) -> Event:
+    """Returns a pruned version of the given event, which removes all keys we
+    don't know about or think could potentially be dodgy.
+    """
+
+def redact_event_dict(room_version: RoomVersion, event_dict: JsonMapping) -> JsonDict:
+    """Returns a pruned version of the given event dict, which removes all keys
+    we don't know about or think could potentially be dodgy.
+
+    Returns the redacted event as a dict.
     """

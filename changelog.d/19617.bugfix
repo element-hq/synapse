@@ -1,0 +1,1 @@
+A long queue of to-device messages could prevent outgoing federation because of the size of the transaction, let's limit the to-device EDU size to a reasonable value.
