@@ -438,8 +438,7 @@ impl Event {
             }
         }
 
-        let is_outlier = self.internal_metadata.is_outlier()?;
-        if is_outlier {
+        if self.internal_metadata.is_outlier()? {
             fields.push(("outlier", "true"));
         }
 
