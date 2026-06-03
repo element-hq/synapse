@@ -56,13 +56,13 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
                 {"id": report_id, "room_id": room_id, "user_id": self.admin_user}
             )
 
-        self.url = "/_synapse/admin/v1/room_reports"
+        self.list_reports_url = "/_synapse/admin/v1/room_reports"
 
     def test_no_auth(self) -> None:
         """
         Try to get a room report without authentication.
         """
-        channel = self.make_request("GET", self.url, {})
+        channel = self.make_request("GET", self.list_reports_url, {})
 
         self.assertEqual(401, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
@@ -74,7 +74,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url,
+            self.list_reports_url,
             access_token=self.other_user_tok,
         )
 
@@ -88,7 +88,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url,
+            self.list_reports_url,
             access_token=self.admin_user_tok,
         )
 
@@ -108,7 +108,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         # First page of results
         channel = self.make_request(
             "GET",
-            self.url + "?limit=5",
+            self.list_reports_url + "?limit=5",
             access_token=self.admin_user_tok,
         )
 
@@ -126,7 +126,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         next_batch = channel.json_body["next_batch"]
         channel = self.make_request(
             "GET",
-            self.url + f"?limit=5&from={next_batch}",
+            self.list_reports_url + f"?limit=5&from={next_batch}",
             access_token=self.admin_user_tok,
         )
 
@@ -148,7 +148,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url + f"?room_id={room_id}",
+            self.list_reports_url + f"?room_id={room_id}",
             access_token=self.admin_user_tok,
         )
 
@@ -166,13 +166,14 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url + f"?user_id={self.other_user}",
+            self.list_reports_url + f"?user_id={self.other_user}",
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(len(channel.json_body["room_reports"]), 5)
         self.assertNotIn("next_batch", channel.json_body)
+        # the last 5 reports were made by the other user
         # we reverse the list of room reports to check against as they are in chronological order
         self._check_expected_room_report_fields(
             channel.json_body["room_reports"], list(reversed(self.room_reports[:5]))
@@ -188,7 +189,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url
+            self.list_reports_url
             + f"?user_id={self.other_user}&room_id={self.room_reports[4]['room_id']}",
             access_token=self.admin_user_tok,
         )
@@ -198,14 +199,6 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         self.assertNotIn("next_batch", channel.json_body)
         self._check_expected_room_report_fields(
             channel.json_body["room_reports"], [self.room_reports[4]]
-        )
-
-        self.assertEqual(
-            channel.json_body["room_reports"][0]["user_id"], self.other_user
-        )
-        self.assertEqual(
-            channel.json_body["room_reports"][0]["room_id"],
-            self.room_reports[4]["room_id"],
         )
 
     def _report_room(self, room_id: str, user_tok: str) -> int:
@@ -246,7 +239,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url,
+            self.list_reports_url,
             access_token=self.admin_user_tok,
         )
 
