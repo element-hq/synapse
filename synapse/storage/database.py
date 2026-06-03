@@ -37,6 +37,7 @@ from typing import (
     Literal,
     Mapping,
     Sequence,
+    Sized,
     TypeVar,
     cast,
     overload,
@@ -483,7 +484,19 @@ class LoggingTransaction:
             assert fetch is True
 
             # execute_values requires a single replacement, but we need to expand it
-            # for COPY. This assumes all inner sequences are the same length.
+            # for COPY. These inner sequences must be the same length.
+            assertion_length = 0
+            for _inner_value in values:
+                # Check for the Sized class here, to verify that this particular
+                # iterable can use len(). In the future, switch the `values` argument to
+                # use this as a Collection instead of an Iterable, which allows all the
+                # types wanted while excluding Generators and this assertion can be
+                # removed.
+                assert isinstance(_inner_value, Sized)
+                if not assertion_length:
+                    assertion_length = len(_inner_value)
+                assert assertion_length == len(_inner_value)
+
             value_str = "(" + ", ".join("?" for _ in next(iter(values))) + ")"
             sql = sql.replace("?", ", ".join(value_str for _ in values))
 
