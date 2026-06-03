@@ -522,10 +522,35 @@ class EventClientSerializer:
         if not isinstance(event, FilteredEvent):
             return event
 
+        config = await self._update_config(config)
+
+        # Perform all the async DB/IO work up front, then run the synchronous
+        # serialization core.
+        redaction_map, unsigned_additions = await self._prepare_serialization(
+            [event], bundle_aggregations, redaction_map
+        )
+
+        return self._serialize_event_core(
+            event,
+            time_now,
+            config,
+            bundle_aggregations,
+            redaction_map,
+            unsigned_additions,
+        )
+
+    async def _update_config(
+        self, config: SerializeEventConfig
+    ) -> SerializeEventConfig:
+        """Update the config based on the requester and server config."""
+
         # Force-enable server admin metadata because the only time an event with
         # relevant metadata will be when the admin requested it via their admin
         # client config account data. Also, it's "just" some `unsigned` fields, so
         # shouldn't cause much in terms of problems to downstream consumers.
+        #
+        # The requester is constant across the whole (recursive) serialization,
+        # so we only need to resolve this once.
         if config.requester is not None and await self._auth.is_server_admin(
             config.requester
         ):
@@ -534,22 +559,126 @@ class EventClientSerializer:
         if self._config.experimental.msc4354_enabled:
             config = attr.evolve(config, msc4354_enabled=True)
 
+        return config
+
+    async def _prepare_serialization(
+        self,
+        events: Collection[FilteredEvent],
+        bundle_aggregations: dict[str, "BundledAggregations"] | None,
+        redaction_map: Mapping[str, "EventBase"] | None = None,
+    ) -> tuple[dict[str, "EventBase"], dict[str, JsonDict]]:
+        """Perform all the async DB/IO work needed to serialize `events`.
+
+        Does two things:
+        1. Fetches any redaction events needed to serialize `events` (and any
+           bundled events) and returns a map from redaction event_id to event.
+        2. Runs the module callbacks for each event to build up the additional
+           `unsigned` fields they contribute.
+
+        Args:
+            events: The events that will be serialized.
+            bundle_aggregations: A map from event_id to the aggregations to be
+                bundled into the event. Used to discover the sub-events (edits
+                and thread latest events) that will also be serialized.
+            redaction_map: An optional caller-supplied map from redaction
+                event_id to the redaction event. Any redactions already present
+                here are not re-fetched, and these entries take precedence over
+                anything we fetch ourselves.
+
+        Returns:
+            A tuple of:
+              - a map from redaction event_id to the redaction event,
+              - a map from event_id to the extra `unsigned` fields contributed
+                by the registered module callbacks.
+        """
+
+        # First we collect all events that get included in the serialization of
+        # `events`, including the events themselves and any bundled events (edits
+        # and thread latest events, which are themselves serialized).
+        collected = {e.event.event_id: e.event for e in events}
+        if bundle_aggregations is not None:
+            for aggregation in bundle_aggregations.values():
+                if aggregation.replace:
+                    collected[aggregation.replace.event_id] = aggregation.replace
+                if aggregation.thread:
+                    latest_event = aggregation.thread.latest_event
+                    collected[latest_event.event_id] = latest_event
+
+        # Next, check the redaction status of all events, and fetch the
+        # redactions if needed.
+        redaction_map = redaction_map or {}
+
+        redaction_ids_to_fetch = {
+            redacted_by
+            for collected_event in collected.values()
+            if (redacted_by := collected_event.internal_metadata.redacted_by)
+            is not None
+            and redacted_by not in redaction_map
+        }
+
+        if redaction_ids_to_fetch:
+            fetched_redaction_map = await self._store.get_events(redaction_ids_to_fetch)
+        else:
+            fetched_redaction_map = {}
+
+        # Ensure the returned redaction map includes any caller-supplied
+        # redactions
+        fetched_redaction_map.update(redaction_map)
+
+        # Run the module callbacks for each event (once per event_id, since
+        # `collected` is already de-duplicated) to build up the additional
+        # `unsigned` fields they contribute.
+        unsigned_additions: dict[str, JsonDict] = {}
+        if self._add_extra_fields_to_unsigned_client_event_callbacks:
+            for collected_event in collected.values():
+                new_unsigned: JsonDict = {}
+                for (
+                    callback
+                ) in self._add_extra_fields_to_unsigned_client_event_callbacks:
+                    new_unsigned.update(await callback(collected_event))
+
+                if new_unsigned:
+                    unsigned_additions[collected_event.event_id] = new_unsigned
+
+        return fetched_redaction_map, unsigned_additions
+
+    def _serialize_event_core(
+        self,
+        event: FilteredEvent,
+        time_now: int,
+        config: SerializeEventConfig,
+        bundle_aggregations: dict[str, "BundledAggregations"] | None,
+        redaction_map: Mapping[str, "EventBase"],
+        unsigned_additions: Mapping[str, JsonDict],
+    ) -> JsonDict:
+        """Synchronously serialize a single event using pre-fetched data.
+
+        All DB/IO must have already been performed by `_prepare_serialization`;
+        this function performs no async work.
+
+        Args:
+            event: The event being serialized.
+            time_now: The current time in milliseconds.
+            config: The resolved serialization config.
+            bundle_aggregations: A map from event_id to the aggregations to be
+                bundled into the event.
+            redaction_map: Pre-fetched map from redaction event_id to event.
+            unsigned_additions: Pre-computed map from event_id to the extra
+                `unsigned` fields contributed by module callbacks.
+
+        Returns:
+            The serialized event
+        """
         serialized_event = _serialize_event(
             event.event, time_now, config=config, membership=event.membership
         )
 
-        # If the event was redacted, fetch the redaction event from the database
-        # and include it in the serialized event's unsigned section.
+        # If the event was redacted, include the (pre-fetched) redaction event
+        # in the serialized event's unsigned section.
         redacted_by: str | None = event.event.internal_metadata.redacted_by
         if redacted_by is not None:
             serialized_event.setdefault("unsigned", {})["redacted_by"] = redacted_by
-            if redaction_map is not None:
-                redaction_event: EventBase | None = redaction_map.get(redacted_by)
-            else:
-                redaction_event = await self._store.get_event(
-                    redacted_by,
-                    allow_none=True,
-                )
+            redaction_event: EventBase | None = redaction_map.get(redacted_by)
             if redaction_event is not None:
                 serialized_redaction = _serialize_event(
                     redaction_event, time_now, config=config
@@ -565,14 +694,12 @@ class EventClientSerializer:
                 ):
                     serialized_event["redacted_because"] = serialized_redaction
 
-        new_unsigned = {}
-        for callback in self._add_extra_fields_to_unsigned_client_event_callbacks:
-            u = await callback(event.event)
-            new_unsigned.update(u)
-
-        if new_unsigned:
-            # We do the `update` this way round so that modules can't clobber
-            # existing fields.
+        additions = unsigned_additions.get(event.event.event_id)
+        if additions:
+            # Copy so we don't mutate the shared `unsigned_additions` entry (the
+            # same event may be serialized more than once), and do the `update`
+            # this way round so that modules can't clobber existing fields.
+            new_unsigned = dict(additions)
             new_unsigned.update(serialized_event["unsigned"])
             serialized_event["unsigned"] = new_unsigned
 
@@ -586,23 +713,27 @@ class EventClientSerializer:
         # Check if there are any bundled aggregations to include with the event.
         if bundle_aggregations:
             if event.event.event_id in bundle_aggregations:
-                await self._inject_bundled_aggregations(
-                    event.event,
-                    time_now,
-                    config,
-                    bundle_aggregations,
-                    serialized_event,
+                self._inject_bundled_aggregations(
+                    event=event.event,
+                    time_now=time_now,
+                    config=config,
+                    bundled_aggregations=bundle_aggregations,
+                    serialized_event=serialized_event,
+                    redaction_map=redaction_map,
+                    unsigned_additions=unsigned_additions,
                 )
 
         return serialized_event
 
-    async def _inject_bundled_aggregations(
+    def _inject_bundled_aggregations(
         self,
         event: EventBase,
         time_now: int,
         config: SerializeEventConfig,
         bundled_aggregations: dict[str, "BundledAggregations"],
         serialized_event: JsonDict,
+        redaction_map: Mapping[str, "EventBase"],
+        unsigned_additions: Mapping[str, JsonDict],
     ) -> None:
         """Potentially injects bundled aggregations into the unsigned portion of the serialized event.
 
@@ -638,21 +769,26 @@ class EventClientSerializer:
             # said that we should only include the `event_id`, `origin_server_ts` and
             # `sender` of the edit; however MSC3925 proposes extending it to the whole
             # of the edit, which is what we do here.
-            serialized_aggregations[RelationTypes.REPLACE] = await self.serialize_event(
-                FilteredEvent(event=event_aggregations.replace, membership=None),
-                time_now,
+            serialized_aggregations[RelationTypes.REPLACE] = self._serialize_event_core(
+                event=FilteredEvent(event=event_aggregations.replace, membership=None),
+                time_now=time_now,
                 config=config,
+                bundle_aggregations=None,
+                redaction_map=redaction_map,
+                unsigned_additions=unsigned_additions,
             )
 
         # Include any threaded replies to this event.
         if event_aggregations.thread:
             thread = event_aggregations.thread
 
-            serialized_latest_event = await self.serialize_event(
-                FilteredEvent(event=thread.latest_event, membership=None),
-                time_now,
+            serialized_latest_event = self._serialize_event_core(
+                event=FilteredEvent(event=thread.latest_event, membership=None),
+                time_now=time_now,
                 config=config,
                 bundle_aggregations=bundled_aggregations,
+                redaction_map=redaction_map,
+                unsigned_additions=unsigned_additions,
             )
 
             thread_summary = {
@@ -698,25 +834,27 @@ class EventClientSerializer:
             str(len(events)),
         )
 
-        # Batch-fetch all redaction events in one go rather than one per event.
-        redaction_ids: set[str] = set()
-        for e in events:
-            base = e.event if isinstance(e, FilteredEvent) else e
-            if isinstance(base, EventBase):
-                redacted_by = base.internal_metadata.redacted_by
-                if redacted_by is not None:
-                    redaction_ids.add(redacted_by)
-        redaction_map = (
-            await self._store.get_events(redaction_ids) if redaction_ids else {}
+        config = await self._update_config(config)
+
+        filtered_events = [e for e in events if isinstance(e, FilteredEvent)]
+
+        # Perform all the async DB/IO work up front, then run the synchronous
+        # serialization core for each event.
+        redaction_map, unsigned_additions = await self._prepare_serialization(
+            filtered_events, bundle_aggregations
         )
 
         return [
-            await self.serialize_event(
+            # To handle the case of presence events and the like
+            event
+            if not isinstance(event, FilteredEvent)
+            else self._serialize_event_core(
                 event,
                 time_now,
-                config=config,
-                bundle_aggregations=bundle_aggregations,
-                redaction_map=redaction_map,
+                config,
+                bundle_aggregations,
+                redaction_map,
+                unsigned_additions,
             )
             for event in events
         ]
