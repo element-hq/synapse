@@ -483,6 +483,11 @@ class LoggingTransaction:
             # effort for the few places we set fetch = False.
             assert fetch is True
 
+            # For the moment, no code paths in Synapse use `template` with `fetch=True`
+            # but the opposite is true. Prevent this mistake until the code can handle
+            # templates as well.
+            assert template is None
+
             # execute_values requires a single replacement, but we need to expand it
             # for COPY. These inner sequences must be the same length.
             assertion_length = 0
