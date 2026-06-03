@@ -31,7 +31,8 @@ from synapse.api.errors import AuthError, SynapseError
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.storage.databases.main.profile import ProfileUpdate
+from synapse.types import JsonDict, StreamKeyType, UserID
 from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -62,8 +63,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.query_handlers[query_type] = handler
 
         self.mock_registry.register_query_handler = register_query_handler
+        self.mock_hs_notifier = Mock()
 
         hs = self.setup_test_homeserver(
+            notifier=self.mock_hs_notifier,
             federation_client=self.mock_federation,
             federation_server=Mock(),
             federation_registry=self.mock_registry,
@@ -83,6 +86,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.frank_token = self.login(self.frank.localpart, "frankpassword")
 
         self.handler = hs.get_profile_handler()
+        self.on_new_event = self.mock_hs_notifier.on_new_event
 
     def test_get_my_name(self) -> None:
         self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
@@ -160,6 +164,178 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
         )
         self.assertEqual(membership[state_tuple].content["displayname"], "Frank Jr.")
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    def test_update_profile_does_not_update_stream_on_set_field_if_msc4429_not_enabled(
+        self,
+        field_name: str,
+        new_value: str,
+    ) -> None:
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        updates = self.get_success(
+            self.store.get_updated_profile_updates(
+                from_id=1,
+                to_id=2,
+                limit=1,
+            )
+        )
+        self.assertEqual(len(updates), 0)
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    def test_update_profile_does_not_notify_notifier_on_set_field_if_msc4429_not_enabled(
+        self,
+        field_name: str,
+        new_value: str,
+    ) -> None:
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 0)
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_update_profile_does_not_notify_notifier_on_set_field_if_user_not_in_rooms(
+        self, field_name: str, new_value: str
+    ) -> None:
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 0)
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_update_profile_updates_stream_on_set_field(
+        self, field_name: str, new_value: str
+    ) -> None:
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        updates = self.get_success(
+            self.store.get_updated_profile_updates(
+                from_id=1,
+                to_id=2,
+                limit=1,
+            )
+        )
+        self.assertEqual(updates[0], (2, "@1234abcd:test", field_name))
+
+        fields_updates = self.get_success(
+            self.store.get_profile_updates_for_fields(
+                from_id=1,
+                to_id=2,
+                field_names=[field_name],
+            )
+        )
+        self.assertEqual(
+            fields_updates[0],
+            ProfileUpdate(stream_id=2, user_id="@1234abcd:test", field_name=field_name),
+        )
+
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value="",
+            )
+        )
+        delete_updates = self.get_success(
+            self.store.get_updated_profile_updates(
+                from_id=2,
+                to_id=3,
+                limit=1,
+            )
+        )
+        self.assertEqual(delete_updates[0], (3, "@1234abcd:test", field_name))
+
+    @parameterized.expand(
+        [
+            ["displayname", "Frank"],
+            ["avatar_url", "mxc://foobar"],
+            ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
+        ]
+    )
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_update_profile_notifies_notifier_on_set_field(
+        self,
+        field_name: str,
+        new_value: str,
+    ) -> None:
+        self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=field_name,
+                new_value=new_value,
+            )
+        )
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 1)
 
     def test_background_update_room_membership_on_set_displayname(self) -> None:
         """Test that `set_displayname` returns immediately and that room membership updates are still done in background."""
