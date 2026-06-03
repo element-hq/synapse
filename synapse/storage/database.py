@@ -502,6 +502,28 @@ class LoggingTransaction:
                     assertion_length = len(_inner_value)
                 assert assertion_length == len(_inner_value)
 
+            # To avoid having to port several psycopg2 utilities that are built into its
+            # Cursor class(mogrify, for example) and import execute_values() from it's
+            # 'extras' module, use a different mechanism that facilitates performance.
+            #
+            # The COPY Postgres-only verb allows for a bulk import and export of data.
+            # However building this query for use with VALUES is somewhat convoluted.
+            #
+            # For exporting of data, which would be the equivalent of a SELECT query,
+            # and given a simple query of the sort:
+            #  SELECT * FROM table, (VALUES ?) AS ld(id) WHERE table.id = ld.id
+            # and VALUES being an example of sequential numbers, 1-5 representing the 5
+            # rows to retrieve, the "VALUES ?" clause needs to be expanded to
+            #  VALUES (?), (?), (?), (?), (?)
+            # Then, the values themselves have to be flattened in a similar fashion
+            #  [(1, 2, 3, 4, 5)]
+            # Similarly, disregarding that the WHERE clause will no longer hold true, if
+            # the count VALUES to be passed were 3, then VALUES clause would expand to:
+            #  VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)
+            # and for berevity assume that all passed values were actually the same, the
+            # values would be flattened to look like:
+            #  [(1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5)]
+
             value_str = "(" + ", ".join("?" for _ in next(iter(values))) + ")"
             sql = sql.replace("?", ", ".join(value_str for _ in values))
 
