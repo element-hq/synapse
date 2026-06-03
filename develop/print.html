@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-5fc2c347.js";
+            window.path_to_searchindex_js = "searchindex-ebc80666.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -18067,8 +18067,11 @@ writing new pages, please
 <a href="https://github.com/element-hq/synapse/tree/develop/docs#adding-to-the-documentation">build <code>docs</code> to a book</a>
 to check that your contributions render correctly. The docs are written in
 <a href="https://guides.github.com/features/mastering-markdown/">GitHub-Flavoured Markdown</a>.</p>
+<h2 id="making-changes-to-the-rust-code"><a class="header" href="#making-changes-to-the-rust-code">Making changes to the Rust code</a></h2>
 <p>When changes are made to any Rust code then you must call either <code>poetry install</code>
-or <code>maturin develop</code> (if installed) to rebuild the Rust code. Using <a href="https://github.com/PyO3/maturin"><code>maturin</code></a>
+or <code>maturin develop</code> (if installed) to rebuild the Rust code.</p>
+<p>You can use <code>poetry install -v</code> or <code>-vv</code> to get more info about build failures.</p>
+<p>Using <a href="https://github.com/PyO3/maturin"><code>maturin</code></a>
 is quicker than <code>poetry install</code>, so is recommended when making frequent
 changes to the Rust code.</p>
 <h1 id="8-test-test-test"><a class="header" href="#8-test-test-test">8. Test, test, test!</a></h1>
