@@ -189,7 +189,7 @@ class Signatures:
 class Unsigned:
     """A class representing the unsigned data of an event."""
 
-    def __init__(self, unsigned_dict: JsonMapping): ...
+    def __init__(self, unsigned_json: str): ...
     def __getitem__(self, key: str) -> Any:
         """Get the value for the given key.
 
@@ -230,7 +230,7 @@ class Event:
 
     def __init__(
         self,
-        event_dict: JsonDict,
+        event_json: str,
         room_version: RoomVersion,
         internal_metadata_dict: JsonDict,
         rejected_reason: str | None,

@@ -35,7 +35,7 @@ from synapse.api.constants import (
 )
 from synapse.api.filtering import Filter
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import Event
+from synapse.events import make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -1385,7 +1385,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             create_event_source,
             self.hs.config.server.default_room_version,
         )
-        create_event = Event(
+        create_event = make_event_from_dict(
             create_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -1408,7 +1408,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             creator_join_event_source,
             self.hs.config.server.default_room_version,
         )
-        creator_join_event = Event(
+        creator_join_event = make_event_from_dict(
             creator_join_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -1433,7 +1433,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = Event(
+        join_event = make_event_from_dict(
             join_event_source,
             self.hs.config.server.default_room_version,
             {},

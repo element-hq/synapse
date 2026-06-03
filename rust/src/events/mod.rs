@@ -160,10 +160,15 @@ pub struct Event {
 
 #[pymethods]
 impl Event {
+    /// Construct an Event from a JSON string, room version, and internal
+    /// metadata dict.
+    ///
+    /// We do no accept a Python dict directly because of the issues with
+    /// depythonize and large integers (see [`FormattedEvent`] for details).
     #[new]
     fn new_from_py<'a, 'py>(
         py: Python<'py>,
-        event_dict: &'a Bound<'py, PyAny>,
+        event_json: &str,
         room_version: &'a Bound<'py, PyAny>,
         internal_metadata_dict: &'a Bound<'py, PyDict>,
         rejected_reason: Option<String>,
@@ -178,14 +183,14 @@ impl Event {
 
         let rejected_reason = rejected_reason.map(String::into_boxed_str);
 
-        // Parse the event dict into a FormattedEvent, converting any failures to
+        // Parse the event JSON into a FormattedEvent, converting any failures to
         // a `ValueError`.
-        let parsed_event = depythonize_event_dict(room_version, event_dict).map_err(|err| {
+        let parsed_event = event_dict_from_json_str(room_version, event_json).map_err(|err| {
             let new_err = PyValueError::new_err(format!(
-                "Failed to parse event for room version {}",
-                room_version
+                "Failed to parse event for room version {}: {}",
+                room_version, err
             ));
-            new_err.set_cause(py, Some(err));
+            new_err.set_cause(py, Some(PyValueError::new_err(err.to_string())));
             new_err
         })?;
 
@@ -555,63 +560,27 @@ impl Event {
     }
 }
 
-fn depythonize_event_dict(
+/// Parses a JSON string into a [`FormattedEvent`] for the given room version.
+fn event_dict_from_json_str(
     room_version: &RoomVersion,
-    event_dict: &Bound<'_, PyAny>,
-) -> PyResult<FormattedEvent> {
-    let formatted_event: FormattedEvent = match room_version.event_format {
-        EventFormatVersions::ROOM_V1_V2 => {
-            let event_format: FormattedEvent<EventFormatV1> = depythonize(event_dict)?;
-
-            event_format.into()
-        }
-        EventFormatVersions::ROOM_V3 | EventFormatVersions::ROOM_V4_PLUS => {
-            let event_format: FormattedEvent<EventFormatV2V3> = depythonize(event_dict)?;
-            event_format.into()
-        }
-        EventFormatVersions::ROOM_V11_HYDRA_PLUS => {
-            let event_format: FormattedEvent<EventFormatV4> = depythonize(event_dict)?;
-            event_format.into()
-        }
-        EventFormatVersions::ROOM_VMSC4242 => {
-            let event_format: FormattedEvent<EventFormatVMSC4242> = depythonize(event_dict)?;
-            event_format.into()
-        }
-        _ => {
-            return Err(PyValueError::new_err(format!(
-                "Unsupported room version: {}",
-                room_version
-            )))
-        }
-    };
-
-    formatted_event.validate()?;
-
-    Ok(formatted_event)
-}
-
-/// Converts an event dict as [`serde_json::Value`] into a [`FormattedEvent`].
-fn event_dict_from_json_value(
-    room_version: &RoomVersion,
-    event_dict: serde_json::Value,
+    event_json: &str,
 ) -> Result<FormattedEvent, Error> {
     let formatted_event: FormattedEvent = match room_version.event_format {
         EventFormatVersions::ROOM_V1_V2 => {
-            let event_format: FormattedEvent<EventFormatV1> = serde_json::from_value(event_dict)?;
-
+            let event_format: FormattedEvent<EventFormatV1> = serde_json::from_str(event_json)?;
             event_format.into()
         }
         EventFormatVersions::ROOM_V3 | EventFormatVersions::ROOM_V4_PLUS => {
-            let event_format: FormattedEvent<EventFormatV2V3> = serde_json::from_value(event_dict)?;
+            let event_format: FormattedEvent<EventFormatV2V3> = serde_json::from_str(event_json)?;
             event_format.into()
         }
         EventFormatVersions::ROOM_V11_HYDRA_PLUS => {
-            let event_format: FormattedEvent<EventFormatV4> = serde_json::from_value(event_dict)?;
+            let event_format: FormattedEvent<EventFormatV4> = serde_json::from_str(event_json)?;
             event_format.into()
         }
         EventFormatVersions::ROOM_VMSC4242 => {
             let event_format: FormattedEvent<EventFormatVMSC4242> =
-                serde_json::from_value(event_dict)?;
+                serde_json::from_str(event_json)?;
             event_format.into()
         }
         _ => {
@@ -638,10 +607,17 @@ fn redact_event_py(event: &Event) -> PyResult<Event> {
     })?;
 
     let redacted_value = redact(&event_value, event.room_version)?;
-    let redacted_formatted_event = event_dict_from_json_value(event.room_version, redacted_value)
-        .map_err(|err| {
-        PyValueError::new_err(format!("Failed to deserialize redacted event: {}", err))
+
+    // We can't convert from a value into [`Event`] directly, so we round-trip
+    // through JSON. See [`FormattedEvent`] for details on why we can't go
+    // directly through Python dicts.
+    let redacted_event_json = serde_json::to_string(&redacted_value).map_err(|err| {
+        PyValueError::new_err(format!("Failed to serialize redacted event: {}", err))
     })?;
+    let redacted_formatted_event =
+        event_dict_from_json_str(event.room_version, &redacted_event_json).map_err(|err| {
+            PyValueError::new_err(format!("Failed to deserialize redacted event: {}", err))
+        })?;
 
     let redacted_event = Event {
         parsed_event: redacted_formatted_event,

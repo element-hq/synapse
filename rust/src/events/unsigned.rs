@@ -16,9 +16,9 @@
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use pyo3::{
-    exceptions::{PyKeyError, PyRuntimeError, PyTypeError},
+    exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError},
     pyclass, pymethods,
-    types::{PyAnyMethods, PyList, PyListMethods, PyMapping},
+    types::{PyAnyMethods, PyList, PyListMethods},
     Bound, IntoPyObjectExt, PyAny, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
@@ -114,9 +114,14 @@ impl Unsigned {
 
 #[pymethods]
 impl Unsigned {
+    /// Create a new `Unsigned` from a JSON string.
+    ///
+    /// We do no accept a Python dict directly because of the issues with
+    /// depythonize and large integers (see [`FormattedEvent`] for details).
     #[new]
-    fn py_new(unsigned: Bound<'_, PyMapping>) -> PyResult<Self> {
-        let inner = depythonize(&unsigned)?;
+    fn py_new(unsigned_json: &str) -> PyResult<Self> {
+        let inner = serde_json::from_str(unsigned_json)
+            .map_err(|err| PyValueError::new_err(format!("Failed to parse unsigned: {}", err)))?;
 
         Ok(Self {
             inner: Arc::new(RwLock::new(inner)),

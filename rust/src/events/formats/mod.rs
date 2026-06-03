@@ -98,6 +98,13 @@ pub use vmsc4242::EventFormatVMSC4242;
 /// fields as they are mutable (and must be deep-copied if the event is cloned).
 /// `common_fields` and `specific_fields` are both `#[serde(flatten)]`ed so that
 /// the serialised JSON is a single flat object matching the Matrix spec.
+///
+/// Note, deserialization of this struct must not be done from
+/// [`serde_json::Value`] nor [`pythonize::depythonize`], due to a bug with
+/// `#[serde(flatten)]` combined with the `arbitrary_precision` feature.
+/// Instead, deserialize directly from a JSON string with
+/// `serde_json::from_str`. See https://github.com/serde-rs/serde/issues/2230
+/// for details.
 #[derive(Serialize, Deserialize)]
 pub struct FormattedEvent<E = Arc<EventFormatEnum>> {
     /// The event's signatures.
