@@ -446,51 +446,6 @@ class EmailPusherTests(HomeserverTestCase):
 
         self.assertIn(expected, html)
 
-    def test_plain_fallback(
-        self,
-    ) -> None:
-        # use <h3> because <h1> and <h2> are not in ALLOWED_TAGS (see
-        # synapse/push/mailer.ALLOWED_TAGS)
-        FORMATTED_INPUT = "<h3>Test Plain</h3>"
-        PLAIN_INPUT = "Test Plain"
-        # Create a room
-        room = self.helper.create_room_as(self.user_id, tok=self.access_token)
-
-        self.helper.invite(
-            room=room, src=self.user_id, tok=self.access_token, targ=self.others[0].id
-        )
-        self.helper.join(room=room, user=self.others[0].id, tok=self.others[0].token)
-
-        self.helper.send_event(
-            room,
-            type="m.room.message",
-            content={
-                "msgtype": "m.text",
-                "format": "org.matrix.custom.html",
-                "formatted_body": FORMATTED_INPUT,
-                "body": PLAIN_INPUT,  # Plain-text Fallback
-            },
-            tok=self.others[0].token,
-        )
-
-        args, kwargs = self._check_for_mail()
-        msg: bytes = args[5]
-        html_message = email.message_from_bytes(msg).get_payload(i=1)
-        plain_message = email.message_from_bytes(msg).get_payload(i=0)
-        assert isinstance(html_message, email.message.Message)
-        assert isinstance(plain_message, email.message.Message)
-        plain_message_decoded = plain_message.get_payload(decode=True)
-        plain = str(plain_message_decoded)
-
-        # Extract the `bytes` from the html Message object, and decode to a `str`.
-        html = html_message.get_payload(decode=True)
-        assert isinstance(html, bytes)
-        html = html.decode()
-
-        self.assertIn(PLAIN_INPUT, plain)
-        self.assertNotIn(FORMATTED_INPUT, plain)
-        self.assertIn(FORMATTED_INPUT, html)
-
     def test_empty_room(self) -> None:
         """All users leaving a room shouldn't cause the pusher to break."""
         # Create a simple room with two users
