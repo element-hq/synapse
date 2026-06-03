@@ -160,10 +160,15 @@ pub struct Event {
 
 #[pymethods]
 impl Event {
+    /// Construct an Event from a JSON string, room version, and internal
+    /// metadata dict.
+    ///
+    /// We do no accept a Python dict directly because of the issues with
+    /// depythonize and large integers (see [`FormattedEvent`] for details).
     #[new]
     fn new_from_py<'a, 'py>(
         py: Python<'py>,
-        event_dict: &'a Bound<'py, PyAny>,
+        event_json: &str,
         room_version: &'a Bound<'py, PyAny>,
         internal_metadata_dict: &'a Bound<'py, PyDict>,
         rejected_reason: Option<String>,
@@ -178,14 +183,14 @@ impl Event {
 
         let rejected_reason = rejected_reason.map(String::into_boxed_str);
 
-        // Parse the event dict into a FormattedEvent, converting any failures to
+        // Parse the event JSON into a FormattedEvent, converting any failures to
         // a `ValueError`.
-        let parsed_event = depythonize_event_dict(room_version, event_dict).map_err(|err| {
+        let parsed_event = event_dict_from_json_str(room_version, event_json).map_err(|err| {
             let new_err = PyValueError::new_err(format!(
-                "Failed to parse event for room version {}",
-                room_version
+                "Failed to parse event for room version {}: {}",
+                room_version, err
             ));
-            new_err.set_cause(py, Some(err));
+            new_err.set_cause(py, Some(PyValueError::new_err(err.to_string())));
             new_err
         })?;
 
@@ -555,33 +560,34 @@ impl Event {
     }
 }
 
-fn depythonize_event_dict(
+/// Parses a JSON string into a [`FormattedEvent`] for the given room version.
+fn event_dict_from_json_str(
     room_version: &RoomVersion,
-    event_dict: &Bound<'_, PyAny>,
-) -> PyResult<FormattedEvent> {
+    event_json: &str,
+) -> Result<FormattedEvent, Error> {
     let formatted_event: FormattedEvent = match room_version.event_format {
         EventFormatVersions::ROOM_V1_V2 => {
-            let event_format: FormattedEvent<EventFormatV1> = depythonize(event_dict)?;
-
+            let event_format: FormattedEvent<EventFormatV1> = serde_json::from_str(event_json)?;
             event_format.into()
         }
         EventFormatVersions::ROOM_V3 | EventFormatVersions::ROOM_V4_PLUS => {
-            let event_format: FormattedEvent<EventFormatV2V3> = depythonize(event_dict)?;
+            let event_format: FormattedEvent<EventFormatV2V3> = serde_json::from_str(event_json)?;
             event_format.into()
         }
         EventFormatVersions::ROOM_V11_HYDRA_PLUS => {
-            let event_format: FormattedEvent<EventFormatV4> = depythonize(event_dict)?;
+            let event_format: FormattedEvent<EventFormatV4> = serde_json::from_str(event_json)?;
             event_format.into()
         }
         EventFormatVersions::ROOM_VMSC4242 => {
-            let event_format: FormattedEvent<EventFormatVMSC4242> = depythonize(event_dict)?;
+            let event_format: FormattedEvent<EventFormatVMSC4242> =
+                serde_json::from_str(event_json)?;
             event_format.into()
         }
         _ => {
-            return Err(PyValueError::new_err(format!(
+            return Err(anyhow::anyhow!(
                 "Unsupported room version: {}",
                 room_version
-            )))
+            ));
         }
     };
 

@@ -29,6 +29,7 @@ from typing import (
 )
 
 import attr
+from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import (
     EventContentFields,
@@ -72,15 +73,35 @@ def make_event_from_dict(
 ) -> Event:
     """Construct an EventBase from the given event dict"""
 
+    # Event constructor only takes JSON string, see Event constructor for
+    # details.
+    event_json = encode_canonical_json(event_dict).decode("utf-8")
+
+    return make_event_from_json(
+        event_json=event_json,
+        room_version=room_version,
+        internal_metadata_dict=internal_metadata_dict,
+        rejected_reason=rejected_reason,
+    )
+
+
+def make_event_from_json(
+    event_json: str,
+    room_version: RoomVersion = RoomVersions.V1,
+    internal_metadata_dict: JsonDict | None = None,
+    rejected_reason: str | None = None,
+) -> Event:
+    """Construct an EventBase from the given event JSON string"""
+
     try:
         return Event(
-            event_dict=event_dict,
+            event_json=event_json,
             room_version=room_version,
             internal_metadata_dict=internal_metadata_dict or {},
             rejected_reason=rejected_reason,
         )
     except ValueError:
-        raise SynapseError(400, "Invalid event dict", Codes.BAD_JSON)
+        raise SynapseError(400, "Invalid event JSON", Codes.BAD_JSON)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
