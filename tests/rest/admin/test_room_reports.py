@@ -11,8 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-
-
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -40,23 +38,23 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         self.other_user = self.register_user("user", "pass")
         self.other_user_tok = self.login("user", "pass")
 
-        self.room_ids = {}
-        for i in range(4):
+        self.room_reports = []
+        for _ in range(5):
             room_id = self.helper.create_room_as(
                 self.admin_user, tok=self.admin_user_tok
             )
-            self.room_ids[i] = room_id
-        for i in range(4, 10):
+            report_id = self._report_room(room_id, self.other_user_tok)
+            self.room_reports.append(
+                {"id": report_id, "room_id": room_id, "user_id": self.other_user}
+            )
+        for _ in range(5, 10):
             room_id = self.helper.create_room_as(
                 self.other_user, tok=self.other_user_tok
             )
-            self.room_ids[i] = room_id
-
-        for room_num, room_id in self.room_ids.items():
-            if room_num <= 4:
-                self._report_room(room_id, self.other_user_tok)
-            else:
-                self._report_room(room_id, self.admin_user_tok)
+            report_id = self._report_room(room_id, self.admin_user_tok)
+            self.room_reports.append(
+                {"id": report_id, "room_id": room_id, "user_id": self.admin_user}
+            )
 
         self.url = "/_synapse/admin/v1/room_reports"
 
@@ -96,21 +94,18 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(len(channel.json_body["room_reports"]), 10)
+        # No pagination token because the page was big enough to hold all of the reports
         self.assertNotIn("next_batch", channel.json_body)
-        self._check_fields(channel.json_body["room_reports"])
-
-    def test_limit(self) -> None:
-        """
-        Testing list of reported rooms with limit
-        """
-        # grab the 5th report to get its id
-        channel = self.make_request(
-            "GET",
-            self.url,
-            access_token=self.admin_user_tok,
+        # we reverse the list of room reports to check against as they are in chronological order
+        self._check_expected_room_report_fields(
+            channel.json_body["room_reports"], list(reversed(self.room_reports))
         )
-        report_5 = channel.json_body["room_reports"][4]
 
+    def test_pagination(self) -> None:
+        """
+        Test pagination of the returned room reports.
+        """
+        # First page of results
         channel = self.make_request(
             "GET",
             self.url + "?limit=5",
@@ -118,77 +113,50 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(len(channel.json_body["room_reports"]), 5)
-        self.assertEqual(channel.json_body["next_batch"], report_5["id"])
-        self._check_fields(channel.json_body["room_reports"])
-
-    def test_from(self) -> None:
-        """
-        Testing list of reported rooms with a defined starting point (from)
-        """
-        # grab the fifth report to get its id
-        channel = self.make_request(
-            "GET",
-            self.url,
-            access_token=self.admin_user_tok,
+        first_page = channel.json_body["room_reports"]
+        self.assertEqual(len(first_page), 5)
+        self.assertIn("next_batch", channel.json_body)
+        # endpoint should return the 5 most recent reports in reverse chronological order
+        # we reverse the list of recorded room reports to check against as they are in chronological order
+        self._check_expected_room_report_fields(
+            first_page, list(reversed(self.room_reports[5:]))
         )
-        report_5 = channel.json_body["room_reports"][4]
-        from_id = report_5["id"]
 
+        # Request second page of results using next_batch token
+        next_batch = channel.json_body["next_batch"]
         channel = self.make_request(
             "GET",
-            self.url + f"?from={from_id}",
+            self.url + f"?limit=5&from={next_batch}",
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(len(channel.json_body["room_reports"]), 5)
+        second_page = channel.json_body["room_reports"]
+        self.assertEqual(len(second_page), 5)
         self.assertNotIn("next_batch", channel.json_body)
-        self._check_fields(channel.json_body["room_reports"])
-
-    def test_limit_and_from(self) -> None:
-        """
-        Testing list of reported rooms with a defined starting point and limit
-        """
-        # grab the second most recent report to get its id
-        channel = self.make_request(
-            "GET",
-            self.url,
-            access_token=self.admin_user_tok,
+        # endpoint should return the 5 oldest reports in reverse chronological order
+        # we reverse the list of recorded room reports to check against as they are in chronological order
+        self._check_expected_room_report_fields(
+            second_page, list(reversed(self.room_reports[:5]))
         )
-        report_2 = channel.json_body["room_reports"][1]
-        from_id = report_2["id"]
-
-        report_5 = channel.json_body["room_reports"][4]
-
-        channel = self.make_request(
-            "GET",
-            self.url + f"?from={from_id}&limit=3",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(len(channel.json_body["room_reports"]), 3)
-        self.assertEqual(channel.json_body["next_batch"], report_5["id"])
-        self._check_fields(channel.json_body["room_reports"])
 
     def test_filter_room(self) -> None:
         """
         Testing list of reported rooms with a filter of room
         """
+        room_id = self.room_reports[3]["room_id"]
 
         channel = self.make_request(
             "GET",
-            self.url + "?room_id=%s" % self.room_ids[1],
+            self.url + f"?room_id={room_id}",
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(len(channel.json_body["room_reports"]), 1)
         self.assertNotIn("next_batch", channel.json_body)
-        self._check_fields(channel.json_body["room_reports"])
-        self.assertEqual(
-            channel.json_body["room_reports"][0]["room_id"], self.room_ids[1]
+        self._check_expected_room_report_fields(
+            channel.json_body["room_reports"], [self.room_reports[3]]
         )
 
     def test_filter_user(self) -> None:
@@ -198,14 +166,17 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url + "?user_id=%s" % self.other_user,
+            self.url + f"?user_id={self.other_user}",
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(len(channel.json_body["room_reports"]), 5)
         self.assertNotIn("next_batch", channel.json_body)
-        self._check_fields(channel.json_body["room_reports"])
+        # we reverse the list of room reports to check against as they are in chronological order
+        self._check_expected_room_report_fields(
+            channel.json_body["room_reports"], list(reversed(self.room_reports[:5]))
+        )
 
         for report in channel.json_body["room_reports"]:
             self.assertEqual(report["user_id"], self.other_user)
@@ -217,141 +188,59 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url + "?user_id=%s&room_id=%s" % (self.other_user, self.room_ids[4]),
+            self.url
+            + f"?user_id={self.other_user}&room_id={self.room_reports[4]['room_id']}",
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(len(channel.json_body["room_reports"]), 1)
         self.assertNotIn("next_batch", channel.json_body)
-        self._check_fields(channel.json_body["room_reports"])
+        self._check_expected_room_report_fields(
+            channel.json_body["room_reports"], [self.room_reports[4]]
+        )
 
         self.assertEqual(
             channel.json_body["room_reports"][0]["user_id"], self.other_user
         )
         self.assertEqual(
-            channel.json_body["room_reports"][0]["room_id"], self.room_ids[4]
+            channel.json_body["room_reports"][0]["room_id"],
+            self.room_reports[4]["room_id"],
         )
 
-    def test_limit_is_negative(self) -> None:
-        """
-        Testing that a negative limit parameter returns a 400
-        """
-
-        channel = self.make_request(
-            "GET",
-            self.url + "?limit=-5",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(400, channel.code, msg=channel.json_body)
-        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
-
-    def test_from_is_negative(self) -> None:
-        """
-        Testing that a negative from parameter returns a 400
-        """
-
-        channel = self.make_request(
-            "GET",
-            self.url + "?from=-5",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(400, channel.code, msg=channel.json_body)
-        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
-
-    def test_next_batch(self) -> None:
-        """
-        Testing that `next_batch` appears at the right place
-        """
-
-        #  `next_batch` does not appear
-        # Number of results is the number of entries
-        channel = self.make_request(
-            "GET",
-            self.url + "?limit=10",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(len(channel.json_body["room_reports"]), 10)
-        self.assertNotIn("next_batch", channel.json_body)
-
-        # fetch ts of 2nd oldest report
-        report_9 = channel.json_body["room_reports"][8]
-
-        #  `next_batch` does not appear
-        # Number of max results is larger than the number of entries
-        channel = self.make_request(
-            "GET",
-            self.url + "?limit=11",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(len(channel.json_body["room_reports"]), 10)
-        self.assertNotIn("next_batch", channel.json_body)
-
-        #  `next_batch` does appear
-        # Number of max results is smaller than the number of entries
-        channel = self.make_request(
-            "GET",
-            self.url + "?limit=9",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(len(channel.json_body["room_reports"]), 9)
-        self.assertEqual(channel.json_body["next_batch"], report_9["id"])
-
-        # Check
-        # Set `from` to value of `next_batch` for request remaining entries
-        #  `next_batch` does not appear
-        channel = self.make_request(
-            "GET",
-            self.url + f"?from={report_9['id']}",
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(len(channel.json_body["room_reports"]), 1)
-        self.assertNotIn("next_batch", channel.json_body)
-
-    def _report_room(self, room_id: str, user_tok: str) -> None:
+    def _report_room(self, room_id: str, user_tok: str) -> int:
         """Report rooms"""
 
         channel = self.make_request(
             "POST",
-            "_matrix/client/v3/rooms/%s/report" % (room_id),
+            f"_matrix/client/v3/rooms/{room_id}/report",
             {"reason": "this makes me sad"},
             access_token=user_tok,
             shorthand=False,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
+        # there is no endpoint to get the id of a room report, so we fetch it from the db
+        (id,) = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_one(
+                table="room_reports",
+                keyvalues={"room_id": room_id},
+                retcols=("id",),
+                allow_none=False,
+            )
+        )
+        return id
 
-    def _check_fields(self, content: list[JsonDict]) -> None:
-        """Checks that all attributes are present in a room report"""
-        for c in content:
-            self.assertIn("id", c)
-            self.assertIn("received_ts", c)
-            self.assertIn("room_id", c)
-            self.assertIn("user_id", c)
-            self.assertIn("canonical_alias", c)
-            self.assertIn("name", c)
-            self.assertIn("reason", c)
-            self.assertIn("topic", c)
-
-    def test_count_correct_despite_table_deletions(self) -> None:
+    def test_room_reports_for_deleted_rooms_are_not_returned(self) -> None:
         """
-        Tests that the count matches the number of rows, even if rows in joined tables
-        are missing.
+        Tests that room reports for rooms that have been deleted are not returned.
         """
 
         # Delete rows from room_stats_state for one of our rooms.
         self.get_success(
             self.hs.get_datastores().main.db_pool.simple_delete(
-                "room_stats_state", {"room_id": self.room_ids[1]}, desc="_"
+                "room_stats_state",
+                {"room_id": self.room_reports[1]["room_id"]},
+                desc="_",
             )
         )
 
@@ -363,6 +252,23 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(len(channel.json_body["room_reports"]), 9)
+
+    def _check_expected_room_report_fields(
+        self, content: list[JsonDict], expected_content: list[JsonDict]
+    ) -> None:
+        """Checks that all attributes are present in a room report and expected values are found"""
+        for i, room_report in enumerate(content):
+            self.assertIn("id", room_report)
+            self.assertEqual(room_report["id"], expected_content[i]["id"])
+            self.assertIn("received_ts", room_report)
+            self.assertIn("room_id", room_report)
+            self.assertEqual(room_report["room_id"], expected_content[i]["room_id"])
+            self.assertIn("user_id", room_report)
+            self.assertEqual(room_report["user_id"], expected_content[i]["user_id"])
+            self.assertIn("canonical_alias", room_report)
+            self.assertIn("name", room_report)
+            self.assertIn("reason", room_report)
+            self.assertIn("topic", room_report)
 
 
 class RoomReportDetailTestCase(unittest.HomeserverTestCase):
@@ -384,16 +290,18 @@ class RoomReportDetailTestCase(unittest.HomeserverTestCase):
             self.other_user, tok=self.other_user_tok, is_public=True
         )
 
-        self._report_room(self.room_id1, self.admin_user_tok)
+        id = self._report_room(self.room_id1, self.admin_user_tok)
+        self.room_reports = [
+            {"id": id, "room_id": self.room_id1, "user_id": self.admin_user}
+        ]
 
-        # first created room report gets `id`=2
-        self.url = "/_synapse/admin/v1/room_reports/2"
+        self.fetch_report_url = f"/_synapse/admin/v1/room_reports/{id}"
 
     def test_no_auth(self) -> None:
         """
         Try to get room report without authentication.
         """
-        channel = self.make_request("GET", self.url, {})
+        channel = self.make_request("GET", self.fetch_report_url, {})
 
         self.assertEqual(401, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
@@ -405,7 +313,7 @@ class RoomReportDetailTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url,
+            self.fetch_report_url,
             access_token=self.other_user_tok,
         )
 
@@ -419,19 +327,19 @@ class RoomReportDetailTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url,
+            self.fetch_report_url,
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        self._check_fields(channel.json_body)
+        self._check_expected_room_report_fields([channel.json_body], self.room_reports)
 
     def test_invalid_report_id(self) -> None:
         """
         Testing that an invalid `report_id` returns a 400.
         """
 
-        # `report_id` is a non-numerical string
+        # `report_id` is invalid (should be a numerical report ID)
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/room_reports/abcdef",
@@ -441,7 +349,7 @@ class RoomReportDetailTestCase(unittest.HomeserverTestCase):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
         self.assertEqual(
-            "The report_id parameter must be a string representing a positive integer.",
+            "The report_id parameter must be a string representing a room report ID (positive integer).",
             channel.json_body["error"],
         )
 
@@ -455,7 +363,7 @@ class RoomReportDetailTestCase(unittest.HomeserverTestCase):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
         self.assertEqual(
-            "The report_id parameter must be a string representing a positive integer.",
+            "The report_id parameter must be a string representing a room report ID (positive integer).",
             channel.json_body["error"],
         )
 
@@ -474,25 +382,41 @@ class RoomReportDetailTestCase(unittest.HomeserverTestCase):
         self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"])
         self.assertEqual("Room report not found", channel.json_body["error"])
 
-    def _check_fields(self, content: JsonDict) -> None:
-        """Checks that all attributes are present in a room report"""
-        self.assertIn("id", content)
-        self.assertIn("received_ts", content)
-        self.assertIn("room_id", content)
-        self.assertIn("user_id", content)
-        self.assertIn("canonical_alias", content)
-        self.assertIn("name", content)
-        self.assertIn("topic", content)
-        self.assertIn("reason", content)
+    def _check_expected_room_report_fields(
+        self, content: list[JsonDict], expected_content: list[JsonDict]
+    ) -> None:
+        """Checks that all attributes are present in a room report and expected values are found"""
+        for i, room_report in enumerate(content):
+            self.assertIn("id", room_report)
+            self.assertEqual(room_report["id"], expected_content[i]["id"])
+            self.assertIn("received_ts", room_report)
+            self.assertIn("room_id", room_report)
+            self.assertEqual(room_report["room_id"], expected_content[i]["room_id"])
+            self.assertIn("user_id", room_report)
+            self.assertEqual(room_report["user_id"], expected_content[i]["user_id"])
+            self.assertIn("canonical_alias", room_report)
+            self.assertIn("name", room_report)
+            self.assertIn("reason", room_report)
+            self.assertIn("topic", room_report)
 
-    def _report_room(self, room_id: str, user_tok: str) -> None:
+    def _report_room(self, room_id: str, user_tok: str) -> int:
         """Report rooms"""
 
         channel = self.make_request(
             "POST",
-            "_matrix/client/v3/rooms/%s/report" % (room_id),
+            f"_matrix/client/v3/rooms/{room_id}/report",
             {"reason": "this makes me sad"},
             access_token=user_tok,
             shorthand=False,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
+        # there is no endpoint to get the id of a room report, so we fetch it from the db
+        (id,) = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_one(
+                table="room_reports",
+                keyvalues={"room_id": room_id},
+                retcols=("id",),
+                allow_none=False,
+            )
+        )
+        return id
