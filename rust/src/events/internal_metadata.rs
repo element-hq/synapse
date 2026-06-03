@@ -563,7 +563,7 @@ impl EventInternalMetadata {
         Ok(dict.into())
     }
 
-    fn is_outlier(&self) -> PyResult<bool> {
+    pub fn is_outlier(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.is_outlier())
     }
 
