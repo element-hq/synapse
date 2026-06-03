@@ -15,6 +15,7 @@
 
 use pyo3::{intern, prelude::*};
 
+/// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
 pub enum DatabaseEngine {
     Sqlite,
