@@ -1,0 +1,175 @@
+name: Rebase CF-TURN branch onto develop
+
+on:
+  push:
+    branches:
+      - develop          # 每次你同步上游 push 到 develop 时触发
+  workflow_dispatch:     # 也支持手动触发
+    inputs:
+      dry_run:
+        description: "Dry run（只检查，不推送）"
+        type: boolean
+        default: false
+
+jobs:
+  rebase:
+    name: Rebase kakahu/cloudflare-turn-18472 → develop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # 需要推送分支
+      issues: write        # 冲突时开 Issue
+
+    env:
+      PATCH_BRANCH: kakahu/cloudflare-turn-18472
+      BASE_BRANCH: develop
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch patch branch
+        run: git fetch origin "$PATCH_BRANCH"
+
+      - name: Check if rebase is needed
+        id: check
+        run: |
+          BASE_SHA=$(git rev-parse origin/$BASE_BRANCH)
+          PATCH_SHA=$(git rev-parse origin/$PATCH_BRANCH)
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "$PATCH_SHA")
+
+          echo "base_sha=$BASE_SHA"         >> "$GITHUB_OUTPUT"
+          echo "patch_sha=$PATCH_SHA"        >> "$GITHUB_OUTPUT"
+          echo "merge_base=$MERGE_BASE"      >> "$GITHUB_OUTPUT"
+
+          if [ "$MERGE_BASE" = "$BASE_SHA" ]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "✅ 补丁分支已是最新，无需 rebase"
+          else
+            BEHIND=$(git rev-list --count "$PATCH_SHA".."$BASE_SHA")
+            echo "needed=true"  >> "$GITHUB_OUTPUT"
+            echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+            echo "📦 补丁分支落后 $BEHIND 个 commit，需要 rebase"
+          fi
+
+      - name: Perform rebase
+        if: steps.check.outputs.needed == 'true'
+        id: rebase
+        run: |
+          git checkout -b "$PATCH_BRANCH" "origin/$PATCH_BRANCH"
+
+          # 记录 rebase 前补丁 commit 数量
+          PATCH_COUNT=$(git rev-list --count "origin/$BASE_BRANCH"..HEAD)
+          echo "patch_count=$PATCH_COUNT" >> "$GITHUB_OUTPUT"
+
+          # 执行 rebase，失败时捕获冲突信息
+          if git rebase "origin/$BASE_BRANCH"; then
+            echo "status=success" >> "$GITHUB_OUTPUT"
+            echo "✅ Rebase 成功"
+          else
+            # 收集冲突文件列表
+            CONFLICTS=$(git diff --name-only --diff-filter=U | head -20 | tr '\n' ' ')
+            echo "status=conflict"      >> "$GITHUB_OUTPUT"
+            echo "conflicts=$CONFLICTS" >> "$GITHUB_OUTPUT"
+            git rebase --abort
+            echo "❌ Rebase 冲突：$CONFLICTS"
+            exit 1
+          fi
+
+      - name: Push rebased branch
+        if: >
+          steps.check.outputs.needed == 'true' &&
+          steps.rebase.outputs.status == 'success' &&
+          inputs.dry_run != 'true'
+        run: |
+          git push origin "$PATCH_BRANCH" --force-with-lease
+          echo "🚀 已推送 $PATCH_BRANCH"
+
+      - name: Dry run summary
+        if: inputs.dry_run == 'true' && steps.rebase.outputs.status == 'success'
+        run: |
+          echo "### Dry Run 结果" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 补丁分支落后：${{ steps.check.outputs.behind }} 个 commit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Rebase 测试：✅ 无冲突" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 补丁数量：${{ steps.rebase.outputs.patch_count }} 个 commit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 实际推送：跳过（dry run 模式）" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write success summary
+        if: steps.rebase.outputs.status == 'success' && inputs.dry_run != 'true'
+        run: |
+          NEW_SHA=$(git rev-parse HEAD)
+          echo "### ✅ Rebase 成功" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 项目 | 值 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|----|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 基准分支 | \`$BASE_BRANCH\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 补丁分支 | \`$PATCH_BRANCH\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 落后 commit 数 | ${{ steps.check.outputs.behind }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 补丁 commit 数 | ${{ steps.rebase.outputs.patch_count }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 新 HEAD | \`${NEW_SHA:0:8}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open conflict issue
+        if: failure() && steps.rebase.outputs.status == 'conflict'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const behind   = '${{ steps.check.outputs.behind }}';
+            const conflicts = '${{ steps.rebase.outputs.conflicts }}';
+            const baseRef  = process.env.BASE_BRANCH;
+            const patchRef = process.env.PATCH_BRANCH;
+            const runUrl   = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // 检查是否已有同名未关闭 Issue，避免重复
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'patch-conflict',
+            });
+
+            if (issues.length > 0) {
+              // 已有 Issue，追加评论
+              await github.rest.issues.createComment({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                issue_number: issues[0].number,
+                body: `## 🔄 新一轮冲突（${new Date().toISOString().slice(0,10)}）\n\n` +
+                      `- 基准分支落后：**${behind} 个 commit**\n` +
+                      `- 冲突文件：\`${conflicts}\`\n` +
+                      `- [查看本次 Action 日志](${runUrl})`,
+              });
+              console.log(`已追加评论到 Issue #${issues[0].number}`);
+            } else {
+              // 新建 Issue
+              await github.rest.issues.create({
+                owner:  context.repo.owner,
+                repo:   context.repo.repo,
+                title:  `⚠️ CF-TURN 补丁 rebase 冲突 — 需要手动处理`,
+                labels: ['patch-conflict'],
+                body:
+                  `## CF-TURN 补丁与上游 \`${baseRef}\` 发生冲突\n\n` +
+                  `本次自动 rebase 失败，需要你手动解决。\n\n` +
+                  `### 冲突详情\n` +
+                  `- **基准分支**：\`${baseRef}\`（上游 develop）\n` +
+                  `- **补丁分支**：\`${patchRef}\`\n` +
+                  `- **落后 commit 数**：${behind}\n` +
+                  `- **冲突文件**：\`${conflicts}\`\n\n` +
+                  `### 手动解决步骤\n` +
+                  `\`\`\`bash\n` +
+                  `git fetch origin\n` +
+                  `git checkout ${patchRef}\n` +
+                  `git rebase origin/${baseRef}\n` +
+                  `# 解决冲突后：\n` +
+                  `git add <冲突文件>\n` +
+                  `git rebase --continue\n` +
+                  `git push origin ${patchRef} --force-with-lease\n` +
+                  `\`\`\`\n\n` +
+                  `[查看 Action 日志](${runUrl})`,
+              });
+            }
