@@ -481,7 +481,6 @@ class EmailPusherTests(HomeserverTestCase):
         assert isinstance(plain_message, email.message.Message)
         plain_message_decoded = plain_message.get_payload(decode=True)
         plain = str(plain_message_decoded)
-        print(plain)
 
         # Extract the `bytes` from the html Message object, and decode to a `str`.
         html = html_message.get_payload(decode=True)
