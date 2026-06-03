@@ -18,6 +18,7 @@ from parameterized import parameterized_class
 
 from synapse.api.room_versions import RoomVersions
 from synapse.events import make_event_from_dict
+from synapse.synapse_rust.events import redact_event
 from synapse.types import JsonDict
 
 from tests.test_utils.event_injection import EventTypes
@@ -83,3 +84,19 @@ class LargeIntTestCase(TestCase):
         event = make_event_from_dict(event_dict, RoomVersions.V1)
 
         self.assertEqual(event.unsigned["prev_content"]["some_field"], self.test_int)
+
+    def test_large_int_redacted(self) -> None:
+        """Test that redact events that have an unsigned field with a large
+        integer in a protected field"""
+
+        event_dict = create_minimal_event_dict(
+            type=EventTypes.PowerLevels,
+            state_key="",
+            content={"users": {"@user:id": self.test_int}},
+        )
+
+        event = make_event_from_dict(event_dict, RoomVersions.V1)
+
+        redacted_event = redact_event(event)
+
+        self.assertEqual(redacted_event.content["users"]["@user:id"], self.test_int)

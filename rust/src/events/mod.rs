@@ -596,43 +596,6 @@ fn event_dict_from_json_str(
     Ok(formatted_event)
 }
 
-/// Converts an event dict as [`serde_json::Value`] into a [`FormattedEvent`].
-fn event_dict_from_json_value(
-    room_version: &RoomVersion,
-    event_dict: serde_json::Value,
-) -> Result<FormattedEvent, Error> {
-    let formatted_event: FormattedEvent = match room_version.event_format {
-        EventFormatVersions::ROOM_V1_V2 => {
-            let event_format: FormattedEvent<EventFormatV1> = serde_json::from_value(event_dict)?;
-
-            event_format.into()
-        }
-        EventFormatVersions::ROOM_V3 | EventFormatVersions::ROOM_V4_PLUS => {
-            let event_format: FormattedEvent<EventFormatV2V3> = serde_json::from_value(event_dict)?;
-            event_format.into()
-        }
-        EventFormatVersions::ROOM_V11_HYDRA_PLUS => {
-            let event_format: FormattedEvent<EventFormatV4> = serde_json::from_value(event_dict)?;
-            event_format.into()
-        }
-        EventFormatVersions::ROOM_VMSC4242 => {
-            let event_format: FormattedEvent<EventFormatVMSC4242> =
-                serde_json::from_value(event_dict)?;
-            event_format.into()
-        }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unsupported room version: {}",
-                room_version
-            ));
-        }
-    };
-
-    formatted_event.validate()?;
-
-    Ok(formatted_event)
-}
-
 /// Returns a pruned version of the given event, which removes all keys we don't
 /// know about or think could potentially be dodgy.
 ///
@@ -644,10 +607,17 @@ fn redact_event_py(event: &Event) -> PyResult<Event> {
     })?;
 
     let redacted_value = redact(&event_value, event.room_version)?;
-    let redacted_formatted_event = event_dict_from_json_value(event.room_version, redacted_value)
-        .map_err(|err| {
-        PyValueError::new_err(format!("Failed to deserialize redacted event: {}", err))
+
+    // We can't convert from a value into [`Event`] directly, so we round-trip
+    // through JSON. See [`FormattedEvent`] for details on why we can't go
+    // directly through Python dicts.
+    let redacted_event_json = serde_json::to_string(&redacted_value).map_err(|err| {
+        PyValueError::new_err(format!("Failed to serialize redacted event: {}", err))
     })?;
+    let redacted_formatted_event =
+        event_dict_from_json_str(event.room_version, &redacted_event_json).map_err(|err| {
+            PyValueError::new_err(format!("Failed to deserialize redacted event: {}", err))
+        })?;
 
     let redacted_event = Event {
         parsed_event: redacted_formatted_event,
