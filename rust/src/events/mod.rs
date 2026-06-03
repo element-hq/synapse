@@ -409,12 +409,12 @@ impl Event {
         self.__repr__()
     }
 
+    /// We want to include some representative fields in the repr for
+    /// debugging purposes.
+    ///
+    /// The end result will look something like:
+    /// `<Event event_id=$def:example.com, type=m.room.message>`
     fn __repr__(&self) -> PyResult<String> {
-        // We want to include some representative fields in the repr for
-        // debugging purposes.
-        //
-        // The end result will look something like:
-        // `<Event event_id=$def:example.com, type=m.room.message>`
         let mut fields: Vec<(&str, &str)> = Vec::with_capacity(6);
 
         if let Some(reason) = self.rejected_reason.as_deref() {
