@@ -44,7 +44,7 @@ from typing import (
 
 import attr
 from prometheus_client import Counter, Histogram
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, ParamSpec, assert_never
 
 from twisted.enterprise import adbapi
 from twisted.internet.interfaces import IReactorCore
@@ -476,7 +476,7 @@ class LoggingTransaction:
                 sql,
                 values,
             )
-        else:
+        elif isinstance(self.database_engine, PsycopgEngine):
             # We use fetch = False to mean a writable query. You *might* be able
             # to morph that into a COPY (...) FROM STDIN, but it isn't worth the
             # effort for the few places we set fetch = False.
@@ -498,6 +498,9 @@ class LoggingTransaction:
 
             # Flatten the values.
             return self._do_execute(f, sql, list(itertools.chain.from_iterable(values)))
+
+        # mypy does not like that self.database_engine is not a Never type
+        assert_never(self.database_engine)  # type: ignore[arg-type]
 
     def copy_write(
         self, sql: str, args: Iterable[Any], values: Iterable[Iterable[Any]]
