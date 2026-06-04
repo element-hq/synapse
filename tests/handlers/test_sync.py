@@ -1373,6 +1373,77 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
 
     @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_incremental_sync_sends_down_only_interesting_profile_updates_when_lazy_loading(
+        self,
+    ) -> None:
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        second_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.join(
+            room=second_room,
+            user=third_user,
+            tok=third_tok,
+        )
+
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+        self.helper.send_messages(room_id=second_room, num_events=10, tok=third_tok)
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [
+                "@third_user:test",
+                "@user:test",
+            ],
+        )
+
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
     def test_incremental_sync_sends_down_null_profile_if_user_no_longer_sharing_rooms(
         self,
     ) -> None:

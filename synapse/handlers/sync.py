@@ -2139,9 +2139,11 @@ class SyncHandler:
 
     async def _generate_initial_sync_entry_for_profile_updates(
         self,
+        *,
         user_id: str,
         sync_result_builder: "SyncResultBuilder",
         profile_fields: list[str],
+        include_users: set[str] | None,
     ) -> None:
         """
         Build an initial sync entry for profile updates and attach it to the
@@ -2153,17 +2155,16 @@ class SyncHandler:
             user_id: The Matrix ID of the user to generate the sync entry for.
             sync_result_builder:
             profile_fields: The list of field IDs to filter for.
+            include_users: List of users profiles to include in the sync response,
+                for when we have calculated a list of users in our lazy loading
+                sync and want to only return those.
         """
         # Currently, limited to only local profiles, so filter remote servers out
         user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
 
-        sync_config = sync_result_builder.sync_config
-        lazy_load_members = sync_config.filter_collection.lazy_load_members()
-        if lazy_load_members:
-            # Only include members we've collected for lazy loading
-            cache_key = (sync_config.user.to_string(), sync_config.device_id)
-            cache = self.get_lazy_loaded_members_cache(cache_key)
-            user_ids = {user_id for user_id in user_ids if cache.get(user_id)}
+        if include_users:
+            # Filter down to selected included users
+            user_ids = {user_id for user_id in user_ids if user_id in include_users}
 
         if not user_ids:
             return
@@ -2213,9 +2214,33 @@ class SyncHandler:
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
 
+        sync_config = sync_result_builder.sync_config
+        lazy_load_members = sync_config.filter_collection.lazy_load_members()
+        include_users = None
+        if lazy_load_members:
+            # Collect members from the existing `sync_result_builder` data
+            include_users = set()
+            # invited
+            for invited in sync_result_builder.invited:
+                include_users.add(invited.invite.sender)
+            # joined
+            for joined in sync_result_builder.joined:
+                for timeline_event in joined.timeline.events:
+                    include_users.add(timeline_event.event.sender)
+            # knocked
+            for knocked in sync_result_builder.knocked:
+                include_users.add(knocked.knock.sender)
+            # archived
+            for archived in sync_result_builder.archived:
+                for timeline_event in archived.timeline.events:
+                    include_users.add(timeline_event.event.sender)
+
         if since_token is None:
             await self._generate_initial_sync_entry_for_profile_updates(
-                user_id, sync_result_builder, profile_fields
+                user_id=user_id,
+                sync_result_builder=sync_result_builder,
+                profile_fields=profile_fields,
+                include_users=include_users,
             )
             return
 
@@ -2227,6 +2252,10 @@ class SyncHandler:
             to_id=now_token.profile_updates_key,
             field_names=profile_fields,
         )
+        if include_users:
+            # Filter down to selected included users
+            updates = [update for update in updates if update.user_id in include_users]
+
         if not updates:
             return
 
