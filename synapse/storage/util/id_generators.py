@@ -831,6 +831,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # Hacky debug logging to attempt to trace https://github.com/element-hq/synapse/issues/19795
         if (
             issue9533_logger.isEnabledFor(logging.DEBUG)
+            # Only log if we are the instance that is doing the persisting
+            and our_current_position > 0
             and self._stream_name == "to_device"
         ):
             issue9533_logger.debug(
