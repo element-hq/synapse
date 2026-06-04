@@ -15,20 +15,16 @@
 
 use pyo3::{
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    wrap_pyfunction, Bound, PyResult, Python,
+    Bound, PyResult, Python,
 };
-use serde::{Deserialize, Serialize};
 
 pub mod versions;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "handlers")?;
-    child_module.add_class::<PushRule>()?;
-    child_module.add_class::<PushRules>()?;
-    child_module.add_class::<FilteredPushRules>()?;
-    child_module.add_class::<PushRuleEvaluator>()?;
-    child_module.add_function(wrap_pyfunction!(get_base_rule_ids, m)?)?;
+    // TODO: Expose `get_versions`
+    // child_module.add_class::<PushRule>()?;
 
     m.add_submodule(&child_module)?;
 

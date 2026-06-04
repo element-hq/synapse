@@ -23,7 +23,11 @@ pub enum PerUserExperimentalFeature {
 pub struct Store {}
 
 impl Store {
-    pub fn is_feature_enabled(feature: PerUserExperimentalFeature) -> Result<bool, anyhow::Error> {
+    pub async fn is_feature_enabled(
+        &self,
+        user_id: &str,
+        feature: PerUserExperimentalFeature,
+    ) -> Result<bool, anyhow::Error> {
         todo!("...");
     }
 }

@@ -13,12 +13,23 @@
  *
  */
 
+// use pyo3::PyAny;
+// use pyo3::{intern, prelude::*};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SynapseConfig {
     pub experimental: ExperimentalConfig,
 }
+
+// impl<'py> FromPyObject<'_, 'py> for SynapseConfig<'py> {
+//     type Error = PyErr;
+
+//     /// From Python `LoggingTransaction`
+//     fn extract(config_python_object: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
+//         todo!("...");
+//     }
+// }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]

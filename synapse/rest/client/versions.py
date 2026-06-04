@@ -49,7 +49,6 @@ class VersionsRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
 
-
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         user_id = None
         if self.auth.has_access_token(request):
@@ -81,7 +80,7 @@ class VersionsRestServlet(RestServlet):
         # authenticated responses are not served from cache.
         request.setHeader(b"Vary", b"Authorization")
 
-        versions_response_body = await get_versions(user_id)
+        versions_response_body = await get_versions(user_id, self.config)
 
         return (
             200,

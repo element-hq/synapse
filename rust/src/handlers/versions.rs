@@ -28,15 +28,15 @@ struct VersionsResponse {
 
 /// Assemble a `/versions` response
 async fn get_versions(
-    store: Store,
+    store: &Store,
     user_id: Option<&str>,
     config: SynapseConfig,
-) -> VersionsResponse {
+) -> Result<VersionsResponse, anyhow::Error> {
     let msc3881_enabled = match user_id {
         Some(user_id) => {
             store
                 .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3881)
-                .await
+                .await?
         }
         None => config.experimental.msc3881_enabled,
     };
@@ -45,11 +45,9 @@ async fn get_versions(
         Some(user_id) => {
             store
                 .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3575)
-                .await
+                .await?
         }
-        None => {
-            config.experimental.msc3575_enabled;
-        }
+        None => config.experimental.msc3575_enabled,
     };
 
     // TODO: Calculate these once since they shouldn't change after start-up.
@@ -66,7 +64,7 @@ async fn get_versions(
     //     in config.room.encryption_enabled_by_default_for_room_presets
     // );
 
-    return VersionsResponse {
+    return Ok(VersionsResponse {
         versions: Vec::from([
             // XXX: at some point we need to decide whether we need to include
             // the previous version numbers, given we've defined r0.3.0 to be
@@ -96,54 +94,54 @@ async fn get_versions(
             "v1.11".to_string(),
             "v1.12".to_string(),
         ]),
-        unstable_features: BTreeMap::from([
+        unstable_features: std::collections::BTreeMap::from([
             // // Implements support for label-based filtering as described in
             // // MSC2326.
-            // ("org.matrix.label_based_filtering", true),
+            // ("org.matrix.label_based_filtering".to_string(), true),
             // // Implements support for cross signing as described in MSC1756
-            // ("org.matrix.e2e_cross_signing", true),
+            // ("org.matrix.e2e_cross_signing".to_string(), true),
             // // Implements additional endpoints as described in MSC2432
-            // ("org.matrix.msc2432", true),
+            // ("org.matrix.msc2432".to_string(), true),
             // // Implements additional endpoints as described in MSC2666
-            // ("uk.half-shot.msc2666.query_mutual_rooms.stable", true),
+            // ("uk.half-shot.msc2666.query_mutual_rooms.stable".to_string(), true),
             // // Whether new rooms will be set to encrypted or not (based on presets).
-            // ("io.element.e2ee_forced.public", e2ee_forced_public),
-            // ("io.element.e2ee_forced.private", e2ee_forced_private),
-            // ("io.element.e2ee_forced.trusted_private", e2ee_forced_trusted_private),
+            // ("io.element.e2ee_forced.public".to_string(), e2ee_forced_public),
+            // ("io.element.e2ee_forced.private".to_string(), e2ee_forced_private),
+            // ("io.element.e2ee_forced.trusted_private".to_string(), e2ee_forced_trusted_private),
             // // Supports the busy presence state described in MSC3026.
-            // ("org.matrix.msc3026.busy_presence", config.experimental.msc3026_enabled),
+            // ("org.matrix.msc3026.busy_presence".to_string(), config.experimental.msc3026_enabled),
             // // Supports receiving private read receipts as per MSC2285
-            // ("org.matrix.msc2285.stable", true),  // TODO: Remove when MSC2285 becomes a part of the spec
+            // ("org.matrix.msc2285.stable".to_string(), true),  // TODO: Remove when MSC2285 becomes a part of the spec
             // // Supports filtering of /publicRooms by room type as per MSC3827
-            // ("org.matrix.msc3827.stable", true),
+            // ("org.matrix.msc3827.stable".to_string(), true),
             // // Adds support for thread relations, per MSC3440.
-            // ("org.matrix.msc3440.stable", true),  // TODO: remove when "v1.3" is added above
+            // ("org.matrix.msc3440.stable".to_string(), true),  // TODO: remove when "v1.3" is added above
             // // Support for thread read receipts & notification counts.
-            // ("org.matrix.msc3771", true),
-            // ("org.matrix.msc3773", config.experimental.msc3773_enabled),
+            // ("org.matrix.msc3771".to_string(), true),
+            // ("org.matrix.msc3773".to_string(), config.experimental.msc3773_enabled),
             // // Allows moderators to fetch redacted event content as described in MSC2815
-            // ("fi.mau.msc2815", config.experimental.msc2815_enabled),
+            // ("fi.mau.msc2815".to_string(), config.experimental.msc2815_enabled),
             // // Adds a ping endpoint for appservices to check HS->AS connection
-            // ("fi.mau.msc2659.stable", true),  // TODO: remove when "v1.7" is added above
+            // ("fi.mau.msc2659.stable".to_string(), true),  // TODO: remove when "v1.7" is added above
             // // TODO: this is no longer needed once unstable MSC3882 does not need to be supported:
-            // ("org.matrix.msc3882", config.auth.login_via_existing_enabled),
+            // ("org.matrix.msc3882".to_string(), config.auth.login_via_existing_enabled),
             // Adds support for remotely enabling/disabling pushers, as per MSC3881
-            ("org.matrix.msc3881", msc3881_enabled),
+            ("org.matrix.msc3881".to_string(), msc3881_enabled),
             // // Adds support for filtering /messages by event relation.
-            // ("org.matrix.msc3874", config.experimental.msc3874_enabled),
+            // ("org.matrix.msc3874".to_string(), config.experimental.msc3874_enabled),
             // // Adds support for relation-based redactions as per MSC3912.
-            // ("org.matrix.msc3912", config.experimental.msc3912_enabled),
+            // ("org.matrix.msc3912".to_string(), config.experimental.msc3912_enabled),
             // // Whether recursively provide relations is supported.
             // // TODO This is no longer needed once unstable MSC3981 does not need to be supported.
-            // ("org.matrix.msc3981", true),
+            // ("org.matrix.msc3981".to_string(), true),
             // // Adds support for deleting account data.
-            // ("org.matrix.msc3391", config.experimental.msc3391_enabled),
+            // ("org.matrix.msc3391".to_string(), config.experimental.msc3391_enabled),
             // // Allows clients to inhibit profile update propagation.
-            // ("org.matrix.msc4069", config.experimental.msc4069_profile_inhibit_propagation),
+            // ("org.matrix.msc4069".to_string(), config.experimental.msc4069_profile_inhibit_propagation),
             // // Allows clients to handle push for encrypted events.
-            // ("org.matrix.msc4028", config.experimental.msc4028_push_encrypted_events),
+            // ("org.matrix.msc4028".to_string(), config.experimental.msc4028_push_encrypted_events),
             // // MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
-            // ("org.matrix.msc4108", (
+            // ("org.matrix.msc4108".to_string(), (
             //     config.experimental.msc4108_enabled
             //     or (
             //         config.experimental.msc4108_delegation_endpoint
@@ -151,24 +149,24 @@ async fn get_versions(
             //     )
             // )),
             // // MSC4140: Delayed events
-            // ("org.matrix.msc4140", bool(config.server.max_event_delay_ms)),
+            // ("org.matrix.msc4140".to_string(), bool(config.server.max_event_delay_ms)),
             // Simplified sliding sync
-            ("org.matrix.simplified_msc3575", msc3575_enabled),
+            ("org.matrix.simplified_msc3575".to_string(), msc3575_enabled),
             // // Arbitrary key-value profile fields.
-            // ("uk.tcpip.msc4133", config.experimental.msc4133_enabled),
-            // ("uk.tcpip.msc4133.stable", true),
+            // ("uk.tcpip.msc4133".to_string(), config.experimental.msc4133_enabled),
+            // ("uk.tcpip.msc4133.stable".to_string(), true),
             // // MSC4155: Invite filtering
-            // ("org.matrix.msc4155", config.experimental.msc4155_enabled),
+            // ("org.matrix.msc4155".to_string(), config.experimental.msc4155_enabled),
             // // MSC4306: Support for thread subscriptions
-            // ("org.matrix.msc4306", config.experimental.msc4306_enabled),
+            // ("org.matrix.msc4306".to_string(), config.experimental.msc4306_enabled),
             // // MSC4169: Backwards-compatible redaction sending using `/send`
-            // ("com.beeper.msc4169", config.experimental.msc4169_enabled),
+            // ("com.beeper.msc4169".to_string(), config.experimental.msc4169_enabled),
             // // MSC4354: Sticky events
-            // ("org.matrix.msc4354", config.experimental.msc4354_enabled),
+            // ("org.matrix.msc4354".to_string(), config.experimental.msc4354_enabled),
             // // MSC4380: Invite blocking
-            // ("org.matrix.msc4380.stable", true),
+            // ("org.matrix.msc4380.stable".to_string(), true),
             // // MSC4445: Sync timeline order
-            // ("org.matrix.msc4445.initial_sync_timeline_topological_ordering", true),
+            // ("org.matrix.msc4445.initial_sync_timeline_topological_ordering".to_string(), true),
         ]),
-    };
+    });
 }
