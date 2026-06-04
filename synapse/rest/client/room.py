@@ -336,7 +336,7 @@ class RoomStateEventRestServlet(RestServlet):
                 )
 
         origin_server_ts = None
-        if requester.app_service:
+        if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
         sticky_duration_ms: int | None = None
@@ -435,7 +435,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         content = parse_json_object_from_request(request)
 
         origin_server_ts = None
-        if requester.app_service:
+        if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
         sticky_duration_ms: int | None = None

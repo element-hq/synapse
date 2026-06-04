@@ -419,7 +419,7 @@ def _serialize_event(
                         and event_token_id == config.requester.access_token_id
                     )
                     or config.requester.is_guest
-                    or config.requester.app_service
+                    or config.requester.app_service_id
                 ):
                     d["unsigned"]["transaction_id"] = txn_id
 
