@@ -15,7 +15,7 @@
 
 use pyo3::{intern, prelude::*};
 
-use crate::storage::db::{DatabasePool, Transaction};
+use crate::storage::db::{DatabasePool, Row, Transaction};
 
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
@@ -34,14 +34,40 @@ impl DatabaseEngine {
     }
 }
 
-pub struct PythonDatabasePool {}
+/// Wrapper for a `DatabasePool` from the Python side of Synapse.
+pub struct PythonDatabasePool {
+    /// The underlying `DatabasePool`
+    database_pool_py: Bound<'py, PyAny>,
+}
 
+#[async_trait::async_trait]
 impl DatabasePool for PythonDatabasePool {
-    pub fn get_transaction(&self, description: &str) -> dyn Transaction {
-        todo!("...");
-        // let execute_fn = self.raw.getattr(intern!(self.raw.py(), "runInteraction"))?;
-        // execute_fn.call1((sql, args))?;
-        // Ok(())
+    async fn get_transaction(
+        &self,
+        description: &str,
+    ) -> Result<Box<dyn Transaction>, anyhow::Error> {
+        // Synapse has built-in retry functionality and can call this function multiple
+        // times under certain failure modes. Normally, everything in the transaction
+        // happens in the callback but since we have a little bit of a different API
+        // surface, we instead extract the transaction for us to use outside.
+        //
+        // Re-using `runInteraction`, means we get all of the logging, metrics, etc for
+        // free.
+        let callback_func =
+            PyCFunction::new_closure(py, None, None, move |args, _| -> PyResult<Py<PyAny>> {
+                // TODO: Error if already called
+
+                let py = args.py();
+                let txn_py = args.get_item(0)?;
+                txn
+            });
+
+        let execute_fn = self
+            .database_pool_py
+            .getattr(intern!(self.database_pool_py.py(), "runInteraction"))?;
+        execute_fn.call1((description, callback_func))?;
+
+        Ok(Box::new(txn))
     }
 }
 
@@ -71,7 +97,7 @@ fn detect_engine(txn_py: &Bound<'_, PyAny>) -> PyResult<DatabaseEngine> {
 /// Use [`execute`](Self::execute) (or other methods) while holding the GIL.
 pub struct LoggingTransactionWrapper {
     /// The underlying `LoggingTransaction`
-    raw: Py<PyAny>,
+    logging_transaction_py: Py<PyAny>,
 
     /// Disambiguate which underlying database engine we're working with
     pub database_engine: DatabaseEngine,
@@ -83,10 +109,10 @@ impl<'a, 'py> FromPyObject<'a, 'py> for LoggingTransactionWrapper {
     /// Extract from a Python `LoggingTransaction` passed as an argument.
     ///
     /// The resulting wrapper has `done_tx = None`; Python owns the transaction lifetime.
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        let database_engine = detect_engine(&obj.to_owned())?;
+    fn extract(logging_transaction_py: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let database_engine = detect_engine(&logging_transaction_py.to_owned())?;
         Ok(Self {
-            raw: obj.to_owned().unbind(),
+            logging_transaction_py: logging_transaction_py.to_owned().unbind(),
             database_engine,
         })
     }
@@ -99,14 +125,22 @@ impl LoggingTransactionWrapper {
         sql: &str,
         args: &Bound<'py, PyAny>,
     ) -> PyResult<()> {
-        let execute_fn = self.raw.bind(py).getattr(intern!(py, "execute"))?;
+        let execute_fn = self
+            .logging_transaction_py
+            .bind(py)
+            .getattr(intern!(py, "execute"))?;
         execute_fn.call1((sql, args))?;
         Ok(())
     }
 }
 
+#[async_trait::async_trait]
 impl Transaction for LoggingTransactionWrapper {
-    fn query(&self, sql: &str, args: &[&str]) -> () {
-        self.execute(sql, args);
+    async fn query(&self, sql: &str, args: &[&str]) -> Vec<Row> {
+        self.execute(sql, args).await;
+    }
+
+    async fn commit(&self) -> Result<(), anyhow::Error> {
+        // In Synapse, `commit` is part of `LoggingDatabaseConnection`
     }
 }

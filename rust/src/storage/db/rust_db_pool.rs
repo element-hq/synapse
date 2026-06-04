@@ -13,23 +13,26 @@
  *
  */
 
-
 // TODO: remove. This is just here to make sure our `DatabasePool`/`Transaction`
 // interfaces are compatible with `tokio-postgres`.
 
 use anyhow::Context;
-use bb8_postgres::{tokio_postgres::Row, PostgresConnectionManager};
+use bb8_postgres::PostgresConnectionManager;
 use postgres_native_tls::MakeTlsConnector;
 
-use crate::storage::db::{DatabasePool, Transaction};
+use crate::storage::db::{DatabasePool, Row, Transaction};
 
 /// Native Rust database access backed by `tokio-postgres` (for use in synapse-rust-apps)
 pub struct RustDatabasePool {
     db_pool: bb8::Pool<PostgresConnectionManager<MakeTlsConnector>>,
 }
 
+#[async_trait::async_trait]
 impl DatabasePool for RustDatabasePool {
-    async fn get_transaction(&self, description: &str) -> dyn Transaction {
+    async fn get_transaction(
+        &self,
+        _description: &str,
+    ) -> Result<Box<dyn Transaction>, anyhow::Error> {
         let mut conn = self
             .db_pool
             .get()
@@ -37,14 +40,15 @@ impl DatabasePool for RustDatabasePool {
             .await
             .context("Failed to acquire database connection")?;
 
+
+        // TODO: Set repeatable-read isolation level (like Synapse)
         let txn = conn
             .transaction()
             // .instrument(tracing::info_span!("start transaction"))
             .await
             .context("Failed to start transaction")?;
 
-        // TODO: Set isolation level
-        txn
+        Ok(Box::new(TokioPostgresTransaction { txn }))
     }
 }
 
@@ -52,20 +56,21 @@ struct TokioPostgresTransaction<'a> {
     txn: bb8_postgres::tokio_postgres::Transaction<'a>,
 }
 
+#[async_trait::async_trait]
 impl Transaction for TokioPostgresTransaction<'_> {
-    async fn query(&self, sql: &str, args: &[&str]) -> () {
-        todo!("TODO");
+    async fn query(&self, sql: &str, args: &[&str]) -> Vec<Row> {
+        // TODO: Convert `?` SQL param style to `tokio-postgres` compatible
 
         let rows = self.txn.query(sql, args).await?;
 
         rows
     }
 
-    async fn commit(&self) -> () {
+    async fn commit(self) -> Result<(), anyhow::Error> {
         self.txn
             .commit()
             // .instrument(tracing::info_span!("commit transaction"))
             .await
-            .context("Failed to commit transaction")?;
+            .context("Failed to commit transaction")
     }
 }
