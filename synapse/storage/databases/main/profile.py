@@ -52,8 +52,8 @@ class ProfileUpdate:
 
     stream_id: int
     user_id: str
+    action: str
     field_name: str | None
-    action: str | None
 
 
 class ProfileWorkerStore(SQLBaseStore):
