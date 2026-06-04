@@ -13,6 +13,10 @@
  *
  */
 
+use sha2::digest::typenum::Len;
+
+use crate::{config::SynapseConfig, storage::db::DatabasePool};
+
 /// Currently supported per-user features
 pub enum PerUserExperimentalFeature {
     MSC3881,
@@ -20,7 +24,20 @@ pub enum PerUserExperimentalFeature {
     MSC4222,
 }
 
-pub struct Store {}
+impl PerUserExperimentalFeature {
+    pub fn is_globally_enabled(&self, config: SynapseConfig) -> bool {
+        match self {
+            PerUserExperimentalFeature::MSC3881 => config.experimental.msc3881_enabled,
+            PerUserExperimentalFeature::MSC3575 => config.experimental.msc3575_enabled,
+            PerUserExperimentalFeature::MSC4222 => config.experimental.msc4222_enabled,
+        }
+    }
+}
+
+pub struct Store {
+    config: SynapseConfig,
+    db_pool: dyn DatabasePool,
+}
 
 impl Store {
     pub async fn is_feature_enabled(
@@ -28,6 +45,28 @@ impl Store {
         user_id: &str,
         feature: PerUserExperimentalFeature,
     ) -> Result<bool, anyhow::Error> {
-        todo!("...");
+        if feature.is_globally_enabled(self.config) {
+            return Ok(true);
+        }
+
+        let txn = self.db_pool.get_transaction("is_feature_enabled").await;
+        let rows = txn
+            .query(
+                r#"
+                SELECT enabled
+                FROM per_user_experimental_features
+                WHERE user_id = ? AND feature = ?
+                "#,
+                &[user_id, feature],
+            )
+            .await;
+
+        match (rows.len(), rows.first()) {
+            (1, Some(enabled)) => Ok(enabled),
+            (0, None) => Ok(false),
+            _ => {
+                panic!("Synapse programming error");
+            }
+        }
     }
 }

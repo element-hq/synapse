@@ -14,17 +14,35 @@
  */
 
 use pyo3::{
+    prelude::*,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
     Bound, PyResult, Python,
 };
 
+use crate::storage::store::Store;
+
 pub mod versions;
+
+#[pyclass]
+struct RustHandlers {
+    versions: versions::VersionsHandler,
+}
+
+#[pymethods]
+impl RustHandlers {
+    #[new]
+    #[pyo3(signature = (homeserver))]
+    pub fn py_new(py: Python<'_>, homeserver: &Bound<'_, PyAny>) -> PyResult<RustHandlers> {
+        RustHandlers {
+            versions: versions::VersionsHandler { store: Store {} },
+        }
+    }
+}
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module = PyModule::new(py, "handlers")?;
-    // TODO: Expose `get_versions`
-    // child_module.add_class::<PushRule>()?;
+    child_module.add_class::<RustHandlers>()?;
 
     m.add_submodule(&child_module)?;
 

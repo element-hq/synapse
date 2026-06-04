@@ -25,13 +25,11 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from synapse.api.constants import RoomCreationPreset
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
-from synapse.rest.admin.experimental_features import ExperimentalFeature
-from synapse.types import JsonDict
 from synapse.synapse_rust.handlers.versions import get_versions
+from synapse.types import JsonDict
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -48,6 +46,7 @@ class VersionsRestServlet(RestServlet):
         self.config = hs.config
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
+        self.rust_handlers = hs.get_rust_handlers()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         user_id = None
@@ -80,7 +79,9 @@ class VersionsRestServlet(RestServlet):
         # authenticated responses are not served from cache.
         request.setHeader(b"Vary", b"Authorization")
 
-        versions_response_body = await get_versions(user_id, self.config)
+        versions_response_body = await self.rust_handlers.versions.get_versions(
+            user_id, self.config
+        )
 
         return (
             200,

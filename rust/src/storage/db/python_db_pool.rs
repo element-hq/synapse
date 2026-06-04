@@ -15,6 +15,8 @@
 
 use pyo3::{intern, prelude::*};
 
+use crate::storage::db::{DatabasePool, Transaction};
+
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
 pub enum DatabaseEngine {
@@ -32,59 +34,79 @@ impl DatabaseEngine {
     }
 }
 
-/// Wrapper for a `DatabasePool` from the Python side of Synapse.
-pub struct DatabasePool<'py> {
-    /// The underlying `DatabasePool`
-    raw: Bound<'py, PyAny>,
-}
+pub struct PythonDatabasePool {}
 
-impl<'py> DatabasePool<'py> {
-    pub fn get_transaction(&mut self, description: &str) -> LoggingTransactionWrapper {
-        todo!("TODO");
+impl DatabasePool for PythonDatabasePool {
+    pub fn get_transaction(&self, description: &str) -> dyn Transaction {
+        todo!("...");
         // let execute_fn = self.raw.getattr(intern!(self.raw.py(), "runInteraction"))?;
         // execute_fn.call1((sql, args))?;
         // Ok(())
     }
 }
 
-/// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
-pub struct LoggingTransactionWrapper<'py> {
-    /// The underlying `LoggingTransaction`
-    raw: Bound<'py, PyAny>,
+fn detect_engine(txn_py: &Bound<'_, PyAny>) -> PyResult<DatabaseEngine> {
+    let name = txn_py
+        .getattr("database_engine")
+        .expect("`LoggingTransaction` must have `database_engine` attr")
+        .get_type()
+        .name()
+        .expect("`database_engine` type must have a name")
+        .to_str()
+        .expect("`database_engine` type name must be valid UTF-8")
+        .to_owned();
 
-    /// Dissambiguate which underyling database engine we're working with
-    database_engine: DatabaseEngine,
+    Ok(match name.as_str() {
+        "PostgresEngine" => DatabaseEngine::Postgres,
+        "Sqlite3Engine" => DatabaseEngine::Sqlite,
+        other => unimplemented!(
+            "Unknown database engine {other:?}. This is a Synapse programming error."
+        ),
+    })
 }
 
-impl<'py> FromPyObject<'_, 'py> for LoggingTransactionWrapper<'py> {
+/// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
+///
+/// Holds no `'py` lifetime so it can be stored and moved freely across threads.
+/// Use [`execute`](Self::execute) (or other methods) while holding the GIL.
+pub struct LoggingTransactionWrapper {
+    /// The underlying `LoggingTransaction`
+    raw: Py<PyAny>,
+
+    /// Disambiguate which underlying database engine we're working with
+    pub database_engine: DatabaseEngine,
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for LoggingTransactionWrapper {
     type Error = PyErr;
 
-    /// From Python `LoggingTransaction`
-    fn extract(logging_transaction_python_object: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
-        let database_engine = match logging_transaction_python_object
-            .getattr("database_engine")
-            .expect("Expected the Python object you passed to be `LoggingTransaction` which should have `database_engine` attr")
-            .get_type()
-            .name()
-            .expect("Expected `LoggingTransaction.database_engine` to have a type name")
-            .to_str()
-            .expect("Expected to be able to convert the `LoggingTransaction.database_engine` type name to a string")
-        {
-            "PostgresEngine" => DatabaseEngine::Postgres,
-            "Sqlite3Engine" => DatabaseEngine::Sqlite,
-            other => unimplemented!("Unknown database engine {other:?}. This is a Synapse programming error."),
-        };
+    /// Extract from a Python `LoggingTransaction` passed as an argument.
+    ///
+    /// The resulting wrapper has `done_tx = None`; Python owns the transaction lifetime.
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let database_engine = detect_engine(&obj.to_owned())?;
         Ok(Self {
-            raw: logging_transaction_python_object.cast()?.to_owned(),
+            raw: obj.to_owned().unbind(),
             database_engine,
         })
     }
 }
 
-impl<'py> LoggingTransactionWrapper<'py> {
-    pub fn execute(&mut self, sql: &str, args: &'py Bound<'py, PyAny>) -> PyResult<()> {
-        let execute_fn = self.raw.getattr(intern!(self.raw.py(), "execute"))?;
+impl LoggingTransactionWrapper {
+    pub fn execute<'py>(
+        &mut self,
+        py: Python<'py>,
+        sql: &str,
+        args: &Bound<'py, PyAny>,
+    ) -> PyResult<()> {
+        let execute_fn = self.raw.bind(py).getattr(intern!(py, "execute"))?;
         execute_fn.call1((sql, args))?;
         Ok(())
+    }
+}
+
+impl Transaction for LoggingTransactionWrapper {
+    fn query(&self, sql: &str, args: &[&str]) -> () {
+        self.execute(sql, args);
     }
 }

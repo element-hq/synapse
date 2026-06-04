@@ -964,6 +964,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return SetPasswordHandler(self)
 
     @cache_in_self
+    def get_rust_handlers(self) -> RustHandlers:
+        return RustHandlers(self)
+
+    @cache_in_self
     def get_event_sources(self) -> EventSources:
         return EventSources(self)
 

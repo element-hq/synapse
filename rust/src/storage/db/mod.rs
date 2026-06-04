@@ -14,5 +14,15 @@
  */
 
 pub mod python_db_pool;
+pub mod rust_db_pool;
 
-pub mod db;
+pub trait DatabasePool {
+    async fn get_transaction(&self, description: &str) -> dyn Transaction;
+}
+
+/// A [`tokio_postgres::Transaction`] looking thing that we can use on the Rust side to
+/// interact with the database
+pub trait Transaction {
+    async fn query(&self, sql: &str, args: &[&str]) -> ();
+    async fn commit(&self) -> ();
+}

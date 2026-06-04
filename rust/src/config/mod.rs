@@ -43,4 +43,5 @@ pub enum RoomCreationPreset {
 pub struct ExperimentalConfig {
     pub msc3881_enabled: bool,
     pub msc3575_enabled: bool,
+    pub msc4222_enabled: bool,
 }
