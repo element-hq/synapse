@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Collection, Iterable, cast
 import attr
 from canonicaljson import encode_canonical_json
 
-from synapse.api.constants import ProfileFields
+from synapse.api.constants import ProfileFields, ProfileUpdateAction
 from synapse.api.errors import Codes, StoreError
 from synapse.replication.tcp.streams._base import ProfileUpdatesStream
 from synapse.storage._base import SQLBaseStore, make_in_list_sql_clause
@@ -52,7 +52,8 @@ class ProfileUpdate:
 
     stream_id: int
     user_id: str
-    field_name: str
+    field_name: str | None
+    action: str | None
 
 
 class ProfileWorkerStore(SQLBaseStore):
@@ -337,7 +338,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
     async def get_updated_profile_updates(
         self, *, from_id: int, to_id: int, limit: int
-    ) -> list[tuple[int, str, str]]:
+    ) -> list[tuple[int, str, str, str | None]]:
         """Get updates to profile updates between two stream IDs.
 
         Bounds: from_id < ... <= to_id
@@ -348,24 +349,24 @@ class ProfileWorkerStore(SQLBaseStore):
             limit: The maximum number of rows to return
 
         Returns:
-            list of tuples representing stream_id, user_id and field_name
+            list of tuples representing stream_id, user_id, action and field_name
         """
         if from_id == to_id:
             return []
 
         def _get_updated_profile_updates_txn(
             txn: LoggingTransaction,
-        ) -> list[tuple[int, str, str]]:
+        ) -> list[tuple[int, str, str, str | None]]:
             sql = """
             SELECT
-                stream_id, user_id, field_name
+                stream_id, user_id, action, field_name
             FROM profile_updates
             WHERE
                 ? < stream_id AND stream_id <= ?
             ORDER BY stream_id ASC LIMIT ?
             """
             txn.execute(sql, (from_id, to_id, limit))
-            return cast(list[tuple[int, str, str]], txn.fetchall())
+            return cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
             "get_updated_profile_updates", _get_updated_profile_updates_txn
@@ -404,20 +405,22 @@ class ProfileWorkerStore(SQLBaseStore):
                 txn.database_engine, "field_name", field_names
             )
             sql = (
-                "SELECT stream_id, user_id, field_name"
+                "SELECT stream_id, user_id, action, field_name"
                 " FROM profile_updates"
-                f" WHERE ? < stream_id AND stream_id <= ? AND {clause}"
+                f" WHERE ? < stream_id AND stream_id <= ? AND ({clause}"
+                " OR action != ?) "
                 " ORDER BY stream_id ASC"
             )
-            txn.execute(sql, (from_id, to_id, *args))
-            rows = cast(list[tuple[int, str, str]], txn.fetchall())
+            txn.execute(sql, (from_id, to_id, ProfileUpdateAction.UPDATE.value, *args))
+            rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
             updates: list[ProfileUpdate] = []
-            for stream_id, user_id, field_name in rows:
+            for stream_id, user_id, action, field_name in rows:
                 updates.append(
                     ProfileUpdate(
                         stream_id=stream_id,
                         user_id=user_id,
+                        action=action,
                         field_name=field_name,
                     )
                 )
@@ -473,33 +476,50 @@ class ProfileWorkerStore(SQLBaseStore):
     async def add_profile_updates(
         self,
         user_id: UserID,
-        updated_fields: list[str],
+        action: str,
+        updated_fields: list[str] | None,
     ) -> int:
         """Persist profile update markers and return the last stream ID."""
         assert self._can_write_to_profile_updates
+        assert action in [action.value for action in ProfileUpdateAction]
 
-        if not updated_fields:
+        if action == ProfileUpdateAction.UPDATE.value and not updated_fields:
             return self._profile_updates_id_gen.get_current_token()
+        elif action == ProfileUpdateAction.LEFT_ROOM.value:
+            assert not updated_fields
 
         user_id_str = user_id.to_string()
 
         def _add_profile_updates_txn(txn: LoggingTransaction) -> int:
-            stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
-                txn, len(updated_fields)
-            )
             values = []
             inserted_ts = self.clock.time_msec()
-            for stream_id, field_name in zip(stream_ids, updated_fields):
+            if updated_fields:
+                stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
+                    txn, len(updated_fields)
+                )
+                for stream_id, field_name in zip(stream_ids, updated_fields):
+                    values.append(
+                        [
+                            stream_id,
+                            self._instance_name,
+                            user_id_str,
+                            action,
+                            field_name,
+                            inserted_ts,
+                        ]
+                    )
+            else:
+                stream_ids = [self._profile_updates_id_gen.get_next_txn(txn)]
                 values.append(
                     [
-                        stream_id,
+                        stream_ids[0],
                         self._instance_name,
                         user_id_str,
-                        field_name,
+                        action,
+                        None,
                         inserted_ts,
                     ]
                 )
-
             self.db_pool.simple_insert_many_txn(
                 txn,
                 table="profile_updates",
@@ -507,6 +527,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     "stream_id",
                     "instance_name",
                     "user_id",
+                    "action",
                     "field_name",
                     "inserted_ts",
                 ],

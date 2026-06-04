@@ -18,9 +18,14 @@ CREATE TABLE profile_updates (
 
   -- The full user ID
   user_id TEXT NOT NULL,
+
+  -- Profile action that has happened, see ProfileUpdateAction enum.
+  action TEXT NOT NULL,
+
   -- Profile field name that has been updated,
   -- see https://spec.matrix.org/unstable/client-server-api/#profiles
-  field_name TEXT NOT NULL,
+  -- This is only required if "action" is "update"
+  field_name TEXT NULL,
 
   -- Unix timestamp for debugging purposes
   inserted_ts BIGINT NOT NULL

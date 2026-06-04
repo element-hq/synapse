@@ -26,7 +26,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 import synapse.types
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, ProfileUpdateAction
 from synapse.api.errors import AuthError, SynapseError
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -274,7 +274,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 limit=1,
             )
         )
-        self.assertEqual(updates[0], (2, "@1234abcd:test", field_name))
+        self.assertEqual(
+            updates[0],
+            (2, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, field_name),
+        )
 
         fields_updates = self.get_success(
             self.store.get_profile_updates_for_fields(
@@ -285,7 +288,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             fields_updates[0],
-            ProfileUpdate(stream_id=2, user_id="@1234abcd:test", field_name=field_name),
+            ProfileUpdate(
+                stream_id=2,
+                user_id="@1234abcd:test",
+                action=ProfileUpdateAction.UPDATE.value,
+                field_name=field_name,
+            ),
         )
 
         self.get_success(
@@ -303,7 +311,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 limit=1,
             )
         )
-        self.assertEqual(delete_updates[0], (3, "@1234abcd:test", field_name))
+        self.assertEqual(
+            delete_updates[0],
+            (3, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, field_name),
+        )
 
     @parameterized.expand(
         [

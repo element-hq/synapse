@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from twisted.internet.defer import CancelledError
 
-from synapse.api.constants import ProfileFields
+from synapse.api.constants import ProfileFields, ProfileUpdateAction
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -102,6 +102,8 @@ class ProfileHandler:
         )
         self._worker_locks = hs.get_worker_locks_handler()
 
+        hs.get_distributor().observe("user_left_room", self.user_left_room)
+
     async def _record_profile_updates(
         self, user_id: UserID, updated_fields: list[str]
     ) -> None:
@@ -118,7 +120,11 @@ class ProfileHandler:
         if not self._msc4429_enabled or not updated_fields:
             return
 
-        stream_id = await self.store.add_profile_updates(user_id, updated_fields)
+        stream_id = await self.store.add_profile_updates(
+            user_id=user_id,
+            updated_fields=updated_fields,
+            action=ProfileUpdateAction.UPDATE.value,
+        )
         room_ids = await self.store.get_rooms_for_user(user_id.to_string())
         if not room_ids:
             return
@@ -411,6 +417,21 @@ class ProfileHandler:
 
         if propagate:
             await self._update_join_states(requester, target_user)
+
+    async def _user_left_room(self, user_id: UserID) -> None:
+        await self.store.add_profile_updates(
+            user_id=user_id,
+            action=ProfileUpdateAction.LEFT_ROOM.value,
+            updated_fields=None,
+        )
+
+    def user_left_room(self, user: UserID, room_id: str) -> None:
+        if self.hs.is_mine_id(user.to_string()):
+            self.hs.run_as_background_process(
+                "profile._user_left_room",
+                self._user_left_room,
+                user_id=user,
+            )
 
     async def delete_profile_upon_deactivation(
         self,

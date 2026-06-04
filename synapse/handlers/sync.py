@@ -38,6 +38,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    ProfileUpdateAction,
     StickyEvent,
 )
 from synapse.api.filtering import FilterCollection
@@ -2229,15 +2230,30 @@ class SyncHandler:
         if not updates:
             return
 
-        updated_user_ids = {update.user_id for update in updates}
-        shared_user_ids = await self.store.do_users_share_a_room(
+        updated_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.UPDATE.value
+        }
+        shared_updated_user_ids = await self.store.do_users_share_a_room(
             user_id, updated_user_ids
         )
-        shared_user_ids.add(user_id)
+        shared_updated_user_ids.add(user_id)
+        left_room_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.LEFT_ROOM.value
+        }
+        shared_left_user_ids = await self.store.do_users_share_a_room(
+            user_id, left_room_user_ids
+        )
+        no_longer_sharing_rooms_user_ids = set(left_room_user_ids) - set(
+            shared_left_user_ids
+        )
 
         user_fields: dict[str, set[str]] = {}
         for update in updates:
-            if update.user_id not in shared_user_ids:
+            if not update.field_name or update.user_id not in shared_updated_user_ids:
                 continue
             user_fields.setdefault(update.user_id, set()).add(update.field_name)
 
@@ -2273,6 +2289,10 @@ class SyncHandler:
 
             if per_user_updates:
                 profile_updates[other_user_id] = per_user_updates
+
+        for other_user_id in no_longer_sharing_rooms_user_ids:
+            # Return an empty dictionary to the client
+            profile_updates[other_user_id] = {}
 
         if profile_updates:
             sync_result_builder.profile_updates = profile_updates

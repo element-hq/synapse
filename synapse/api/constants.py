@@ -383,6 +383,11 @@ class ProfileFields:
     AVATAR_URL: Final = "avatar_url"
 
 
+class ProfileUpdateAction(enum.Enum):
+    LEFT_ROOM = "left_room"
+    UPDATE = "update"
+
+
 class StickyEventField(TypedDict):
     """
     Dict content of the `sticky` part of an event.

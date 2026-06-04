@@ -772,6 +772,9 @@ class ProfileUpdatesStreamRow:
 
     user_id: UserID
     """The full user ID with the profile update."""
+    action: str
+    """The action, either 'update' for a field update or 'left_room' if the user left a room,
+    see ProfileUpdateAction constant."""
     field_name: str
     """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles """
 
@@ -800,9 +803,9 @@ class ProfileUpdatesStream(_StreamFromIdGen):
             (
                 stream_id,
                 # These are the args to `ProfileUpdatesStreamRow`
-                (user_id, field_name),
+                (user_id, action, field_name),
             )
-            for stream_id, user_id, field_name in updates
+            for stream_id, user_id, action, field_name in updates
         ]
 
         if not rows:
