@@ -921,7 +921,7 @@ class E2eKeysHandler:
         device_keys = keys["device_keys"]
         # MSC4350: validate / strip the unstable impersonator field
         # depending on whether the experimental flag is enabled.
-        self._handle_msc4350_impersonator(user_id, device_id, device_keys)
+        await self._handle_msc4350_impersonator(user_id, device_id, device_keys)
         logger.info(
             "Updating device_keys for device %r for user %s at %d",
             device_id,
@@ -954,7 +954,7 @@ class E2eKeysHandler:
     # responses for the impersonator pointer.
     _MSC4350_IMPERSONATOR_FIELD = "fi.mau.msc4350.impersonator"
 
-    def _handle_msc4350_impersonator(
+    async def _handle_msc4350_impersonator(
         self, user_id: str, device_id: str, device_keys: JsonDict
     ) -> None:
         """Process the optional MSC4350 `fi.mau.msc4350.impersonator` field on
@@ -970,13 +970,15 @@ class E2eKeysHandler:
               (user_id, device_id, algorithms, keys)
             * `signatures` MUST contain a signature from the impersonator
               user keyed by `ed25519:<impersonator.device_id>`
-        - The cryptographic verification of that signature against the
-          impersonator device's actual ed25519 key is deferred to a
-          subsequent sprint; this method only enforces structural rules.
+            * for a LOCAL impersonator device, the ed25519 signature MUST
+              cryptographically verify against the impersonator device's
+              stored ed25519 public key. For a remote impersonator the
+              upload is accepted with a warning log; the recipient client
+              will still validate the signature per spec.
           See https://github.com/matrix-org/matrix-spec-proposals/pull/4350
 
         Raises:
-            SynapseError: with HTTP 400 if structural validation fails.
+            SynapseError: with HTTP 400 if structural or signature validation fails.
         """
         if self._MSC4350_IMPERSONATOR_FIELD not in device_keys:
             return
@@ -1029,8 +1031,6 @@ class E2eKeysHandler:
 
         # The device's signatures map MUST include a signature from the
         # impersonator user keyed by `ed25519:<impersonator.device_id>`.
-        # We only check that the entry exists; the actual signature
-        # verification will land in the next sprint.
         sigs = device_keys.get("signatures", {})
         imp_user = impersonator["user_id"]
         imp_device = impersonator["device_id"]
@@ -1044,6 +1044,59 @@ class E2eKeysHandler:
             _bad(
                 "device_keys.signatures MUST contain a signature from "
                 f"{imp_user} keyed by {expected_key!r}"
+            )
+
+        # Cryptographic verification of the impersonator signature.
+        # For LOCAL impersonator users we look up the impersonator
+        # device's stored ed25519 public key and verify the signature
+        # over the canonical JSON of the device entry. For remote
+        # impersonators (federation) we accept the upload with a warning
+        # — recipient clients still validate per spec.
+        if self.is_mine(UserID.from_string(imp_user)):
+            stored = await self.store.get_e2e_device_keys_and_signatures(
+                [(imp_user, imp_device)]
+            )
+            stored_device = (stored.get(imp_user) or {}).get(imp_device)
+            stored_keys = stored_device.keys if stored_device is not None else None
+            if not stored_keys:
+                _bad(
+                    f"local impersonator device {imp_user}/{imp_device} has "
+                    "no uploaded keys; upload the bridge bot's device first"
+                )
+            imp_ed25519 = stored_keys.get("keys", {}).get(expected_key)
+            if not imp_ed25519:
+                _bad(
+                    f"local impersonator device {imp_user}/{imp_device} has "
+                    f"no {expected_key!r} entry in its stored keys"
+                )
+            try:
+                verify_key = decode_verify_key_bytes(
+                    expected_key, decode_base64(imp_ed25519)
+                )
+            except Exception as e:
+                logger.warning(
+                    "MSC4350: malformed stored ed25519 key for impersonator "
+                    "%s/%s: %s",
+                    imp_user,
+                    imp_device,
+                    e,
+                )
+                _bad("could not decode stored impersonator ed25519 key")
+            try:
+                verify_signed_json(device_keys, imp_user, verify_key)
+            except SignatureVerifyException:
+                _bad(
+                    "impersonator signature failed cryptographic verification "
+                    f"against {imp_user}/{imp_device} ed25519 key"
+                )
+        else:
+            logger.info(
+                "MSC4350: skipping crypto verification of remote impersonator "
+                "%s/%s on upload by %s/%s — recipient clients will validate",
+                imp_user,
+                imp_device,
+                user_id,
+                device_id,
             )
 
     async def _augment_msc4350_signatures(

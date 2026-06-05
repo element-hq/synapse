@@ -2025,19 +2025,91 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         )
 
 
-class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
-    """Sprint 2 coverage for MSC4350: structural validation of the
-    `fi.mau.msc4350.impersonator` field on /keys/upload device entries.
+class _MSC4350TestBase(unittest.HomeserverTestCase):
+    """Shared scaffolding for MSC4350 test cases (Sprints 2, 3, 4).
 
-    Cryptographic signature verification is deferred to a later sprint;
-    these tests only cover field shape + flag-gating.
+    Provides helpers to:
+      - Generate an ed25519 keypair for a bridge bot device and upload
+        the corresponding device-keys entry to the test homeserver.
+      - Build impersonatable device-keys payloads with a real signature
+        from the bot's ed25519 key (so cryptographic verification passes).
+      - Build *unsigned* impersonatable payloads for tests that only
+        exercise structural validation (and don't reach the crypto check).
     """
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.handler = hs.get_e2e_keys_handler()
         self.store = self.hs.get_datastores().main
 
-    def _ghost_payload(
+    def _upload_bot_device(self, bot_user: str, bot_device: str) -> "key.SigningKey":
+        """Generate an ed25519 keypair, build the bridge-bot device-keys
+        entry, upload it, and return the corresponding signing key for use
+        by callers signing impersonatable ghost devices."""
+        signing_key = key.generate_signing_key(bot_device)
+        verify_key_b64 = key.encode_verify_key_base64(signing_key.verify_key)
+        bot_device_keys: JsonDict = {
+            "user_id": bot_user,
+            "device_id": bot_device,
+            "algorithms": [
+                "m.olm.v1.curve25519-aes-sha2",
+                RoomEncryptionAlgorithms.MEGOLM_V1_AES_SHA2,
+            ],
+            "keys": {
+                f"curve25519:{bot_device}": "bot-curve25519-placeholder",
+                f"ed25519:{bot_device}": verify_key_b64,
+            },
+            "signatures": {},
+        }
+        sign.sign_json(bot_device_keys, bot_user, signing_key)
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                bot_user, bot_device, {"device_keys": bot_device_keys}
+            )
+        )
+        return signing_key
+
+    def _build_impersonator_subdict(
+        self, bot_user: str, bot_device: str, ed25519_b64: str
+    ) -> JsonDict:
+        return {
+            "user_id": bot_user,
+            "device_id": bot_device,
+            "algorithms": [
+                "m.olm.v1.curve25519-aes-sha2",
+                RoomEncryptionAlgorithms.MEGOLM_V1_AES_SHA2,
+            ],
+            "keys": {
+                f"curve25519:{bot_device}": "bot-curve25519-placeholder",
+                f"ed25519:{bot_device}": ed25519_b64,
+            },
+        }
+
+    def _signed_ghost_payload(
+        self,
+        ghost_user: str,
+        ghost_device: str,
+        bot_user: str,
+        bot_device: str,
+        signing_key: "key.SigningKey",
+    ) -> JsonDict:
+        """Build an impersonatable ghost device-keys entry with a real
+        ed25519 signature from the supplied bot signing key. Round-trips
+        through cryptographic verification."""
+        verify_key_b64 = key.encode_verify_key_base64(signing_key.verify_key)
+        device_keys: JsonDict = {
+            "user_id": ghost_user,
+            "device_id": ghost_device,
+            "algorithms": [],
+            "keys": {},
+            "signatures": {},
+            "fi.mau.msc4350.impersonator": self._build_impersonator_subdict(
+                bot_user, bot_device, verify_key_b64
+            ),
+        }
+        sign.sign_json(device_keys, bot_user, signing_key)
+        return device_keys
+
+    def _unsigned_ghost_payload(
         self,
         ghost_user: str,
         ghost_device: str,
@@ -2047,48 +2119,37 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
         algorithms: list | None = None,
         keys: dict | None = None,
         include_signature: bool = True,
-        impersonator_overrides: dict | None = None,
     ) -> JsonDict:
-        """Build a synthetic impersonatable-device upload payload."""
-        impersonator = {
-            "user_id": bot_user,
-            "device_id": bot_device,
-            "algorithms": [
-                "m.olm.v1.curve25519-aes-sha2",
-                "m.megolm.v1.aes-sha2",
-            ],
-            "keys": {
-                f"curve25519:{bot_device}": "bot-curve25519-key-placeholder",
-                f"ed25519:{bot_device}": "bot-ed25519-key-placeholder",
-            },
-        }
-        if impersonator_overrides is not None:
-            impersonator.update(impersonator_overrides)
-
-        signatures: dict = {}
+        """Build a payload that will fail structural validation before
+        cryptographic checks run. Used by Sprint 2 rejection tests."""
+        signatures: JsonDict = {}
         if include_signature:
             signatures = {
-                bot_user: {
-                    f"ed25519:{bot_device}": "signature-placeholder-not-cryptographically-verified-yet",
-                }
+                bot_user: {f"ed25519:{bot_device}": "placeholder-signature"}
             }
-
         return {
             "user_id": ghost_user,
             "device_id": ghost_device,
             "algorithms": [] if algorithms is None else algorithms,
             "keys": {} if keys is None else keys,
             "signatures": signatures,
-            "fi.mau.msc4350.impersonator": impersonator,
+            "fi.mau.msc4350.impersonator": self._build_impersonator_subdict(
+                bot_user, bot_device, "placeholder-ed25519-key"
+            ),
         }
 
+
+class MSC4350UploadValidationTestCase(_MSC4350TestBase):
+    """Sprint 2 coverage: structural validation of the
+    fi.mau.msc4350.impersonator field on /keys/upload."""
+
     def test_field_stripped_when_flag_off(self) -> None:
-        """Without `msc4350_enabled`, the unstable impersonator field is
+        """Without msc4350_enabled, the unstable impersonator field is
         silently dropped so the server's behaviour is indistinguishable
         from one that doesn't know MSC4350."""
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
-        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+        device_keys = self._unsigned_ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
 
         self.get_success(
             self.handler.upload_keys_for_user(
@@ -2096,16 +2157,17 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # The field must have been popped before reaching storage.
-        # (Mutating the caller's dict in place is intentional and matches
-        # the existing handler-passed-dict idiom.)
         self.assertNotIn("fi.mau.msc4350.impersonator", device_keys)
 
     @override_config({"experimental_features": {"msc4350_enabled": True}})
     def test_valid_payload_accepted(self) -> None:
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
-        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+
+        signing_key = self._upload_bot_device(bot, "BOTDEV")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", signing_key
+        )
 
         self.get_success(
             self.handler.upload_keys_for_user(
@@ -2113,14 +2175,14 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # Field preserved through validation
+        # Field preserved through validation + crypto verification.
         self.assertIn("fi.mau.msc4350.impersonator", device_keys)
 
     @override_config({"experimental_features": {"msc4350_enabled": True}})
     def test_non_empty_algorithms_rejected(self) -> None:
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
-        device_keys = self._ghost_payload(
+        device_keys = self._unsigned_ghost_payload(
             ghost,
             "GHOSTDEV",
             bot,
@@ -2138,7 +2200,7 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
     def test_non_empty_keys_rejected(self) -> None:
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
-        device_keys = self._ghost_payload(
+        device_keys = self._unsigned_ghost_payload(
             ghost,
             "GHOSTDEV",
             bot,
@@ -2156,8 +2218,7 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
     def test_impersonator_missing_required_field_rejected(self) -> None:
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
-        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
-        # Drop a required sub-field from the impersonator
+        device_keys = self._unsigned_ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
         del device_keys["fi.mau.msc4350.impersonator"]["device_id"]
         self.get_failure(
             self.handler.upload_keys_for_user(
@@ -2170,7 +2231,7 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
     def test_missing_signature_rejected(self) -> None:
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
-        device_keys = self._ghost_payload(
+        device_keys = self._unsigned_ghost_payload(
             ghost, "GHOSTDEV", bot, "BOTDEV", include_signature=False
         )
         self.get_failure(
@@ -2182,12 +2243,13 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
 
     @override_config({"experimental_features": {"msc4350_enabled": True}})
     def test_impersonator_field_round_trips_through_storage(self) -> None:
-        """The unstable field, once accepted, persists in the device_keys
-        JSON blob and reappears when we read it back via the C-S API."""
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
-        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
 
+        signing_key = self._upload_bot_device(bot, "BOTDEV")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", signing_key
+        )
         self.get_success(
             self.handler.upload_keys_for_user(
                 ghost, "GHOSTDEV", {"device_keys": device_keys}
@@ -2204,54 +2266,19 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
         )
 
 
-class MSC4350QueryAugmentationTestCase(unittest.HomeserverTestCase):
-    """Sprint 3 coverage for MSC4350: /keys/query surfaces the impersonator
-    field and any cross-signing signatures the impersonator user has made
-    over impersonatable devices, regardless of who is querying."""
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.handler = hs.get_e2e_keys_handler()
-        self.store = self.hs.get_datastores().main
-
-    def _ghost_payload(
-        self,
-        ghost_user: str,
-        ghost_device: str,
-        bot_user: str,
-        bot_device: str,
-    ) -> JsonDict:
-        return {
-            "user_id": ghost_user,
-            "device_id": ghost_device,
-            "algorithms": [],
-            "keys": {},
-            "signatures": {
-                bot_user: {
-                    f"ed25519:{bot_device}": "bot-signature-placeholder",
-                }
-            },
-            "fi.mau.msc4350.impersonator": {
-                "user_id": bot_user,
-                "device_id": bot_device,
-                "algorithms": [
-                    "m.olm.v1.curve25519-aes-sha2",
-                    "m.megolm.v1.aes-sha2",
-                ],
-                "keys": {
-                    f"curve25519:{bot_device}": "bot-curve25519-placeholder",
-                    f"ed25519:{bot_device}": "bot-ed25519-placeholder",
-                },
-            },
-        }
+class MSC4350QueryAugmentationTestCase(_MSC4350TestBase):
+    """Sprint 3 coverage: /keys/query surfaces the impersonator field and
+    impersonator-user cross-signatures over impersonatable devices."""
 
     @override_config({"experimental_features": {"msc4350_enabled": True}})
     def test_impersonator_field_in_query_response(self) -> None:
-        """A /keys/query response for an impersonatable device must include
-        the impersonator field and the bridge-bot device signature."""
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
 
-        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+        signing_key = self._upload_bot_device(bot, "BOTDEV")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", signing_key
+        )
         self.get_success(
             self.handler.upload_keys_for_user(
                 ghost, "GHOSTDEV", {"device_keys": device_keys}
@@ -2265,31 +2292,30 @@ class MSC4350QueryAugmentationTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             ghost_device["fi.mau.msc4350.impersonator"]["user_id"], bot
         )
-        # The bot's device signature (carried inside the device-keys upload)
-        # must round-trip through the query response.
+        # Bot's own device signature over the entry must round-trip.
         self.assertIn(bot, ghost_device["signatures"])
         self.assertIn("ed25519:BOTDEV", ghost_device["signatures"][bot])
 
     @override_config({"experimental_features": {"msc4350_enabled": True}})
     def test_impersonator_cross_signature_surfaced(self) -> None:
-        """If the impersonator user has uploaded a cross-signing signature
-        over the impersonatable device (via /keys/signatures/upload), the
-        signature MUST appear in /keys/query responses per MSC4350."""
+        """Cross-signature from the impersonator user uploaded separately
+        (via /keys/signatures/upload) MUST appear in /keys/query responses."""
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
 
-        # 1. Upload the ghost's impersonatable device entry
-        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+        signing_key = self._upload_bot_device(bot, "BOTDEV")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", signing_key
+        )
         self.get_success(
             self.handler.upload_keys_for_user(
                 ghost, "GHOSTDEV", {"device_keys": device_keys}
             )
         )
 
-        # 2. Inject a synthetic cross-signature from the bridge bot's
-        #    self-signing-key over the ghost's device. In production this
-        #    arrives via /keys/signatures/upload; for the unit test we
-        #    write directly to the storage layer.
+        # Inject a synthetic cross-signature from the bot's self-signing-key
+        # directly into storage. In production this arrives via
+        # /keys/signatures/upload.
         synth_key_id = "ed25519:bot-self-signing-key"
         synth_sig = "synthetic-cross-signature-from-bot"
         self.get_success(
@@ -2306,31 +2332,105 @@ class MSC4350QueryAugmentationTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # 3. Query and confirm the synthetic signature appears
         result = self.get_success(self.handler.query_local_devices({ghost: None}))
         ghost_device = result[ghost]["GHOSTDEV"]
         signatures = ghost_device.get("signatures", {})
 
-        self.assertIn(bot, signatures, "Impersonator user must appear in signatures")
-        self.assertEqual(
-            signatures[bot].get(synth_key_id),
-            synth_sig,
-            "MSC4350-required cross-signature from impersonator user must "
-            "be surfaced in /keys/query response",
-        )
+        self.assertIn(bot, signatures)
+        self.assertEqual(signatures[bot].get(synth_key_id), synth_sig)
 
     def test_augmentation_no_op_when_flag_off(self) -> None:
-        """With the experimental flag off, no augmentation runs. The
-        device-keys JSON still round-trips because storage is JSON-blob,
-        but the explicit impersonator-cross-signature lookup is skipped
-        and no extra signatures appear."""
+        """With the flag off, _augment_msc4350_signatures returns without
+        any DB lookups even for input that would otherwise match."""
+        self.get_success(
+            self.handler._augment_msc4350_signatures({})  # type: ignore[arg-type]
+        )
+
+
+class MSC4350SignatureVerificationTestCase(_MSC4350TestBase):
+    """Sprint 4 coverage: cryptographic verification of the impersonator
+    signature on /keys/upload."""
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_valid_signature_accepted(self) -> None:
+        """A genuine signature from the impersonator device's ed25519 key
+        passes verification."""
         ghost = "@whatsapp_27:" + self.hs.hostname
         bot = "@whatsappbot:" + self.hs.hostname
 
-        # We can't even upload an impersonator-bearing payload with the
-        # flag off — the handler strips the field. So we test the
-        # augmentation path is a no-op by checking it doesn't raise even
-        # when called with an empty result set.
+        signing_key = self._upload_bot_device(bot, "BOTDEV")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", signing_key
+        )
         self.get_success(
-            self.handler._augment_msc4350_signatures({})  # type: ignore[arg-type]
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            )
+        )
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_forged_signature_rejected(self) -> None:
+        """A signature from a *different* ed25519 key (not the one stored
+        for the impersonator device) is rejected with HTTP 400."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+
+        # Upload bot device with the real signing key
+        self._upload_bot_device(bot, "BOTDEV")
+
+        # Build the ghost payload but sign it with an UNRELATED signing key
+        forger_key = key.generate_signing_key("forger")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", forger_key
+        )
+        # The impersonator field still references BOTDEV but the embedded
+        # ed25519 key is the forger's. Worse: the signature claims to be
+        # from BOTDEV. Verification must fail.
+        self.get_failure(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            ),
+            SynapseError,
+        )
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_unknown_local_impersonator_device_rejected(self) -> None:
+        """If the impersonator device hasn't been uploaded yet (so its
+        ed25519 key isn't in storage), the upload is rejected. Bridges
+        must upload the bot device before any impersonatable ghost devices."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+
+        # NB: NO call to _upload_bot_device here
+        signing_key = key.generate_signing_key("BOTDEV")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", signing_key
+        )
+        self.get_failure(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            ),
+            SynapseError,
+        )
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_remote_impersonator_skipped(self) -> None:
+        """For a remote impersonator user, the homeserver doesn't have
+        their device's ed25519 key locally. Spec says skip verification
+        with a warning; recipient clients validate. We assert the upload
+        succeeds without the local impersonator device existing."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        # Note: bot user is on a *different* server
+        remote_bot = "@whatsappbot:other.example"
+
+        signing_key = key.generate_signing_key("REMOTEBOT")
+        device_keys = self._signed_ghost_payload(
+            ghost, "GHOSTDEV", remote_bot, "REMOTEBOT", signing_key
+        )
+        # Should succeed even though we never uploaded REMOTEBOT to our
+        # local storage — crypto verification is skipped for remote users.
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            )
         )
