@@ -22,6 +22,7 @@ use pyo3::{
 use crate::config::SynapseConfig;
 use crate::storage::db::python_db_pool::PythonDatabasePool;
 use crate::storage::store::Store;
+use crate::UnwrapInfallible;
 
 pub mod versions;
 
@@ -42,7 +43,6 @@ impl RustHandlers {
             .call_method0("get_datastores")?
             .into_pyobject(py)
             .unwrap_infallible()
-            .unbind()
             .getattr("main")?
             .getattr("db_pool")?
             .extract()?;

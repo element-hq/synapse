@@ -37,7 +37,18 @@ impl DatabaseEngine {
 /// Wrapper for a `DatabasePool` from the Python side of Synapse.
 pub struct PythonDatabasePool {
     /// The underlying `DatabasePool`
-    database_pool_py: Bound<'py, PyAny>,
+    database_pool_py: Py<PyAny>,
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PythonDatabasePool {
+    type Error = PyErr;
+
+    /// Extract from a Python `DatabasePool` passed as an argument.
+    fn extract(database_pool_py: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            database_pool_py: database_pool_py.to_owned().unbind(),
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -151,8 +162,6 @@ impl<'a, 'py> FromPyObject<'a, 'py> for LoggingTransactionWrapper {
     type Error = PyErr;
 
     /// Extract from a Python `LoggingTransaction` passed as an argument.
-    ///
-    /// The resulting wrapper has `done_tx = None`; Python owns the transaction lifetime.
     fn extract(logging_transaction_py: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         let database_engine = detect_engine(&logging_transaction_py.to_owned())?;
         Ok(Self {
