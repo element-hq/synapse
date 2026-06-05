@@ -560,6 +560,70 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             device_query,
         )
 
+    async def get_msc4350_impersonator_cross_signatures(
+        self,
+        triples: Collection[tuple[str, str, str]],
+    ) -> Mapping[tuple[str, str], Sequence[tuple[str, str, str]]]:
+        """MSC4350: fetch cross-signing signatures made by an impersonator
+        user over an impersonatable device.
+
+        The existing `_get_e2e_cross_signing_signatures_for_devices` only
+        returns *self*-cross-signatures (signing user == target user).
+        For MSC4350, the impersonator user is by definition a different
+        user from the impersonatable device's owner, so we need a separate
+        lookup that takes the impersonator user as the signing user.
+
+        Args:
+            triples: iterable of (target_user_id, target_device_id,
+                impersonator_user_id). The impersonator_user_id is the
+                value of `fi.mau.msc4350.impersonator.user_id` on the
+                target device's keys entry.
+
+        Returns:
+            Mapping from (target_user_id, target_device_id) to a list of
+            (signing_user_id, key_id, signature) tuples. Empty list for
+            triples with no matching cross-signatures.
+        """
+        if not triples:
+            return {}
+
+        def _txn(
+            txn: LoggingTransaction,
+            triples: Collection[tuple[str, str, str]],
+        ) -> Mapping[tuple[str, str], list[tuple[str, str, str]]]:
+            where_clause_sql, where_clause_params = make_tuple_in_list_sql_clause(
+                self.database_engine,
+                columns=("target_user_id", "target_device_id", "user_id"),
+                iterable=triples,
+            )
+            sql = f"""
+                SELECT user_id, key_id, target_user_id, target_device_id, signature
+                FROM e2e_cross_signing_signatures WHERE {where_clause_sql}
+            """
+            txn.execute(sql, where_clause_params)
+
+            result: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
+            for target_user, target_device, _impersonator in triples:
+                result.setdefault((target_user, target_device), [])
+
+            for (
+                signing_user,
+                key_id,
+                target_user,
+                target_device,
+                signature,
+            ) in txn.fetchall():
+                result[(target_user, target_device)].append(
+                    (signing_user, key_id, signature)
+                )
+            return result
+
+        return await self.db_pool.runInteraction(
+            "get_msc4350_impersonator_cross_signatures",
+            _txn,
+            triples,
+        )
+
     async def get_e2e_one_time_keys(
         self, user_id: str, device_id: str, key_ids: list[str]
     ) -> dict[tuple[str, str], str]:

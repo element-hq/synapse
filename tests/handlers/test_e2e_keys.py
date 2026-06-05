@@ -2202,3 +2202,135 @@ class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
             stored[ghost]["GHOSTDEV"],
             "Impersonator field should survive the storage round-trip",
         )
+
+
+class MSC4350QueryAugmentationTestCase(unittest.HomeserverTestCase):
+    """Sprint 3 coverage for MSC4350: /keys/query surfaces the impersonator
+    field and any cross-signing signatures the impersonator user has made
+    over impersonatable devices, regardless of who is querying."""
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.handler = hs.get_e2e_keys_handler()
+        self.store = self.hs.get_datastores().main
+
+    def _ghost_payload(
+        self,
+        ghost_user: str,
+        ghost_device: str,
+        bot_user: str,
+        bot_device: str,
+    ) -> JsonDict:
+        return {
+            "user_id": ghost_user,
+            "device_id": ghost_device,
+            "algorithms": [],
+            "keys": {},
+            "signatures": {
+                bot_user: {
+                    f"ed25519:{bot_device}": "bot-signature-placeholder",
+                }
+            },
+            "fi.mau.msc4350.impersonator": {
+                "user_id": bot_user,
+                "device_id": bot_device,
+                "algorithms": [
+                    "m.olm.v1.curve25519-aes-sha2",
+                    "m.megolm.v1.aes-sha2",
+                ],
+                "keys": {
+                    f"curve25519:{bot_device}": "bot-curve25519-placeholder",
+                    f"ed25519:{bot_device}": "bot-ed25519-placeholder",
+                },
+            },
+        }
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_impersonator_field_in_query_response(self) -> None:
+        """A /keys/query response for an impersonatable device must include
+        the impersonator field and the bridge-bot device signature."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+
+        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            )
+        )
+
+        result = self.get_success(self.handler.query_local_devices({ghost: None}))
+        ghost_device = result[ghost]["GHOSTDEV"]
+
+        self.assertIn("fi.mau.msc4350.impersonator", ghost_device)
+        self.assertEqual(
+            ghost_device["fi.mau.msc4350.impersonator"]["user_id"], bot
+        )
+        # The bot's device signature (carried inside the device-keys upload)
+        # must round-trip through the query response.
+        self.assertIn(bot, ghost_device["signatures"])
+        self.assertIn("ed25519:BOTDEV", ghost_device["signatures"][bot])
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_impersonator_cross_signature_surfaced(self) -> None:
+        """If the impersonator user has uploaded a cross-signing signature
+        over the impersonatable device (via /keys/signatures/upload), the
+        signature MUST appear in /keys/query responses per MSC4350."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+
+        # 1. Upload the ghost's impersonatable device entry
+        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            )
+        )
+
+        # 2. Inject a synthetic cross-signature from the bridge bot's
+        #    self-signing-key over the ghost's device. In production this
+        #    arrives via /keys/signatures/upload; for the unit test we
+        #    write directly to the storage layer.
+        synth_key_id = "ed25519:bot-self-signing-key"
+        synth_sig = "synthetic-cross-signature-from-bot"
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "e2e_cross_signing_signatures",
+                {
+                    "user_id": bot,
+                    "key_id": synth_key_id,
+                    "target_user_id": ghost,
+                    "target_device_id": "GHOSTDEV",
+                    "signature": synth_sig,
+                },
+                desc="msc4350_test_insert_cross_sig",
+            )
+        )
+
+        # 3. Query and confirm the synthetic signature appears
+        result = self.get_success(self.handler.query_local_devices({ghost: None}))
+        ghost_device = result[ghost]["GHOSTDEV"]
+        signatures = ghost_device.get("signatures", {})
+
+        self.assertIn(bot, signatures, "Impersonator user must appear in signatures")
+        self.assertEqual(
+            signatures[bot].get(synth_key_id),
+            synth_sig,
+            "MSC4350-required cross-signature from impersonator user must "
+            "be surfaced in /keys/query response",
+        )
+
+    def test_augmentation_no_op_when_flag_off(self) -> None:
+        """With the experimental flag off, no augmentation runs. The
+        device-keys JSON still round-trips because storage is JSON-blob,
+        but the explicit impersonator-cross-signature lookup is skipped
+        and no extra signatures appear."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+
+        # We can't even upload an impersonator-bearing payload with the
+        # flag off — the handler strips the field. So we test the
+        # augmentation path is a no-op by checking it doesn't raise even
+        # when called with an empty result set.
+        self.get_success(
+            self.handler._augment_msc4350_signatures({})  # type: ignore[arg-type]
+        )

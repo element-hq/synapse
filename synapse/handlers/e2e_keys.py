@@ -573,6 +573,10 @@ class E2eKeysHandler:
             local_query, include_displaynames
         )
 
+        # MSC4350: augment with cross-signing signatures from the impersonator
+        # user over any impersonatable devices.
+        await self._augment_msc4350_signatures(results)
+
         # Check if the application services have any additional results.
         if self._query_appservices_for_keys:
             # Query the appservices for any keys.
@@ -1041,6 +1045,64 @@ class E2eKeysHandler:
                 "device_keys.signatures MUST contain a signature from "
                 f"{imp_user} keyed by {expected_key!r}"
             )
+
+    async def _augment_msc4350_signatures(
+        self, results: dict[str, dict[str, JsonDict]]
+    ) -> None:
+        """MSC4350: for every device in `results` that carries an
+        `fi.mau.msc4350.impersonator` field, look up any cross-signing
+        signatures the impersonator user has made over the impersonatable
+        device and merge them into the device's `signatures` map.
+
+        Mutates `results` in place.
+
+        Behind the experimental flag — when the flag is off, this is a no-op.
+
+        Note: cross-signatures already present in the device-keys JSON blob
+        (which is what the bridge bot's device signature looks like, and
+        what the double-puppet user's self-signing-key signature looks like)
+        are preserved untouched by the storage layer. This method
+        ADDITIONALLY surfaces cross-signing signatures the impersonator user
+        may have uploaded via `/keys/signatures/upload` *after* the initial
+        device upload.
+
+        See https://github.com/matrix-org/matrix-spec-proposals/pull/4350
+        """
+        if not self.config.experimental.msc4350_enabled:
+            return
+
+        # Collect (target_user, target_device, impersonator_user) triples.
+        triples: list[tuple[str, str, str]] = []
+        for user_id, device_keys in results.items():
+            for device_id, device_info in device_keys.items():
+                impersonator = device_info.get(
+                    self._MSC4350_IMPERSONATOR_FIELD
+                )
+                if not isinstance(impersonator, dict):
+                    continue
+                imp_user = impersonator.get("user_id")
+                if not isinstance(imp_user, str) or imp_user == user_id:
+                    # The impersonator user MUST differ from the target user
+                    # for a meaningful lookup; if they match it's the
+                    # double-puppet case and self-cross-signatures are
+                    # already picked up by the regular flow.
+                    continue
+                triples.append((user_id, device_id, imp_user))
+
+        if not triples:
+            return
+
+        sigs_by_device = await self.store.get_msc4350_impersonator_cross_signatures(
+            triples
+        )
+
+        for (target_user, target_device), sig_list in sigs_by_device.items():
+            if not sig_list:
+                continue
+            device_info = results[target_user][target_device]
+            signatures = device_info.setdefault("signatures", {})
+            for signing_user, key_id, signature in sig_list:
+                signatures.setdefault(signing_user, {})[key_id] = signature
 
     async def _upload_one_time_keys_for_user(
         self, user_id: str, device_id: str, time_now: int, one_time_keys: JsonDict
