@@ -1284,8 +1284,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
             )
         )
-        self.helper.send_messages(room_id=self.joined_room, num_events=1, tok=self.other_tok)
-        self.helper.send_messages(room_id=self.joined_room, num_events=10, tok=third_tok)
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=1, tok=self.other_tok
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=10, tok=third_tok
+        )
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 requester,
