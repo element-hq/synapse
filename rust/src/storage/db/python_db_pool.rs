@@ -217,7 +217,7 @@ impl LoggingTransactionWrapper {
         Ok(())
     }
 
-    pub fn fetchall<T: FromPyObject<'py> + ValidDatabaseReturnType>(
+    pub fn fetchall<'py, T: FromPyObjectOwned<'py> + ValidDatabaseReturnType>(
         &mut self,
         py: Python<'py>,
     ) -> anyhow::Result<Vec<T>> {
