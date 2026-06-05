@@ -2257,78 +2257,84 @@ class SyncHandler:
             to_id=now_token.profile_updates_key,
             user_id=user_id,
         )
-        # Only include updates we've got for us specifically
-        updates = [
-            update for update in updates if update.stream_id in interesting_updates
-        ]
-
         if include_users:
             # Further filter down to selected included users
             updates = [update for update in updates if update.user_id in include_users]
 
-        if not updates:
-            return
-
-        updated_user_ids = {
-            update.user_id
-            for update in updates
-            if update.action == ProfileUpdateAction.UPDATE.value
-        }
-        updated_user_ids.add(user_id)
         left_room_user_ids = {
             update.user_id
             for update in updates
             if update.action == ProfileUpdateAction.LEFT_ROOM.value
         }
-        shared_left_user_ids = await self.store.do_users_share_a_room(
-            user_id, left_room_user_ids
-        )
-        no_longer_sharing_rooms_user_ids = set(left_room_user_ids) - set(
-            shared_left_user_ids
-        )
+        # Only include updates we've got for us specifically for field updates
+        updates = [
+            update for update in updates if update.stream_id in interesting_updates
+        ]
+        updated_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.UPDATE.value
+        }
+        no_longer_sharing_rooms_user_ids: set[str] = set()
+        if left_room_user_ids:
+            shared_left_user_ids = await self.store.do_users_share_a_room(
+                user_id, left_room_user_ids
+            )
+            no_longer_sharing_rooms_user_ids = set(left_room_user_ids) - set(
+                shared_left_user_ids
+            )
 
-        user_fields: dict[str, set[str]] = {}
-        for update in updates:
-            if not update.field_name or update.user_id not in updated_user_ids:
-                continue
-            user_fields.setdefault(update.user_id, set()).add(update.field_name)
-
-        # Note: there's a small race condition here where a profile update may
-        # occur between fetching `now_token` above and reaching this step. In
-        # that case, the profile information will be newer than `now_token`.
-        # This is fine, as users will generally always want the latest profile
-        # information. However, it does mean that on the next sync, the same
-        # profile update will come down a second time.
-        #
-        # Hopefully clients can just filter these out.
-        profile_data_by_user = await self.store.get_profile_data_for_users(
-            user_fields.keys()
-        )
+        if not updated_user_ids and not left_room_user_ids:
+            return
 
         # Serialise the profile updates into the sync response format.
         # user ID -> {profile field -> value | null if unset }
         profile_updates: dict[str, dict[str, JsonValue | None]] = {}
-        for other_user_id, fields in user_fields.items():
-            profile_data = profile_data_by_user.get(other_user_id)
-            if profile_data is None:
-                # No profile data for this user, just return a blank dictionary
-                # in incremental sync, telling the clients to remove all profile
-                # information for this user.
+
+        # Process field updates
+        if updated_user_ids:
+            updated_user_ids.add(user_id)
+            user_fields: dict[str, set[str]] = {}
+            for update in updates:
+                if not update.field_name or update.user_id not in updated_user_ids:
+                    continue
+                user_fields.setdefault(update.user_id, set()).add(update.field_name)
+
+            # Note: there's a small race condition here where a profile update may
+            # occur between fetching `now_token` above and reaching this step. In
+            # that case, the profile information will be newer than `now_token`.
+            # This is fine, as users will generally always want the latest profile
+            # information. However, it does mean that on the next sync, the same
+            # profile update will come down a second time.
+            #
+            # Hopefully clients can just filter these out.
+            profile_data_by_user = await self.store.get_profile_data_for_users(
+                user_fields.keys()
+            )
+
+            for other_user_id, fields in user_fields.items():
+                profile_data = profile_data_by_user.get(other_user_id)
+                if profile_data is None:
+                    # No profile data for this user, just return a blank dictionary
+                    # in incremental sync, telling the clients to remove all profile
+                    # information for this user.
+                    profile_updates[other_user_id] = {}
+                    continue
+
+                per_user_updates: dict[str, JsonValue] = {}
+                for field_name in fields:
+                    per_user_updates[field_name] = cast(
+                        JsonValue, profile_data.get(field_name)
+                    )
+
+                if per_user_updates:
+                    profile_updates[other_user_id] = per_user_updates
+
+        # Process left rooms
+        if no_longer_sharing_rooms_user_ids:
+            for other_user_id in no_longer_sharing_rooms_user_ids:
+                # Return an empty dictionary to the client
                 profile_updates[other_user_id] = {}
-                continue
-
-            per_user_updates: dict[str, JsonValue] = {}
-            for field_name in fields:
-                per_user_updates[field_name] = cast(
-                    JsonValue, profile_data.get(field_name)
-                )
-
-            if per_user_updates:
-                profile_updates[other_user_id] = per_user_updates
-
-        for other_user_id in no_longer_sharing_rooms_user_ids:
-            # Return an empty dictionary to the client
-            profile_updates[other_user_id] = {}
 
         if profile_updates:
             sync_result_builder.profile_updates = profile_updates
