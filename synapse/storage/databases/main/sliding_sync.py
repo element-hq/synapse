@@ -204,6 +204,32 @@ class SlidingSyncStore(SQLBaseStore):
                 raise SlidingSyncUnknownPosition()
 
             (connection_key,) = row
+
+            if isinstance(self.database_engine, PostgresEngine):
+                # Lock the sliding sync connection row for update upfront,
+                # to prevent deadlocks between concurrent transactions
+                # (which can retry again and again without making progress).
+                #
+                # (We don't need to explicitly lock in the other branch,
+                # where we re-create the connection, as that implies a lock
+                # anyway)
+                #
+                # Specifically, the statements seen to deadlock against
+                # each other were
+                # `INSERT INTO sliding_sync_connection_lazy_members`
+                # with conflicting tuples on
+                #     "sliding_sync_connection_lazy_members_idx" UNIQUE, btree
+                #     (connection_key, room_id, user_id)
+                # https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS
+                txn.execute(
+                    """
+                    SELECT 1
+                    FROM sliding_sync_connections
+                    WHERE connection_key = ?
+                    FOR NO KEY UPDATE
+                    """,
+                    (connection_key,),
+                )
         else:
             # We're restarting the connection, so we clear the previous existing data we
             # used to track it. We do this here to ensure that if we get lots of
@@ -672,29 +698,6 @@ class SlidingSyncStore(SQLBaseStore):
         """Persist that we have sent lazy membership for the given user IDs."""
 
         now = self.clock.time_msec()
-
-        if isinstance(self.database_engine, PostgresEngine):
-            # If the update is large and there are multiple overlapping
-            # updates going on,
-            # multiple transactions can try to INSERT INTO sliding_sync_connection_lazy_members
-            # with conflicting tuples on
-            #     "sliding_sync_connection_lazy_members_idx" UNIQUE, btree
-            #     (connection_key, room_id, user_id)
-            # This causes a deadlock and eventually a DeadlockDetected error.
-            # The transactions get tried again and again and do not make progress.
-            # To avoid this, take a lock on the connection upfront.
-            # https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS
-            # (We could also consider sorting our insertions, but not clear if Postgres
-            # guarantees to preservee the insertion order)
-            txn.execute(
-                """
-                SELECT 1
-                FROM sliding_sync_connections
-                WHERE connection_key = ?
-                FOR NO KEY UPDATE
-                """,
-                (connection_key,),
-            )
 
         # Figure out which cache entries to add or update.
         #
