@@ -47,6 +47,7 @@ from synapse.api.constants import (
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
+from synapse.synapse_rust.events import Unsigned
 from synapse.types import JsonDict, Requester
 
 from . import EventBase, FrozenEventV2, StrippedStateEvent, make_event_from_dict
@@ -987,7 +988,7 @@ def validate_canonicaljson(value: Any) -> None:
 
 
 def maybe_upsert_event_field(
-    event: EventBase, container: JsonDict, key: str, value: object
+    event: EventBase, container: Unsigned, key: str, value: object
 ) -> bool:
     """Upsert an event field, but only if this doesn't make the event too large.
 
@@ -1031,7 +1032,7 @@ def strip_event(event: EventBase) -> JsonDict:
     return {
         "type": event.type,
         "state_key": event.state_key,
-        "content": event.content,
+        "content": dict(event.content),
         "sender": event.sender,
     }
 
