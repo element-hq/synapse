@@ -129,6 +129,19 @@ class ProfileHandler:
         if not room_ids:
             return
 
+        users_who_share_rooms = (
+            await self.store.get_local_users_who_share_room_with_user(
+                user_id.to_string()
+            )
+        )
+        # Remove ourselves from the user ID list
+        users_who_share_rooms.remove(user_id.to_string())
+        if users_who_share_rooms:
+            await self.store.track_profile_updates_per_user(
+                stream_id=stream_id,
+                user_ids=users_who_share_rooms,
+            )
+
         self._notifier.on_new_event(
             StreamKeyType.PROFILE_UPDATES, stream_id, rooms=room_ids
         )

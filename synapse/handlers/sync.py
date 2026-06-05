@@ -2252,8 +2252,18 @@ class SyncHandler:
             to_id=now_token.profile_updates_key,
             field_names=profile_fields,
         )
+        interesting_updates = await self.store.get_profile_updates_per_user_for_user(
+            from_id=since_token.profile_updates_key,
+            to_id=now_token.profile_updates_key,
+            user_id=user_id,
+        )
+        # Only include updates we've got for us specifically
+        updates = [
+            update for update in updates if update.stream_id in interesting_updates
+        ]
+
         if include_users:
-            # Filter down to selected included users
+            # Further filter down to selected included users
             updates = [update for update in updates if update.user_id in include_users]
 
         if not updates:
@@ -2264,10 +2274,7 @@ class SyncHandler:
             for update in updates
             if update.action == ProfileUpdateAction.UPDATE.value
         }
-        shared_updated_user_ids = await self.store.do_users_share_a_room(
-            user_id, updated_user_ids
-        )
-        shared_updated_user_ids.add(user_id)
+        updated_user_ids.add(user_id)
         left_room_user_ids = {
             update.user_id
             for update in updates
@@ -2282,7 +2289,7 @@ class SyncHandler:
 
         user_fields: dict[str, set[str]] = {}
         for update in updates:
-            if not update.field_name or update.user_id not in shared_updated_user_ids:
+            if not update.field_name or update.user_id not in updated_user_ids:
                 continue
             user_fields.setdefault(update.user_id, set()).add(update.field_name)
 

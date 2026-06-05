@@ -316,6 +316,53 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             (3, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, field_name),
         )
 
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_update_profile_set_field_writes_to_per_user_profile_tracking_table(
+        self,
+    ) -> None:
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        self.register_user("millie", "password")
+        millie_token = self.login("millie", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+        self.helper.join(room_id, "@millie:test", tok=millie_token)
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="m.status",
+                new_value='{"text": "Holiday"}',
+            )
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_per_user_for_user(
+                from_id=1,
+                to_id=2,
+                user_id="@roger:test",
+            )
+        )
+        self.assertEqual(per_user_updates, [2])
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_per_user_for_user(
+                from_id=1,
+                to_id=2,
+                user_id="@millie:test",
+            )
+        )
+        self.assertEqual(per_user_updates, [2])
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_per_user_for_user(
+                from_id=1,
+                to_id=2,
+                user_id=self.frank.to_string(),
+            )
+        )
+        self.assertEqual(per_user_updates, [])
+
     @parameterized.expand(
         [
             ["displayname", "Frank"],

@@ -540,6 +540,74 @@ class ProfileWorkerStore(SQLBaseStore):
             "add_profile_updates", _add_profile_updates_txn
         )
 
+    async def track_profile_updates_per_user(
+        self,
+        stream_id: int,
+        user_ids: set[str],
+    ) -> None:
+        """
+        Create tracking rows for profile updater per target user interested in profile
+        updates for the user triggering one.
+
+        Args:
+            stream_id: Stream ID referencing a `profile_updates` stream ID.
+            user_ids: A set of the full user IDs of the target users interested in
+                this change.
+        """
+
+        def _track_profile_updates_per_user_txn(txn: LoggingTransaction) -> None:
+            inserted_ts = self.clock.time_msec()
+            values = [[stream_id, user_id, inserted_ts] for user_id in user_ids]
+            self.db_pool.simple_insert_many_txn(
+                txn,
+                table="profile_updates_per_user",
+                keys=[
+                    "stream_id",
+                    "user_id",
+                    "inserted_ts",
+                ],
+                values=values,
+            )
+
+        return await self.db_pool.runInteraction(
+            "track_profile_updates_per_user",
+            _track_profile_updates_per_user_txn,
+        )
+
+    async def get_profile_updates_per_user_for_user(
+        self, *, from_id: int, to_id: int, user_id: str
+    ) -> list[int]:
+        """
+        Get profile updates per user stream ID's for a particular user.
+
+        Args:
+            from_id: The starting stream ID (exclusive)
+            to_id: The ending stream ID (inclusive)
+            user_id: The full user ID to filter on
+
+        Returns:
+            List of stream ID's.
+        """
+
+        def _get_profile_updates_per_user_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> list[int]:
+            sql = """
+            SELECT
+                stream_id
+            FROM profile_updates_per_user
+            WHERE
+                ? < stream_id AND stream_id <= ? AND user_id = ?
+            """
+            txn.execute(sql, (from_id, to_id, user_id))
+            rows = cast(list[tuple[int]], txn.fetchall())
+            return [row[0] for row in rows]
+
+        return await self.db_pool.runInteraction(
+            "get_profile_updates_per_user_for_user",
+            _get_profile_updates_per_user_for_user_txn,
+        )
+
     async def create_profile(self, user_id: UserID) -> None:
         """
         Create a blank profile for a user.
