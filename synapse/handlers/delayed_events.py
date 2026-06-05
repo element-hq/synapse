@@ -461,7 +461,7 @@ class DelayedEventsHandler:
         # the action to be done with the delay_id, but the worst that can happen without it
         # is the possibility of the delay_id disappearing after having checked for it here,
         # which isn't terrible since it's used here only for applying a ratelimit.
-        await self._store.has_delayed_event(delay_id)
+        await self._store.assert_delayed_event(delay_id)
 
         if self._auth.has_access_token(request):
             requester = await self._auth.get_user_by_req(request)
