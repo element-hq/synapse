@@ -523,8 +523,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
                 self.user1_access_token,
             )
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-            delay_id = channel.json_body.get("delay_id")
-            assert delay_id is not None
+            assert "delay_id" in channel.json_body
+            delay_id = channel.json_body["delay_id"]
             delay_ids.append(delay_id)
 
         for _ in range(2):
