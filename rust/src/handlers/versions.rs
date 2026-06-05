@@ -41,7 +41,7 @@ impl VersionsHandler {
                     .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3881)
                     .await?
             }
-            None => PerUserExperimentalFeature::MSC3881.is_globally_enabled(self.config),
+            None => PerUserExperimentalFeature::MSC3881.is_globally_enabled(&self.config),
         };
 
         let msc3575_enabled = match user_id {
@@ -50,7 +50,7 @@ impl VersionsHandler {
                     .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3575)
                     .await?
             }
-            None => PerUserExperimentalFeature::MSC3575.is_globally_enabled(self.config),
+            None => PerUserExperimentalFeature::MSC3575.is_globally_enabled(&self.config),
         };
 
         // TODO: Calculate these once since they shouldn't change after start-up.

@@ -25,7 +25,7 @@ pub enum PerUserExperimentalFeature {
 }
 
 impl PerUserExperimentalFeature {
-    pub fn is_globally_enabled(&self, config: SynapseConfig) -> bool {
+    pub fn is_globally_enabled(&self, config: &SynapseConfig) -> bool {
         match self {
             PerUserExperimentalFeature::MSC3881 => config.experimental.msc3881_enabled,
             PerUserExperimentalFeature::MSC3575 => config.experimental.msc3575_enabled,
