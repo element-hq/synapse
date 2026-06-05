@@ -465,12 +465,12 @@ class DelayedEventsHandler:
 
         if self._auth.has_access_token(request):
             requester = await self._auth.get_user_by_req(request)
-            user_id = requester.user.to_string()
+            requester_key = requester.user.to_string()
         else:
             requester = None
-            user_id = None
+            requester_key = request.getClientAddress().host
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
-            requester, (user_id, delay_id)
+            requester, (requester_key, delay_id)
         )
 
     async def _send_on_timeout(self) -> None:
