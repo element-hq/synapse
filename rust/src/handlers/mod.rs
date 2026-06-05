@@ -50,7 +50,10 @@ impl RustHandlers {
             .extract()?;
 
         // Store is shared across all of the handlers so let's use an `Arc`
-        let store = Arc::new(Store { config, db_pool });
+        let store = Arc::new(Store {
+            config,
+            db_pool: Box::new(db_pool),
+        });
 
         Ok(RustHandlers {
             versions: versions::VersionsHandler {
