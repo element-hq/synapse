@@ -2023,3 +2023,182 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
                 }
             },
         )
+
+
+class MSC4350UploadValidationTestCase(unittest.HomeserverTestCase):
+    """Sprint 2 coverage for MSC4350: structural validation of the
+    `fi.mau.msc4350.impersonator` field on /keys/upload device entries.
+
+    Cryptographic signature verification is deferred to a later sprint;
+    these tests only cover field shape + flag-gating.
+    """
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.handler = hs.get_e2e_keys_handler()
+        self.store = self.hs.get_datastores().main
+
+    def _ghost_payload(
+        self,
+        ghost_user: str,
+        ghost_device: str,
+        bot_user: str,
+        bot_device: str,
+        *,
+        algorithms: list | None = None,
+        keys: dict | None = None,
+        include_signature: bool = True,
+        impersonator_overrides: dict | None = None,
+    ) -> JsonDict:
+        """Build a synthetic impersonatable-device upload payload."""
+        impersonator = {
+            "user_id": bot_user,
+            "device_id": bot_device,
+            "algorithms": [
+                "m.olm.v1.curve25519-aes-sha2",
+                "m.megolm.v1.aes-sha2",
+            ],
+            "keys": {
+                f"curve25519:{bot_device}": "bot-curve25519-key-placeholder",
+                f"ed25519:{bot_device}": "bot-ed25519-key-placeholder",
+            },
+        }
+        if impersonator_overrides is not None:
+            impersonator.update(impersonator_overrides)
+
+        signatures: dict = {}
+        if include_signature:
+            signatures = {
+                bot_user: {
+                    f"ed25519:{bot_device}": "signature-placeholder-not-cryptographically-verified-yet",
+                }
+            }
+
+        return {
+            "user_id": ghost_user,
+            "device_id": ghost_device,
+            "algorithms": [] if algorithms is None else algorithms,
+            "keys": {} if keys is None else keys,
+            "signatures": signatures,
+            "fi.mau.msc4350.impersonator": impersonator,
+        }
+
+    def test_field_stripped_when_flag_off(self) -> None:
+        """Without `msc4350_enabled`, the unstable impersonator field is
+        silently dropped so the server's behaviour is indistinguishable
+        from one that doesn't know MSC4350."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            )
+        )
+
+        # The field must have been popped before reaching storage.
+        # (Mutating the caller's dict in place is intentional and matches
+        # the existing handler-passed-dict idiom.)
+        self.assertNotIn("fi.mau.msc4350.impersonator", device_keys)
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_valid_payload_accepted(self) -> None:
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            )
+        )
+
+        # Field preserved through validation
+        self.assertIn("fi.mau.msc4350.impersonator", device_keys)
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_non_empty_algorithms_rejected(self) -> None:
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+        device_keys = self._ghost_payload(
+            ghost,
+            "GHOSTDEV",
+            bot,
+            "BOTDEV",
+            algorithms=["m.olm.v1.curve25519-aes-sha2"],
+        )
+        self.get_failure(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            ),
+            SynapseError,
+        )
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_non_empty_keys_rejected(self) -> None:
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+        device_keys = self._ghost_payload(
+            ghost,
+            "GHOSTDEV",
+            bot,
+            "BOTDEV",
+            keys={"ed25519:GHOSTDEV": "should-not-be-here"},
+        )
+        self.get_failure(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            ),
+            SynapseError,
+        )
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_impersonator_missing_required_field_rejected(self) -> None:
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+        # Drop a required sub-field from the impersonator
+        del device_keys["fi.mau.msc4350.impersonator"]["device_id"]
+        self.get_failure(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            ),
+            SynapseError,
+        )
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_missing_signature_rejected(self) -> None:
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+        device_keys = self._ghost_payload(
+            ghost, "GHOSTDEV", bot, "BOTDEV", include_signature=False
+        )
+        self.get_failure(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            ),
+            SynapseError,
+        )
+
+    @override_config({"experimental_features": {"msc4350_enabled": True}})
+    def test_impersonator_field_round_trips_through_storage(self) -> None:
+        """The unstable field, once accepted, persists in the device_keys
+        JSON blob and reappears when we read it back via the C-S API."""
+        ghost = "@whatsapp_27:" + self.hs.hostname
+        bot = "@whatsappbot:" + self.hs.hostname
+        device_keys = self._ghost_payload(ghost, "GHOSTDEV", bot, "BOTDEV")
+
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                ghost, "GHOSTDEV", {"device_keys": device_keys}
+            )
+        )
+
+        stored = self.get_success(
+            self.store.get_e2e_device_keys_for_cs_api([(ghost, "GHOSTDEV")])
+        )
+        self.assertIn(
+            "fi.mau.msc4350.impersonator",
+            stored[ghost]["GHOSTDEV"],
+            "Impersonator field should survive the storage round-trip",
+        )

@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Iterable, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping, NoReturn
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -915,6 +915,9 @@ class E2eKeysHandler:
         time_now = self.clock.time_msec()
 
         device_keys = keys["device_keys"]
+        # MSC4350: validate / strip the unstable impersonator field
+        # depending on whether the experimental flag is enabled.
+        self._handle_msc4350_impersonator(user_id, device_id, device_keys)
         logger.info(
             "Updating device_keys for device %r for user %s at %d",
             device_id,
@@ -942,6 +945,102 @@ class E2eKeysHandler:
         # need to double-check the device is registered to avoid ending up with
         # keys without a corresponding device.
         await self.device_handler.check_device_registered(user_id, device_id)
+
+    # MSC4350: the unstable field key used on device-keys uploads + query
+    # responses for the impersonator pointer.
+    _MSC4350_IMPERSONATOR_FIELD = "fi.mau.msc4350.impersonator"
+
+    def _handle_msc4350_impersonator(
+        self, user_id: str, device_id: str, device_keys: JsonDict
+    ) -> None:
+        """Process the optional MSC4350 `fi.mau.msc4350.impersonator` field on
+        an incoming `/keys/upload` device-keys payload.
+
+        - If the experimental flag is OFF, strip the field silently so the
+          server behaves as if MSC4350 doesn't exist.
+        - If the flag is ON and the field is present, validate the spec
+          invariants:
+            * `algorithms` MUST be an empty list
+            * `keys` MUST be an empty mapping
+            * `impersonator` MUST be a well-formed device-keys-style object
+              (user_id, device_id, algorithms, keys)
+            * `signatures` MUST contain a signature from the impersonator
+              user keyed by `ed25519:<impersonator.device_id>`
+        - The cryptographic verification of that signature against the
+          impersonator device's actual ed25519 key is deferred to a
+          subsequent sprint; this method only enforces structural rules.
+          See https://github.com/matrix-org/matrix-spec-proposals/pull/4350
+
+        Raises:
+            SynapseError: with HTTP 400 if structural validation fails.
+        """
+        if self._MSC4350_IMPERSONATOR_FIELD not in device_keys:
+            return
+
+        if not self.config.experimental.msc4350_enabled:
+            # Feature disabled — strip the unstable field so we don't
+            # persist server state that depends on an unimplemented
+            # behaviour. The client should detect the lack of support
+            # via /capabilities (TODO) and not send the field.
+            log_kv(
+                {
+                    "message": "Stripping MSC4350 impersonator field — experimental flag off",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            device_keys.pop(self._MSC4350_IMPERSONATOR_FIELD)
+            return
+
+        impersonator = device_keys[self._MSC4350_IMPERSONATOR_FIELD]
+
+        def _bad(msg: str) -> NoReturn:
+            raise SynapseError(
+                400,
+                f"MSC4350: {msg}",
+                errcode=Codes.INVALID_PARAM,
+            )
+
+        if device_keys.get("algorithms") != []:
+            _bad(
+                "device_keys.algorithms MUST be an empty list when "
+                "fi.mau.msc4350.impersonator is set"
+            )
+        if device_keys.get("keys") != {}:
+            _bad(
+                "device_keys.keys MUST be an empty object when "
+                "fi.mau.msc4350.impersonator is set"
+            )
+
+        if not isinstance(impersonator, dict):
+            _bad("fi.mau.msc4350.impersonator MUST be an object")
+
+        for required in ("user_id", "device_id", "algorithms", "keys"):
+            if required not in impersonator:
+                _bad(f"fi.mau.msc4350.impersonator missing required field {required!r}")
+        if not isinstance(impersonator["algorithms"], list):
+            _bad("fi.mau.msc4350.impersonator.algorithms MUST be a list")
+        if not isinstance(impersonator["keys"], dict):
+            _bad("fi.mau.msc4350.impersonator.keys MUST be an object")
+
+        # The device's signatures map MUST include a signature from the
+        # impersonator user keyed by `ed25519:<impersonator.device_id>`.
+        # We only check that the entry exists; the actual signature
+        # verification will land in the next sprint.
+        sigs = device_keys.get("signatures", {})
+        imp_user = impersonator["user_id"]
+        imp_device = impersonator["device_id"]
+        expected_key = f"ed25519:{imp_device}"
+        if (
+            not isinstance(sigs, dict)
+            or imp_user not in sigs
+            or not isinstance(sigs[imp_user], dict)
+            or expected_key not in sigs[imp_user]
+        ):
+            _bad(
+                "device_keys.signatures MUST contain a signature from "
+                f"{imp_user} keyed by {expected_key!r}"
+            )
 
     async def _upload_one_time_keys_for_user(
         self, user_id: str, device_id: str, time_now: int, one_time_keys: JsonDict

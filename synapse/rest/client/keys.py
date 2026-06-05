@@ -26,7 +26,7 @@ from collections import Counter
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Mapping
 
-from pydantic import StrictBool, StrictStr, field_validator
+from pydantic import Field, StrictBool, StrictStr, field_validator
 
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
@@ -54,6 +54,23 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class MSC4350ImpersonatorDevice(RequestBodyModel):
+    """
+    MSC4350: the device entry of the bridge bot (or other impersonator)
+    embedded inside an impersonatable device's `fi.mau.msc4350.impersonator`
+    field.
+
+    This is a canonical device-keys object **without** its own `signatures`
+    field, per spec — the impersonator device's signatures live elsewhere
+    (in synapse's regular device-key storage for the impersonator user).
+    """
+
+    algorithms: list[StrictStr]
+    device_id: StrictStr
+    keys: Mapping[StrictStr, StrictStr]
+    user_id: StrictStr
 
 
 class KeyUploadServlet(RestServlet):
@@ -142,6 +159,17 @@ class KeyUploadServlet(RestServlet):
 
             user_id: StrictStr
             """The ID of the user the device belongs to. Must match the user ID used when logging in."""
+
+            # MSC4350: Permitting encryption impersonation for appservices.
+            # When present, this device entry has empty `algorithms` and
+            # `keys`; instead, the bridge bot's device (in `impersonator`)
+            # is authorized to sign encrypted events on this device's behalf.
+            # Stored as-is; behavioural validation lives in the handler so
+            # it can consult the experimental flag.
+            # https://github.com/matrix-org/matrix-spec-proposals/pull/4350
+            impersonator: MSC4350ImpersonatorDevice | None = Field(
+                default=None, alias="fi.mau.msc4350.impersonator"
+            )
 
         class KeyObject(RequestBodyModel):
             key: StrictStr
