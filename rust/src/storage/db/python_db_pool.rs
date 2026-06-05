@@ -13,7 +13,12 @@
  *
  */
 
-use pyo3::{intern, prelude::*};
+//! We have these three main classes:
+//!  - Database pool [`PythonDatabasePoolWrapper`] which creates
+//!  - connections [`LoggingDatabaseConnectionWrapper`] which creates
+//!  - transactions [`LoggingTransactionWrapper`]
+
+use pyo3::{intern, prelude::*, types::PyCFunction};
 
 use crate::storage::db::{DatabaseConnection, DatabasePool, Row, Transaction};
 
@@ -35,12 +40,12 @@ impl DatabaseEngine {
 }
 
 /// Wrapper for a `DatabasePool` from the Python side of Synapse.
-pub struct PythonDatabasePool {
+pub struct PythonDatabasePoolWrapper {
     /// The underlying `DatabasePool`
     database_pool_py: Py<PyAny>,
 }
 
-impl<'a, 'py> FromPyObject<'a, 'py> for PythonDatabasePool {
+impl<'a, 'py> FromPyObject<'a, 'py> for PythonDatabasePoolWrapper {
     type Error = PyErr;
 
     /// Extract from a Python `DatabasePool` passed as an argument.
@@ -52,7 +57,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PythonDatabasePool {
 }
 
 #[async_trait::async_trait]
-impl DatabasePool for PythonDatabasePool {
+impl DatabasePool for PythonDatabasePoolWrapper {
     async fn get_connection(&self) -> Result<Box<dyn DatabaseConnection>, anyhow::Error> {
         let callback_func =
             PyCFunction::new_closure(py, None, None, move |args, _| -> PyResult<Py<PyAny>> {
@@ -61,7 +66,7 @@ impl DatabasePool for PythonDatabasePool {
                 let py = args.py();
                 // We found our `LoggingDatabaseConnection`
                 let conn_py = args.get_item(0)?;
-                tx.send(conn_py);
+                tx.send(conn_py.unbind());
             });
 
         let execute_fn = self
@@ -70,8 +75,8 @@ impl DatabasePool for PythonDatabasePool {
         execute_fn.call1((callback_func,))?;
 
         Ok(Box::new(LoggingDatabaseConnectionWrapper {
-            database_pool_py: self,
-            logging_database_connection_py: conn_py,
+            database_pool_py: self.database_pool_py,
+            logging_database_connection_py: connection,
         }))
     }
 }
@@ -79,7 +84,12 @@ impl DatabasePool for PythonDatabasePool {
 /// Wrapper for a `LoggingDatabaseConnection` from the Python side of Synapse.
 pub struct LoggingDatabaseConnectionWrapper {
     /// The underlying `DatabasePool`
-    database_pool_py: Bound<'py, PyAny>,
+    ///
+    /// We purposely avoid `Bound<'py, PyAny>` so it can be stored and moved freely
+    /// across threads (like to extract it from the `runWithConnection(...)` callback).
+    /// You will need to acquire your own `py` and bind it using
+    /// `database_pool_py.bind(py)` to do anything useful.
+    database_pool_py: Py<PyAny>,
     /// The underlying `LoggingDatabaseConnection`
     logging_database_connection_py: Py<PyAny>,
 }
@@ -103,8 +113,8 @@ impl DatabaseConnection for LoggingDatabaseConnectionWrapper {
                 // TODO: Error if already called
 
                 let py = args.py();
-                let txn_py: LoggingTransactionWrapper = args.get_item(0)?;
-                tx.send(txn_py);
+                let txn: LoggingTransactionWrapper = args.get_item(0)?;
+                tx.send(txn);
 
                 // Wait until we see the signal that we're `done_with_txn_rx`
             });
@@ -146,12 +156,13 @@ fn detect_engine(txn_py: &Bound<'_, PyAny>) -> PyResult<DatabaseEngine> {
 }
 
 /// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
-///
-/// TODO: Verify if this is the correct approach or we should use`Bound<'py, PyAny>`:
-/// Holds no `'py` lifetime so it can be stored and moved freely across threads.
-/// Use [`execute`](Self::execute) (or other methods) while holding the GIL.
 pub struct LoggingTransactionWrapper {
     /// The underlying `LoggingTransaction`
+    ///
+    /// We purposely avoid `Bound<'py, PyAny>` so it can be stored and moved freely
+    /// across threads (like to extract it from the `new_transaction(...)` callback).
+    /// You will need to acquire your own `py` and bind it using
+    /// `logging_transaction_py.bind(py)` to do anything useful.
     logging_transaction_py: Py<PyAny>,
 
     /// Disambiguate which underlying database engine we're working with
@@ -208,9 +219,11 @@ impl LoggingTransactionWrapper {
 
     pub fn fetchall<T: FromPyObject<'py> + ValidDatabaseReturnType>(
         &mut self,
+        py: Python<'py>,
     ) -> anyhow::Result<Vec<T>> {
         let fetch_fn = self
             .logging_transaction_py
+            .bind(py)
             .getattr(intern!(self.logging_transaction_py.py(), "fetchall"))?;
         Ok(fetch_fn.call0()?.extract()?)
     }
@@ -219,10 +232,13 @@ impl LoggingTransactionWrapper {
 #[async_trait::async_trait]
 impl Transaction for LoggingTransactionWrapper {
     async fn query(&self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
-        self.execute(sql, args).await;
-        let rows = self.fetchall(sql, args).await?;
+        Python::attach(|py| -> PyResult<Vec<Row>> {
+            self.execute(py, sql, args).await;
+            let rows = self.fetchall(py, sql, args).await?;
 
-        Ok(rows)
+            Ok(rows)
+        })
+        .map_err(anyhow::Error::from)
     }
 
     async fn commit(&self) -> Result<(), anyhow::Error> {

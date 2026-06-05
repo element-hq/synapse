@@ -22,7 +22,7 @@ use pyo3::{
 };
 
 use crate::config::SynapseConfig;
-use crate::storage::db::python_db_pool::PythonDatabasePool;
+use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
 use crate::storage::store::Store;
 use crate::UnwrapInfallible;
 
@@ -41,7 +41,7 @@ impl RustHandlers {
         let config: SynapseConfig = homeserver.getattr("config")?.extract()?;
 
         // hs.get_datastores().main.db_pool
-        let db_pool: PythonDatabasePool = homeserver
+        let db_pool: PythonDatabasePoolWrapper = homeserver
             .call_method0("get_datastores")?
             .into_pyobject(py)
             .unwrap_infallible()
