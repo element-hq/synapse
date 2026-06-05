@@ -2315,8 +2315,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         )
 
         # We should see the new `required_state` immediately without waiting
-        # (for the full timeout, we may need to wait briefly).
-        channel.await_result(timeout_ms=100)
+        channel.await_result(timeout_ms=0)
         response_body = channel.json_body
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
