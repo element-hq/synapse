@@ -1268,16 +1268,24 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         """
         third_user = self.register_user("third_user", "password")
         third_tok = self.login("third_user", "password")
-        second_room = self.helper.create_room_as(self.user, tok=self.tok)
         self.helper.join(
-            room=second_room,
+            room=self.joined_room,
             user=third_user,
             tok=third_tok,
         )
 
         requester = create_requester(self.user)
 
-        self.helper.send_messages(room_id=second_room, num_events=10, tok=third_tok)
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+        self.helper.send_messages(room_id=self.joined_room, num_events=1, tok=self.other_tok)
+        self.helper.send_messages(room_id=self.joined_room, num_events=10, tok=third_tok)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 requester,
@@ -1300,22 +1308,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        self.assertEqual(
-            initial_result.profile_updates["@user:test"]["m.status"],
-            '{"text": "Swimming in the Great Lakes!", "emoji": "\\ud83c\\udfca"}',
-        )
-        self.assertEqual(
-            initial_result.profile_updates["@user:test"]["displayname"], "user"
-        )
-        self.assertEqual(
-            initial_result.profile_updates["@third_user:test"]["displayname"],
-            "third_user",
-        )
+        # Only third_user is returned, as lazy loading filters out the events from
+        # the other users
         self.assertCountEqual(
             initial_result.profile_updates.keys(),
             [
                 "@third_user:test",
-                "@user:test",
             ],
         )
 
@@ -1378,9 +1376,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     ) -> None:
         third_user = self.register_user("third_user", "password")
         third_tok = self.login("third_user", "password")
-        second_room = self.helper.create_room_as(self.user, tok=self.tok)
         self.helper.join(
-            room=second_room,
+            room=self.joined_room,
             user=third_user,
             tok=third_tok,
         )
@@ -1411,7 +1408,20 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
             )
         )
-        self.helper.send_messages(room_id=second_room, num_events=10, tok=third_tok)
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On fire", "emoji": "🔥"}),
+            )
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=1, tok=self.other_tok
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=10, tok=third_tok
+        )
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 requester,
@@ -1435,11 +1445,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        # Only third_user is returned, as lazy loading filters out the events from
+        # other_user
         self.assertCountEqual(
             incremental_result.profile_updates.keys(),
             [
                 "@third_user:test",
-                "@user:test",
             ],
         )
 
