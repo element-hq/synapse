@@ -16,8 +16,9 @@
 pub mod python_db_pool;
 pub mod rust_db_pool;
 
+// Using `Send + Sync` traits so this can stored in the `#[pyclass]` just fine
 #[async_trait::async_trait]
-pub trait DatabasePool {
+pub trait DatabasePool: Send + Sync {
     /// TODO
     async fn get_connection(&self) -> Result<Box<dyn DatabaseConnection>, anyhow::Error>;
 }
