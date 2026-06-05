@@ -18,7 +18,7 @@
 //!  - connections [`LoggingDatabaseConnectionWrapper`] which creates
 //!  - transactions [`LoggingTransactionWrapper`]
 
-use pyo3::{intern, prelude::*, types::PyCFunction};
+use pyo3::{intern, prelude::*, types::PyCFunction, types::PyList};
 
 use crate::storage::db::{DatabaseConnection, DatabasePool, Row, Transaction};
 
@@ -233,8 +233,13 @@ impl LoggingTransactionWrapper {
 impl Transaction for LoggingTransactionWrapper {
     async fn query(&self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
         Python::attach(|py| -> PyResult<Vec<Row>> {
-            self.execute(py, sql, args).await;
-            let rows = self.fetchall(py, sql, args).await?;
+            // Convert the Rust `&[&str]` of SQL parameters into a Python sequence so it
+            // can be passed through to the Python-side `execute`.
+            let args = PyList::new(py, args)?;
+            // Run the query
+            self.execute(py, sql, args.as_any())?;
+            // Get the results
+            let rows = self.fetchall(py)?;
 
             Ok(rows)
         })
