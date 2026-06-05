@@ -317,7 +317,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
     )
     def test_cancel_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
-        for _ in range(3):
+        for _ in range(5):
             channel = self.make_request(
                 "POST",
                 _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
@@ -329,11 +329,14 @@ class DelayedEventsTestCase(HomeserverTestCase):
             assert delay_id is not None
             delay_ids.append(delay_id)
 
-        delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        for _ in range(2):
+            delay_id = delay_ids.pop(0)
+            channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         delay_id = delay_ids.pop(0)
+        channel = self._update_delayed_event(delay_id, "restart", action_in_path)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -344,6 +347,16 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         delay_id = delay_ids.pop(0)
+        channel = self._update_delayed_event(
+            delay_id, "cancel", action_in_path, self.user1_access_token
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        delay_id = delay_ids.pop(0)
+        channel = self._update_delayed_event(
+            delay_id, "restart", action_in_path, self.user1_access_token
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         channel = self._update_delayed_event(
             delay_id, "cancel", action_in_path, self.user1_access_token
         )
@@ -502,7 +515,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
     )
     def test_restart_delayed_event_ratelimit(self, action_in_path: bool) -> None:
         delay_ids = []
-        for _ in range(3):
+        for _ in range(2):
             channel = self.make_request(
                 "POST",
                 _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
@@ -514,11 +527,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
             assert delay_id is not None
             delay_ids.append(delay_id)
 
-        delay_id = delay_ids.pop(0)
-        channel = self._update_delayed_event(delay_id, "restart", action_in_path)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        for _ in range(2):
+            delay_id = delay_ids.pop(0)
+            channel = self._update_delayed_event(delay_id, "restart", action_in_path)
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        delay_id = delay_ids.pop(0)
         channel = self._update_delayed_event(delay_id, "restart", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
@@ -528,7 +541,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        delay_id = delay_ids.pop(0)
         channel = self._update_delayed_event(
             delay_id, "restart", action_in_path, self.user1_access_token
         )
