@@ -301,8 +301,9 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 """Are there any updates that should be returned immediately to
                 the client?"""
-                # Note that "signed_curve25519" is always returned in key count responses
-                # regardless of whether we uploaded any keys for it. This is necessary until
+                # Note that "signed_curve25519" is always returned in key count
+                # responses regardless of whether we uploaded any keys for it.
+                # This is necessary until
                 # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
                 #
                 # Also related:
@@ -310,8 +311,14 @@ class SlidingSyncResult:
                 # https://github.com/matrix-org/synapse/issues/10456
                 #
                 # This is why we don't incorporate `device_one_time_keys_count`
-                # (or `device_unused_fallback_key_types`) into the
-                # `__bool__` check.
+                # (or `device_unused_fallback_key_types`) into the `__bool__`
+                # check. Ideally we'd detect if either of those fields have
+                # changed since the last sync, but we do not currently track
+                # such state.
+                #
+                # Note that the client will receive these fields eventually when
+                # we respond to the sync request, we just won't immediately
+                # respond (even if there are changes).
 
                 return bool(self.device_list_updates)
 
