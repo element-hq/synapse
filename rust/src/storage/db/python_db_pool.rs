@@ -15,7 +15,7 @@
 
 use pyo3::{intern, prelude::*};
 
-use crate::storage::db::{DatabasePool, Row, Transaction};
+use crate::storage::db::{DatabaseConnection, DatabasePool, Row, Transaction};
 
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
@@ -42,14 +42,48 @@ pub struct PythonDatabasePool {
 
 #[async_trait::async_trait]
 impl DatabasePool for PythonDatabasePool {
+    async fn get_connection(&self) -> Result<Box<dyn DatabaseConnection>, anyhow::Error> {
+        let callback_func =
+            PyCFunction::new_closure(py, None, None, move |args, _| -> PyResult<Py<PyAny>> {
+                // TODO: Error if already called
+
+                let py = args.py();
+                // We found our `LoggingDatabaseConnection`
+                let conn_py = args.get_item(0)?;
+                tx.send(conn_py);
+            });
+
+        let execute_fn = self
+            .database_pool_py
+            .getattr(intern!(self.database_pool_py.py(), "runWithConnection"))?;
+        execute_fn.call1((callback_func,))?;
+
+        Ok(Box::new(LoggingDatabaseConnectionWrapper {
+            database_pool_py: self,
+            logging_database_connection_py: conn_py,
+        }))
+    }
+}
+
+/// Wrapper for a `LoggingDatabaseConnection` from the Python side of Synapse.
+pub struct LoggingDatabaseConnectionWrapper {
+    /// The underlying `DatabasePool`
+    database_pool_py: Bound<'py, PyAny>,
+    /// The underlying `LoggingDatabaseConnection`
+    logging_database_connection_py: Py<PyAny>,
+}
+
+#[async_trait::async_trait]
+impl DatabaseConnection for LoggingDatabaseConnectionWrapper {
     async fn get_transaction(
         &self,
         description: &str,
     ) -> Result<Box<dyn Transaction>, anyhow::Error> {
-        // Synapse has built-in retry functionality and can call this function multiple
-        // times under certain failure modes. Normally, everything in the transaction
-        // happens in the callback but since we have a little bit of a different API
-        // surface, we instead extract the transaction for us to use outside.
+        // Synapse's `DatabasePool.new_transaction` has built-in retry functionality and
+        // can call this function multiple times under certain failure modes. Normally,
+        // everything in the transaction happens in the callback but since we have a
+        // little bit of a different API surface, we instead extract the transaction for
+        // us to use outside.
         //
         // Re-using `runInteraction`, means we get all of the logging, metrics, etc for
         // free.
@@ -58,14 +92,23 @@ impl DatabasePool for PythonDatabasePool {
                 // TODO: Error if already called
 
                 let py = args.py();
-                let txn_py = args.get_item(0)?;
-                txn
+                let txn_py: LoggingTransactionWrapper = args.get_item(0)?;
+                tx.send(txn_py);
+
+                // Wait until we see the signal that we're `done_with_txn_rx`
             });
 
         let execute_fn = self
             .database_pool_py
-            .getattr(intern!(self.database_pool_py.py(), "runInteraction"))?;
-        execute_fn.call1((description, callback_func))?;
+            .getattr(intern!(self.database_pool_py.py(), "new_transaction"))?;
+        execute_fn.call1((
+            self.logging_database_connection_py,
+            description,
+            [],
+            [],
+            [],
+            callback_func,
+        ))?;
 
         Ok(Box::new(txn))
     }
@@ -93,6 +136,7 @@ fn detect_engine(txn_py: &Bound<'_, PyAny>) -> PyResult<DatabaseEngine> {
 
 /// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
 ///
+/// TODO: Verify if this is the correct approach or we should use`Bound<'py, PyAny>`:
 /// Holds no `'py` lifetime so it can be stored and moved freely across threads.
 /// Use [`execute`](Self::execute) (or other methods) while holding the GIL.
 pub struct LoggingTransactionWrapper {
@@ -118,6 +162,26 @@ impl<'a, 'py> FromPyObject<'a, 'py> for LoggingTransactionWrapper {
     }
 }
 
+pub trait ValidDatabaseFieldType {}
+pub trait ValidDatabaseReturnType {}
+impl ValidDatabaseFieldType for String {}
+impl ValidDatabaseFieldType for usize {}
+impl<T: ValidDatabaseFieldType> ValidDatabaseFieldType for Option<T> {}
+impl<T0: ValidDatabaseFieldType> ValidDatabaseReturnType for (T0,) {}
+impl<T0: ValidDatabaseFieldType, T1: ValidDatabaseFieldType> ValidDatabaseReturnType for (T0, T1) {}
+impl<T0: ValidDatabaseFieldType, T1: ValidDatabaseFieldType, T2: ValidDatabaseFieldType>
+    ValidDatabaseReturnType for (T0, T1, T2)
+{
+}
+impl<
+        T0: ValidDatabaseFieldType,
+        T1: ValidDatabaseFieldType,
+        T2: ValidDatabaseFieldType,
+        T3: ValidDatabaseFieldType,
+    > ValidDatabaseReturnType for (T0, T1, T2, T3)
+{
+}
+
 impl LoggingTransactionWrapper {
     pub fn execute<'py>(
         &mut self,
@@ -132,15 +196,33 @@ impl LoggingTransactionWrapper {
         execute_fn.call1((sql, args))?;
         Ok(())
     }
+
+    pub fn fetchall<T: FromPyObject<'py> + ValidDatabaseReturnType>(
+        &mut self,
+    ) -> anyhow::Result<Vec<T>> {
+        let fetch_fn = self
+            .logging_transaction_py
+            .getattr(intern!(self.logging_transaction_py.py(), "fetchall"))?;
+        Ok(fetch_fn.call0()?.extract()?)
+    }
 }
 
 #[async_trait::async_trait]
 impl Transaction for LoggingTransactionWrapper {
-    async fn query(&self, sql: &str, args: &[&str]) -> Vec<Row> {
+    async fn query(&self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
         self.execute(sql, args).await;
+        let rows = self.fetchall(sql, args).await?;
+
+        Ok(rows)
     }
 
     async fn commit(&self) -> Result<(), anyhow::Error> {
-        // In Synapse, `commit` is part of `LoggingDatabaseConnection`
+        // In Synapse, `commit` is part of `LoggingDatabaseConnection` and will be
+        // called as part of the `new_transaction(...)` machinery we used to create the
+        // transaction in the first place.
+        //
+        // We just need to send the proper signal which will finish the txn callback and
+        // have it run.
+        done_with_txn_tx.send(())
     }
 }

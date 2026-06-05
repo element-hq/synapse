@@ -19,6 +19,14 @@ pub mod rust_db_pool;
 #[async_trait::async_trait]
 pub trait DatabasePool {
     /// TODO
+    async fn get_connection(&self) -> Result<Box<dyn DatabaseConnection>, anyhow::Error>;
+}
+
+/// A `tokio_postgres` Connection looking thing that we can use on the Rust side to
+/// interact with the database
+#[async_trait::async_trait]
+pub trait DatabaseConnection {
+    /// TODO
     ///
     /// Arguments:
     /// description of the transaction, for logging and metrics
@@ -32,7 +40,7 @@ pub trait DatabasePool {
 /// interact with the database
 #[async_trait::async_trait]
 pub trait Transaction {
-    async fn query(&self, sql: &str, args: &[&str]) -> Vec<Row>;
+    async fn query(&self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error>;
     async fn commit(self) -> Result<(), anyhow::Error>;
 }
 

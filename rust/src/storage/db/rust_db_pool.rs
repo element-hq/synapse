@@ -20,7 +20,7 @@ use anyhow::Context;
 use bb8_postgres::PostgresConnectionManager;
 use postgres_native_tls::MakeTlsConnector;
 
-use crate::storage::db::{DatabasePool, Row, Transaction};
+use crate::storage::db::{DatabaseConnection, DatabasePool, Row, Transaction};
 
 /// Native Rust database access backed by `tokio-postgres` (for use in synapse-rust-apps)
 pub struct RustDatabasePool {
@@ -29,10 +29,7 @@ pub struct RustDatabasePool {
 
 #[async_trait::async_trait]
 impl DatabasePool for RustDatabasePool {
-    async fn get_transaction(
-        &self,
-        _description: &str,
-    ) -> Result<Box<dyn Transaction>, anyhow::Error> {
+    async fn get_connection(&self) -> Result<Box<dyn DatabaseConnection>, anyhow::Error> {
         let mut conn = self
             .db_pool
             .get()
@@ -40,9 +37,22 @@ impl DatabasePool for RustDatabasePool {
             .await
             .context("Failed to acquire database connection")?;
 
+        Ok(Box::new(RustConnection { connection: conn }))
+    }
+}
 
+pub struct RustConnection<'a> {
+    connection: bb8::PooledConnection<'a, PostgresConnectionManager<MakeTlsConnector>>,
+}
+
+impl DatabaseConnection for RustConnection<'_> {
+    async fn get_transaction(
+        &self,
+        _description: &str,
+    ) -> Result<Box<dyn Transaction>, anyhow::Error> {
         // TODO: Set repeatable-read isolation level (like Synapse)
-        let txn = conn
+        let txn = self
+            .connection
             .transaction()
             // .instrument(tracing::info_span!("start transaction"))
             .await
@@ -58,12 +68,12 @@ struct TokioPostgresTransaction<'a> {
 
 #[async_trait::async_trait]
 impl Transaction for TokioPostgresTransaction<'_> {
-    async fn query(&self, sql: &str, args: &[&str]) -> Vec<Row> {
+    async fn query(&self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
         // TODO: Convert `?` SQL param style to `tokio-postgres` compatible
 
         let rows = self.txn.query(sql, args).await?;
 
-        rows
+        Ok(rows)
     }
 
     async fn commit(self) -> Result<(), anyhow::Error> {
