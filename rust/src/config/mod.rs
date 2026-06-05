@@ -15,7 +15,7 @@
 
 use pyo3::prelude::*;
 
-#[derive(FromPyObject)]
+#[derive(FromPyObject, Clone)]
 pub struct SynapseConfig {
     pub experimental: ExperimentalConfig,
 }
@@ -28,7 +28,7 @@ pub struct SynapseConfig {
 //     TrustedPrivateChat,
 // }
 
-#[derive(FromPyObject)]
+#[derive(FromPyObject, Clone)]
 pub struct ExperimentalConfig {
     pub msc3881_enabled: bool,
     pub msc3575_enabled: bool,

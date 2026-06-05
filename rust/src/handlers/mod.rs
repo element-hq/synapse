@@ -51,13 +51,13 @@ impl RustHandlers {
 
         // Store is shared across all of the handlers so let's use an `Arc`
         let store = Arc::new(Store {
-            config,
+            config: config.clone(),
             db_pool: Box::new(db_pool),
         });
 
         Ok(RustHandlers {
             versions: versions::VersionsHandler {
-                config,
+                config: config.clone(),
                 store: Arc::clone(&store),
             },
         })
