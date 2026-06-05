@@ -23,7 +23,7 @@ from typing_extensions import assert_never
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.events import EventBase
-from synapse.events.utils import strip_event
+from synapse.events.utils import FilteredEvent, strip_event
 from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.room_lists import (
@@ -150,6 +150,23 @@ class SlidingSyncHandler:
         # events or future events if the user is nefariously, manually modifying the
         # token.
         if from_token is not None:
+            # Work around a bug where older Synapse versions gave out tokens "from the
+            # future", i.e. that are ahead of the tokens persisted in the DB. This could
+            # also happen if a user is intentionally messing with the token so this also
+            # acts as sanitization/validation.
+            #
+            # If the token has positions ahead of our persisted positions in the
+            # database (invalid), then we simply use our max persisted position (recover
+            # gracefully); instead of waiting for a position that may never come around.
+            #
+            # FIXME: For Sliding Sync, instead of bounding the token, we should detect
+            # the invalid future position and raise a `M_UNKNOWN_POS` error.
+            from_token = SlidingSyncStreamToken(
+                stream_token=await self.event_sources.bound_future_token(
+                    from_token.stream_token
+                ),
+                connection_position=from_token.connection_position,
+            )
             # We need to make sure this worker has caught up with the token. If
             # this returns false, it means we timed out waiting, and we should
             # just return an empty response.
@@ -679,7 +696,7 @@ class SlidingSyncHandler:
         # membership. Currently, we have to make all of these optional because
         # `invite`/`knock` rooms only have `stripped_state`. See
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-        timeline_events: list[EventBase] = []
+        timeline_events: list[FilteredEvent] = []
         bundled_aggregations: dict[str, BundledAggregations] | None = None
         limited: bool | None = None
         prev_batch_token: StreamToken | None = None
@@ -739,7 +756,7 @@ class SlidingSyncHandler:
                 # Use `stream_ordering` for updates
                 else paginate_room_events_by_stream_ordering
             )
-            timeline_events, new_room_key, limited = await pagination_method(
+            raw_timeline_events, new_room_key, limited = await pagination_method(
                 room_id=room_id,
                 # The bounds are reversed so we can paginate backwards
                 # (from newer to older events) starting at to_bound.
@@ -752,13 +769,13 @@ class SlidingSyncHandler:
 
             # We want to return the events in ascending order (the last event is the
             # most recent).
-            timeline_events.reverse()
+            raw_timeline_events.reverse()
 
             # Make sure we don't expose any events that the client shouldn't see
             timeline_events = await filter_and_transform_events_for_client(
                 self.storage_controllers,
                 user.to_string(),
-                timeline_events,
+                raw_timeline_events,
                 is_peeking=room_membership_for_user_at_to_token.membership
                 != Membership.JOIN,
                 filter_send_to_client=True,
@@ -778,12 +795,17 @@ class SlidingSyncHandler:
             if from_token is not None:
                 for timeline_event in reversed(timeline_events):
                     # This fields should be present for all persisted events
-                    assert timeline_event.internal_metadata.stream_ordering is not None
-                    assert timeline_event.internal_metadata.instance_name is not None
+                    assert (
+                        timeline_event.event.internal_metadata.stream_ordering
+                        is not None
+                    )
+                    assert (
+                        timeline_event.event.internal_metadata.instance_name is not None
+                    )
 
                     persisted_position = PersistedEventPosition(
-                        instance_name=timeline_event.internal_metadata.instance_name,
-                        stream=timeline_event.internal_metadata.stream_ordering,
+                        instance_name=timeline_event.event.internal_metadata.instance_name,
+                        stream=timeline_event.event.internal_metadata.stream_ordering,
                     )
                     if persisted_position.persisted_after(
                         from_token.stream_token.room_key
@@ -850,20 +872,10 @@ class SlidingSyncHandler:
         # For incremental syncs, we can do this first to determine if something relevant
         # has changed and strategically avoid fetching other costly things.
         room_state_delta_id_map: MutableStateMap[str] = {}
-        name_event_id: str | None = None
         membership_changed = False
         name_changed = False
         avatar_changed = False
-        if initial:
-            # Check whether the room has a name set
-            name_state_ids = await self.get_current_state_ids_at(
-                room_id=room_id,
-                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
-                state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
-                to_token=to_token,
-            )
-            name_event_id = name_state_ids.get((EventTypes.Name, ""))
-        else:
+        if not initial:
             assert from_bound is not None
 
             # TODO: Limit the number of state events we're about to send down
@@ -911,6 +923,27 @@ class SlidingSyncHandler:
                 ):
                     avatar_changed = True
 
+        # If a room has an m.room.name event with an absent, null, or empty
+        # name field, it should be treated the same as a room with no
+        # m.room.name event.
+        # https://spec.matrix.org/v1.17/client-server-api/#mroomname
+        #
+        # TODO: Should we also check for `EventTypes.CanonicalAlias`
+        # (`m.room.canonical_alias`) as a fallback for the room name? see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/4186/changes#r2860107511
+        room_name: str | None = None
+        if initial or name_changed:
+            # Check whether the room has a name set
+            name_states = await self.get_current_state_at(
+                room_id=room_id,
+                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+                state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
+                to_token=to_token,
+            )
+            name_event = name_states.get((EventTypes.Name, ""))
+            if name_event is not None:
+                room_name = name_event.content.get("name")
+
         # We only need the room summary for calculating heroes, however if we do
         # fetch it then we can use it to calculate `joined_count` and
         # `invited_count`.
@@ -927,12 +960,13 @@ class SlidingSyncHandler:
         hero_user_ids: list[str] = []
         # TODO: Should we also check for `EventTypes.CanonicalAlias`
         # (`m.room.canonical_alias`) as a fallback for the room name? see
-        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/4186/changes#r2860107511
         #
-        # We need to fetch the `heroes` if the room name is not set. But we only need to
-        # get them on initial syncs (or the first time we send down the room) or if the
+        # We need to fetch the `heroes` if the room name is not set (taking
+        # care to treat an empty string as unset). But we only need to get them
+        # on initial syncs (or the first time we send down the room) or if the
         # membership has changed which may change the heroes.
-        if name_event_id is None and (initial or (not initial and membership_changed)):
+        if not room_name and (initial or membership_changed):
             # We need the room summary to extract the heroes from
             if room_membership_for_user_at_to_token.membership != Membership.JOIN:
                 # TODO: Figure out how to get the membership summary for left/banned rooms
@@ -1061,13 +1095,13 @@ class SlidingSyncHandler:
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
                                     # Anyone who sent a message is relevant
-                                    timeline_membership.add(timeline_event.sender)
+                                    timeline_membership.add(timeline_event.event.sender)
 
                                     # We also care about invite, ban, kick, targets,
                                     # etc.
-                                    if timeline_event.type == EventTypes.Member:
+                                    if timeline_event.event.type == EventTypes.Member:
                                         timeline_membership.add(
-                                            timeline_event.state_key
+                                            timeline_event.event.state_key
                                         )
 
                             # The client needs to know the membership of everyone in
@@ -1151,8 +1185,6 @@ class SlidingSyncHandler:
             (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
         ]
         meta_room_state = list(hero_room_state)
-        if initial or name_changed:
-            meta_room_state.append((EventTypes.Name, ""))
         if initial or avatar_changed:
             meta_room_state.append((EventTypes.RoomAvatar, ""))
 
@@ -1309,15 +1341,6 @@ class SlidingSyncHandler:
         required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():
             required_room_state = required_state_filter.filter_state(room_state)
-
-        # Find the room name and avatar from the state
-        room_name: str | None = None
-        # TODO: Should we also check for `EventTypes.CanonicalAlias`
-        # (`m.room.canonical_alias`) as a fallback for the room name? see
-        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
-        name_event = room_state.get((EventTypes.Name, ""))
-        if name_event is not None:
-            room_name = name_event.content.get("name")
 
         room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
@@ -1480,7 +1503,7 @@ class SlidingSyncHandler:
         self,
         room_id: str,
         to_token: StreamToken,
-        timeline: list[EventBase],
+        timeline: list[FilteredEvent],
         check_outside_timeline: bool,
     ) -> int | None:
         """Get a bump stamp for the room, if we have a bump event and it has
@@ -1500,8 +1523,8 @@ class SlidingSyncHandler:
         # those matches. We iterate backwards and take the stream ordering
         # of the first event that matches the bump event types.
         for timeline_event in reversed(timeline):
-            if timeline_event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
-                new_bump_stamp = timeline_event.internal_metadata.stream_ordering
+            if timeline_event.event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
+                new_bump_stamp = timeline_event.event.internal_metadata.stream_ordering
 
                 # All persisted events have a stream ordering
                 assert new_bump_stamp is not None

@@ -53,9 +53,9 @@ from synapse.api.errors import (
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
     EventClientSerializer,
+    FilteredEvent,
     SerializeEventConfig,
     format_event_for_client_v2,
-    serialize_event,
 )
 from synapse.handlers.pagination import GetMessagesResult
 from synapse.http.server import HttpServer
@@ -214,6 +214,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
+        self._event_serializer = hs.get_event_client_serializer()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
@@ -285,8 +286,8 @@ class RoomStateEventRestServlet(RestServlet):
             raise SynapseError(404, "Event not found.", errcode=Codes.NOT_FOUND)
 
         if format == "event":
-            event = serialize_event(
-                data,
+            event = await self._event_serializer.serialize_event(
+                FilteredEvent.state(data),
                 self.clock.time_msec(),
                 config=SerializeEventConfig(
                     event_format=format_event_for_client_v2,
@@ -865,7 +866,9 @@ async def encode_messages_response(
         serialized_result[
             "state"
         ] = await serialize_deps.event_serializer.serialize_events(
-            get_messages_result.state, time_now, config=serialize_options
+            [FilteredEvent.state(e) for e in get_messages_result.state],
+            time_now,
+            config=serialize_options,
         )
 
     return serialized_result
@@ -1171,7 +1174,7 @@ class RoomEventContextServlet(RestServlet):
                 config=serializer_options,
             ),
             "state": await self._event_serializer.serialize_events(
-                event_context.state,
+                [FilteredEvent.state(e) for e in event_context.state],
                 time_now,
                 config=serializer_options,
             ),
@@ -1714,16 +1717,18 @@ class RoomHierarchyRestServlet(RestServlet):
 
 class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
     PATTERNS = (
-        # deprecated endpoint, to be removed
+        # deprecated unstable endpoint, to be removed
         re.compile(
             "^/_matrix/client/unstable/im.nheko.summary"
             "/rooms/(?P<room_identifier>[^/]*)/summary$"
         ),
-        # recommended endpoint
+        # recommended unstable endpoint
         re.compile(
             "^/_matrix/client/unstable/im.nheko.summary"
             "/summary/(?P<room_identifier>[^/]*)$"
         ),
+        # stable endpoint
+        re.compile("^/_matrix/client/v1/room_summary/(?P<room_identifier>[^/]*)$"),
     )
     CATEGORY = "Client API requests"
 
@@ -1771,8 +1776,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomTypingRestServlet(hs).register(http_server)
     RoomEventContextServlet(hs).register(http_server)
     RoomHierarchyRestServlet(hs).register(http_server)
-    if hs.config.experimental.msc3266_enabled:
-        RoomSummaryRestServlet(hs).register(http_server)
+    RoomSummaryRestServlet(hs).register(http_server)
     RoomEventServlet(hs).register(http_server)
     JoinedRoomsRestServlet(hs).register(http_server)
     RoomAliasListServlet(hs).register(http_server)

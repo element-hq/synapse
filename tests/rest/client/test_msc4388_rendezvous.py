@@ -131,6 +131,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         }
     )
     def test_off(self) -> None:
+        # Discovery endpoint should return 404
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 404)
+        # Create session should also fail
         channel = self.make_request("POST", rz_endpoint, {}, access_token=None)
         self.assertEqual(channel.code, 404)
 
@@ -143,7 +147,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )
@@ -156,6 +160,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             - Deleting the data
             - Sequence token handling
         """
+        # Discovery should return 200
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 200)
+        self.assertTrue(channel.json_body.get("create_available"))
+
         # We can post arbitrary data to the endpoint
         channel = self.make_request(
             "POST",
@@ -268,7 +277,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.setup_mock_oauth()
         alice_token = self.register_oauth_user("alice", "device1")
 
-        # This should fail without authentication:
+        # Discovery should fail due to lack of authentication
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=None)
+        self.assertEqual(channel.code, 401)
+
+        # Creating a session should fail without authentication:
         channel = self.make_request(
             "POST",
             rz_endpoint,
@@ -276,6 +289,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             access_token=None,
         )
         self.assertEqual(channel.code, 401)
+
+        # Discovery should succeed with authentication
+        channel = self.make_request("GET", rz_endpoint, {}, access_token=alice_token)
+        self.assertEqual(channel.code, 200)
+        self.assertTrue(channel.json_body.get("create_available"))
 
         # This should work as we are now authenticated
         channel = self.make_request(
@@ -288,7 +306,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         rendezvous_id = channel.json_body["id"]
         sequence_token = channel.json_body["sequence_token"]
         expires_in_ms = channel.json_body["expires_in_ms"]
-        self.assertGreater(expires_in_ms, 0)
+        self.assertEqual(expires_in_ms, 120000)
 
         session_endpoint = rz_endpoint + f"/{rendezvous_id}"
 
@@ -302,7 +320,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=bar")
         self.assertEqual(channel.json_body["sequence_token"], sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms)
+        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 100)
 
         # We can update the data without authentication
         channel = self.make_request(
@@ -325,7 +343,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=baz")
         self.assertEqual(channel.json_body["sequence_token"], new_sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 200)
+        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 300)
 
         # We can delete the data without authentication
         channel = self.make_request(
@@ -355,7 +373,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )
@@ -402,7 +420,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )
@@ -473,7 +491,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )
@@ -531,7 +549,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )
@@ -585,7 +603,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )
@@ -648,7 +666,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )
@@ -698,7 +716,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
-                "msc4388_mode": "public",
+                "msc4388_mode": "open",
             },
         }
     )

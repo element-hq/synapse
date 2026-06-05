@@ -343,7 +343,7 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
             # possible for invalid data to exist in room-state, etc.
             parse_and_validate_server_name(obj.domain)
             return True
-        except Exception:
+        except (SynapseError, ValueError):
             return False
 
     __repr__ = to_string
@@ -354,6 +354,29 @@ class UserID(DomainSpecificString):
     """Structure representing a user ID."""
 
     SIGIL = "@"
+
+    @classmethod
+    def is_valid_strict(cls, s: str) -> bool:
+        """
+        Parses the input string and attempts to ensure it is a valid and compliant user
+        ID according to https://spec.matrix.org/v1.17/appendices/#historical-user-ids.
+
+        This should be used with care: there are existing non-compliant user IDs in the
+        wild with empty or non-ASCII localparts, which will be rejected by this method.
+        """
+        if len(s.encode("utf-8")) > 255:
+            return False
+        try:
+            obj = cls.from_string(s)
+            if not is_compliant_user_id_localpart(obj.localpart):
+                return False
+            # Apply additional validation to the domain. This is only done
+            # during  is_valid (and not part of from_string) since it is
+            # possible for invalid data to exist in room-state, etc.
+            parse_and_validate_server_name(obj.domain)
+            return True
+        except (SynapseError, ValueError):
+            return False
 
 
 @attr.s(slots=True, frozen=True, repr=False)
@@ -453,17 +476,44 @@ GUEST_USER_ID_PATTERN = re.compile(r"^\d+$")
 
 
 def contains_invalid_mxid_characters(localpart: str) -> bool:
-    """Check for characters not allowed in an mxid or groupid localpart
+    """
+    Check for characters not allowed in a modern user ID localpart.
+
+    This is primarily used for new registrations and MUST NOT be used to validate
+    existing user IDs, as there are real users whose user IDs don't follow this
+    character set.
+
+    See https://spec.matrix.org/v1.17/appendices/#user-identifiers
 
     Args:
         localpart: the localpart to be checked
-        use_extended_character_set: True to use the extended allowed characters
-            from MSC4009.
 
     Returns:
         True if there are any naughty characters
     """
     return any(c not in MXID_LOCALPART_ALLOWED_CHARACTERS for c in localpart)
+
+
+def is_compliant_user_id_localpart(localpart: str) -> bool:
+    """
+    Validates that the given user ID localpart is within the "compliant" range,
+    i.e. not empty and all characters are between U+0021 and U+007E inclusive.
+    See https://spec.matrix.org/v1.17/appendices/#historical-user-ids
+
+    To check if a localpart is non-historical, use contains_invalid_mxid_characters instead.
+
+    This should be used with care: there are existing non-compliant user IDs in the
+    wild with empty or non-ASCII localparts, which will be rejected by this method.
+
+    Args:
+        localpart: the localpart to be checked
+
+    Returns:
+        True if the localpart is compliant, False otherwise
+    """
+    if not localpart:
+        return False
+    return all(0x21 <= ord(c) <= 0x7E for c in localpart)
 
 
 UPPER_CASE_PATTERN = re.compile(b"[A-Z_]")
@@ -635,6 +685,9 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
 
     def bound_stream_token(self, max_stream: int) -> "Self":
         """Bound the stream positions to a maximum value"""
+        # Shortcut if we're already under the bound
+        if self.get_max_stream_pos() <= max_stream:
+            return self
 
         min_pos = min(self.stream, max_stream)
         return type(self)(
@@ -1007,6 +1060,7 @@ class StreamKeyType(Enum):
     UN_PARTIAL_STATED_ROOMS = "un_partial_stated_rooms_key"
     THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
     STICKY_EVENTS = "sticky_events_key"
+    QUARANTINED_MEDIA = "quarantined_media_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1014,7 +1068,7 @@ class StreamToken:
     """A collection of keys joined together by underscores in the following
     order and which represent the position in their respective streams.
 
-    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242`
+    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242_4141_4343`
         1. `room_key`: `s2633508` which is a `RoomStreamToken`
            - `RoomStreamToken`'s can also look like `t426-2633508` or `m56~2.58~3.59`
            - See the docstring for `RoomStreamToken` for more details.
@@ -1029,12 +1083,13 @@ class StreamToken:
         10. `un_partial_stated_rooms_key`: `379`
         11. `thread_subscriptions_key`: 4242
         12. `sticky_events_key`: 4141
+        13. `quarantined_media_key`: 4343
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
     ```json
     {
-        "next_batch": "s12_4_0_1_1_1_1_4_1_1",
+        "next_batch": "s12_4_0_1_1_1_1_4_1_1_1_1_1",
         "presence": {
             "events": []
         },
@@ -1046,7 +1101,7 @@ class StreamToken:
                 "!QrZlfIDQLNLdZHqTnt:hs1": {
                     "timeline": {
                         "events": [],
-                        "prev_batch": "s10_4_0_1_1_1_1_4_1_1",
+                        "prev_batch": "s10_4_0_1_1_1_1_4_1_1_1_1_1",
                         "limited": false
                     },
                     "state": {
@@ -1089,6 +1144,9 @@ class StreamToken:
     un_partial_stated_rooms_key: int
     thread_subscriptions_key: int
     sticky_events_key: int
+    quarantined_media_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1118,6 +1176,7 @@ class StreamToken:
                 un_partial_stated_rooms_key,
                 thread_subscriptions_key,
                 sticky_events_key,
+                quarantined_media_key,
             ) = keys
 
             return cls(
@@ -1135,6 +1194,9 @@ class StreamToken:
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
                 thread_subscriptions_key=int(thread_subscriptions_key),
                 sticky_events_key=int(sticky_events_key),
+                quarantined_media_key=await MultiWriterStreamToken.parse(
+                    store, quarantined_media_key
+                ),
             )
         except CancelledError:
             raise
@@ -1159,6 +1221,7 @@ class StreamToken:
                 str(self.un_partial_stated_rooms_key),
                 str(self.thread_subscriptions_key),
                 str(self.sticky_events_key),
+                await self.quarantined_media_key.to_string(store),
             ]
         )
 
@@ -1188,6 +1251,12 @@ class StreamToken:
                 self.device_list_key.copy_and_advance(new_value),
             )
             return new_token
+        elif key == StreamKeyType.QUARANTINED_MEDIA:
+            new_token = self.copy_and_replace(
+                StreamKeyType.QUARANTINED_MEDIA,
+                self.quarantined_media_key.copy_and_advance(new_value),
+            )
+            return new_token
 
         new_token = self.copy_and_replace(key, new_value)
         new_id = new_token.get_field(key)
@@ -1210,6 +1279,7 @@ class StreamToken:
         key: Literal[
             StreamKeyType.RECEIPT,
             StreamKeyType.DEVICE_LIST,
+            StreamKeyType.QUARANTINED_MEDIA,
         ],
     ) -> MultiWriterStreamToken: ...
 
@@ -1281,7 +1351,8 @@ class StreamToken:
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
             f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
-            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key})"
+            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}"
+            f"quarantined_media: {self.quarantined_media_key})"
         )
 
 
@@ -1298,6 +1369,7 @@ StreamToken.START = StreamToken(
     un_partial_stated_rooms_key=0,
     thread_subscriptions_key=0,
     sticky_events_key=0,
+    quarantined_media_key=MultiWriterStreamToken(stream=0),
 )
 
 

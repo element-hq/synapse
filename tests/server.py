@@ -101,6 +101,7 @@ from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 from tests.utils import (
     LEAVE_DB,
@@ -422,7 +423,7 @@ def make_request(
         path = b"/" + path
 
     if isinstance(content, dict):
-        content = json.dumps(content).encode("utf8")
+        content = json_encoder.encode(content).encode("utf8")
     if isinstance(content, str):
         content = content.encode("utf8")
 
@@ -1357,6 +1358,16 @@ def start_test_homeserver(
         return reactor.getThreadPool()
 
     hs.get_media_sender_thread_pool = thread_pool  # type: ignore[method-assign]
+
+    # Load the OIDC provider metadatas, if OIDC is enabled.
+    # This matches `start` in synapse/app/_base.py
+    #
+    # TODO: Extract common startup logic somewhere cleaner
+    if hs.config.oidc.oidc_enabled:
+        oidc = hs.get_oidc_handler()
+        # Preload the provider metadata.
+        # This will spawn fire-and-forget background processes.
+        oidc.preload_metadata()
 
     # Load any configured modules into the homeserver
     module_api = hs.get_module_api()

@@ -37,6 +37,7 @@ from typing import (
 
 import attr
 from prometheus_client import Gauge
+from typing_extensions import assert_never
 
 from twisted.internet import defer
 
@@ -179,7 +180,11 @@ class _EventRow:
 
         rejected_reason: if the event was rejected, the reason why.
 
-        redactions: a list of event-ids which (claim to) redact this event.
+        unconfirmed_redactions: a list of event-ids which (claim to) redact this event
+            and need to be rechecked.
+
+        confirmed_redactions: a list of event-ids which redact this event and have been
+            confirmed as valid redactions.
 
         outlier: True if this event is an outlier.
     """
@@ -192,7 +197,8 @@ class _EventRow:
     format_version: int | None
     room_version_id: str | None
     rejected_reason: str | None
-    redactions: list[str]
+    unconfirmed_redactions: list[str]
+    confirmed_redactions: list[str]
     outlier: bool
 
 
@@ -770,18 +776,38 @@ class EventsWorkerStore(SQLBaseStore):
                     continue
                 elif redact_behaviour == EventRedactBehaviour.redact:
                     event = entry.redacted_event
+                elif redact_behaviour == EventRedactBehaviour.as_is:
+                    # Allow event through as is
+                    pass
+                else:
+                    # We (should) have covered all possible values of
+                    # redact_behaviour, so this is unreachable.
+                    assert_never(redact_behaviour)
+                    raise ValueError(f"Unknown redact_behaviour {redact_behaviour}")
 
             events.append(event)
 
             if get_prev_content:
-                if "replaces_state" in event.unsigned:
+                # The `event` here might be in the cache, and so might have
+                # already had the `prev_content` and `prev_sender` fields added
+                # to its unsigned.
+                #
+                # We check if a) we should add the previous content, and b) if
+                # we have already added it.
+                replaces_state = "replaces_state" in event.unsigned
+                has_prev = (
+                    "prev_content" in event.unsigned and "prev_sender" in event.unsigned
+                )
+                if replaces_state and not has_prev:
                     prev = await self.get_event(
                         event.unsigned["replaces_state"],
                         get_prev_content=False,
                         allow_none=True,
                     )
                     if prev:
-                        event.unsigned = dict(event.unsigned)
+                        # This mutates the cached event, but that's fine as the
+                        # previous content/sender will be the same for all
+                        # requests for this event.
                         event.unsigned["prev_content"] = prev.content
                         event.unsigned["prev_sender"] = prev.sender
 
@@ -1359,14 +1385,20 @@ class EventsWorkerStore(SQLBaseStore):
             )
             row_map = await self._enqueue_events(event_ids_to_fetch)
 
-            # we need to recursively fetch any redactions of those events
+            # we need to recursively fetch redaction events that require
+            # rechecking, so we can validate them
             redaction_ids: set[str] = set()
             for event_id in event_ids_to_fetch:
                 row = row_map.get(event_id)
                 fetched_event_ids.add(event_id)
                 if row:
                     fetched_events[event_id] = row
-                    redaction_ids.update(row.redactions)
+
+                    # If this event only has unconfirmed redactions we fetch
+                    # them from the DB so that we check them to see if any are
+                    # valid.
+                    if not row.confirmed_redactions:
+                        redaction_ids.update(row.unconfirmed_redactions)
 
             event_ids_to_fetch = redaction_ids.difference(fetched_event_ids)
             return event_ids_to_fetch
@@ -1484,12 +1516,17 @@ class EventsWorkerStore(SQLBaseStore):
                     )
                     continue
 
-            original_ev = make_event_from_dict(
-                event_dict=d,
-                room_version=room_version,
-                internal_metadata_dict=internal_metadata,
-                rejected_reason=rejected_reason,
-            )
+            try:
+                original_ev = make_event_from_dict(
+                    event_dict=d,
+                    room_version=room_version,
+                    internal_metadata_dict=internal_metadata,
+                    rejected_reason=rejected_reason,
+                )
+            except SynapseError as e:
+                logger.error("Unable to parse event from database %s: %s", event_id, e)
+                continue
+
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
             original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier
@@ -1510,9 +1547,12 @@ class EventsWorkerStore(SQLBaseStore):
         # the cache entries.
         result_map: dict[str, EventCacheEntry] = {}
         for event_id, original_ev in event_map.items():
-            redactions = fetched_events[event_id].redactions
+            row = fetched_events[event_id]
             redacted_event = self._maybe_redact_event_row(
-                original_ev, redactions, event_map
+                original_ev,
+                row.unconfirmed_redactions,
+                row.confirmed_redactions,
+                event_map,
             )
 
             cache_entry = EventCacheEntry(
@@ -1606,21 +1646,25 @@ class EventsWorkerStore(SQLBaseStore):
                     format_version=row[5],
                     room_version_id=row[6],
                     rejected_reason=row[7],
-                    redactions=[],
+                    unconfirmed_redactions=[],
+                    confirmed_redactions=[],
                     outlier=bool(row[8]),  # This is an int in SQLite3
                 )
 
             # check for redactions
-            redactions_sql = "SELECT event_id, redacts FROM redactions WHERE "
+            redactions_sql = "SELECT event_id, redacts, recheck FROM redactions WHERE "
 
             clause, args = make_in_list_sql_clause(txn.database_engine, "redacts", evs)
 
             txn.execute(redactions_sql + clause, args)
 
-            for redacter, redacted in txn:
+            for redacter, redacted, recheck in txn:
                 d = event_dict.get(redacted)
                 if d:
-                    d.redactions.append(redacter)
+                    if recheck:
+                        d.unconfirmed_redactions.append(redacter)
+                    else:
+                        d.confirmed_redactions.append(redacter)
 
             # check for MSC4293 redactions
             to_check = []
@@ -1669,24 +1713,28 @@ class EventsWorkerStore(SQLBaseStore):
                         # backfilled events, as they have a negative stream ordering
                         if e_row.stream_ordering >= redact_end_ordering:
                             continue
-                    e_row.redactions.append(redacting_event_id)
+                    e_row.unconfirmed_redactions.append(redacting_event_id)
         return event_dict
 
     def _maybe_redact_event_row(
         self,
         original_ev: EventBase,
-        redactions: Iterable[str],
+        unconfirmed_redactions: Iterable[str],
+        confirmed_redactions: Iterable[str],
         event_map: dict[str, EventBase],
     ) -> EventBase | None:
-        """Given an event object and a list of possible redacting event ids,
+        """Given an event object and lists of possible redacting event ids,
         determine whether to honour any of those redactions and if so return a redacted
         event.
 
         Args:
              original_ev: The original event.
-             redactions: list of event ids of potential redaction events
+             unconfirmed_redactions: list of event ids of redaction events that need
+                domain rechecking (room v3+).
+             confirmed_redactions: list of event ids of redaction events that have
+                already been validated and do not need rechecking.
              event_map: other events which have been fetched, in which we can
-                look up the redaaction events. Map from event id to event.
+                look up the redaction events. Map from event id to event.
 
         Returns:
             If the event should be redacted, a pruned event object. Otherwise, None.
@@ -1695,7 +1743,12 @@ class EventsWorkerStore(SQLBaseStore):
             # we choose to ignore redactions of m.room.create events.
             return None
 
-        for redaction_id in redactions:
+        for redaction_id in confirmed_redactions:
+            redacted_event = prune_event(original_ev)
+            redacted_event.internal_metadata.redacted_by = redaction_id
+            return redacted_event
+
+        for redaction_id in unconfirmed_redactions:
             redaction_event = event_map.get(redaction_id)
             if not redaction_event or redaction_event.rejected_reason:
                 # we don't have the redaction event, or the redaction event was not
@@ -1736,12 +1789,10 @@ class EventsWorkerStore(SQLBaseStore):
 
             # we found a good redaction event. Redact!
             redacted_event = prune_event(original_ev)
-            redacted_event.unsigned["redacted_by"] = redaction_id
+            redacted_event.internal_metadata.redacted_by = redaction_id
 
-            # It's fine to add the event directly, since get_pdu_json
-            # will serialise this field correctly
-            redacted_event.unsigned["redacted_because"] = redaction_event
-
+            # Note: The `redacted_because` field will later be populated by
+            # `EventClientSerializer.serialize_event`.
             return redacted_event
 
         # no valid redaction found for this event

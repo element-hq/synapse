@@ -49,9 +49,11 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import (
     EventBase,
     StrippedStateEvent,
+    event_exists_in_state_dag,
     is_creator,
     relation_from_event,
 )
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
@@ -295,6 +297,7 @@ class PersistEventsStore:
         new_event_links: dict[str, NewEventChainLinks],
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
+        new_state_dag_forward_extremities: set[str] | None = None,
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -315,6 +318,8 @@ class PersistEventsStore:
                 from being updated by these events. This should be set to True
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
+            new_state_dag_forward_extremities: A set of event IDs that are the new forward
+                extremities for the state DAG for this room. MSC4242 only.
 
         Returns:
             Resolves when the events have been persisted
@@ -379,6 +384,7 @@ class PersistEventsStore:
                 new_forward_extremities=new_forward_extremities,
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
+                new_state_dag_forward_extremities=new_state_dag_forward_extremities,
             )
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
@@ -909,7 +915,9 @@ class PersistEventsStore:
         # instances as we'll potentially be pulling more events from the DB and
         # we don't need the overhead of fetching/parsing the full event JSON.
         event_to_types = {e.event_id: (e.type, e.state_key) for e in state_events}
-        event_to_auth_chain = {e.event_id: e.auth_event_ids() for e in state_events}
+        event_to_auth_chain: dict[str, StrCollection] = {
+            e.event_id: e.auth_event_ids() for e in state_events
+        }
         event_to_room_id = {e.event_id: e.room_id for e in state_events}
 
         return self._calculate_chain_cover_index(
@@ -962,8 +970,10 @@ class PersistEventsStore:
 
         return results
 
-    async def _get_prevs_before_rejected(self, event_ids: Iterable[str]) -> set[str]:
-        """Get soft-failed ancestors to remove from the extremities.
+    async def _get_prevs_before_rejected(
+        self, event_ids: Iterable[str], include_soft_failed: bool = True
+    ) -> set[str]:
+        """Get soft-failed/rejected ancestors to remove from the extremities.
 
         Given a set of events, find all those that have been soft-failed or
         rejected. Returns those soft failed/rejected events and their prev
@@ -976,7 +986,8 @@ class PersistEventsStore:
         Args:
             event_ids: Events to find prev events for. Note that these must have
                 already been persisted.
-
+            include_soft_failed: Soft-failed events are included in the search. If false, only
+                rejected events are included.
         Returns:
             The previous events.
         """
@@ -1016,7 +1027,7 @@ class PersistEventsStore:
                         continue
 
                     soft_failed = db_to_json(metadata).get("soft_failed")
-                    if soft_failed or rejected:
+                    if (include_soft_failed and soft_failed) or rejected:
                         to_recursively_check.append(prev_event_id)
                         existing_prevs.add(prev_event_id)
 
@@ -1038,6 +1049,7 @@ class PersistEventsStore:
         new_forward_extremities: set[str] | None,
         new_event_links: dict[str, NewEventChainLinks],
         sliding_sync_table_changes: SlidingSyncTableChanges | None,
+        new_state_dag_forward_extremities: set[str] | None = None,
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1144,6 +1156,11 @@ class PersistEventsStore:
                 room_id,
                 new_forward_extremities=new_forward_extremities,
                 max_stream_order=max_stream_order,
+            )
+
+        if new_state_dag_forward_extremities:
+            self._set_state_dag_extremities_txn(
+                txn, room_id, new_state_dag_forward_extremities
             )
 
         self._persist_transaction_ids_txn(txn, events_and_contexts)
@@ -2475,6 +2492,29 @@ class PersistEventsStore:
             ],
         )
 
+    def _set_state_dag_extremities_txn(
+        self, txn: LoggingTransaction, room_id: str, new_extrems: Collection[str]
+    ) -> None:
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="msc4242_state_dag_forward_extremities",
+            keyvalues={
+                "room_id": room_id,
+            },
+        )
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            table="msc4242_state_dag_forward_extremities",
+            keys=("room_id", "event_id"),
+            values=[
+                (
+                    room_id,
+                    event_id,
+                )
+                for event_id in new_extrems
+            ],
+        )
+
     @classmethod
     def _filter_events_and_contexts_for_duplicates(
         cls, events_and_contexts: list[EventPersistencePair]
@@ -2673,7 +2713,7 @@ class PersistEventsStore:
             return
 
         def event_dict(event: EventBase) -> JsonDict:
-            d = event.get_dict()
+            d = event.get_dict_for_persistence()
             d.pop("redacted", None)
             d.pop("redacted_because", None)
             return d
@@ -2859,6 +2899,9 @@ class PersistEventsStore:
 
             self._handle_event_relations(txn, event)
 
+            if supports_msc4242_state_dag(event) and event_exists_in_state_dag(event):
+                self._store_state_dag_edges(txn, event)
+
             # Store the labels for this event.
             labels = event.content.get(EventContentFields.LABELS)
             if labels:
@@ -2935,6 +2978,36 @@ class PersistEventsStore:
         txn.async_call_after(external_prefill)
         txn.call_after(local_prefill)
 
+    def _store_state_dag_edges(
+        self, txn: LoggingTransaction, event: MSC4242Event
+    ) -> None:
+        # the create event has no edge but we still need to persist it as get_state_dag just
+        # yanks all rows in this table. It's a bit gross to store NULL as the prev_state_event_id
+        # though.
+        if len(event.prev_state_events) == 0 and event.type == EventTypes.Create:
+            self.db_pool.simple_insert_txn(
+                txn,
+                table="msc4242_state_dag_edges",
+                values={
+                    "room_id": event.room_id,
+                    "event_id": event.event_id,
+                    "prev_state_event_id": None,
+                },
+            )
+            return
+        assert len(event.prev_state_events) > 0
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="msc4242_state_dag_edges",
+            key_names=["room_id", "event_id", "prev_state_event_id"],
+            key_values=[
+                (event.room_id, event.event_id, prev_state_event)
+                for prev_state_event in event.prev_state_events
+            ],
+            value_names=(),
+            value_values=(),
+        )
+
     def _store_redaction(self, txn: LoggingTransaction, event: EventBase) -> None:
         assert event.redacts is not None
         self.db_pool.simple_upsert_txn(
@@ -2944,6 +3017,7 @@ class PersistEventsStore:
             values={
                 "redacts": event.redacts,
                 "received_ts": self._clock.time_msec(),
+                "recheck": event.internal_metadata.need_to_check_redaction(),
             },
         )
 
@@ -3027,7 +3101,7 @@ class PersistEventsStore:
                     event.event_id,
                     event.internal_metadata.stream_ordering,
                     event.state_key,
-                    event.user_id,
+                    event.sender,
                     event.room_id,
                     event.membership,
                     non_null_str_or_none(event.content.get("displayname")),
@@ -3455,7 +3529,13 @@ class PersistEventsStore:
         """
         state_groups = {}
         for event, context in events_and_contexts:
-            if event.internal_metadata.is_outlier():
+            # state dag rooms allow outliers to have state, as `/get_missing_events` state dag events are nominally
+            # outliers (not present in the timeline) but do need state persisted so we can calculate
+            # what the auth_events are for the event.
+            if (
+                not event.room_version.msc4242_state_dags
+                and event.internal_metadata.is_outlier()
+            ):
                 # double-check that we don't have any events that claim to be outliers
                 # *and* have partial state (which is meaningless: we should have no
                 # state at all for an outlier)

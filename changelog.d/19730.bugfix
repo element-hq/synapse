@@ -1,0 +1,1 @@
+Work around bug that sometimes breaks joining restricted rooms that require a remote join. Contributed by @tulir @ Beeper.

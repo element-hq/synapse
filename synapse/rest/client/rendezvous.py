@@ -20,6 +20,7 @@
 #
 
 import logging
+from http import HTTPStatus
 from http.client import TEMPORARY_REDIRECT
 from typing import TYPE_CHECKING, Any
 
@@ -80,6 +81,12 @@ class MSC4388CreateRendezvousServlet(RestServlet):
         self.require_authentication = (
             hs.config.experimental.msc4388_requires_authentication
         )
+
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, Any]:
+        if self.require_authentication:
+            # This will raise if the user is not authenticated
+            await self.auth.get_user_by_req(request)
+        return HTTPStatus.OK, {"create_available": True}
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, Any]:
         if self.require_authentication:

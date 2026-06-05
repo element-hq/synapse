@@ -1,8 +1,97 @@
-matrix-synapse-py3 (1.149.0~rc1+nmu1) UNRELEASED; urgency=medium
+matrix-synapse-py3 (1.154.0) stable; urgency=medium
 
+  * New Synapse release 1.154.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Thu, 04 Jun 2026 14:16:23 +0100
+
+matrix-synapse-py3 (1.154.0~rc1) stable; urgency=medium
+
+  * New Synapse release 1.154.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Wed, 27 May 2026 12:23:54 +0100
+
+matrix-synapse-py3 (1.153.0) stable; urgency=medium
+
+  * New Synapse release 1.153.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 19 May 2026 14:12:51 +0100
+
+matrix-synapse-py3 (1.153.0~rc3) stable; urgency=medium
+
+  * New Synapse release 1.153.0rc3.
+
+ -- Synapse Packaging team <packages@matrix.org>  Fri, 15 May 2026 11:42:29 +0100
+
+matrix-synapse-py3 (1.153.0~rc2) stable; urgency=medium
+
+  * New Synapse release 1.153.0rc2.
+
+ -- Synapse Packaging team <packages@matrix.org>  Wed, 13 May 2026 12:00:39 +0100
+
+matrix-synapse-py3 (1.153.0~rc1) stable; urgency=medium
+
+  * New Synapse release 1.153.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Fri, 08 May 2026 13:05:08 +0100
+
+matrix-synapse-py3 (1.152.1) stable; urgency=medium
+
+  * New Synapse release 1.152.1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Thu, 07 May 2026 13:29:05 +0100
+
+matrix-synapse-py3 (1.152.0) stable; urgency=medium
+
+  * New Synapse release 1.152.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 28 Apr 2026 11:45:01 +0100
+
+matrix-synapse-py3 (1.152.0~rc1) stable; urgency=medium
+
+  * New Synapse release 1.152.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Wed, 22 Apr 2026 12:03:58 +0100
+
+matrix-synapse-py3 (1.151.0) stable; urgency=medium
+
+  * New synapse release 1.151.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 07 Apr 2026 12:15:10 +0000
+
+matrix-synapse-py3 (1.151.0~rc1) stable; urgency=medium
+
+  * New synapse release 1.151.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 31 Mar 2026 12:23:34 +0000
+
+matrix-synapse-py3 (1.150.0) stable; urgency=medium
+
+  * New synapse release 1.150.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 24 Mar 2026 14:17:04 +0000
+
+matrix-synapse-py3 (1.150.0~rc1) stable; urgency=medium
+
+  [ Quentin Gliech ]
   * Change how the systemd journald integration is installed.
+  * Update Poetry used at build time to 2.2.1.
 
- -- Quentin Gliech <packages@matrix.org>  Fri, 20 Feb 2026 19:19:51 +0100
+  [ Synapse Packaging team ]
+  * New synapse release 1.150.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 17 Mar 2026 14:56:35 +0000
+
+matrix-synapse-py3 (1.149.1) stable; urgency=medium
+
+  * New synapse release 1.149.1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Wed, 11 Mar 2026 09:30:24 +0000
+
+matrix-synapse-py3 (1.149.0) stable; urgency=medium
+
+  * New synapse release 1.149.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 10 Mar 2026 13:02:53 +0000
 
 matrix-synapse-py3 (1.149.0~rc1) stable; urgency=medium
 
