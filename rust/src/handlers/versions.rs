@@ -14,6 +14,7 @@
  */
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::config::SynapseConfig;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
@@ -28,7 +29,7 @@ struct VersionsResponse {
 
 pub struct VersionsHandler {
     pub config: SynapseConfig,
-    pub store: &Store,
+    pub store: Arc<Store>,
 }
 
 impl VersionsHandler {

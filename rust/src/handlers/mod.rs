@@ -13,6 +13,8 @@
  *
  */
 
+use std::sync::Arc;
+
 use pyo3::{
     prelude::*,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
@@ -47,10 +49,13 @@ impl RustHandlers {
             .getattr("db_pool")?
             .extract()?;
 
+        // Store is shared across all of the handlers so let's use an `Arc`
+        let store = Arc::new(Store { config, db_pool });
+
         Ok(RustHandlers {
             versions: versions::VersionsHandler {
                 config,
-                store: Store { config, db_pool },
+                store: Arc::clone(&store),
             },
         })
     }
