@@ -312,13 +312,19 @@ class SlidingSyncResult:
                 #
                 # This is why we don't incorporate `device_one_time_keys_count`
                 # (or `device_unused_fallback_key_types`) into the `__bool__`
-                # check. Ideally we'd detect if either of those fields have
+                # check.
+                #
+                # FIXME: Ideally we'd detect if either of those fields have
                 # changed since the last sync, but we do not currently track
                 # such state.
                 #
                 # Note that the client will receive these fields eventually when
-                # we respond to the sync request, we just won't immediately
-                # respond (even if there are changes).
+                # we respond to the sync request (usually sync timeouts are set
+                # to ~30s), we just won't immediately respond (even if there are
+                # changes). This delay is acceptable for clients, as a) these
+                # fields do not trigger UI (and so don't affect user perceivable
+                # latency) and b) are handled in the background by the clients
+                # anyway.
 
                 return bool(self.device_list_updates)
 
