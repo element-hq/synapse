@@ -413,8 +413,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._mgmt_ratelimit(request)
-        await make_deferred_yieldable(self._initialized_from_db)
+        await self._mgmt_ratelimit(request, delay_id)
 
         next_send_ts = await self._store.cancel_delayed_event(delay_id)
 
@@ -428,13 +427,7 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
-        await self._mgmt_ratelimit(request)
-
-        # Note: We don't need to wait on `self._initialized_from_db` here as the
-        # events that deals with are already marked as processed.
-        #
-        # `restart_delayed_events` will skip over such events entirely.
-
+        await self._mgmt_ratelimit(request, delay_id)
         next_send_ts = await self._store.restart_delayed_event(
             delay_id, self._get_current_ts()
         )
@@ -452,8 +445,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._mgmt_ratelimit(request)
-        await make_deferred_yieldable(self._initialized_from_db)
+        await self._mgmt_ratelimit(request, delay_id)
 
         event, next_send_ts = await self._store.process_target_delayed_event(delay_id)
 
@@ -462,14 +454,24 @@ class DelayedEventsHandler:
 
         await self._send_event(event)
 
-    async def _mgmt_ratelimit(self, request: SynapseRequest) -> None:
+    async def _mgmt_ratelimit(self, request: SynapseRequest, delay_id: str) -> None:
+        await make_deferred_yieldable(self._initialized_from_db)
+
+        # NOTE: it would be more accurate to run this in a transaction that also contains
+        # the action to be done with the delay_id, but the worst that can happen without it
+        # is the possibility of the delay_id disappearing after having checked for it here,
+        # which isn't terrible since it's used here only for applying a ratelimit.
+        await self._store.has_delayed_event(delay_id)
+
         if self._auth.has_access_token(request):
             requester = await self._auth.get_user_by_req(request)
-            key = None
+            user_id = requester.user.to_string()
         else:
             requester = None
-            key = request.getClientAddress().host
-        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester, key)
+            user_id = None
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
+            requester, (user_id, delay_id)
+        )
 
     async def _send_on_timeout(self) -> None:
         self._next_delayed_event_call = None

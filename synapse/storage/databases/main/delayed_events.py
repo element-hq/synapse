@@ -210,6 +210,23 @@ class DelayedEventsStore(SQLBaseStore):
             "restart_delayed_event", restart_delayed_event_txn
         )
 
+    async def assert_delayed_event(self, delay_id: str) -> None:
+        """Checks whether there is a delayed event in the DB with the given delay_id.
+
+        Raises:
+            NotFoundError: if there is no matching delayed event.
+        """
+
+        res = await self.db_pool.simple_select_one_onecol(
+            table="delayed_events",
+            keyvalues={"delay_id": delay_id},
+            retcol="1",
+            allow_none=True,
+            desc="has_delayed_event",
+        )
+        if not res:
+            raise NotFoundError("Delayed event not found")
+
     async def get_count_of_delayed_events(self) -> int:
         """Returns the number of pending delayed events in the DB."""
 
