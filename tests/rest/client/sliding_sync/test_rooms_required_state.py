@@ -1926,7 +1926,12 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
     def test_rooms_required_state_expand_retract_expand(self) -> None:
         """Test that when expanding, retracting and then expanding the required
-        state, we get the changes that happened."""
+        state, we get the changes that happened.
+
+        Also see `test_changing_required_state_returns_immediately`, which tests
+        that the sync stream is woken up immediately when changing the required
+        state, and not just on the next change to the room.
+        """
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
