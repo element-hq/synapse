@@ -465,27 +465,6 @@ class ProfileHandler:
 
         profile_updates: list[tuple[str, JsonValue | None]] = []
         current_profile: ProfileInfo | None = None
-        if not by_admin:
-            current_profile = await self.store.get_profileinfo(target_user)
-            if not self.hs.config.registration.enable_set_displayname:
-                if current_profile.display_name:
-                    # SUSPICIOUS: It seems strange to block deactivation on this,
-                    # though this is preserving previous behaviour.
-                    raise SynapseError(
-                        400,
-                        "Changing display name is disabled on this server",
-                        Codes.FORBIDDEN,
-                    )
-
-            if not self.hs.config.registration.enable_set_avatar_url:
-                if current_profile.avatar_url:
-                    # SUSPICIOUS: It seems strange to block deactivation on this,
-                    # though this is preserving previous behaviour.
-                    raise SynapseError(
-                        400,
-                        "Changing avatar is disabled on this server",
-                        Codes.FORBIDDEN,
-                    )
 
         if self._msc4429_enabled:
             if current_profile is None:
