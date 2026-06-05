@@ -1,3 +1,44 @@
+# Synapse 1.154.0 (2026-06-04)
+
+No significant changes since 1.154.0rc1.
+
+# Synapse 1.154.0rc1 (2026-05-27)
+
+## Features
+
+- Add support for [MSC4452: Preview URL capabilities API](https://github.com/matrix-org/matrix-spec-proposals/pull/4452) which exposes a `io.element.msc4452.preview_url` capability.
+  If `experimental_features.msc4452_enabled` is `true`, the `/_matrix/(client/v1/media|media/v3)/preview_url` endpoint
+  now responds with a 403 status code when the capability is disabled. ([\#19715](https://github.com/element-hq/synapse/issues/19715))
+
+## Bugfixes
+
+- Fix a bug in [MSC4186: Simplified Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) that could prevent user avatars from showing if the room had an empty name. ([\#19468](https://github.com/element-hq/synapse/issues/19468), [\#19791](https://github.com/element-hq/synapse/issues/19791))
+- Fix access token cache not being invalidated for sessions using refresh tokens. Contributed by @FrenchGithubUser @ Famedly. ([\#19483](https://github.com/element-hq/synapse/issues/19483))
+- Fix bug where Synapse would return 400 (`M_BAD_JSON`) when sending a message with a `mentions` field and Synapse module `check_event_allowed` callback registered (frozen event). Contributed by @gaetan-sbt. ([\#19634](https://github.com/element-hq/synapse/issues/19634))
+- Fix long-standing but niche bug with `/sync` where it could attempt to fetch data with flawed invalid future tokens. ([\#19644](https://github.com/element-hq/synapse/issues/19644))
+- Fix `/sync` failing when [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) are enabled and the sync request filters out Ephemeral Data Units (EDUs). ([\#19787](https://github.com/element-hq/synapse/issues/19787))
+- Fix packaging for Fedora and EPEL caused by unnecessary bumping `attrs` minimum version requirement in `pyproject.toml` file. Contributed by Oleg Girko. ([\#19789](https://github.com/element-hq/synapse/issues/19789))
+- Fix merging signatures when a policy server is running under the same server name as Synapse. The bug was re-introduced in v1.153.0rc1 after being fixed earlier in v1.151.0rc1. Contributed by @tulir @ Beeper. ([\#19797](https://github.com/element-hq/synapse/issues/19797))
+
+## Improved Documentation
+
+- Added details about how Synapse syncs the picture claim when `update_profile_information` setting is true. ([\#19508](https://github.com/element-hq/synapse/issues/19508))
+
+## Internal Changes
+
+- Port `Event.content` field to Rust. ([\#19725](https://github.com/element-hq/synapse/issues/19725))
+- Prefer close backfill points (absolute distance). ([\#19748](https://github.com/element-hq/synapse/issues/19748))
+- Replace unique `quarantined_media` waiting patterns with standard `wait_for_stream_token(...)`. ([\#19764](https://github.com/element-hq/synapse/issues/19764))
+- Improve Synapse logging around when someone encounters `We can't get valid state history.` so you can correlate everything by `event_id`. ([\#19765](https://github.com/element-hq/synapse/issues/19765))
+- Tidy up Rust `RoomVersion` structs. ([\#19766](https://github.com/element-hq/synapse/issues/19766))
+- Update `WorkerLock` tests to better stress the `WORKER_LOCK_MAX_RETRY_INTERVAL`. ([\#19772](https://github.com/element-hq/synapse/issues/19772))
+- Refactor [MSC4242: State DAG](https://github.com/matrix-org/matrix-spec-proposals/pull/4242) checks behind a single `TypeIs` helper to avoid scattered `isinstance` casts. ([\#19774](https://github.com/element-hq/synapse/issues/19774))
+- Use `StrCollection` for `prev_state_events`. ([\#19777](https://github.com/element-hq/synapse/issues/19777))
+- Fix up the construction of events in tests, ahead of the Rust event port. ([\#19781](https://github.com/element-hq/synapse/issues/19781))
+
+
+
+
 # Synapse 1.153.0 (2026-05-19)
 
 No significant changes since 1.153.0rc3.

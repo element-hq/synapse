@@ -977,7 +977,7 @@ class SlidingSyncHandler:
         # care to treat an empty string as unset). But we only need to get them
         # on initial syncs (or the first time we send down the room) or if the
         # membership has changed which may change the heroes.
-        if not room_name and (initial or (not initial and membership_changed)):
+        if not room_name and (initial or membership_changed):
             # We need the room summary to extract the heroes from
             if room_membership_for_user_at_to_token.membership != Membership.JOIN:
                 # TODO: Figure out how to get the membership summary for left/banned rooms
@@ -1196,8 +1196,6 @@ class SlidingSyncHandler:
             (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
         ]
         meta_room_state = list(hero_room_state)
-        if initial or name_changed:
-            meta_room_state.append((EventTypes.Name, ""))
         if initial or avatar_changed:
             meta_room_state.append((EventTypes.RoomAvatar, ""))
 
