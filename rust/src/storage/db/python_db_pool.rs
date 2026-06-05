@@ -224,7 +224,7 @@ impl LoggingTransactionWrapper {
         let fetch_fn = self
             .logging_transaction_py
             .bind(py)
-            .getattr(intern!(self.logging_transaction_py.py(), "fetchall"))?;
+            .getattr(intern!(py, "fetchall"))?;
         Ok(fetch_fn.call0()?.extract()?)
     }
 }
