@@ -1,0 +1,1 @@
+Add experimental support for [MSC4350](https://github.com/matrix-org/matrix-spec-proposals/pull/4350) (encryption impersonation for appservices), behind the `experimental_features.msc4350_enabled` config flag. This scaffolding commit only adds the flag; behavior follows in subsequent commits.

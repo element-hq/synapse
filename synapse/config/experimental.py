@@ -410,6 +410,15 @@ class ExperimentalConfig(Config):
             "msc3984_appservice_key_query", False
         )
 
+        # MSC4350: Permitting encryption impersonation for appservices.
+        # When enabled, /keys/upload accepts an `fi.mau.msc4350.impersonator`
+        # field on device key entries, and /keys/query includes the
+        # impersonator user's signatures in responses. Used by bridges to
+        # legitimize a shared bridge-bot device signing events on behalf of
+        # ghost users without tripping device-owner mismatch warnings.
+        # See https://github.com/matrix-org/matrix-spec-proposals/pull/4350
+        self.msc4350_enabled: bool = experimental.get("msc4350_enabled", False)
+
         # MSC3720 (Account status endpoint)
         self.msc3720_enabled: bool = experimental.get("msc3720_enabled", False)
 
