@@ -35,8 +35,8 @@ impl PerUserExperimentalFeature {
 }
 
 pub struct Store {
-    config: SynapseConfig,
-    db_pool: dyn DatabasePool,
+    pub config: SynapseConfig,
+    pub db_pool: dyn DatabasePool,
 }
 
 impl Store {

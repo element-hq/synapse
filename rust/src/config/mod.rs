@@ -13,33 +13,22 @@
  *
  */
 
-// use pyo3::PyAny;
-// use pyo3::{intern, prelude::*};
-use serde::{Deserialize, Serialize};
+use pyo3::prelude::*;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(FromPyObject)]
 pub struct SynapseConfig {
     pub experimental: ExperimentalConfig,
 }
 
-// impl<'py> FromPyObject<'_, 'py> for SynapseConfig<'py> {
-//     type Error = PyErr;
-
-//     /// From Python `LoggingTransaction`
-//     fn extract(config_python_object: Borrowed<'_, 'py, PyAny>) -> PyResult<Self> {
-//         todo!("...");
-//     }
+// #[derive(FromPyObject)]
+// #[serde(rename_all = "snake_case")]
+// pub enum RoomCreationPreset {
+//     PrviateChat,
+//     PublicChat,
+//     TrustedPrivateChat,
 // }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum RoomCreationPreset {
-    PrviateChat,
-    PublicChat,
-    TrustedPrivateChat,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(FromPyObject)]
 pub struct ExperimentalConfig {
     pub msc3881_enabled: bool,
     pub msc3575_enabled: bool,

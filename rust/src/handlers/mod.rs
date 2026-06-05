@@ -19,6 +19,8 @@ use pyo3::{
     Bound, PyResult, Python,
 };
 
+use crate::config::SynapseConfig;
+use crate::storage::db::python_db_pool::PythonDatabasePool;
 use crate::storage::store::Store;
 
 pub mod versions;
@@ -33,9 +35,24 @@ impl RustHandlers {
     #[new]
     #[pyo3(signature = (homeserver))]
     pub fn py_new(py: Python<'_>, homeserver: &Bound<'_, PyAny>) -> PyResult<RustHandlers> {
-        RustHandlers {
-            versions: versions::VersionsHandler { store: Store {} },
-        }
+        let config: SynapseConfig = homeserver.getattr("config")?.extract()?;
+
+        // hs.get_datastores().main.db_pool
+        let db_pool: PythonDatabasePool = homeserver
+            .call_method0("get_datastores")?
+            .into_pyobject(py)
+            .unwrap_infallible()
+            .unbind()
+            .getattr("main")?
+            .getattr("db_pool")?
+            .extract()?;
+
+        Ok(RustHandlers {
+            versions: versions::VersionsHandler {
+                config,
+                store: Store { config, db_pool },
+            },
+        })
     }
 }
 

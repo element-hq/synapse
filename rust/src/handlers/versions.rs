@@ -27,23 +27,20 @@ struct VersionsResponse {
 }
 
 pub struct VersionsHandler {
-    store: &Store,
+    pub config: SynapseConfig,
+    pub store: &Store,
 }
 
 impl VersionsHandler {
     /// Assemble a `/versions` response
-    async fn get_versions(
-        &self,
-        user_id: Option<&str>,
-        config: SynapseConfig,
-    ) -> Result<VersionsResponse, anyhow::Error> {
+    async fn get_versions(&self, user_id: Option<&str>) -> Result<VersionsResponse, anyhow::Error> {
         let msc3881_enabled = match user_id {
             Some(user_id) => {
                 self.store
                     .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3881)
                     .await?
             }
-            None => PerUserExperimentalFeature::MSC3881.is_globally_enabled(config),
+            None => PerUserExperimentalFeature::MSC3881.is_globally_enabled(self.config),
         };
 
         let msc3575_enabled = match user_id {
@@ -52,7 +49,7 @@ impl VersionsHandler {
                     .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3575)
                     .await?
             }
-            None => PerUserExperimentalFeature::MSC3575.is_globally_enabled(config),
+            None => PerUserExperimentalFeature::MSC3575.is_globally_enabled(self.config),
         };
 
         // TODO: Calculate these once since they shouldn't change after start-up.

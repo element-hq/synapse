@@ -224,5 +224,7 @@ impl Transaction for LoggingTransactionWrapper {
         // We just need to send the proper signal which will finish the txn callback and
         // have it run.
         done_with_txn_tx.send(())
+        // TODO: How can we guarantee that `commit` was run? Perhaps we have to wait for
+        // `new_transaction(...)` to complete successfully
     }
 }
