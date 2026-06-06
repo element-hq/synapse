@@ -48,12 +48,12 @@ from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import (
     EventBase,
-    FrozenEventVMSC4242,
     StrippedStateEvent,
     event_exists_in_state_dag,
     is_creator,
     relation_from_event,
 )
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
@@ -915,7 +915,9 @@ class PersistEventsStore:
         # instances as we'll potentially be pulling more events from the DB and
         # we don't need the overhead of fetching/parsing the full event JSON.
         event_to_types = {e.event_id: (e.type, e.state_key) for e in state_events}
-        event_to_auth_chain = {e.event_id: e.auth_event_ids() for e in state_events}
+        event_to_auth_chain: dict[str, StrCollection] = {
+            e.event_id: e.auth_event_ids() for e in state_events
+        }
         event_to_room_id = {e.event_id: e.room_id for e in state_events}
 
         return self._calculate_chain_cover_index(
@@ -2897,10 +2899,7 @@ class PersistEventsStore:
 
             self._handle_event_relations(txn, event)
 
-            if event.room_version.msc4242_state_dags and event_exists_in_state_dag(
-                event
-            ):
-                assert isinstance(event, FrozenEventVMSC4242)
+            if supports_msc4242_state_dag(event) and event_exists_in_state_dag(event):
                 self._store_state_dag_edges(txn, event)
 
             # Store the labels for this event.
@@ -2980,7 +2979,7 @@ class PersistEventsStore:
         txn.call_after(local_prefill)
 
     def _store_state_dag_edges(
-        self, txn: LoggingTransaction, event: FrozenEventVMSC4242
+        self, txn: LoggingTransaction, event: MSC4242Event
     ) -> None:
         # the create event has no edge but we still need to persist it as get_state_dag just
         # yanks all rows in this table. It's a bit gross to store NULL as the prev_state_event_id

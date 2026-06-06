@@ -1355,7 +1355,15 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         current_state = {
             state_key: event_map[event_id]
             for state_key, event_id in state_before_join.items()
+            # TODO figure out why events present in state_before_join are sometimes not found in event_map
+            #  See https://github.com/element-hq/synapse/issues/19465
+            if event_id in event_map
         }
+        if len(current_state) < len(state_before_join):
+            logger.warning(
+                "Some events from state_before_join were not found in event_map: %s",
+                set(state_before_join.values()) - set(event_map.keys()),
+            )
         servers_that_can_issue_invite = get_servers_from_users(
             get_users_which_can_issue_invite(current_state)
         )
