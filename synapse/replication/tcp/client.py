@@ -178,6 +178,16 @@ class ReplicationDataHandler:
 
                 # Yield to reactor so that we don't block.
                 await self._clock.sleep(Duration(seconds=0))
+
+            # Wake up sync connections for users who uploaded new cross-signing
+            # signatures. These rows have is_signature=True and are skipped by the
+            # room-based loop above, so without this the signing user's /sync
+            # long-poll would not wake up until its timeout expires.
+            sig_users = [row.user_id for row in rows if row.is_signature]
+            if sig_users:
+                self.notifier.on_new_event(
+                    StreamKeyType.DEVICE_LIST, token, users=sig_users
+                )
         elif stream_name == PushersStream.NAME:
             for row in rows:
                 if row.deleted:
