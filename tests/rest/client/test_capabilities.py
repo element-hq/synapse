@@ -203,6 +203,42 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             ["avatar_url"],
         )
 
+    def test_get_delayed_events_capabilities_default_config_msc4140(self) -> None:
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_delay"], 0
+        )
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_scheduled"], 100
+        )
+
+    @override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 50,
+            },
+        }
+    )
+    def test_get_delayed_events_capabilities_custom_config_msc4140(self) -> None:
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_delay"], 86400000
+        )
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_scheduled"], 50
+        )
+
     @override_config({"enable_3pid_changes": False})
     def test_get_change_3pid_capabilities_3pid_disabled(self) -> None:
         """Test if change 3pid is disabled that the server responds it."""

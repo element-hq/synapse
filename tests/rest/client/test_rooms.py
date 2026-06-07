@@ -2521,7 +2521,7 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            Codes.INVALID_PARAM,
             channel.json_body.get("errcode"),
             channel.json_body,
         )
@@ -2539,7 +2539,7 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "ORG.MATRIX.MSC4140_MAX_DELAY_EXCEEDED",
+            Codes.INVALID_PARAM,
             channel.json_body.get("errcode"),
             channel.json_body,
         )
