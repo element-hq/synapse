@@ -2581,8 +2581,6 @@ class RoomDelayedEventTestCase(RoomBase):
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        wait_ms = 2000
-        self.reactor.advance(wait_ms / 1000.0)
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
         self.assertEqual(
@@ -2591,7 +2589,7 @@ class RoomDelayedEventTestCase(RoomBase):
             channel.json_body,
         )
         step_ms = 100  # This is the amount of time advanced by a call to make_request
-        expected_retry_after_ms = send_after_ms - wait_ms - step_ms
+        expected_retry_after_ms = send_after_ms - step_ms
         self.assertEqual(
             expected_retry_after_ms,
             channel.json_body["retry_after_ms"],
