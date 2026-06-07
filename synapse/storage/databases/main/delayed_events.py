@@ -13,11 +13,12 @@
 #
 
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING, NewType
 
 import attr
 
-from synapse.api.errors import LimitExceededError, NotFoundError
+from synapse.api.errors import LimitExceededError, NotFoundError, SynapseError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -137,7 +138,11 @@ class DelayedEventsStore(SQLBaseStore):
             LimitExceededError: if the user has reached the limit of
                 how many delayed events they may have scheduled at once.
         """
-        assert limit > 0  # Should be enforced at config read time
+        if limit <= 0:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Sending delayed events has been disallowed",
+            )
         delay_id = _generate_delay_id()
         send_ts = Timestamp(creation_ts + delay)
 

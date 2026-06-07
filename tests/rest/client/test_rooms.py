@@ -2520,11 +2520,26 @@ class RoomDelayedEventTestCase(RoomBase):
             {"body": "test", "msgtype": "m.text"},
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertEqual(
-            Codes.INVALID_PARAM,
-            channel.json_body.get("errcode"),
-            channel.json_body,
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 0,
+            },
+        }
+    )
+    def test_delayed_event_disabled_by_limit(self) -> None:
+        """Test that delayed events are disabled by configuring the per-user limit to 0."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
         )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
 
     @unittest.override_config({"max_event_delay_duration": "1000"})
     def test_delayed_event_exceeds_max_delay(self) -> None:

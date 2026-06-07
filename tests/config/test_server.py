@@ -19,6 +19,8 @@
 #
 
 
+from typing import Any
+
 import yaml
 
 from synapse.config._base import ConfigError, RootConfig
@@ -203,19 +205,18 @@ class ServerConfigTestCase(unittest.TestCase):
         with self.assertRaises(ConfigError):
             _read_config(generate_config(-1))
 
-    def test_max_delayed_events_per_user_enforces_positive(self) -> None:
-        def generate_config(value: int) -> JsonDict:
+    def test_max_delayed_events_per_user_enforces_non_negative_int(self) -> None:
+        def generate_config(value: Any) -> JsonDict:
             return {
                 "experimental_features": {"msc4140_max_delayed_events_per_user": value}
             }
 
-        _read_config(generate_config(1))
+        for allowed_value in (0, 1):
+            _read_config(generate_config(allowed_value))
 
-        with self.assertRaises(ConfigError):
-            _read_config(generate_config(0))
-
-        with self.assertRaises(ConfigError):
-            _read_config(generate_config(-1))
+        for disallowed_value in (-1, 0.5):
+            with self.assertRaises(ConfigError):
+                _read_config(generate_config(disallowed_value))
 
 
 def _read_config(config_values: JsonDict) -> None:

@@ -927,10 +927,10 @@ class ServerConfig(Config):
         ).get("msc4140_max_delayed_events_per_user", 100)
         if (
             not isinstance(self.max_delayed_events_per_user, int)
-            or self.max_delayed_events_per_user <= 0
+            or self.max_delayed_events_per_user < 0
         ):
             raise ConfigError(
-                "Expected a positive value",
+                "'msc4140_max_delayed_events_per_user' must be a non-negative integer",
                 ("experimental", "msc4140_max_delayed_events_per_user"),
             )
 

@@ -539,8 +539,7 @@ def _parse_request_delay(
     if max_delay is None:
         raise SynapseError(
             HTTPStatus.BAD_REQUEST,
-            "Delayed events are not supported on this server",
-            Codes.INVALID_PARAM,
+            "Sending delayed events has been disallowed",
         )
     if delay > max_delay:
         raise SynapseError(
