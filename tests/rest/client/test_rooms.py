@@ -2590,7 +2590,7 @@ class RoomDelayedEventTestCase(RoomBase):
             channel.json_body["errcode"],
             channel.json_body,
         )
-        step_ms = 100  # The simulated duration of each make_request
+        step_ms = 100  # This is the amount of time advanced by a call to make_request
         expected_retry_after_ms = send_after_ms - wait_ms - step_ms
         self.assertEqual(
             expected_retry_after_ms,
