@@ -432,6 +432,15 @@ There are two options for solving this:
 Sorry, we know it's a bit fiddly, but it's *really* helpful for us when we come
 to put together a release!
 
+> [!TIP]
+> If you are pushing from a branch in the main `element-hq/synapse` repository
+>(rather than a fork), you can skip all of this: name the file
+> `changelog.d/0.<type>` (for example `changelog.d/0.bugfix`) and commit it
+> before opening the PR. Once the PR is open, CI automatically pushes a commit
+> renaming the file to the real PR number, so just `git pull` afterwards to
+> fetch the rename. This doesn't work from forks, since CI can't push back to
+> them.
+
 ### Debian changelog
 
 Changes which affect the debian packaging files (in `debian`) are an
