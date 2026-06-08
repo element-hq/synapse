@@ -324,7 +324,10 @@ class SlidingSyncResult:
                 # changes). This delay is acceptable for clients, as a) these
                 # fields do not trigger UI (and so don't affect user perceivable
                 # latency) and b) are handled in the background by the clients
-                # anyway.
+                # anyway. The only risk being that one-time keys could be exhausted
+                # before the client knows about adding some more. But for example,
+                # if the client is syncing with a timeout of 30s, the window of
+                # staleness is so small for this not to matter.
 
                 return bool(self.device_list_updates)
 
