@@ -194,6 +194,11 @@ class ServerConfigTestCase(unittest.TestCase):
         self.assertEqual(conf["listeners"], expected_listeners)
 
     def test_max_delayed_events_enforces_positive(self) -> None:
+        """
+        Test that the configured maximum allowed delay must be a positive value if set,
+        as per documentation
+        """
+
         def generate_config(value: int) -> JsonDict:
             return {"max_event_delay_duration": value}
 
@@ -206,6 +211,11 @@ class ServerConfigTestCase(unittest.TestCase):
             _read_config(generate_config(-1))
 
     def test_max_delayed_events_per_user_enforces_non_negative_int(self) -> None:
+        """
+        Test that the configured maximum number of delayed events must be a non-negative value if set,
+        as a negative limit can never be satisfied
+        """
+
         def generate_config(value: Any) -> JsonDict:
             return {
                 "experimental_features": {"msc4140_max_delayed_events_per_user": value}
