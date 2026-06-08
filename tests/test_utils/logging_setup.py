@@ -25,6 +25,13 @@ import twisted.logger
 from synapse.logging.context import LoggingContextFilter
 from synapse.synapse_rust import reset_logging_config
 
+# The maximum length of a single log line. Extremely long log lines aren't
+# useful, and keeping them short also stays well under the limit that would
+# otherwise break parallel test runs: under `trial -jN` worker log events are
+# shipped to the manager process over AMP, which raises `TooLong` for any value
+# of 64KiB or more (e.g. a DEBUG dump of a large SQL query's values).
+_MAX_LOG_LINE_LENGTH = 1000
+
 
 class ToTwistedHandler(logging.Handler):
     """logging handler which sends the logs to the twisted log"""
@@ -33,6 +40,11 @@ class ToTwistedHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         log_entry = self.format(record)
+        if len(log_entry) > _MAX_LOG_LINE_LENGTH:
+            log_entry = (
+                log_entry[:_MAX_LOG_LINE_LENGTH]
+                + "... [truncated overly long log line]"
+            )
         log_level = record.levelname.lower().replace("warning", "warn")
         self.tx_log.emit(
             twisted.logger.LogLevel.levelWithName(log_level), "{entry}", entry=log_entry
