@@ -195,15 +195,44 @@ jobs:
     # Only run on pull_request events, targeting develop/release branches, and skip when the PR author is dependabot[bot].
     if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'develop' || contains(github.base_ref, 'release-')) && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
+    # Needed so the placeholder-rename step below can push a commit back to the PR.
+    permissions:
+      contents: write
     steps:
+      # Check out the head *branch* (not the detached SHA) so the rename commit
+      # below has a branch to push back to.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.x"
       - run: "pip install 'towncrier>=18.6.0rc1'"
+
+      # If a `changelog.d/0.*` placeholder is present, rename it to the real PR
+      # number and push the result back to the PR *before* the check below runs,
+      # so the check sees the correctly-numbered file. Only runs for PRs from
+      # branches in the main repo (forks get a read-only token, so the push would
+      # fail); on a fork the placeholder is left as-is and the check rejects it,
+      # which is what we want — fork contributors must use the real PR number.
+      - name: Rename placeholder newsfragment to the PR number
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          shopt -s nullglob
+          for f in changelog.d/0.*; do
+            git mv "$f" "changelog.d/${PULL_REQUEST_NUMBER}.${f#changelog.d/0.}"
+          done
+        env:
+          PULL_REQUEST_NUMBER: ${{ github.event.number }}
+
+      - name: Commit renamed newsfragment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7.1.0
+        with:
+          commit_message: "Rename changelog newsfragment to PR number"
+          file_pattern: "changelog.d/"
+
       - run: scripts-dev/check-newsfragment.sh
         env:
           PULL_REQUEST_NUMBER: ${{ github.event.number }}
