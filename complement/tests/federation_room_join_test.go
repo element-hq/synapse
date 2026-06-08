@@ -29,6 +29,10 @@ import (
 // extremities, prompting the joining server to backfill.
 //
 // See https://github.com/element-hq/synapse/pull/19390
+//
+// This test lives as a in-repo Synapse Complement test because the spec doesn't mandate
+// which events should be resolvable after the `/make_join`/`/send_join` dance (or that
+// a homeserver should send `m.dummy` events to tie things together)
 func TestEventBetweenMakeJoinAndSendJoinIsNotLost(t *testing.T) {
 	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
@@ -47,6 +51,9 @@ func TestEventBetweenMakeJoinAndSendJoinIsNotLost(t *testing.T) {
 	messageDiscoverableWaiter := helpers.NewWaiter()
 
 	srv := federation.NewServer(t, deployment,
+		// hs1 fetches our signing keys via /_matrix/key/v2/server to verify our
+		// identity before accepting federation requests. Without this handler,
+		// make_join is rejected with 401 M_UNAUTHORIZED.
 		federation.HandleKeyRequests(),
 	)
 	// After send_join, hs1 will start sending us federation transactions via
