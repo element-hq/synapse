@@ -916,7 +916,7 @@ class ServerConfig(Config):
             if self.max_event_delay_ms <= 0:
                 raise ConfigError(
                     "'max_event_delay_duration' must be a positive value if set",
-                    ("max_event_delay_duration",)
+                    ("max_event_delay_duration",),
                 )
         else:
             self.max_event_delay_ms = None
