@@ -1,0 +1,1 @@
+Allow naming changelog files `0.<type>` as a placeholder when pushing from a branch in the main repo; CI renames them to the PR number automatically.
