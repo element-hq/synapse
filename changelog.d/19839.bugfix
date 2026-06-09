@@ -1,1 +1,0 @@
-Fix the `/capabilities` endpoint returning a 500 error on non-media workers when [MSC4452: Preview URL capabilities API](https://github.com/matrix-org/matrix-spec-proposals/pull/4452) is enabled.
