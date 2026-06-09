@@ -832,7 +832,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # If this is the to-device stream, and we are a writer for that stream, log some stats
         if (
             issue9533_logger.isEnabledFor(logging.DEBUG)
-            # Only log if we are the instance that is doing the persisting
             and our_current_position > 0
             and self._stream_name == "to_device"
         ):
