@@ -343,7 +343,7 @@ class MessageHandler:
         Returns:
             A dict of user_id to profile info
         """
-        if not requester.app_service:
+        if not requester.app_service_id:
             # We check AS auth after fetching the room membership, as it
             # requires us to pull out all joined members anyway.
             membership, _ = await self.auth.check_user_in_room_or_world_readable(
@@ -365,12 +365,14 @@ class MessageHandler:
         # If this is an AS, double check that they are allowed to see the members.
         # This can either be because the AS user is in the room or because there
         # is a user in the room that the AS is "interested in"
-        if (
-            requester.app_service
-            and requester.user.to_string() not in users_with_profile
-        ):
+        app_service = (
+            self.store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
+        if app_service and requester.user.to_string() not in users_with_profile:
             for uid in users_with_profile:
-                if requester.app_service.is_interested_in_user(uid):
+                if app_service.is_interested_in_user(uid):
                     break
             else:
                 # Loop fell through, AS has no interested users in room
@@ -846,7 +848,7 @@ class EventCreationHandler:
             return
 
         # exempt AS users from needing consent
-        if requester.app_service is not None:
+        if requester.app_service_id is not None:
             return
 
         user_id = requester.authenticated_entity
@@ -1425,8 +1427,10 @@ class EventCreationHandler:
             else:
                 context = await self.state.calculate_context_info(event)
 
-        if requester:
-            context.app_service = requester.app_service
+        if requester and requester.app_service_id:
+            context.app_service = self.store.get_app_service_by_id(
+                requester.app_service_id
+            )
 
         res, new_content = await self._third_party_event_rules.check_event_allowed(
             event, context

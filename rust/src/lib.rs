@@ -22,6 +22,7 @@ pub mod rendezvous;
 pub mod room_versions;
 pub mod segmenter;
 pub mod storage;
+pub mod types;
 
 lazy_static! {
     static ref LOGGING_HANDLE: ResetHandle = pyo3_log::init();
@@ -75,6 +76,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     msc4388_rendezvous::register_module(py, m)?;
     segmenter::register_module(py, m)?;
     room_versions::register_module(py, m)?;
+    types::register_module(py, m)?;
 
     Ok(())
 }

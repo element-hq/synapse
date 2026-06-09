@@ -828,7 +828,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # do.
                 break
 
-        # Hacky debug logging to attempt to trace https://github.com/element-hq/synapse/issues/19795
+        # Hacky debug logging to attempt to trace https://github.com/element-hq/synapse/issues/19795.
+        # If this is the to-device stream, and we are a writer for that stream, log some stats
         if (
             issue9533_logger.isEnabledFor(logging.DEBUG)
             # Only log if we are the instance that is doing the persisting
