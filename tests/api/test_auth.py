@@ -108,12 +108,12 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
     def test_get_user_by_req_appservice_valid_token(self) -> None:
         app_service = Mock(
+            id="as_id",
             token="foobar",
             url="a_url",
             sender=self.test_user_id,
             ip_range_whitelist=None,
         )
-        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
