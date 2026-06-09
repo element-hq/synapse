@@ -237,6 +237,84 @@ class ReceiptTestCase(HomeserverTestCase):
         )
         self.assertEqual(res, {self.room_id1: event1_2_id, self.room_id2: event2_1_id})
 
+    def test_threaded_receipt_dropped_when_unthreaded_exists(self) -> None:
+        """MSC4102: a threaded receipt that clashes with an existing unthreaded
+        receipt *for the same event* should be dropped at insert time, so the
+        unthreaded receipt durably wins regardless of how the receipts are
+        later served down /sync. A threaded receipt for a *different* event is
+        not a clash and is kept (matching the read-time dedup in
+        `ReceiptInRoom.merge_to_content`, which keys off event id).
+
+        Regression test for the Complement test TestThreadReceiptsInSyncMSC4102,
+        which flaked because the read-time dedup alone doesn't survive the
+        receipts being served in separate /sync responses.
+        """
+        event1_id = self.create_and_send_event(
+            self.room_id1, UserID.from_string(OTHER_USER_ID)
+        )
+        # A second event. event1 is used as the thread-root id for the
+        # threaded receipts below; storage doesn't check thread membership.
+        event2_id = self.create_and_send_event(
+            self.room_id1, UserID.from_string(OTHER_USER_ID)
+        )
+
+        # Insert an unthreaded receipt for the second event.
+        pos = self.get_success(
+            self.store.insert_receipt(
+                room_id=self.room_id1,
+                receipt_type=ReceiptTypes.READ,
+                user_id=OUR_USER_ID,
+                event_ids=[event2_id],
+                thread_id=None,
+                data={},
+            )
+        )
+        self.assertIsNotNone(pos)
+
+        # A threaded receipt that clashes with it (same event) should be
+        # dropped.
+        pos = self.get_success(
+            self.store.insert_receipt(
+                room_id=self.room_id1,
+                receipt_type=ReceiptTypes.READ,
+                user_id=OUR_USER_ID,
+                event_ids=[event2_id],
+                thread_id=event1_id,
+                data={},
+            )
+        )
+        self.assertIsNone(pos)
+
+        # A threaded receipt for a *different* event is not a clash, so it is
+        # kept.
+        pos = self.get_success(
+            self.store.insert_receipt(
+                room_id=self.room_id1,
+                receipt_type=ReceiptTypes.READ,
+                user_id=OUR_USER_ID,
+                event_ids=[event1_id],
+                thread_id=event1_id,
+                data={},
+            )
+        )
+        self.assertIsNotNone(pos)
+
+        # The unthreaded receipt at event2 wins (no thread_id), and the
+        # non-clashing threaded receipt at event1 is retained.
+        to_key = self.store.get_max_receipt_stream_id()
+        receipts = self.get_success(
+            self.store.get_linearized_receipts_for_rooms([self.room_id1], to_key=to_key)
+        )
+        content = receipts[0]["content"]
+        self.assertEqual(set(content.keys()), {event1_id, event2_id})
+        self.assertNotIn(
+            "thread_id", content[event2_id][ReceiptTypes.READ][OUR_USER_ID]
+        )
+        self.assertEqual(
+            content[event1_id][ReceiptTypes.READ][OUR_USER_ID]["thread_id"],
+            event1_id,
+        )
+
     def test_get_last_receipt_event_id_for_user(self) -> None:
         # Send some events into the first room
         event1_1_id = self.create_and_send_event(

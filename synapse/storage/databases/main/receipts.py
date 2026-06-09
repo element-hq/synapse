@@ -908,35 +908,67 @@ class ReceiptsWorkerStore(SQLBaseStore):
         rx_ts = res[1] if res else 0
 
         # We don't want to clobber receipts for more recent events, so we
-        # have to compare orderings of existing receipts
+        # have to compare orderings of existing receipts.
+        #
+        # We fetch the user's existing receipts for this room/type in a single
+        # query: every receipt whose event ordering we know (for the
+        # same-thread comparison below), plus the unthreaded receipt for *this*
+        # event even if we don't know its ordering (for the MSC4102 check
+        # below).
         if stream_ordering is not None:
-            if thread_id is None:
-                thread_clause = "r.thread_id IS NULL"
-                thread_args: tuple[str, ...] = ()
-            else:
-                thread_clause = "r.thread_id = ?"
-                thread_args = (thread_id,)
-
-            # If the receipt doesn't have a stream ordering it is because we
-            # don't have the associated event, and so must be a remote receipt.
-            # Hence it's safe to just allow new receipts to clobber it.
-            sql = f"""
-            SELECT r.event_stream_ordering, r.event_id FROM receipts_linearized AS r
+            sql = """
+            SELECT r.event_stream_ordering, r.event_id, r.thread_id
+            FROM receipts_linearized AS r
             WHERE r.room_id = ? AND r.receipt_type = ? AND r.user_id = ?
-            AND r.event_stream_ordering IS NOT NULL AND {thread_clause}
-            """
-            txn.execute(
-                sql,
-                (
-                    room_id,
-                    receipt_type,
-                    user_id,
-                )
-                + thread_args,
+            AND (
+                r.event_stream_ordering IS NOT NULL
+                OR (r.thread_id IS NULL AND r.event_id = ?)
             )
+            """
+            txn.execute(sql, (room_id, receipt_type, user_id, event_id))
 
-            for so, eid in txn:
-                if int(so) >= stream_ordering:
+            for so, eid, existing_thread_id in txn:
+                # MSC4102: an unthreaded receipt always supersedes a threaded
+                # one for the *same* event. If we are inserting a threaded
+                # receipt but already have an unthreaded receipt for this user
+                # at the same event, then the threaded receipt is semantically
+                # meaningless, so we drop it rather than persisting it.
+                #
+                # We match on event id (mirroring the read-time dedup in
+                # `ReceiptInRoom.merge_to_content`) rather than on ordering, so
+                # this also covers a remote unthreaded receipt whose event we
+                # hadn't seen when it arrived (and so has a NULL
+                # event_stream_ordering).
+                #
+                # Doing this at insert time, as well as when serving receipts,
+                # makes the "prefer unthreaded" behaviour durable: otherwise the
+                # threaded receipt could be served on its own in a later /sync
+                # response (e.g. when the unthreaded and threaded receipts
+                # arrive in separate federation EDUs and so end up at different
+                # stream positions), causing the client to incorrectly see it
+                # win.
+                if (
+                    thread_id is not None
+                    and existing_thread_id is None
+                    and eid == event_id
+                ):
+                    logger.debug(
+                        "Ignoring threaded receipt for %s in favour of "
+                        "existing unthreaded receipt",
+                        event_id,
+                    )
+                    return None
+
+                # The remaining check compares stream orderings, so skip
+                # receipts for older events, and remote receipts whose event we
+                # don't have (NULL ordering) since it's safe to clobber those.
+                if so is None or int(so) < stream_ordering:
+                    continue
+
+                # Don't clobber a receipt for a more recent event in the same
+                # thread. (When inserting an unthreaded receipt, thread_id is
+                # None and this matches the existing unthreaded receipt.)
+                if existing_thread_id == thread_id:
                     logger.debug(
                         "Ignoring new receipt for %s in favour of existing "
                         "one for later event %s",
