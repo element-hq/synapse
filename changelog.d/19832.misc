@@ -1,1 +1,1 @@
-Fix a flaky test (`TooLong` under `trial -jN`) caused by an oversized debug log line.
+Fix a flaky test (`twisted.protocols.amp.TooLong` error under `trial -jN`) caused by an oversized debug log line.
