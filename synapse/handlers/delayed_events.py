@@ -414,6 +414,7 @@ class DelayedEventsHandler:
         """
         assert self._is_master
         await self._mgmt_ratelimit(request, delay_id)
+        await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(delay_id)
 
@@ -428,6 +429,12 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         await self._mgmt_ratelimit(request, delay_id)
+
+        # Note: We don't need to wait on `self._initialized_from_db` here as the
+        # events that deals with are already marked as processed.
+        #
+        # `restart_delayed_events` will skip over such events entirely.
+
         next_send_ts = await self._store.restart_delayed_event(
             delay_id, self._get_current_ts()
         )
@@ -446,6 +453,7 @@ class DelayedEventsHandler:
         """
         assert self._is_master
         await self._mgmt_ratelimit(request, delay_id)
+        await make_deferred_yieldable(self._initialized_from_db)
 
         event, next_send_ts = await self._store.process_target_delayed_event(delay_id)
 
@@ -455,8 +463,6 @@ class DelayedEventsHandler:
         await self._send_event(event)
 
     async def _mgmt_ratelimit(self, request: SynapseRequest, delay_id: str) -> None:
-        await make_deferred_yieldable(self._initialized_from_db)
-
         # NOTE: it would be more accurate to run this in a transaction that also contains
         # the action to be done with the delay_id, but the worst that can happen without it
         # is the possibility of the delay_id disappearing after having checked for it here,
