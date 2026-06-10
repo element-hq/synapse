@@ -236,9 +236,9 @@ class ResponseCacheTestCase(TestCase):
                 [], cache.keys(), "cache should not have the result now"
             )
 
-    def test_cache_func_errors(self) -> None:
+    def test_errors_raised_to_all_waiters(self) -> None:
         """If the callback raises an error, the error should be raised to all
-        callers and the result should not be cached"""
+        concurrent callers that were waiting on the same in-flight result."""
         cache = self.with_cache("error_cache", ms=3000)
 
         expected_error = Exception("oh no")
