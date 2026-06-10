@@ -13,14 +13,18 @@
  *
  */
 
-use sha2::digest::typenum::Len;
+use serde::{Serialize};
 
 use crate::{config::SynapseConfig, storage::db::DatabasePool};
 
 /// Currently supported per-user features
+#[derive(Serialize)]
 pub enum PerUserExperimentalFeature {
+    #[serde(rename = "msc3881")]
     MSC3881,
+    #[serde(rename = "msc3575")]
     MSC3575,
+    #[serde(rename = "msc4222")]
     MSC4222,
 }
 
@@ -34,6 +38,24 @@ impl PerUserExperimentalFeature {
     }
 }
 
+impl std::fmt::Display for PerUserExperimentalFeature {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            // Serialize so we can use the serde name of the variant as the source of truth
+            serde_json::to_string(self)
+                .unwrap_or_else(|err| format!(
+                    "<unable to serialize PerUserExperimentalFeature::{:?} to get display value: {}>",
+                    self, err
+                ))
+                // Remove the surrounding quotes from JSON serialization
+                .trim_matches('"')
+        )
+    }
+}
+
+
 pub struct Store {
     pub config: SynapseConfig,
     pub db_pool: Box<dyn DatabasePool>,
@@ -45,28 +67,34 @@ impl Store {
         user_id: &str,
         feature: PerUserExperimentalFeature,
     ) -> Result<bool, anyhow::Error> {
-        if feature.is_globally_enabled(self.config) {
+        if feature.is_globally_enabled(&self.config) {
             return Ok(true);
         }
 
-        let txn = self.db_pool.get_transaction("is_feature_enabled").await;
-        let rows = txn
-            .query(
-                r#"
-                SELECT enabled
-                FROM per_user_experimental_features
-                WHERE user_id = ? AND feature = ?
-                "#,
-                &[user_id, feature],
-            )
-            .await;
+        let is_feature_enabled_for_user = self.db_pool.run_interaction<bool>("is_feature_enabled_for_user", |txn| {
+            async move {
+                let rows = txn
+                    .query(
+                        r#"
+                        SELECT enabled
+                        FROM per_user_experimental_features
+                        WHERE user_id = ? AND feature = ?
+                        "#,
+                        &[user_id, &feature.to_string()],
+                    )
+                    .await;
 
-        match (rows.len(), rows.first()) {
-            (1, Some(enabled)) => Ok(enabled),
-            (0, None) => Ok(false),
-            _ => {
-                panic!("Synapse programming error");
+                match (rows.len(), rows.first()) {
+                    (1, Some(enabled)) => enabled,
+                    (0, None) => false,
+                    _ => {
+                        panic!("Synapse programming error");
+                    }
+                }
             }
-        }
+            .boxed()
+        }).await;
+        
+        Ok(is_feature_enabled_for_user)
     }
 }

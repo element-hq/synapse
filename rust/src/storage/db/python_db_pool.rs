@@ -58,80 +58,30 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PythonDatabasePoolWrapper {
 
 #[async_trait::async_trait]
 impl DatabasePool for PythonDatabasePoolWrapper {
-    async fn get_connection(&self) -> Result<Box<dyn DatabaseConnection>, anyhow::Error> {
-        let callback_func =
-            PyCFunction::new_closure(py, None, None, move |args, _| -> PyResult<Py<PyAny>> {
-                // TODO: Error if already called
+    fn run_interaction<'txn, R, F>(
+        &'txn self,
+        name: &'static str,
+        func: F,
+    ) -> impl Future<Output = anyhow::Result<R>> + 'txn
+    where
+        R: Send + Sync + 'static,
+        F: for<'f> Fn(&'f mut dyn Transaction) -> BoxFuture<'f, anyhow::Result<R>> + Send + 'static,
+    {
+        Python::attach(|py| -> PyResult<Vec<Row>> {
+            let callback_func =
+                PyCFunction::new_closure(py, None, None, move |args, _| -> PyResult<Py<PyAny>> {
+                    // We found our `LoggingTransactionWrapper`
+                    let txn: LoggingTransactionWrapper = args.get_item(0)?;
+                    func(txn);
+                });
 
-                let py = args.py();
-                // We found our `LoggingDatabaseConnection`
-                let conn_py = args.get_item(0)?;
-                tx.send(conn_py.unbind());
-            });
-
-        let execute_fn = self
-            .database_pool_py
-            .getattr(intern!(self.database_pool_py.py(), "runWithConnection"))?;
-        execute_fn.call1((callback_func,))?;
-
-        Ok(Box::new(LoggingDatabaseConnectionWrapper {
-            database_pool_py: self.database_pool_py,
-            logging_database_connection_py: connection,
-        }))
-    }
-}
-
-/// Wrapper for a `LoggingDatabaseConnection` from the Python side of Synapse.
-pub struct LoggingDatabaseConnectionWrapper {
-    /// The underlying `DatabasePool`
-    ///
-    /// We purposely avoid `Bound<'py, PyAny>` so it can be stored and moved freely
-    /// across threads (like to extract it from the `runWithConnection(...)` callback).
-    /// You will need to acquire your own `py` and bind it using
-    /// `database_pool_py.bind(py)` to do anything useful.
-    database_pool_py: Py<PyAny>,
-    /// The underlying `LoggingDatabaseConnection`
-    logging_database_connection_py: Py<PyAny>,
-}
-
-#[async_trait::async_trait]
-impl DatabaseConnection for LoggingDatabaseConnectionWrapper {
-    async fn get_transaction(
-        &self,
-        description: &str,
-    ) -> Result<Box<dyn Transaction>, anyhow::Error> {
-        // Synapse's `DatabasePool.new_transaction` has built-in retry functionality and
-        // can call this function multiple times under certain failure modes. Normally,
-        // everything in the transaction happens in the callback but since we have a
-        // little bit of a different API surface, we instead extract the transaction for
-        // us to use outside.
-        //
-        // Re-using `runInteraction`, means we get all of the logging, metrics, etc for
-        // free.
-        let callback_func =
-            PyCFunction::new_closure(py, None, None, move |args, _| -> PyResult<Py<PyAny>> {
-                // TODO: Error if already called
-
-                let py = args.py();
-                let txn: LoggingTransactionWrapper = args.get_item(0)?;
-                tx.send(txn);
-
-                // Wait until we see the signal that we're `done_with_txn_rx`
-            });
-
-        let execute_fn = self
-            .database_pool_py
-            .getattr(intern!(self.database_pool_py.py(), "new_transaction"))?;
-        execute_fn.call1((
-            self.logging_database_connection_py,
-            description,
-            [],
-            [],
-            [],
-            callback_func,
-        ))?;
-
-        Ok(Box::new(txn))
+            let execute_fn = self
+                .database_pool_py
+                .bind(py)
+                .getattr(intern!(py, "runInteraction"))?;
+            let results = execute_fn.call1((callback_func,))?;
+            results
+        })
     }
 }
 
@@ -244,17 +194,5 @@ impl Transaction for LoggingTransactionWrapper {
             Ok(rows)
         })
         .map_err(anyhow::Error::from)
-    }
-
-    async fn commit(&self) -> Result<(), anyhow::Error> {
-        // In Synapse, `commit` is part of `LoggingDatabaseConnection` and will be
-        // called as part of the `new_transaction(...)` machinery we used to create the
-        // transaction in the first place.
-        //
-        // We just need to send the proper signal which will finish the txn callback and
-        // have it run.
-        done_with_txn_tx.send(())
-        // TODO: How can we guarantee that `commit` was run? Perhaps we have to wait for
-        // `new_transaction(...)` to complete successfully
     }
 }

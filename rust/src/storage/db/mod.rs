@@ -13,6 +13,8 @@
  *
  */
 
+use std::future::Future;
+
 pub mod python_db_pool;
 pub mod rust_db_pool;
 
@@ -30,10 +32,7 @@ pub trait DatabasePool: Send + Sync {
     ) -> impl Future<Output = anyhow::Result<R>> + 'txn
     where
         R: Send + Sync + 'static,
-        // TODO: Can we use `&'f mut dyn Txn` here?
-        F: for<'f> Fn(&'f mut dyn Transaction<'f>) -> BoxFuture<'f, anyhow::Result<R>>
-            + Send
-            + 'static;
+        F: for<'f> Fn(&'f mut dyn Transaction) -> BoxFuture<'f, anyhow::Result<R>> + Send + 'static;
 }
 
 /// A [`tokio_postgres::Transaction`] looking thing that we can use on the Rust side to
@@ -41,7 +40,6 @@ pub trait DatabasePool: Send + Sync {
 #[async_trait::async_trait]
 pub trait Transaction {
     async fn query(&self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error>;
-    async fn commit(self) -> Result<(), anyhow::Error>;
 }
 
 pub type Row = Vec<String>;

@@ -75,12 +75,4 @@ impl Transaction for TokioPostgresTransaction<'_> {
 
         Ok(rows)
     }
-
-    async fn commit(self) -> Result<(), anyhow::Error> {
-        self.txn
-            .commit()
-            // .instrument(tracing::info_span!("commit transaction"))
-            .await
-            .context("Failed to commit transaction")
-    }
 }
