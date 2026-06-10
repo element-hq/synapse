@@ -13,10 +13,9 @@
  *
  */
 
-//! We have these three main classes:
-//!  - Database pool [`PythonDatabasePoolWrapper`] which creates
-//!  - connections [`LoggingDatabaseConnectionWrapper`] which creates
-//!  - transactions [`LoggingTransactionWrapper`]
+//! We have these main classes:
+//!  - Database pool [`PythonDatabasePoolWrapper`] which allows you to start a...
+//!  - transaction [`LoggingTransactionWrapper`] and query the database
 
 use pyo3::{intern, prelude::*, types::PyCFunction, types::PyList};
 
