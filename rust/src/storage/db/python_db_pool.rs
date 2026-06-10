@@ -19,10 +19,11 @@
 
 use std::sync::{Arc, Mutex};
 
+use futures::future::BoxFuture;
 use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyCFunction, types::PyList};
-use tokio::sync::oneshot;
 
-use crate::storage::db::{AnyResult, DatabasePool, InteractionFn, Row, Transaction};
+use crate::http_client::await_deferred;
+use crate::storage::db::{DatabasePool, Row, Transaction};
 
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
@@ -63,26 +64,33 @@ impl PythonDatabasePoolWrapper {
     }
 }
 
-#[async_trait::async_trait]
 impl DatabasePool for PythonDatabasePoolWrapper {
-    async fn run_interaction_erased(&self, name: &'static str, func: InteractionFn) -> AnyResult {
-        // We bridge the Python-side `runInteraction` (a coroutine, run on the
-        // Twisted reactor + thread pool) back into our `async` Rust world using a
-        // oneshot channel that resolves when the resulting deferred fires.
-        let (tx, rx) = oneshot::channel::<AnyResult>();
-
+    async fn run_interaction<R, F>(&self, name: &'static str, func: F) -> anyhow::Result<R>
+    where
+        R: Send + 'static,
+        F: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, anyhow::Result<R>>
+            + Send
+            + Sync
+            + 'static,
+    {
         // `runInteraction` calls `func` with a `LoggingTransaction` on a DB
         // thread and expects a synchronous return value. Since we can't
         // round-trip an arbitrary Rust `R` back out through Python, the callback
         // stashes the result here and we pick it up once the deferred fires.
-        let result_slot: Arc<Mutex<Option<AnyResult>>> = Arc::new(Mutex::new(None));
+        //
+        // Note the callback may run more than once (`runInteraction` retries on
+        // serialization/deadlock errors), so we only trust this slot once the
+        // deferred has fired, i.e. once the transaction has finally committed or
+        // failed.
+        let result_slot: Arc<Mutex<Option<anyhow::Result<R>>>> = Arc::new(Mutex::new(None));
 
-        Python::attach(|py| -> PyResult<()> {
-            // (1) The callback that Python's `runInteraction` invokes on a DB
-            // thread with a `LoggingTransaction`. We drive `func` to completion
-            // here. The Python query path is synchronous under the hood, so it's
-            // safe to block this dedicated DB thread until the future resolves.
-            let callback_slot = Arc::clone(&result_slot);
+        // Build the callback that Python's `runInteraction` invokes on a DB
+        // thread with a `LoggingTransaction`, plus owned handles we can move onto
+        // the reactor thread. We drive `func` to completion in the callback; the
+        // Python query path is synchronous under the hood, so it's safe to block
+        // this dedicated DB thread until the future resolves.
+        let callback_slot = Arc::clone(&result_slot);
+        let (callback, database_pool_py, reactor) = Python::attach(|py| -> PyResult<_> {
             let callback = PyCFunction::new_closure(
                 py,
                 None,
@@ -92,9 +100,7 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                     let txn_py = args.get_item(0)?;
                     let mut txn = txn_py.extract::<LoggingTransactionWrapper>()?;
 
-                    let result = futures::executor::block_on(func(&mut txn));
-
-                    match result {
+                    match futures::executor::block_on(func(&mut txn)) {
                         Ok(value) => {
                             *callback_slot.lock().unwrap() = Some(Ok(value));
                             Ok(py.None())
@@ -112,91 +118,37 @@ impl DatabasePool for PythonDatabasePoolWrapper {
             )?
             .unbind();
 
-            // The oneshot sender, shared between the success and error callbacks
-            // (only one of which ever fires).
-            let sender = Arc::new(Mutex::new(Some(tx)));
-
-            // (2a) Fired when the transaction succeeds: hand the stashed result
-            // back to the awaiting task.
-            let success_slot = Arc::clone(&result_slot);
-            let success_sender = Arc::clone(&sender);
-            let on_success = PyCFunction::new_closure(
-                py,
-                None,
-                None,
-                move |args, _kwargs| -> PyResult<Py<PyAny>> {
-                    let result = success_slot.lock().unwrap().take().unwrap_or_else(|| {
-                        Err(anyhow::anyhow!("run_interaction produced no result"))
-                    });
-                    if let Some(tx) = success_sender.lock().unwrap().take() {
-                        let _ = tx.send(result);
-                    }
-                    Ok(args.py().None())
-                },
-            )?
-            .unbind();
-
-            // (2b) Fired when the transaction fails. Prefer the original error
-            // captured in the callback (it carries the Rust context); otherwise
-            // fall back to the Twisted `Failure` text.
-            let error_slot = Arc::clone(&result_slot);
-            let error_sender = Arc::clone(&sender);
-            let on_error = PyCFunction::new_closure(
-                py,
-                None,
-                None,
-                move |args, _kwargs| -> PyResult<Py<PyAny>> {
-                    let result = error_slot.lock().unwrap().take().unwrap_or_else(|| {
-                        let description = args
-                            .get_item(0)
-                            .and_then(|failure| failure.str())
-                            .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or_else(|_| "<unknown failure>".to_owned());
-                        Err(anyhow::anyhow!("run_interaction failed: {description}"))
-                    });
-                    if let Some(tx) = error_sender.lock().unwrap().take() {
-                        let _ = tx.send(result);
-                    }
-                    Ok(args.py().None())
-                },
-            )?
-            .unbind();
-
-            // (3) Kick off `runInteraction` on the reactor thread. It's a
-            // coroutine, so we wrap it with `ensureDeferred` and attach our
-            // callbacks.
-            let database_pool_py = self.database_pool_py.clone_ref(py);
-            let starter = PyCFunction::new_closure(
-                py,
-                None,
-                None,
-                move |args, _kwargs| -> PyResult<Py<PyAny>> {
-                    let py = args.py();
-                    let coro = database_pool_py.bind(py).call_method1(
-                        intern!(py, "runInteraction"),
-                        (name, callback.bind(py)),
-                    )?;
-                    let deferred = py
-                        .import("twisted.internet.defer")?
-                        .call_method1(intern!(py, "ensureDeferred"), (coro,))?;
-                    deferred.call_method1(
-                        intern!(py, "addCallbacks"),
-                        (on_success.bind(py), on_error.bind(py)),
-                    )?;
-                    Ok(py.None())
-                },
-            )?;
-
-            self.reactor
-                .bind(py)
-                .call_method1(intern!(py, "callFromThread"), (starter,))?;
-
-            Ok(())
+            Ok((
+                callback,
+                self.database_pool_py.clone_ref(py),
+                self.reactor.clone_ref(py),
+            ))
         })
         .map_err(anyhow::Error::from)?;
 
-        rx.await
-            .map_err(|_| anyhow::anyhow!("run_interaction channel closed before completing"))?
+        // Await `runInteraction` directly. `runInteraction` offloads the actual
+        // DB work onto a thread itself, so we don't; `await_deferred` only has to
+        // start the coroutine on the reactor thread and bridge its deferred back
+        // into our `async` world.
+        let outcome = await_deferred(reactor, move |py| {
+            database_pool_py
+                .bind(py)
+                .call_method1(intern!(py, "runInteraction"), (name, callback.bind(py)))
+        })
+        .await;
+
+        // Prefer the result captured by the callback (it carries the Rust
+        // context). If the slot is empty, `runInteraction` failed before ever
+        // invoking the callback (e.g. it couldn't acquire a connection), so
+        // surface the deferred's outcome instead.
+        let captured = result_slot.lock().unwrap().take();
+        match captured {
+            Some(result) => result,
+            None => match outcome {
+                Ok(_) => Err(anyhow::anyhow!("run_interaction produced no result")),
+                Err(py_err) => Err(anyhow::Error::from(py_err)),
+            },
+        }
     }
 }
 

@@ -19,18 +19,25 @@
 use anyhow::Context;
 use bb8_postgres::tokio_postgres::{self, types::ToSql, IsolationLevel};
 use bb8_postgres::PostgresConnectionManager;
+use futures::future::BoxFuture;
 use postgres_native_tls::MakeTlsConnector;
 
-use crate::storage::db::{AnyResult, DatabasePool, InteractionFn, Row, Transaction};
+use crate::storage::db::{DatabasePool, Row, Transaction};
 
 /// Native Rust database access backed by `tokio-postgres` (for use in synapse-rust-apps)
 pub struct RustDatabasePool {
     db_pool: bb8::Pool<PostgresConnectionManager<MakeTlsConnector>>,
 }
 
-#[async_trait::async_trait]
 impl DatabasePool for RustDatabasePool {
-    async fn run_interaction_erased(&self, _name: &'static str, func: InteractionFn) -> AnyResult {
+    async fn run_interaction<R, F>(&self, _name: &'static str, func: F) -> anyhow::Result<R>
+    where
+        R: Send + 'static,
+        F: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, anyhow::Result<R>>
+            + Send
+            + Sync
+            + 'static,
+    {
         // Like Synapse's `runInteraction`, retry the whole transaction on
         // serialization/deadlock errors (which can happen under repeatable-read).
         loop {

@@ -54,7 +54,7 @@ impl RustHandlers {
         // Store is shared across all of the handlers so let's use an `Arc`
         let store = Arc::new(Store {
             config: config.clone(),
-            db_pool: Box::new(db_pool),
+            db_pool,
         });
 
         let versions = Py::new(

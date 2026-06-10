@@ -12,14 +12,22 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    future::Future,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use anyhow::Context;
 use http_body_util::BodyExt;
 use once_cell::sync::OnceCell;
-use pyo3::{create_exception, exceptions::PyException, prelude::*};
+use pyo3::{
+    create_exception, exceptions::PyException, exceptions::PyRuntimeError, intern, prelude::*,
+    types::PyCFunction,
+};
 use reqwest::RequestBuilder;
 use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
 
 use crate::errors::HttpResponseException;
 
@@ -320,6 +328,111 @@ where
 
     // Make the deferred follow the Synapse logcontext rules
     make_deferred_yieldable(py, &deferred)
+}
+
+/// Runs `make_deferred` on the Twisted reactor thread to obtain a Deferred (or
+/// coroutine), then resolves once that Deferred fires.
+///
+/// This is the inverse of [`create_deferred`]: where that turns a Rust future
+/// into a Twisted Deferred, this turns a Twisted Deferred into an awaitable Rust
+/// future.
+///
+/// We're called on a Tokio worker thread, but Twisted `Deferred`s (and the
+/// coroutine that `ensureDeferred` drives) are not thread-safe and Synapse's
+/// logcontext is thread-local, so the coroutine must both start and resume on
+/// the reactor thread. The `callFromThread` hop is what gets us there for the
+/// kickoff; the deferred's own callbacks then fire on the reactor thread too.
+/// (Note this is unrelated to offloading the DB work onto a thread — that's
+/// handled internally by whatever `make_deferred` calls, e.g. `runInteraction`.)
+///
+/// `make_deferred` is invoked on the reactor thread and may return either a
+/// coroutine or a `Deferred`; `ensureDeferred` normalises both to a `Deferred`.
+pub(crate) async fn await_deferred<F>(reactor: Py<PyAny>, make_deferred: F) -> PyResult<Py<PyAny>>
+where
+    F: for<'py> Fn(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
+{
+    // Resolves when the deferred fires; carries the resolved value or the error.
+    let (tx, rx) = oneshot::channel::<PyResult<Py<PyAny>>>();
+    // Shared between the success and error callbacks (only one ever fires).
+    let sender = Arc::new(Mutex::new(Some(tx)));
+
+    Python::attach(|py| -> PyResult<()> {
+        let success_sender = Arc::clone(&sender);
+        let on_success = PyCFunction::new_closure(
+            py,
+            None,
+            None,
+            move |args, _kwargs| -> PyResult<Py<PyAny>> {
+                let value = args.get_item(0)?.unbind();
+                if let Some(tx) = success_sender.lock().unwrap().take() {
+                    let _ = tx.send(Ok(value));
+                }
+                Ok(args.py().None())
+            },
+        )?
+        .unbind();
+
+        let error_sender = Arc::clone(&sender);
+        let on_error = PyCFunction::new_closure(
+            py,
+            None,
+            None,
+            move |args, _kwargs| -> PyResult<Py<PyAny>> {
+                let err = failure_to_pyerr(&args.get_item(0)?);
+                if let Some(tx) = error_sender.lock().unwrap().take() {
+                    let _ = tx.send(Err(err));
+                }
+                Ok(args.py().None())
+            },
+        )?
+        .unbind();
+
+        let starter = PyCFunction::new_closure(
+            py,
+            None,
+            None,
+            move |args, _kwargs| -> PyResult<Py<PyAny>> {
+                let py = args.py();
+                let deferred = defer(py)?
+                    .call_method1(intern!(py, "ensureDeferred"), (make_deferred(py)?,))?;
+                deferred.call_method1(
+                    intern!(py, "addCallbacks"),
+                    (on_success.bind(py), on_error.bind(py)),
+                )?;
+                Ok(py.None())
+            },
+        )?;
+
+        reactor
+            .bind(py)
+            .call_method1(intern!(py, "callFromThread"), (starter,))?;
+
+        Ok(())
+    })?;
+
+    match rx.await {
+        Ok(result) => result,
+        Err(_) => Err(PyRuntimeError::new_err(
+            "await_deferred channel closed before the deferred fired",
+        )),
+    }
+}
+
+/// Convert a Twisted `Failure` (as passed to an errback) into a [`PyErr`].
+///
+/// A `Failure` carries the original exception instance in its `.value`
+/// attribute, which we re-raise so callers see the real error. If that can't be
+/// reached, fall back to the `Failure`'s textual representation.
+fn failure_to_pyerr(failure: &Bound<'_, PyAny>) -> PyErr {
+    match failure.getattr(intern!(failure.py(), "value")) {
+        Ok(value) => PyErr::from_value(value),
+        Err(_) => PyRuntimeError::new_err(
+            failure
+                .str()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "<unknown failure>".to_owned()),
+        ),
+    }
 }
 
 static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();

@@ -16,10 +16,7 @@
 use futures::FutureExt;
 use serde::Serialize;
 
-use crate::{
-    config::SynapseConfig,
-    storage::db::{DatabasePool, DatabasePoolExt},
-};
+use crate::{config::SynapseConfig, storage::db::DatabasePool};
 
 /// Currently supported per-user features
 #[derive(Serialize, Debug)]
@@ -59,13 +56,12 @@ impl std::fmt::Display for PerUserExperimentalFeature {
     }
 }
 
-
-pub struct Store {
+pub struct Store<P: DatabasePool> {
     pub config: SynapseConfig,
-    pub db_pool: Box<dyn DatabasePool>,
+    pub db_pool: P,
 }
 
-impl Store {
+impl<P: DatabasePool> Store<P> {
     pub async fn is_feature_enabled(
         &self,
         user_id: &str,
