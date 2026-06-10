@@ -50,9 +50,11 @@ jobs:
     name: "Build .deb packages"
     runs-on: ubuntu-latest
     strategy:
-      # If the deb build is flaky during a release,
-      # failing fast can mean it takes many more retries
-      # before managing to get a full successful set.
+      # Prevent all Debian package builds from being cancelled
+      # when one of them fails. Especially helpful when things are
+      # flaky during a release.
+      #
+      # `fail-fast` defaults to true and applies to the entire test matrix
       fail-fast: false
       matrix:
         distro: ${{ fromJson(needs.get-distros.outputs.distros) }}
