@@ -661,8 +661,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         key = (room_id,)
 
         as_id = object()
-        if requester.app_service:
-            as_id = requester.app_service.id
+        if requester.app_service_id:
+            as_id = requester.app_service_id
 
         # We first linearise by the application service (to try to limit concurrent joins
         # by application services), and then by room ID.
