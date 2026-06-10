@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -15,7 +16,8 @@
 # Originally licensed under the Apache License, Version 2.0:
 # <http://www.apache.org/licenses/LICENSE-2.0>.
 #
-# [This file includes modifications made by New Vector Limited]
+# [This file includes modifications made by New Vector Limited
+# and Element Creations Ltd]
 #
 #
 
@@ -258,6 +260,46 @@ class ResponseCacheTestCase(TestCase):
         # both results should have completed with the error
         self.assertFailure(wrap_d, Exception)
         self.assertFailure(wrap2_d, Exception)
+
+    def test_errors_are_not_cached(self) -> None:
+        """If the callback raises an error, the error is not cached and
+        served to any subsequent requests, whether they are within the
+        cache timeout or not.
+        """
+        cache = self.with_cache("error_not_cached", ms=3000)
+
+        return_error = True
+
+        async def erring_then_fine(_: str) -> str:
+            """
+            This function raises an error the first time it is called,
+            then is fine the next time it is called.
+            """
+            nonlocal return_error
+
+            # pretend to do some work
+            await self.clock.sleep(Duration(seconds=1))
+
+            if return_error:
+                return_error = False
+                raise RuntimeError("this is a temporary error!")
+            return "fine"
+
+        # First call: should get an error
+        wrap_d = defer.ensureDeferred(cache.wrap(0, erring_then_fine, "ignored"))
+        self.assertNoResult(wrap_d)
+        self.reactor.advance(1)
+        self.failureResultOf(wrap_d, RuntimeError)
+
+        # Second call: the error shouldn't be replayed
+        # and the next call should succeed, so we should get a successful response
+        wrap2_d = defer.ensureDeferred(cache.wrap(0, erring_then_fine, "ignored"))
+        self.reactor.advance(1)
+        self.assertEqual(
+            "fine",
+            self.successResultOf(wrap2_d),
+            "should get the fresh result, not the cached error",
+        )
 
     def test_cache_cancel_first_wait(self) -> None:
         """Test that cancellation of the deferred returned by wrap() on the
