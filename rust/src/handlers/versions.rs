@@ -13,10 +13,14 @@
  *
  */
 
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use pyo3::prelude::*;
+use pythonize::{pythonize, PythonizeError};
+use serde::{Deserialize, Serialize};
+
 use crate::config::SynapseConfig;
+use crate::http_client::create_deferred;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
 /// `GET /_matrix/client/versions` response
@@ -27,30 +31,73 @@ struct VersionsResponse {
     unstable_features: std::collections::BTreeMap<String, bool>,
 }
 
+impl<'py> IntoPyObject<'py> for VersionsResponse {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        pythonize(py, &self)
+    }
+}
+
+#[pyclass]
 pub struct VersionsHandler {
     pub config: SynapseConfig,
     pub store: Arc<Store>,
+    /// The Twisted reactor, used to bridge our `async` response back into a
+    /// Twisted deferred that Python can `await`.
+    pub reactor: Py<PyAny>,
 }
 
+#[pymethods]
 impl VersionsHandler {
-    /// Assemble a `/versions` response
-    async fn get_versions(&self, user_id: Option<&str>) -> Result<VersionsResponse, anyhow::Error> {
+    /// Assemble a `/versions` response, returning a Twisted deferred that
+    /// resolves to the response body (a dict).
+    #[pyo3(signature = (user_id=None))]
+    fn get_versions<'py>(
+        &self,
+        py: Python<'py>,
+        user_id: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let store = Arc::clone(&self.store);
+        let config = self.config.clone();
+
+        create_deferred(py, self.reactor.bind(py), async move {
+            build_versions_response(&store, &config, user_id.as_deref())
+                .await
+                .map_err(|err| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to build /versions response: {err:#}"
+                    ))
+                })
+        })
+    }
+}
+
+/// Assemble a `/versions` response body.
+async fn build_versions_response(
+    store: &Store,
+    config: &SynapseConfig,
+    user_id: Option<&str>,
+) -> Result<VersionsResponse, anyhow::Error> {
+    {
         let msc3881_enabled = match user_id {
             Some(user_id) => {
-                self.store
+                store
                     .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3881)
                     .await?
             }
-            None => PerUserExperimentalFeature::MSC3881.is_globally_enabled(&self.config),
+            None => PerUserExperimentalFeature::MSC3881.is_globally_enabled(config),
         };
 
         let msc3575_enabled = match user_id {
             Some(user_id) => {
-                self.store
+                store
                     .is_feature_enabled(user_id, PerUserExperimentalFeature::MSC3575)
                     .await?
             }
-            None => PerUserExperimentalFeature::MSC3575.is_globally_enabled(&self.config),
+            None => PerUserExperimentalFeature::MSC3575.is_globally_enabled(config),
         };
 
         // TODO: Calculate these once since they shouldn't change after start-up.
@@ -67,7 +114,7 @@ impl VersionsHandler {
         //     in config.room.encryption_enabled_by_default_for_room_presets
         // );
 
-        return Ok(VersionsResponse {
+        Ok(VersionsResponse {
             versions: Vec::from([
                 // XXX: at some point we need to decide whether we need to include
                 // the previous version numbers, given we've defined r0.3.0 to be
@@ -171,6 +218,6 @@ impl VersionsHandler {
                 // // MSC4445: Sync timeline order
                 // ("org.matrix.msc4445.initial_sync_timeline_topological_ordering".to_string(), true),
             ]),
-        });
+        })
     }
 }

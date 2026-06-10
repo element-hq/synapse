@@ -13,12 +13,16 @@
  *
  */
 
-use serde::{Serialize};
+use futures::FutureExt;
+use serde::Serialize;
 
-use crate::{config::SynapseConfig, storage::db::DatabasePool};
+use crate::{
+    config::SynapseConfig,
+    storage::db::{DatabasePool, DatabasePoolExt},
+};
 
 /// Currently supported per-user features
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub enum PerUserExperimentalFeature {
     #[serde(rename = "msc3881")]
     MSC3881,
@@ -71,30 +75,48 @@ impl Store {
             return Ok(true);
         }
 
-        let is_feature_enabled_for_user = self.db_pool.run_interaction<bool>("is_feature_enabled_for_user", |txn| {
-            async move {
-                let rows = txn
-                    .query(
-                        r#"
-                        SELECT enabled
-                        FROM per_user_experimental_features
-                        WHERE user_id = ? AND feature = ?
-                        "#,
-                        &[user_id, &feature.to_string()],
-                    )
-                    .await;
+        // It's not enabled globally, so check whether it's enabled per-user.
+        //
+        // Owned copies so the callback can be `'static` (it may be moved to
+        // another thread and called multiple times under retries).
+        let user_id = user_id.to_string();
+        let feature = feature.to_string();
 
-                match (rows.len(), rows.first()) {
-                    (1, Some(enabled)) => enabled,
-                    (0, None) => false,
-                    _ => {
-                        panic!("Synapse programming error");
-                    }
+        let is_feature_enabled_for_user = self
+            .db_pool
+            .run_interaction("is_feature_enabled_for_user", move |txn| {
+                let user_id = user_id.clone();
+                let feature = feature.clone();
+                async move {
+                    let rows = txn
+                        .query(
+                            "SELECT enabled \
+                             FROM per_user_experimental_features \
+                             WHERE user_id = ? AND feature = ?",
+                            &[user_id.as_str(), feature.as_str()],
+                        )
+                        .await?;
+
+                    // `None` (no row) and a falsy value are treated the same.
+                    let enabled = rows
+                        .first()
+                        .and_then(|row| row.first())
+                        .is_some_and(|value| parse_db_bool(value));
+
+                    Ok(enabled)
                 }
-            }
-            .boxed()
-        }).await;
-        
+                .boxed()
+            })
+            .await?;
+
         Ok(is_feature_enabled_for_user)
     }
+}
+
+/// Parse a boolean as returned by either database engine.
+///
+/// Postgres renders `BOOLEAN` columns as `"True"`/`"False"` while SQLite stores
+/// them as integers (`"1"`/`"0"`).
+fn parse_db_bool(value: &str) -> bool {
+    matches!(value, "True" | "true" | "t" | "1")
 }

@@ -267,7 +267,7 @@ impl HttpClient {
 /// tokio runtime.
 ///
 /// Does not handle deferred cancellation or contextvars.
-fn create_deferred<'py, F, O>(
+pub(crate) fn create_deferred<'py, F, O>(
     py: Python<'py>,
     reactor: &Bound<'py, PyAny>,
     fut: F,
