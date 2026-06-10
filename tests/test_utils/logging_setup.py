@@ -28,8 +28,9 @@ from synapse.synapse_rust import reset_logging_config
 # The maximum length of a single log line. Extremely long log lines aren't
 # useful, and keeping them short also stays well under the limit that would
 # otherwise break parallel test runs: under `trial -jN` worker log events are
-# shipped to the manager process over AMP, which raises `TooLong` for any value
-# of 64KiB or more (e.g. a DEBUG dump of a large SQL query's values).
+# shipped to the manager process over trial's AMP, which raises `TooLong` for
+# any value of 64KiB or more (e.g. a DEBUG dump of a large SQL query's values)
+# (c.f. https://github.com/twisted/twisted/issues/12482).
 _MAX_LOG_LINE_LENGTH = 1000
 
 
