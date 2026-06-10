@@ -32,6 +32,7 @@ from typing import (
 import attr
 
 from twisted.internet import defer
+from twisted.python.failure import Failure
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import (
@@ -226,14 +227,14 @@ class ResponseCache(Generic[KV]):
         Returns:
             The cache entry object.
         """
-        result = ObservableDeferred(deferred, consumeErrors=True)
+        result = ObservableDeferred(deferred, consumeErrors=False)
         key = context.cache_key
         entry = ResponseCacheEntry(
             result, opentracing_span_context, cancellable=cancellable
         )
         self._result_cache[key] = entry
 
-        def on_complete(r: RV) -> RV:
+        def on_succeed(r: RV) -> RV:
             # if this cache has a non-zero timeout, and the callback has not cleared
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
@@ -254,10 +255,22 @@ class ResponseCache(Generic[KV]):
                 self.unset(key)
             return r
 
-        # make sure we do this *after* adding the entry to result_cache,
+        def on_fail(failure: Failure) -> None:
+            """
+            If the deferred fails, unset the cache entry.
+            """
+            self.unset(key)
+
+            # Consider the Failure handled so they don't get thrown by the reactor
+            return None
+
+        # make sure we add the callback and errback *after* adding the entry to result_cache,
         # in case the result is already complete (in which case flipping the order would
         # leave us with a stuck entry in the cache).
-        result.addBoth(on_complete)
+        result.addCallback(on_succeed)
+        # Must register errback after callback, so the `None` doesn't get processed
+        # by the result callback chain
+        result.addErrback(on_fail)
         return entry
 
     def unset(self, key: KV) -> None:
