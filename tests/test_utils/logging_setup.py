@@ -31,7 +31,7 @@ from synapse.synapse_rust import reset_logging_config
 # shipped to the manager process over trial's AMP, which raises `TooLong` for
 # any value of 64KiB or more (e.g. a DEBUG dump of a large SQL query's values)
 # (c.f. https://github.com/twisted/twisted/issues/12482).
-_MAX_LOG_LINE_LENGTH = 1000
+_MAX_LOG_LINE_LENGTH = 60_000
 
 
 class ToTwistedHandler(logging.Handler):
