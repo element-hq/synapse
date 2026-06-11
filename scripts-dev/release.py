@@ -611,6 +611,16 @@ def _wait_for_actions(gh_token: str | None) -> None:
         if len(resp["workflow_runs"]) == 0:
             continue
 
+        # Warn the user if any workflows are still queued. They might need to fix something.
+        if any(workflow["status"] == "queued" for workflow in resp["workflow_runs"]):
+            _notify("Warning: at least one release workflow is still queued...")
+            if not click.confirm("Continue waiting for queued assets?", default=True):
+                click.echo(
+                    "Continuing on with the release. Note that you may need to upload missing assets manually later."
+                )
+                break
+            continue
+
         if all(
             workflow["status"] != "in_progress" for workflow in resp["workflow_runs"]
         ):
