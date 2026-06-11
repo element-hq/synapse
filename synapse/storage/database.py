@@ -1349,6 +1349,11 @@ class DatabasePool:
             txn.execute_values(sql, values, fetch=False)
 
         elif isinstance(txn.database_engine, PsycopgEngine):
+            # `execute_values` is not available for insertions on psycopg at this time.
+            # However, Postgres allows for bulk insertion of data with its COPY command
+            # which is very performant. This should be on-par with `execute_values` from
+            # psycopg2. The available alternative would be `executemany` which uses
+            # Postgres' pipeline mode but is approximately an order of magnitude slower.
             sql = "COPY %s (%s) FROM STDIN" % (
                 table,
                 ", ".join(k for k in keys),
