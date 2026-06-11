@@ -272,11 +272,12 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
             result = await store.get_user_count_by_service()
 
+            user_count_gauge.clear()
+
             for app_service, count in result:
                 user_count_gauge.labels(
                     app_service=app_service, **{SERVER_NAME_LABEL: server_name}
                 ).set(float(count))
-
         return hs.run_as_background_process(
             "generate_total_users",
             _generate_total_users,
