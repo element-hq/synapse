@@ -68,10 +68,17 @@ max_mau_gauge = Gauge(
     "MAU Limit",
     labelnames=[SERVER_NAME_LABEL],
 )
+
 registered_reserved_users_mau_gauge = Gauge(
     "synapse_admin_mau_registered_reserved_users",
     "Registered users with reserved threepids",
     labelnames=[SERVER_NAME_LABEL],
+)
+
+user_count_gauge = Gauge(
+    "synapse_admin__user_count",
+    "Total user count within the Synapse database",
+    labelnames=["app_service", SERVER_NAME_LABEL],
 )
 
 
@@ -260,6 +267,25 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
             "generate_monthly_active_users",
             _generate_monthly_active_users,
         )
+
+    def generate_total_users() -> "defer.Deferred[None]":
+        async def _generate_total_users() -> None:
+            store = hs.get_datastores().main
+
+            result = await store.get_user_count_by_service()
+
+            for app_service, count in result:
+                user_count_gauge.labels(
+                    app_service=app_service, **{SERVER_NAME_LABEL: server_name}
+                ).set(float(count))
+
+        return hs.run_as_background_process(
+            "generate_total_users",
+            _generate_total_users,
+        )
+
+    generate_total_users()
+    clock.looping_call(generate_total_users, Duration(minutes=5))
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()

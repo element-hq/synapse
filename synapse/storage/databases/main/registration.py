@@ -1133,6 +1133,32 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction("count_real_users", _count_users)
 
+    async def get_user_count_by_service(self) -> list[tuple[str, int]]:
+        """Counts users grouped by their appservice.
+
+        Returns:
+            A list of tuples (appservice_id, count). "native" is emitted as the
+            appservice for users that don't come from appservices (i.e. native Matrix
+            users).
+
+        """
+
+        def _get_user_count_by_service(
+            txn: LoggingTransaction,
+        ) -> list[tuple[str, int]]:
+            sql = """
+                    SELECT COALESCE(appservice_id, 'native'), COUNT(name)
+                    FROM users WHERE deactivated = 0
+                    GROUP BY appservice_id;
+                """
+
+            txn.execute(sql)
+            return cast(list[tuple[str, int]], txn.fetchall())
+
+        return await self.db_pool.runInteraction(
+            "get_user_count_by_service", _get_user_count_by_service
+        )
+
     async def generate_user_id(self) -> str:
         """Generate a suitable localpart for a guest user
 

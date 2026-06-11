@@ -19,11 +19,13 @@ from twisted.internet.testing import MemoryReactor
 from synapse.app.phone_stats_home import (
     PHONE_HOME_INTERVAL,
     start_phone_stats_home,
+    user_count_gauge,
 )
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -261,3 +263,31 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         synapse_logger = logging.getLogger("synapse")
         log_level = synapse_logger.getEffectiveLevel()
         self.assertEqual(phone_home_stats["log_level"], logging.getLevelName(log_level))
+
+    def test_generate_total_users_gauge(self) -> None:
+        """
+        Test that generate_total_users() populates user_count_gauge correctly,
+        counting only active (non-deactivated) users split by app_service.
+        """
+        server_name = self.hs.config.server.server_name
+
+        # Register two native users and deactivate one to confirm it is excluded.
+        self.register_user("gauge_user_1", "password")
+        user_2 = self.register_user("gauge_user_2", "password")
+        self.get_success(
+            self.store.set_user_deactivated_status(user_id=user_2, deactivated=True)
+        )
+
+        # Advance past the 5-minute looping interval so generate_total_users fires again.
+        self.reactor.advance(Duration(minutes=5).as_secs() + 1)
+
+        # Collect gauge samples for our server_name.
+        samples = {
+            sample.labels["app_service"]: sample.value
+            for metric_family in user_count_gauge.collect()
+            for sample in metric_family.samples
+            if sample.labels.get("server_name") == server_name
+        }
+
+        # Only the one active native user should be counted.
+        self.assertEqual(samples.get("native"), 1.0)
