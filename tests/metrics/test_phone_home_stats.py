@@ -264,6 +264,28 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         log_level = synapse_logger.getEffectiveLevel()
         self.assertEqual(phone_home_stats["log_level"], logging.getLevelName(log_level))
 
+
+class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        register.register_servlets,
+    ]
+
+    def make_homeserver(
+        self, reactor: ThreadedMemoryReactorClock, clock: Clock
+    ) -> HomeServer:
+        config = self.default_config()
+        config["enable_metrics"] = True
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.wait_for_background_updates()
+        start_phone_stats_home(hs=homeserver)
+        super().prepare(reactor, clock, homeserver)
+
     def test_generate_total_users_gauge(self) -> None:
         """
         Test that generate_total_users() populates user_count_gauge correctly,
