@@ -296,8 +296,8 @@ class ResponseCacheTestCase(TestCase):
         wrap2_d = defer.ensureDeferred(cache.wrap(0, erring_then_fine, "ignored"))
         self.reactor.advance(1)
         self.assertEqual(
-            "fine",
             self.successResultOf(wrap2_d),
+            "fine",
             "should get the fresh result, not the cached error",
         )
 
