@@ -278,6 +278,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
                 user_count_gauge.labels(
                     app_service=app_service, **{SERVER_NAME_LABEL: server_name}
                 ).set(float(count))
+
         return hs.run_as_background_process(
             "generate_total_users",
             _generate_total_users,
