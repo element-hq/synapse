@@ -807,16 +807,25 @@ class RoomSummaryHandler:
 
         # Include allowed_room_ids for rooms with restricted join rules so that
         # clients can determine which memberships grant access.
-        current_state_ids = await self._storage_controllers.state.get_current_state_ids(
-            room_id
+        # Only the join rules event is needed for both has_restricted_join_rules
+        # and get_rooms_that_allow_join, so avoid fetching full state.
+        join_rules_state_ids = (
+            await self._storage_controllers.state.get_current_state_ids(
+                room_id,
+                state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
+            )
         )
-        room_version = await self._store.get_room_version(room_id)
 
-        if await self._event_auth_handler.has_restricted_join_rules(
-            current_state_ids, room_version
+        try:
+            room_version = await self._store.get_room_version(room_id)
+        except UnsupportedRoomVersionError:
+            room_version = None
+
+        if room_version and await self._event_auth_handler.has_restricted_join_rules(
+            join_rules_state_ids, room_version
         ):
             allowed_rooms = await self._event_auth_handler.get_rooms_that_allow_join(
-                current_state_ids
+                join_rules_state_ids
             )
             if allowed_rooms:
                 entry["allowed_room_ids"] = allowed_rooms
