@@ -39,18 +39,16 @@ from synapse.api.constants import (
     CANONICALJSON_MAX_INT,
     CANONICALJSON_MIN_INT,
     MAX_PDU_SIZE,
-    EventContentFields,
     EventTypes,
     EventUnsignedContentFields,
     RelationTypes,
 )
 from synapse.api.errors import Codes, SynapseError
-from synapse.api.room_versions import RoomVersion
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
-from synapse.synapse_rust.events import Unsigned
+from synapse.synapse_rust.events import Unsigned, redact_event
 from synapse.types import JsonDict, Requester
 
-from . import EventBase, FrozenEventV2, StrippedStateEvent, make_event_from_dict
+from . import EventBase, StrippedStateEvent
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
@@ -78,177 +76,18 @@ def prune_event(event: EventBase) -> EventBase:
     the user has specified, but we do want to keep necessary information like
     type, state_key etc.
     """
-    pruned_event_dict = prune_event_dict(event.room_version, event.get_dict())
-
-    pruned_event = make_event_from_dict(
-        pruned_event_dict, event.room_version, event.internal_metadata.get_dict()
-    )
-
-    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`
-    pruned_event.internal_metadata.stream_ordering = (
-        event.internal_metadata.stream_ordering
-    )
-    pruned_event.internal_metadata.instance_name = event.internal_metadata.instance_name
-    pruned_event.internal_metadata.outlier = event.internal_metadata.outlier
-    pruned_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
-
-    # Mark the event as redacted
-    pruned_event.internal_metadata.redacted = True
-
-    return pruned_event
+    return redact_event(event)
 
 
 def clone_event(event: EventBase) -> EventBase:
     """Take a copy of the event.
 
-    This is mostly useful because it does a *shallow* copy of the `unsigned` data,
-    which means it can then be updated without corrupting the in-memory cache. Note that
-    other properties of the event, such as `content`, are *not* (currently) copied here.
-    """
-    # XXX: We rely on at least one of `event.get_dict()` and `make_event_from_dict()`
-    #   making a copy of `unsigned`. Currently, both do, though I don't really know why.
-    #   Still, as long as they do, there's not much point doing yet another copy here.
-    new_event = make_event_from_dict(
-        event.get_dict(), event.room_version, event.internal_metadata.get_dict()
-    )
-
-    # Starting FrozenEventV2, the event ID is an (expensive) hash of the event. This is
-    # lazily computed when we get the FrozenEventV2.event_id property, then cached in
-    # _event_id field. Later FrozenEvent formats all inherit from FrozenEventV2, so we
-    # can use the same logic here.
-    if isinstance(event, FrozenEventV2) and isinstance(new_event, FrozenEventV2):
-        # If we already pre-computed the event ID, use it.
-        new_event._event_id = event._event_id
-
-    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`.
-    new_event.internal_metadata.stream_ordering = (
-        event.internal_metadata.stream_ordering
-    )
-    new_event.internal_metadata.instance_name = event.internal_metadata.instance_name
-    new_event.internal_metadata.outlier = event.internal_metadata.outlier
-    new_event.internal_metadata.redacted_by = event.internal_metadata.redacted_by
-
-    return new_event
-
-
-def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDict:
-    """Redacts the event_dict in the same way as `prune_event`, except it
-    operates on dicts rather than event objects
-
-    Returns:
-        A copy of the pruned event dict
+    Most fields of the event are immutable, however fields such as `unsigned`,
+    `signatures` and `internal_metadata` are mutable. Cloning the event allows
+    us to edit such fields without affecting the original event.
     """
 
-    allowed_keys = [
-        "event_id",
-        "sender",
-        "room_id",
-        "hashes",
-        "signatures",
-        "content",
-        "type",
-        "state_key",
-        "depth",
-        "prev_events",
-        "auth_events",
-        "origin_server_ts",
-    ]
-
-    # Earlier room versions from had additional allowed keys.
-    if not room_version.updated_redaction_rules:
-        allowed_keys.extend(["prev_state", "membership", "origin"])
-    # Custom room versions add new allowed keys and remove others
-    if room_version.msc4242_state_dags:
-        allowed_keys.extend(["prev_state_events"])
-        allowed_keys.remove("auth_events")
-
-    event_type = event_dict["type"]
-
-    new_content = {}
-
-    def add_fields(*fields: str) -> None:
-        for field in fields:
-            if field in event_dict["content"]:
-                new_content[field] = event_dict["content"][field]
-
-    if event_type == EventTypes.Member:
-        add_fields("membership")
-        if room_version.restricted_join_rule_fix:
-            add_fields(EventContentFields.AUTHORISING_USER)
-        if room_version.updated_redaction_rules:
-            # Preserve the signed field under third_party_invite.
-            third_party_invite = event_dict["content"].get("third_party_invite")
-            if isinstance(third_party_invite, collections.abc.Mapping):
-                new_content["third_party_invite"] = {}
-                if "signed" in third_party_invite:
-                    new_content["third_party_invite"]["signed"] = third_party_invite[
-                        "signed"
-                    ]
-
-    elif event_type == EventTypes.Create:
-        if room_version.updated_redaction_rules:
-            # MSC2176 rules state that create events cannot have their `content` redacted.
-            new_content = event_dict["content"]
-        if not room_version.implicit_room_creator:
-            # Some room versions give meaning to `creator`
-            add_fields("creator")
-        if room_version.msc4291_room_ids_as_hashes:
-            # room_id is not allowed on the create event as it's derived from the event ID
-            allowed_keys.remove("room_id")
-
-    elif event_type == EventTypes.JoinRules:
-        add_fields("join_rule")
-        if room_version.restricted_join_rule:
-            add_fields("allow")
-    elif event_type == EventTypes.PowerLevels:
-        add_fields(
-            "users",
-            "users_default",
-            "events",
-            "events_default",
-            "state_default",
-            "ban",
-            "kick",
-            "redact",
-        )
-
-        if room_version.updated_redaction_rules:
-            add_fields("invite")
-
-    elif event_type == EventTypes.Aliases and room_version.special_case_aliases_auth:
-        add_fields("aliases")
-    elif event_type == EventTypes.RoomHistoryVisibility:
-        add_fields("history_visibility")
-    elif event_type == EventTypes.Redaction and room_version.updated_redaction_rules:
-        add_fields("redacts")
-
-    # Protect the rel_type and event_id fields under the m.relates_to field.
-    if room_version.msc3389_relation_redactions:
-        relates_to = event_dict["content"].get("m.relates_to")
-        if isinstance(relates_to, collections.abc.Mapping):
-            new_relates_to = {}
-            for field in ("rel_type", "event_id"):
-                if field in relates_to:
-                    new_relates_to[field] = relates_to[field]
-            # Only include a non-empty relates_to field.
-            if new_relates_to:
-                new_content["m.relates_to"] = new_relates_to
-
-    allowed_fields = {k: v for k, v in event_dict.items() if k in allowed_keys}
-
-    allowed_fields["content"] = new_content
-
-    unsigned: JsonDict = {}
-    allowed_fields["unsigned"] = unsigned
-
-    event_unsigned = event_dict.get("unsigned", {})
-
-    if "age_ts" in event_unsigned:
-        unsigned["age_ts"] = event_unsigned["age_ts"]
-    if "replaces_state" in event_unsigned:
-        unsigned["replaces_state"] = event_unsigned["replaces_state"]
-
-    return allowed_fields
+    return event.deep_copy()
 
 
 def _copy_field(src: JsonDict, dst: JsonDict, field: list[str]) -> None:
@@ -580,7 +419,7 @@ def _serialize_event(
                         and event_token_id == config.requester.access_token_id
                     )
                     or config.requester.is_guest
-                    or config.requester.app_service
+                    or config.requester.app_service_id
                 ):
                     d["unsigned"]["transaction_id"] = txn_id
 

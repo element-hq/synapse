@@ -193,6 +193,12 @@ impl JsonObject {
     }
 }
 
+impl JsonObject {
+    pub fn get_field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.object.get(key)
+    }
+}
+
 /// Helper class returned by `JsonObject.keys()` to act as a view into the keys
 /// of the object.
 ///

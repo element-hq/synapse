@@ -27,7 +27,6 @@ from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
-from synapse.synapse_rust.events import Signatures
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
@@ -182,7 +181,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         non_policyserver_key = signedjson.key.generate_signing_key(
             "non_policyserver_key"
         )
-        event.signatures = Signatures(
+        event.signatures.update(
             compute_event_signature(
                 event.room_version,
                 event.get_dict(),

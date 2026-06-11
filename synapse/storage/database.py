@@ -86,6 +86,13 @@ sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
 
+# The maximum length of the repr of a query's values that we log at DEBUG. Some
+# queries carry large payloads (e.g. to-device messages), and logging them in
+# full is not useful. Truncating also keeps the line well under AMP's 64KiB
+# per-value limit, which would otherwise break `trial -jN` test runs (c.f.
+# https://github.com/twisted/twisted/issues/12482).
+MAX_SQL_VALUE_LOG_LENGTH = 1000
+
 sql_scheduling_timer = Histogram(
     "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
 )
@@ -606,7 +613,13 @@ class LoggingTransaction:
             sql = self.database_engine.convert_param_style(sql)
         if args:
             try:
-                sql_logger.debug("[SQL values] {%s} %r", self.name, args[0])
+                if sql_logger.isEnabledFor(logging.DEBUG):
+                    value_repr = repr(args[0])
+                    if len(value_repr) > MAX_SQL_VALUE_LOG_LENGTH:
+                        value_repr = (
+                            value_repr[:MAX_SQL_VALUE_LOG_LENGTH] + "... [truncated]"
+                        )
+                    sql_logger.debug("[SQL values] {%s} %s", self.name, value_repr)
             except Exception:
                 # Don't let logging failures stop SQL from working
                 pass
