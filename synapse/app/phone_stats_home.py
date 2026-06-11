@@ -283,8 +283,9 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
             _generate_total_users,
         )
 
-    generate_total_users()
-    clock.looping_call(generate_total_users, Duration(minutes=5))
+    if hs.config.metrics.enable_metrics:
+        generate_total_users()
+        clock.looping_call(generate_total_users, Duration(minutes=5))
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
