@@ -68,13 +68,11 @@ max_mau_gauge = Gauge(
     "MAU Limit",
     labelnames=[SERVER_NAME_LABEL],
 )
-
 registered_reserved_users_mau_gauge = Gauge(
     "synapse_admin_mau_registered_reserved_users",
     "Registered users with reserved threepids",
     labelnames=[SERVER_NAME_LABEL],
 )
-
 user_count_gauge = Gauge(
     "synapse_admin_user_count",
     "Total user count within the Synapse database",
