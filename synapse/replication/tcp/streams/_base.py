@@ -28,6 +28,7 @@ from typing import (
     Callable,
     Sequence,
     Union,
+    NewType,
 )
 
 import attr
@@ -864,6 +865,13 @@ class ProfileUpdatesStream(_StreamFromIdGen):
             return [], to_token, False
 
         return rows, rows[-1][0], len(updates) == limit
+
+
+StickyEventStreamPosition = NewType("StickyEventStreamPosition", int)
+"""
+Integer corresponding to the stream position (`stream_id`)
+of a sticky event in the `sticky_events` table.
+"""
 
 
 @attr.s(slots=True, auto_attribs=True)
