@@ -1147,10 +1147,11 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             txn: LoggingTransaction,
         ) -> list[tuple[str, int]]:
             sql = """
-                    SELECT COALESCE(appservice_id, 'native'), COUNT(name)
-                    FROM users WHERE deactivated = 0
-                    GROUP BY appservice_id;
-                """
+                SELECT COALESCE(NULLIF(appservice_id, ''), 'native') AS app_service, COUNT(*) AS count
+                FROM users
+                WHERE deactivated = 0
+                GROUP BY COALESCE(NULLIF(appservice_id, ''), 'native')
+            """
 
             txn.execute(sql)
             return cast(list[tuple[str, int]], txn.fetchall())
