@@ -48,8 +48,9 @@ from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
+from synapse.replication.tcp.streams._base import StickyEventStreamPosition
 from synapse.storage import DataStore
-from synapse.types import JsonDict, ReadReceipt
+from synapse.types import JsonDict, ReadReceipt, RoomID
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
 
@@ -110,6 +111,7 @@ class PerDestinationQueue:
         self._sticky_event_backlog_tracker = StickyEventBacklogTracker(
             destination, self._store, self._hs.config.experimental.msc4354_enabled
         )
+        self._transaction_count = 0
 
         self._should_send_on_this_instance = True
         if not self._federation_shard_config.should_handle(
@@ -742,6 +744,20 @@ class PerDestinationQueue:
 
 
 @attr.s(slots=True, auto_attribs=True, frozen=True)
+class _StickyEventsTransationInfo:
+    room_id: RoomID
+    """
+    The room ID from which backlogged sticky events were sent.
+    """
+
+    max_sent_sticky_events_stream_position: StickyEventStreamPosition
+    """
+    The maximum sticky events stream position of the backlogged sticky events
+    sent in this transaction.
+    """
+
+
+@attr.s(slots=True, auto_attribs=True, frozen=True)
 class _TransactionCompletionInformation:
     """
     This holds information that is acquired when preparing a transaction
@@ -778,6 +794,11 @@ class _TransactionCompletionInformation:
     The number of PDUs that were sent from the main queue.
     """
 
+    sticky_events: _StickyEventsTransationInfo | None
+    """
+    Information useful for transactions sending backlogged sticky events.
+    """
+
 
 @attr.s(slots=True, auto_attribs=True)
 class _TransactionQueueManager:
@@ -797,6 +818,20 @@ class _TransactionQueueManager:
     async def __aenter__(self) -> tuple[list[EventBase], list[Edu]]:
         assert self._completion_info is None, "_TransactionQueueManager is single-use"
 
+        self._queue._transaction_count += 1
+
+        if self._queue._transaction_count % 2 == 0:
+            # Round-robin between sticky event backlog transactions
+            # and regular real-time transactions
+            transaction_opt = (
+                await self._queue._sticky_event_backlog_tracker.prepare_transaction()
+            )
+
+            if transaction_opt is not None:
+                pdus, self._completion_info = transaction_opt
+                # No EDUs
+                return pdus, []
+
         pdus, edus, completion_info = await self._prepare_new_transaction(self._queue)
 
         self._completion_info = completion_info
@@ -808,7 +843,7 @@ class _TransactionQueueManager:
         queue: PerDestinationQueue,
     ) -> tuple[list[EventBase], list[Edu], _TransactionCompletionInformation]:
         """
-        Prepare a new transaction by calculating what we want to send
+        Prepare a new regular transaction by calculating what we want to send
         and preparing information that is useful once we have completed the transaction.
         """
 
@@ -915,6 +950,9 @@ class _TransactionQueueManager:
                 device_stream_id=device_stream_id_upon_completion,
                 last_stream_ordering=last_stream_ordering,
                 pdu_count_from_main_queue=len(pdus),
+                # This is not part of the sticky events backlog flow,
+                # so don't advance that
+                sticky_events=None,
             ),
         )
 
@@ -968,6 +1006,11 @@ class _TransactionQueueManager:
                 queue._destination, info.last_stream_ordering
             )
 
+        if info.sticky_events is not None:
+            await queue._sticky_event_backlog_tracker.complete_transaction(
+                info.sticky_events
+            )
+
 
 class StickyEventBacklogTracker:
     """
@@ -1006,9 +1049,33 @@ class StickyEventBacklogTracker:
         if not self._backlogged:
             return None
 
-        # TODO select a room and get up to 50 sticky events
+        # Select a room and get up to 50 backlogged sticky events
+        backlog = await self._store.get_backlogged_sticky_events_for_destination(
+            self._destination
+        )
 
-        # Return the transaction
+        if backlog is None:
+            logger.info(
+                "Completed federation sticky event backlog for destination %r",
+                self._destination,
+            )
+            self._backlogged = False
+            return None
+
+        room_id, sticky_event_stream_position, event_ids = backlog
+
+        logger.debug(
+            "Selected %d backlogged sticky events to send to destination %r in room %r up to %r",
+            len(event_ids),
+            self._destination,
+            room_id,
+            sticky_event_stream_position,
+        )
+
+        # Fetch the events from the database
+        sticky_events = await self._store.get_events_as_list(event_ids)
+
+        # TODO DO WE NEED FILTERING?
 
         return sticky_events, _TransactionCompletionInformation(
             device_list_id=None,
@@ -1016,11 +1083,22 @@ class StickyEventBacklogTracker:
             last_stream_ordering=None,
             # These events are not from the main queue, so don't advance the main queue
             pdu_count_from_main_queue=0,
-            # TODO advance in the sticky backlog stream...
+            # Upon completion, advance in the sticky backlog stream
+            sticky_events=_StickyEventsTransationInfo(
+                room_id=room_id,
+                max_sent_sticky_events_stream_position=sticky_event_stream_position,
+            ),
         )
 
-    async def complete_transaction(self, transaction: int) -> None:
-        pass
+    async def complete_transaction(self, info: _StickyEventsTransationInfo) -> None:
+        """
+        Call upon successfully sending a transaction generated by `prepare_transaction`.
+
+        Will advance the backlogged sticky events stream position in the database.
+        """
+        await self._store.mark_backlogged_sticky_events_sent(
+            self._destination, info.room_id, info.max_sent_sticky_events_stream_position
+        )
 
     async def notify_joined_room(self) -> None:
         """
