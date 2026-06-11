@@ -227,6 +227,8 @@ class ResponseCache(Generic[KV]):
         Returns:
             The cache entry object.
         """
+        # `consumeErrors=False`: we want to handle errors ourselves (`on_fail`) instead of
+        # replacing them with a `None` successful result that would go to `on_succeed`
         result = ObservableDeferred(deferred, consumeErrors=False)
         key = context.cache_key
         entry = ResponseCacheEntry(
