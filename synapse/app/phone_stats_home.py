@@ -76,7 +76,7 @@ registered_reserved_users_mau_gauge = Gauge(
 )
 
 user_count_gauge = Gauge(
-    "synapse_admin__user_count",
+    "synapse_admin_user_count",
     "Total user count within the Synapse database",
     labelnames=["app_service", SERVER_NAME_LABEL],
 )
