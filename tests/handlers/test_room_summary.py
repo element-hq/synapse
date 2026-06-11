@@ -35,7 +35,6 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import AuthError, NotFoundError, SynapseError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import make_event_from_dict
 from synapse.federation.transport.client import TransportLayerClient
 from synapse.handlers.room_summary import _child_events_comparison_key, _RoomEntry
 from synapse.rest import admin
@@ -45,6 +44,7 @@ from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 from tests.unittest import override_config
 
 
@@ -217,7 +217,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         # Poke an invite over federation into the database.
         fed_handler = self.hs.get_federation_handler()
         fed_hostname = UserID.from_string(from_user).domain
-        event = make_event_from_dict(
+        event = make_test_event(
             {
                 "room_id": room_id,
                 "event_id": "!abcd:" + fed_hostname,

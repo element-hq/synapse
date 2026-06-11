@@ -206,6 +206,8 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4354": self.config.experimental.msc4354_enabled,
                     # MSC4380: Invite blocking
                     "org.matrix.msc4380.stable": True,
+                    # MSC4445: Sync timeline order
+                    "org.matrix.msc4445.initial_sync_timeline_topological_ordering": True,
                 },
             },
         )

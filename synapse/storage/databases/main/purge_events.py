@@ -71,6 +71,10 @@ purge_room_tables_with_room_id_column = (
     # so must be deleted first.
     "sliding_sync_joined_rooms",
     "sliding_sync_membership_snapshots",
+    # Note: msc4242_state_dag_forward_extremities/edges have a foreign key to the `events` table
+    # so must be deleted first.
+    "msc4242_state_dag_forward_extremities",
+    "msc4242_state_dag_edges",
     "events",
     "federation_inbound_events_staging",
     "receipts_graph",

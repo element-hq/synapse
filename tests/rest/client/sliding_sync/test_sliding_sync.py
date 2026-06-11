@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
+import urllib.parse
 from typing import Any, Iterable, Literal
 from unittest.mock import AsyncMock
 
@@ -30,7 +31,7 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
+from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import account_data, devices, login, receipts, room, sync
@@ -43,10 +44,12 @@ from synapse.types import (
     StreamToken,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.server import FakeChannel, TimedOutException
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import create_event
 
 logger = logging.getLogger(__name__)
@@ -81,7 +84,13 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         return config
 
     def make_sync_request(
-        self, sync_body: JsonDict, *, since: str | None = None, tok: str
+        self,
+        sync_body: JsonDict,
+        *,
+        since: str | None = None,
+        tok: str,
+        timeout: Duration | None = None,
+        await_result: bool = True,
     ) -> FakeChannel:
         """Make a sliding sync request with given body.
 
@@ -89,25 +98,40 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             sync_body: The full request body to use
             since: Optional since token
             tok: Access token to use
-
+            timeout_ms: Optional timeout in milliseconds to use for the request.
+            await_result: Whether to block and wait for the result before returning.
         Returns:
             A tuple of the response body and the `pos` field.
         """
 
         sync_path = self.sync_endpoint
+
+        query_params: dict[str, Any] = {}
         if since:
-            sync_path += f"?pos={since}"
+            query_params["pos"] = since
+        if timeout is not None:
+            query_params["timeout"] = timeout.as_millis()
+
+        if query_params:
+            query_str = urllib.parse.urlencode(query_params)
+            sync_path += f"?{query_str}"
 
         channel = self.make_request(
             method="POST",
             path=sync_path,
             content=sync_body,
             access_token=tok,
+            await_result=await_result,
         )
         return channel
 
     def do_sync(
-        self, sync_body: JsonDict, *, since: str | None = None, tok: str
+        self,
+        sync_body: JsonDict,
+        *,
+        since: str | None = None,
+        tok: str,
+        timeout: Duration | None = None,
     ) -> tuple[JsonDict, str]:
         """Do a sliding sync request with given body.
 
@@ -117,11 +141,14 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             sync_body: The full request body to use
             since: Optional since token
             tok: Access token to use
+            timeout: Optional timeout to use for the request.
 
         Returns:
             A tuple of the response body and the `pos` field.
         """
-        channel = self.make_sync_request(sync_body, since=since, tok=tok)
+        channel = self.make_sync_request(
+            sync_body, since=since, tok=tok, timeout=timeout
+        )
         self.assertEqual(channel.code, 200, channel.json_body)
 
         return channel.json_body, channel.json_body["pos"]
@@ -308,7 +335,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
                 "invite_room_state": serialized_stripped_state_events
             }
 
-        invite_event = make_event_from_dict(
+        invite_event = make_test_event(
             invite_event_dict,
             room_version=RoomVersions.V10,
         )

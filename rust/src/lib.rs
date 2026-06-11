@@ -5,17 +5,21 @@ use pyo3::prelude::*;
 use pyo3_log::ResetHandle;
 
 pub mod acl;
+pub mod canonical_json;
 pub mod duration;
 pub mod errors;
 pub mod events;
 pub mod http;
 pub mod http_client;
 pub mod identifier;
+pub mod json;
 pub mod matrix_const;
 pub mod msc4388_rendezvous;
 pub mod push;
 pub mod rendezvous;
+pub mod room_versions;
 pub mod segmenter;
+pub mod types;
 
 lazy_static! {
     static ref LOGGING_HANDLE: ResetHandle = pyo3_log::init();
@@ -27,6 +31,14 @@ lazy_static! {
 #[pyfunction]
 fn get_rust_file_digest() -> &'static str {
     env!("SYNAPSE_RUST_DIGEST")
+}
+
+/// Returns the `rustc` version used when this native module was built.
+///
+/// This value is embedded at build time, so it can be exported as a prometheus metrics.
+#[pyfunction]
+pub fn get_rustc_version() -> &'static str {
+    env!("SYNAPSE_RUSTC_VERSION")
 }
 
 /// Formats the sum of two numbers as string.
@@ -49,6 +61,7 @@ fn reset_logging_config() {
 fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_rust_file_digest, m)?)?;
+    m.add_function(wrap_pyfunction!(get_rustc_version, m)?)?;
     m.add_function(wrap_pyfunction!(reset_logging_config, m)?)?;
 
     acl::register_module(py, m)?;
@@ -58,6 +71,8 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     rendezvous::register_module(py, m)?;
     msc4388_rendezvous::register_module(py, m)?;
     segmenter::register_module(py, m)?;
+    room_versions::register_module(py, m)?;
+    types::register_module(py, m)?;
 
     Ok(())
 }

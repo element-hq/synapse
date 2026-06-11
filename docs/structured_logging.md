@@ -78,3 +78,44 @@ loggers:
 The above logging config will set Synapse as 'INFO' logging level by default,
 with the SQL layer at 'WARNING', and will log JSON formatted messages to a
 remote endpoint at 10.1.2.3:9999.
+
+## Google Cloud Logging (GKE)
+
+When running Synapse on GKE, use `synapse.logging.GcpJsonFormatter`. It outputs
+JSON to stdout with a `severity` field that Google Cloud Logging maps to the
+correct per-entry severity. Without this, GKE assigns `ERROR` to everything
+written to stderr regardless of the actual Python log level.
+
+Example output:
+
+```json
+{"severity":"INFO","message":"Processed request: 3.481sec 200 GET /sync","logger":"synapse.access.http.8008","time":"2026-05-12T13:40:37.829Z"}
+```
+
+Configuration:
+
+```yaml
+version: 1
+disable_existing_loggers: false
+
+formatters:
+    gcp_json:
+        class: synapse.logging.GcpJsonFormatter
+
+handlers:
+    console:
+        class: logging.StreamHandler
+        formatter: gcp_json
+        stream: ext://sys.stdout
+
+loggers:
+    synapse.storage.SQL:
+        level: WARNING
+    twisted:
+        handlers: [console]
+        propagate: false
+
+root:
+    level: INFO
+    handlers: [console]
+```

@@ -159,6 +159,23 @@ class KeyUploadServlet(RestServlet):
         device_keys: DeviceKeys | None = None
         """Identity keys for the device. May be absent if no new identity keys are required."""
 
+        @field_validator("device_keys", mode="before")
+        @classmethod
+        def validate_device_keys_not_null(cls, v: Any) -> Any:
+            """Reject explicit `null` for `device_keys` while still allowing
+            the field to be omitted (in which case the default `None` is used).
+
+            The spec says `device_keys` may be omitted, but when present it
+            must be a `DeviceKeys` object — not `null`.
+
+            Pydantic's experimental `Missing` sentinel would be a cleaner way
+            to express this, but it's not stable yet:
+            https://docs.pydantic.dev/latest/concepts/experimental/#missing-sentinel
+            """
+            if v is None:
+                raise ValueError("device_keys must not be null")
+            return v
+
         fallback_keys: Mapping[StrictStr, StrictStr | KeyObject] | None = None
         """
         The public key which should be used if the device's one-time keys are
@@ -241,7 +258,7 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        if "device_keys" in body and isinstance(body["device_keys"], dict):
+        if "device_keys" in body:
             # Validate the provided `user_id` and `device_id` fields in
             # `device_keys` match that of the requesting user. We can't do
             # this directly in the pydantic model as we don't have access
@@ -249,13 +266,13 @@ class KeyUploadServlet(RestServlet):
             #
             # TODO: We could use ValidationInfo when we switch to Pydantic v2.
             # https://docs.pydantic.dev/latest/concepts/validators/#validation-info
-            if body["device_keys"].get("user_id") != user_id:
+            if body["device_keys"]["user_id"] != user_id:
                 raise SynapseError(
                     code=HTTPStatus.BAD_REQUEST,
                     errcode=Codes.BAD_JSON,
                     msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
                 )
-            if body["device_keys"].get("device_id") != device_id:
+            if body["device_keys"]["device_id"] != device_id:
                 raise SynapseError(
                     code=HTTPStatus.BAD_REQUEST,
                     errcode=Codes.BAD_JSON,
@@ -518,7 +535,7 @@ class SigningKeyUploadServlet(RestServlet):
         # setup, and that is allowed without UIA, per MSC3967.
         # If yes, then we need to authenticate the change.
         # MSC4190 can skip UIA for replacing cross-signing keys as well.
-        if is_cross_signing_setup and not requester.app_service:
+        if is_cross_signing_setup and not requester.app_service_id:
             # With MSC3861, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
             if self.hs.config.mas.enabled:
