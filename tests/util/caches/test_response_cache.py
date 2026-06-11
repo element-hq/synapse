@@ -269,6 +269,8 @@ class ResponseCacheTestCase(TestCase):
 
         return_error = True
 
+        REQUEST_SLEEP_TIME = Duration(seconds=1)
+
         async def erring_then_fine(_: str) -> str:
             """
             This function raises an error the first time it is called,
@@ -277,7 +279,7 @@ class ResponseCacheTestCase(TestCase):
             nonlocal return_error
 
             # pretend to do some work
-            await self.clock.sleep(Duration(seconds=1))
+            await self.clock.sleep(REQUEST_SLEEP_TIME)
 
             if return_error:
                 return_error = False
@@ -286,14 +288,27 @@ class ResponseCacheTestCase(TestCase):
 
         # First call: should get an error
         wrap_d = defer.ensureDeferred(cache.wrap(0, erring_then_fine, "ignored"))
+
+        # Should be pending
         self.assertNoResult(wrap_d)
-        self.reactor.advance(1)
+
+        # Wait for the time it takes for the request to resolve to an error
+        self.reactor.advance(REQUEST_SLEEP_TIME.as_secs())
+
+        # Check that the Deferred resolved to an error of the correct type
         self.failureResultOf(wrap_d, RuntimeError)
 
         # Second call: the error shouldn't be replayed
         # and the next call should succeed, so we should get a successful response
         wrap2_d = defer.ensureDeferred(cache.wrap(0, erring_then_fine, "ignored"))
+
+        # Since this is a new request (not coalesced with the previous failed one),
+        # this should still be pending
+        self.assertNoResult(wrap2_d)
+
+        # Wait for the time it takes for the request to resolve
         self.reactor.advance(1)
+
         self.assertEqual(
             self.successResultOf(wrap2_d),
             "fine",
