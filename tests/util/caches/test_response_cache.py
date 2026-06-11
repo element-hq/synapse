@@ -263,8 +263,7 @@ class ResponseCacheTestCase(TestCase):
 
     def test_errors_are_not_cached(self) -> None:
         """If the callback raises an error, the error is not cached and
-        served to any subsequent requests, whether they are within the
-        cache timeout or not.
+        served to any subsequent requests.
         """
         cache = self.with_cache("error_not_cached", ms=3000)
 
