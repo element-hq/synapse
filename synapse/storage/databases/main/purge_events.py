@@ -365,10 +365,18 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         )
         summary_decrements = cast(list[tuple[str, str, int, int]], txn.fetchall())
 
+        # `unread_count` is nullable, so `COALESCE` it before subtracting (else
+        # the result would be NULL). Clamp both counts at 0 via `GREATEST`/`MAX`
+        # to guard against ever driving a count negative if the summary is
+        # somehow out of sync with `event_push_actions`.
+        greatest_func = (
+            "GREATEST" if isinstance(self.database_engine, PostgresEngine) else "MAX"
+        )
         txn.execute_batch(
-            """
+            f"""
             UPDATE event_push_summary
-            SET notif_count = notif_count - ?, unread_count = unread_count - ?
+            SET notif_count = {greatest_func}(notif_count - ?, 0),
+                unread_count = {greatest_func}(COALESCE(unread_count, 0) - ?, 0)
             WHERE room_id = ? AND user_id = ? AND thread_id = ?
             """,
             [
