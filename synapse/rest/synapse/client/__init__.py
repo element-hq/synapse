@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -24,6 +25,10 @@ from typing import TYPE_CHECKING, Mapping
 from twisted.web.resource import Resource
 
 from synapse.rest.synapse.client.federation_whitelist import FederationWhitelistResource
+from synapse.rest.synapse.client.media_upload_limit import (
+    MEDIA_UPLOAD_LIMIT_PATH,
+    MediaUploadLimitResource,
+)
 from synapse.rest.synapse.client.new_user_consent import NewUserConsentResource
 from synapse.rest.synapse.client.pick_idp import PickIdpResource
 from synapse.rest.synapse.client.pick_username import pick_username_resource
@@ -55,6 +60,11 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
         # Unsubscribe to notification emails link
         "/_synapse/client/unsubscribe": UnsubscribeResource(hs),
     }
+
+    # Fallback page served as the `info_uri` for media upload limits that don't
+    # have an explicit `info_uri` configured. Only mounted when actually needed.
+    if hs.config.media.media_upload_limit_fallback_needed:
+        resources[MEDIA_UPLOAD_LIMIT_PATH] = MediaUploadLimitResource(hs)
 
     if hs.config.mas.enabled:
         resources["/_synapse/mas"] = MasResource(hs)

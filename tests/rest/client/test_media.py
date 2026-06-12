@@ -3,6 +3,7 @@
 #
 # Copyright 2022 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2024 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -58,6 +59,8 @@ from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.module_api import MediaUploadLimit
 from synapse.rest import admin
 from synapse.rest.client import login, media
+from synapse.rest.synapse.client import build_synapse_client_resource_tree
+from synapse.rest.synapse.client.media_upload_limit import MEDIA_UPLOAD_LIMIT_PATH
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
@@ -2961,6 +2964,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        resources.update(build_synapse_client_resource_tree(self.hs))
         return resources
 
     def upload_media(self, size: int) -> FakeChannel:
@@ -3051,6 +3055,61 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                 "",
                 "",
             )
+
+    @override_config(
+        {
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    # No `info_uri` is configured, so the fallback resource
+                    # should be used instead.
+                }
+            ],
+        }
+    )
+    def test_falls_back_to_served_page_when_no_info_uri(self) -> None:
+        """When no info_uri is configured, the error should point at a page
+        served by Synapse, and that page should return HTML."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+
+        expected_info_uri = (
+            self.hs.config.server.public_baseurl + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
+        )
+        self.assertEqual(channel.json_body["info_uri"], expected_info_uri)
+
+        # The fallback page should be served by Synapse and return HTML.
+        page = self.make_request(
+            "GET",
+            MEDIA_UPLOAD_LIMIT_PATH,
+            shorthand=False,
+        )
+        self.assertEqual(page.code, 200)
+        self.assertEqual(
+            page.headers.getRawHeaders("Content-Type"),
+            ["text/html; charset=utf-8"],
+        )
+        self.assertIn(b"upload limit", page.result["body"])
+
+    def test_fallback_page_not_mounted_when_not_needed(self) -> None:
+        """When every limit has an explicit info_uri, the fallback resource
+        should not be mounted."""
+        # The default config for this test case sets an info_uri on every limit,
+        # so the fallback should not be needed.
+        self.assertFalse(self.hs.config.media.media_upload_limit_fallback_needed)
+
+        # And the fallback page should not be served.
+        page = self.make_request(
+            "GET",
+            MEDIA_UPLOAD_LIMIT_PATH,
+            shorthand=False,
+        )
+        self.assertEqual(page.code, 404)
 
     @override_config(
         {

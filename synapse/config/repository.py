@@ -3,6 +3,7 @@
 #
 # Copyright 2014, 2015 OpenMarket Ltd
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -328,6 +329,11 @@ class ContentRepositoryConfig(Config):
 
         self.enable_authenticated_media = config.get("enable_authenticated_media", True)
 
+        # Whether any media upload limit relies on the static fallback page
+        # served by Synapse (i.e. was configured without an explicit `info_uri`).
+        # This is used to decide whether to mount the fallback resource.
+        self.media_upload_limit_fallback_needed = False
+
         self.media_upload_limits: list[MediaUploadLimit] = []
         for raw_entry in config.get("media_upload_limits", []):
             try:
@@ -343,7 +349,18 @@ class ContentRepositoryConfig(Config):
                 logger.warning(
                     "Empty info_uri provided for media upload limit, using static fallback value instead. You should specify an info_uri that points to more information about the upload limits imposed."
                 )
-                info_uri = "data:text/html,<p>You have exceeded a media upload limit. Ask your server administrator for more information.</p>"
+                # Fall back to a static page served by Synapse itself. This is
+                # built from public_baseurl so that it is a usable absolute URL.
+                # We import here to avoid a circular import at module load time.
+                from synapse.rest.synapse.client.media_upload_limit import (
+                    MEDIA_UPLOAD_LIMIT_PATH,
+                )
+
+                self.media_upload_limit_fallback_needed = True
+                info_uri = (
+                    self.root.server.public_baseurl
+                    + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
+                )
 
             self.media_upload_limits.append(
                 MediaUploadLimit(
@@ -353,6 +370,16 @@ class ContentRepositoryConfig(Config):
                     can_upgrade=entry.can_upgrade,
                 )
             )
+
+        # If any limit relies on the static fallback page, load the template
+        # used to render it. This lets server administrators customize the page
+        # via a custom template directory.
+        self.media_upload_limit_exceeded_template = None
+        if self.media_upload_limit_fallback_needed:
+            self.media_upload_limit_exceeded_template = self.read_templates(
+                ["media_upload_limit_exceeded.html"],
+                (td for td in (self.root.server.custom_template_directory,) if td),
+            )[0]
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None
