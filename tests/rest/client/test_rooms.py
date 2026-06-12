@@ -2602,7 +2602,7 @@ class RoomDelayedEventTestCase(RoomBase):
             retry_header,
         )
 
-        # Confirm that ratelimit overrides do not unblock this kind of limit
+        # Confirm that lifing temporal ratelimits doesn't lift this storage-based limit
         self.get_success(
             self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
         )
