@@ -346,9 +346,6 @@ class ContentRepositoryConfig(Config):
 
             info_uri = entry.info_uri
             if not info_uri:
-                logger.warning(
-                    "Empty info_uri provided for media upload limit, using static fallback value instead. You should specify an info_uri that points to more information about the upload limits imposed."
-                )
                 # Fall back to a static page served by Synapse itself. This is
                 # built from public_baseurl so that it is a usable absolute URL.
                 # We import here to avoid a circular import at module load time.

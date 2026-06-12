@@ -48,7 +48,6 @@ from twisted.web.resource import Resource
 from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config._base import Config
-from synapse.config.homeserver import HomeServerConfig
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
@@ -79,7 +78,6 @@ from tests.media.test_media_storage import (
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
 from tests.test_utils import SMALL_PNG
 from tests.unittest import override_config
-from tests.utils import default_config
 
 try:
     import lxml
@@ -3035,26 +3033,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         # This will succeed as the weekly limit has reset
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
-
-    def test_logs_warning_with_no_info_uri_in_config(self) -> None:
-        config_dict = default_config("test")
-
-        with self.assertLogs("synapse.config.repository", level="WARNING"):
-            HomeServerConfig().parse_config_dict(
-                {
-                    "media_upload_limits": [
-                        {
-                            "time_period": "1d",
-                            "max_size": "1K",
-                            #  We're specifically testing that having no `info_uri` results in some warning logs
-                            # "info_uri": "https://example.com",
-                        }
-                    ],
-                    **config_dict,
-                },
-                "",
-                "",
-            )
 
     @override_config(
         {
