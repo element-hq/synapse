@@ -231,7 +231,7 @@ class ResponseCache(Generic[KV]):
             deferred,
             # We set `consumeErrors=False` as we want to handle errors ourselves (`on_fail`) instead of
             # replacing them with a `None` successful result that would go to `on_succeed`
-            consumeErrors=False
+            consumeErrors=False,
         )
         key = context.cache_key
         entry = ResponseCacheEntry(
@@ -269,13 +269,20 @@ class ResponseCache(Generic[KV]):
             # Consider the Failure handled so they don't get thrown by the reactor
             return None
 
-        # make sure we add the callback and errback *after* adding the entry to result_cache,
-        # in case the result is already complete (in which case flipping the order would
-        # leave us with a stuck entry in the cache).
+        # Two ordering constraints to be aware of for registering the callback and errback:
+        # 1. Both of them must be registered _after_ adding the entry to the result_cache,
+        #    otherwise it is possible for them to trigger immediately (before the entry
+        #    is added to the result_cache), the net effect of which is that it would leave
+        #    us with a stuck entry in the cache.
+        # 2. We must register the errback after callback.
+        #    If the errback was registered first, `on_fail` returning `None` would
+        #    cause `on_succeed` to be called with that `None` as argument.
+        #    This would start a timer to remove a cache entry, even though there isn't a
+        #    valid cache entry yet.
+        #    (This could prematurely remove a future cache entry with the same key.)
         result.addCallback(on_succeed)
-        # Must register errback after callback, so the `None` doesn't get processed
-        # by the result callback chain
         result.addErrback(on_fail)
+
         return entry
 
     def unset(self, key: KV) -> None:
