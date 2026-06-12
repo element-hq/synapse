@@ -414,6 +414,15 @@ class SyncHandler:
             context.tag = sync_label
 
         if since_token is not None:
+            # Work around a bug where older Synapse versions gave out tokens "from the
+            # future", i.e. that are ahead of the tokens persisted in the DB. This could
+            # also happen if a user is intentionally messing with the token so this also
+            # acts as sanitization/validation.
+            #
+            # If the token has positions ahead of our persisted positions in the
+            # database (invalid), then we simply use our max persisted position (recover
+            # gracefully); instead of waiting for a position that may never come around.
+            since_token = await self.event_sources.bound_future_token(since_token)
             # We need to make sure this worker has caught up with the token. If
             # this returns false it means we timed out waiting, and we should
             # just return an empty response.
@@ -2227,19 +2236,23 @@ class SyncHandler:
         if block_all_room_ephemeral:
             ephemeral_by_room: dict[str, list[JsonDict]] = {}
         else:
-            now_token, ephemeral_by_room = await self.ephemeral_by_room(
+            (
+                sync_result_builder.now_token,
+                ephemeral_by_room,
+            ) = await self.ephemeral_by_room(
                 sync_result_builder,
                 now_token=sync_result_builder.now_token,
                 since_token=sync_result_builder.since_token,
             )
-            sync_result_builder.now_token = now_token
 
         sticky_by_room: dict[str, list[str]] = {}
         if self.hs_config.experimental.msc4354_enabled:
-            now_token, sticky_by_room = await self.sticky_events_by_room(
-                sync_result_builder, now_token, since_token
+            (
+                sync_result_builder.now_token,
+                sticky_by_room,
+            ) = await self.sticky_events_by_room(
+                sync_result_builder, sync_result_builder.now_token, since_token
             )
-            sync_result_builder.now_token = now_token
 
         # 2. We check up front if anything has changed, if it hasn't then there is
         # no point in going further.

@@ -130,7 +130,10 @@ class BaseDatabaseEngine(
     ) -> None:
         """Attempt to set the connections isolation level.
 
-        Note: This has no effect on SQLite3, as transactions are SERIALIZABLE by default.
+        Note:
+            * This has no effect on SQLite3, as transactions are SERIALIZABLE by default.
+            * On Postgres, an isolation_level of None restores the default from the
+              attribute `default_isolation_level`
         """
         ...
 

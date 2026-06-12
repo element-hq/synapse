@@ -37,6 +37,7 @@ from typing import (
     Literal,
     Mapping,
     Sequence,
+    Sized,
     TypeVar,
     cast,
     overload,
@@ -44,7 +45,7 @@ from typing import (
 
 import attr
 from prometheus_client import Counter, Histogram
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, ParamSpec, assert_never
 
 from twisted.enterprise import adbapi
 from twisted.internet.interfaces import IReactorCore
@@ -84,6 +85,13 @@ logger = logging.getLogger(__name__)
 sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
+
+# The maximum length of the repr of a query's values that we log at DEBUG. Some
+# queries carry large payloads (e.g. to-device messages), and logging them in
+# full is not useful. Truncating also keeps the line well under AMP's 64KiB
+# per-value limit, which would otherwise break `trial -jN` test runs (c.f.
+# https://github.com/twisted/twisted/issues/12482).
+MAX_SQL_VALUE_LOG_LENGTH = 1000
 
 sql_scheduling_timer = Histogram(
     "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
@@ -417,6 +425,10 @@ class LoggingTransaction:
         """
 
         if isinstance(self.database_engine, Psycopg2Engine):
+            # This is narrowed to the only be used by psycopg2 as it is imported from
+            # that module. Internally, `execute_batch()` just injects a given grouping
+            # of parameters into the query and then appends multiple of those queries
+            # together with a `;`, leading to large reduction of 'round-tripping'.
             from psycopg2.extras import execute_batch
 
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
@@ -433,6 +445,9 @@ class LoggingTransaction:
             # suggests that the outer collection may be iterable, but
             # https://docs.python.org/3/library/sqlite3.html?highlight=sqlite3#how-to-use-placeholders-to-bind-values-in-sql-queries
             # suggests that the inner collection should be a sequence or dict.
+            # In the case of psycopg v3+ usage, `executemany()` uses a postgres
+            # optimization called pipelining to vastly speed up processing of the query
+            # when there are many args.
             self.executemany(sql, args)
 
     def execute_values(
@@ -469,14 +484,53 @@ class LoggingTransaction:
                 sql,
                 values,
             )
-        else:
+        elif isinstance(self.database_engine, PsycopgEngine):
             # We use fetch = False to mean a writable query. You *might* be able
             # to morph that into a COPY (...) FROM STDIN, but it isn't worth the
             # effort for the few places we set fetch = False.
             assert fetch is True
 
+            # For the moment, no code paths in Synapse use `template` with `fetch=True`
+            # but the opposite is true. Prevent this mistake until the code can handle
+            # templates as well.
+            assert template is None
+
             # execute_values requires a single replacement, but we need to expand it
-            # for COPY. This assumes all inner sequences are the same length.
+            # for COPY. These inner sequences must be the same length.
+            assertion_length = 0
+            for _inner_value in values:
+                # Check for the Sized class here, to verify that this particular
+                # iterable can use len(). In the future, switch the `values` argument to
+                # use this as a Collection instead of an Iterable, which allows all the
+                # types wanted while excluding Generators and this assertion can be
+                # removed.
+                assert isinstance(_inner_value, Sized)
+                if not assertion_length:
+                    assertion_length = len(_inner_value)
+                assert assertion_length == len(_inner_value)
+
+            # To avoid having to port several psycopg2 utilities that are built into its
+            # Cursor class(mogrify, for example) and import execute_values() from it's
+            # 'extras' module, use a different mechanism that facilitates performance.
+            #
+            # The COPY Postgres-only verb allows for a bulk import and export of data.
+            # However building this query for use with VALUES is somewhat convoluted.
+            #
+            # For exporting of data, which would be the equivalent of a SELECT query,
+            # and given a simple query of the sort:
+            #  SELECT * FROM table, (VALUES ?) AS ld(id) WHERE table.id = ld.id
+            # and VALUES being an example of sequential numbers, 1-5 representing the 5
+            # rows to retrieve, the "VALUES ?" clause needs to be expanded to
+            #  VALUES (?), (?), (?), (?), (?)
+            # Then, the values themselves have to be flattened in a similar fashion
+            #  [(1, 2, 3, 4, 5)]
+            # Similarly, disregarding that the WHERE clause will no longer hold true, if
+            # the count VALUES to be passed were 3, then VALUES clause would expand to:
+            #  VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)
+            # and for berevity assume that all passed values were actually the same, the
+            # values would be flattened to look like:
+            #  [(1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5)]
+
             value_str = "(" + ", ".join("?" for _ in next(iter(values))) + ")"
             sql = sql.replace("?", ", ".join(value_str for _ in values))
 
@@ -492,10 +546,31 @@ class LoggingTransaction:
             # Flatten the values.
             return self._do_execute(f, sql, list(itertools.chain.from_iterable(values)))
 
+        # mypy does not like that self.database_engine is not a Never type
+        assert_never(self.database_engine)  # type: ignore[arg-type]
+
     def copy_write(
         self, sql: str, args: Iterable[Any], values: Iterable[Iterable[Any]]
     ) -> None:
-        """Corresponds to a PostgreSQL COPY (...) FROM STDIN call."""
+        """
+        Corresponds to a PostgreSQL COPY (...) FROM STDIN call using psycopg v3
+        attributes and helpers.
+
+        Note that COPY commands do not have an INSERT INTO or similar, merely the
+        tablename and the columns in the order of insertion. Assumes no return values.
+        Do not use for DELETE, UPSERTs or when needing a RETURNING value
+
+        Instead of
+            INSERT INTO table (user_id, email, locked) VALUES ("alice", "a@here.com", False)
+
+        it would be
+            COPY table (user_id, email, locked) FROM STDIN
+
+        The 'values' parameter input should not change, a Collection of Iterables.
+        Details on formatting are handled by psycopg.
+
+        The most performant way to insert data, especially at scale.
+        """
         assert isinstance(self.database_engine, PsycopgEngine)
 
         def f(
@@ -556,7 +631,13 @@ class LoggingTransaction:
             sql = self.database_engine.convert_param_style(sql)
         if args:
             try:
-                sql_logger.debug("[SQL values] {%s} %r", self.name, args[0])
+                if sql_logger.isEnabledFor(logging.DEBUG):
+                    value_repr = repr(args[0])
+                    if len(value_repr) > MAX_SQL_VALUE_LOG_LENGTH:
+                        value_repr = (
+                            value_repr[:MAX_SQL_VALUE_LOG_LENGTH] + "... [truncated]"
+                        )
+                    sql_logger.debug("[SQL values] {%s} %s", self.name, value_repr)
             except Exception:
                 # Don't let logging failures stop SQL from working
                 pass
@@ -579,7 +660,7 @@ class LoggingTransaction:
             secs = time.time() - start
             sql_logger.debug("[SQL time] {%s} %f sec", self.name, secs)
             sql_query_timer.labels(
-                verb=one_line_sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
+                verb=sql.split(maxsplit=1)[0], **{SERVER_NAME_LABEL: self.server_name}
             ).observe(secs)
 
     def close(self) -> None:
@@ -1299,6 +1380,11 @@ class DatabasePool:
             txn.execute_values(sql, values, fetch=False)
 
         elif isinstance(txn.database_engine, PsycopgEngine):
+            # `execute_values` is not available for insertions on psycopg at this time.
+            # However, Postgres allows for bulk insertion of data with its COPY command
+            # which is very performant. This should be on-par with `execute_values` from
+            # psycopg2. The available alternative would be `executemany` which uses
+            # Postgres' pipeline mode but is approximately an order of magnitude slower.
             sql = "COPY %s (%s) FROM STDIN" % (
                 table,
                 ", ".join(k for k in keys),

@@ -52,7 +52,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         self.mock_request = Mock()
         self.mock_request.path = b"/foo/bar"
         self.mock_requester = Mock()
-        self.mock_requester.app_service = None
+        self.mock_requester.app_service_id = None
         self.mock_requester.is_guest = False
         self.mock_requester.access_token_id = 1234
 

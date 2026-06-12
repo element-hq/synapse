@@ -32,7 +32,8 @@ import attr
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
-from synapse.events import EventBase, FrozenEventVMSC4242
+from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.utils import FilteredEvent
 from synapse.types import (
     JsonMapping,
@@ -426,7 +427,7 @@ class AdminHandler:
 
         r = task.params.get("requester")
         assert r is not None
-        admin = Requester.deserialize(self._store, r)
+        admin = Requester.deserialize(r)
 
         user_id = task.params.get("user_id")
         assert user_id is not None
@@ -495,8 +496,7 @@ class AdminHandler:
 
                 try:
                     prev_state_events = None
-                    if room_version.msc4242_state_dags:
-                        assert isinstance(event, FrozenEventVMSC4242)
+                    if supports_msc4242_state_dag(event):
                         prev_state_events = event.prev_state_events
                         assert prev_state_events is not None, (
                             "Parent event of redaction has no `prev_state_events` which should be impossible as `prev_state_events` is a required field in MSC4242 rooms"

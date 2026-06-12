@@ -37,7 +37,8 @@ from prometheus_client import Counter, Histogram
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, StateResolutionVersions
-from synapse.events import EventBase, FrozenEventVMSC4242
+from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import (
     EventContext,
     UnpersistedEventContext,
@@ -315,7 +316,7 @@ class StateHandler:
             # might redundantly recalculate the state for this event later.)
             prev_event_ids = frozenset(
                 event.prev_state_events
-                if isinstance(event, FrozenEventVMSC4242)
+                if supports_msc4242_state_dag(event)
                 else event.prev_event_ids()
             )
             incomplete_prev_events = await self.store.get_partial_state_events(

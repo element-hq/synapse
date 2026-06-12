@@ -53,7 +53,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             ]
 
             if USE_POSTGRES_FOR_TESTS == "psycopg":
-                conn_attributes += ["autocommit"]
+                conn_attributes += ["set_autocommit"]
 
                 # copy returns a context manager which needs assertions.
                 self.mock_copy = Mock(spec_set=["write_row", "rows"])

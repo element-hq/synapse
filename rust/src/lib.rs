@@ -5,18 +5,21 @@ use pyo3::prelude::*;
 use pyo3_log::ResetHandle;
 
 pub mod acl;
+pub mod canonical_json;
 pub mod duration;
 pub mod errors;
 pub mod events;
 pub mod http;
 pub mod http_client;
 pub mod identifier;
+pub mod json;
 pub mod matrix_const;
 pub mod msc4388_rendezvous;
 pub mod push;
 pub mod rendezvous;
 pub mod room_versions;
 pub mod segmenter;
+pub mod types;
 
 lazy_static! {
     static ref LOGGING_HANDLE: ResetHandle = pyo3_log::init();
@@ -69,6 +72,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     msc4388_rendezvous::register_module(py, m)?;
     segmenter::register_module(py, m)?;
     room_versions::register_module(py, m)?;
+    types::register_module(py, m)?;
 
     Ok(())
 }
