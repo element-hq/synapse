@@ -142,7 +142,7 @@ class MediaUploadLimit:
     """The URI to return with the M_USER_LIMIT_EXCEEDED error.
 
     If left unset (`None`), Synapse falls back to a static page served by itself
-    (see `MEDIA_UPLOAD_LIMIT_PATH`), which explains that the limit has been
+    (see `MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH`), which explains that the limit has been
     exceeded and can be customized by server administrators via a custom
     template. The fallback URI is resolved when the error is generated, not when
     the limit is constructed."""
