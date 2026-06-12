@@ -162,7 +162,7 @@ class DelayedEventsStore(SQLBaseStore):
                     """
                     SELECT MAX(send_ts) FROM (
                         SELECT * FROM delayed_events
-                        WHERE user_localpart = ? AND NOT is_processed
+                        WHERE user_localpart = ?
                         ORDER BY send_ts LIMIT ?
                     )
                     """,
