@@ -26,7 +26,7 @@ import math
 import typing
 from enum import Enum
 from http import HTTPStatus
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 from twisted.web import http
 
@@ -527,7 +527,7 @@ class UserLimitExceededError(SynapseError):
         info_uri: str,
         can_upgrade: bool = False,
     ):
-        additional_fields: dict[str, Union[str, bool]] = {
+        additional_fields: dict[str, str | bool] = {
             "info_uri": info_uri,
         }
 
