@@ -269,7 +269,7 @@ class ResponseCacheTestCase(TestCase):
 
         return_error = True
 
-        REQUEST_SLEEP_TIME = Duration(seconds=1)
+        REQUEST_FAKE_WORK_SLEEP_TIME = Duration(seconds=1)
 
         async def erring_then_fine(_: str) -> str:
             """
@@ -279,7 +279,7 @@ class ResponseCacheTestCase(TestCase):
             nonlocal return_error
 
             # pretend to do some work
-            await self.clock.sleep(REQUEST_SLEEP_TIME)
+            await self.clock.sleep(REQUEST_FAKE_WORK_SLEEP_TIME)
 
             if return_error:
                 return_error = False
@@ -293,7 +293,7 @@ class ResponseCacheTestCase(TestCase):
         self.assertNoResult(wrap_d)
 
         # Wait for the time it takes for the request to resolve to an error
-        self.reactor.advance(REQUEST_SLEEP_TIME.as_secs())
+        self.reactor.advance(REQUEST_FAKE_WORK_SLEEP_TIME.as_secs())
 
         # Check that the Deferred resolved to an error of the correct type
         self.failureResultOf(wrap_d, RuntimeError)
@@ -307,7 +307,7 @@ class ResponseCacheTestCase(TestCase):
         self.assertNoResult(wrap2_d)
 
         # Wait for the time it takes for the request to resolve
-        self.reactor.advance(1)
+        self.reactor.advance(REQUEST_FAKE_WORK_SLEEP_TIME.as_secs())
 
         self.assertEqual(
             self.successResultOf(wrap2_d),
