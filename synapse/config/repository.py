@@ -363,12 +363,13 @@ class ContentRepositoryConfig(Config):
         # for any limit (whether from config or a module callback) that doesn't
         # specify one. Built from public_baseurl so that it is a usable absolute
         # URL. We import here to avoid a circular import at module load time.
-        from synapse.rest.synapse.client.media_upload_limit import (
-            MEDIA_UPLOAD_LIMIT_PATH,
+        from synapse.rest.synapse.client.media_upload_limit_exceeded import (
+            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
         )
 
         self.media_upload_limit_fallback_info_uri = (
-            self.root.server.public_baseurl + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
+            self.root.server.public_baseurl
+            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
         )
 
         # Load the template used to render the fallback page. This lets server

@@ -20,18 +20,18 @@ from synapse.http.site import SynapseRequest
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-# The path at which the fallback media upload limit info page is served. This is
-# used as the `info_uri` returned in the `M_USER_LIMIT_EXCEEDED` error when no
-# `info_uri` has been configured for a media upload limit.
-MEDIA_UPLOAD_LIMIT_PATH = "/_synapse/client/media_upload_limit"
+# The path at which the fallback media upload limit exceeded info page is served.
+# This is used as the `info_uri` returned in the `M_USER_LIMIT_EXCEEDED` error
+# when no `info_uri` has been specified for a media upload limit.
+MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH = "/_synapse/client/media_upload_limit_exceeded"
 
 
-class MediaUploadLimitResource(DirectServeHtmlResource):
+class MediaUploadLimitExceededResource(DirectServeHtmlResource):
     """Serves a static fallback page explaining that a media upload limit has
     been exceeded.
 
-    This is used as the `info_uri` for the `M_USER_LIMIT_EXCEEDED` error when a
-    media upload limit has been configured without an explicit `info_uri`.
+    This is used as the `info_uri` for the `M_USER_LIMIT_EXCEEDED` error when no
+    `info_uri` has been specified for a media upload limit.
     """
 
     def __init__(self, hs: "HomeServer"):

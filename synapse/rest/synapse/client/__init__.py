@@ -25,9 +25,9 @@ from typing import TYPE_CHECKING, Mapping
 from twisted.web.resource import Resource
 
 from synapse.rest.synapse.client.federation_whitelist import FederationWhitelistResource
-from synapse.rest.synapse.client.media_upload_limit import (
-    MEDIA_UPLOAD_LIMIT_PATH,
-    MediaUploadLimitResource,
+from synapse.rest.synapse.client.media_upload_limit_exceeded import (
+    MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
+    MediaUploadLimitExceededResource,
 )
 from synapse.rest.synapse.client.new_user_consent import NewUserConsentResource
 from synapse.rest.synapse.client.pick_idp import PickIdpResource
@@ -66,7 +66,9 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
     # since limits without an `info_uri` can be returned by module callbacks at
     # any time. The template is only set when the media repo is enabled.
     if hs.config.media.media_upload_limit_exceeded_template is not None:
-        resources[MEDIA_UPLOAD_LIMIT_PATH] = MediaUploadLimitResource(hs)
+        resources[MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH] = MediaUploadLimitExceededResource(
+            hs
+        )
 
     if hs.config.mas.enabled:
         resources["/_synapse/mas"] = MasResource(hs)

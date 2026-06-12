@@ -59,7 +59,9 @@ from synapse.module_api import MediaUploadLimit
 from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
-from synapse.rest.synapse.client.media_upload_limit import MEDIA_UPLOAD_LIMIT_PATH
+from synapse.rest.synapse.client.media_upload_limit_exceeded import (
+    MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
@@ -3057,14 +3059,15 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
         expected_info_uri = (
-            self.hs.config.server.public_baseurl + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
+            self.hs.config.server.public_baseurl
+            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
         )
         self.assertEqual(channel.json_body["info_uri"], expected_info_uri)
 
         # The fallback page should be served by Synapse and return HTML.
         page = self.make_request(
             "GET",
-            MEDIA_UPLOAD_LIMIT_PATH,
+            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
             shorthand=False,
         )
         self.assertEqual(page.code, 200)
@@ -3081,7 +3084,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         # The default config for this test case sets an info_uri on every limit.
         page = self.make_request(
             "GET",
-            MEDIA_UPLOAD_LIMIT_PATH,
+            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
             shorthand=False,
         )
         self.assertEqual(page.code, 200)
@@ -3374,7 +3377,8 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
         expected_info_uri = (
-            self.hs.config.server.public_baseurl + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
+            self.hs.config.server.public_baseurl
+            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
         )
         self.assertEqual(channel.json_body["info_uri"], expected_info_uri)
 
