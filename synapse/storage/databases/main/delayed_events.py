@@ -137,6 +137,7 @@ class DelayedEventsStore(SQLBaseStore):
         Raises:
             LimitExceededError: if the user has reached the limit of
                 how many delayed events they may have scheduled at once.
+            SynapseError: if the user is not allowed to schedule any delayed events.
         """
         if limit <= 0:
             raise SynapseError(
