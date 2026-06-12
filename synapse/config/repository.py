@@ -138,8 +138,14 @@ class MediaUploadLimit:
     time_period_ms: int
     """The time period in milliseconds."""
 
-    info_uri: str
-    """The URI to return with the M_USER_LIMIT_EXCEEDED error."""
+    info_uri: str | None = None
+    """The URI to return with the M_USER_LIMIT_EXCEEDED error.
+
+    If left unset (`None`), Synapse falls back to a static page served by itself
+    (see `MEDIA_UPLOAD_LIMIT_PATH`), which explains that the limit has been
+    exceeded and can be customized by server administrators via a custom
+    template. The fallback URI is resolved when the error is generated, not when
+    the limit is constructed."""
 
     can_upgrade: bool = False
     """Whether the user can upgrade their plan to increase the limit. This is returned in the M_USER_LIMIT_EXCEEDED error."""
@@ -171,6 +177,9 @@ class ContentRepositoryConfig(Config):
             and config.get("worker_app") != "synapse.app.media_repository"
         ):
             self.can_load_media_repo = False
+            # The fallback media upload limit resource is only mounted when this
+            # template is set, so leave it unset when the media repo is disabled.
+            self.media_upload_limit_exceeded_template = None
             return
         else:
             self.can_load_media_repo = True
@@ -329,11 +338,6 @@ class ContentRepositoryConfig(Config):
 
         self.enable_authenticated_media = config.get("enable_authenticated_media", True)
 
-        # Whether any media upload limit relies on the static fallback page
-        # served by Synapse (i.e. was configured without an explicit `info_uri`).
-        # This is used to decide whether to mount the fallback resource.
-        self.media_upload_limit_fallback_needed = False
-
         self.media_upload_limits: list[MediaUploadLimit] = []
         for raw_entry in config.get("media_upload_limits", []):
             try:
@@ -344,39 +348,38 @@ class ContentRepositoryConfig(Config):
                     ("media_upload_limits",),
                 ) from e
 
-            info_uri = entry.info_uri
-            if not info_uri:
-                # Fall back to a static page served by Synapse itself. This is
-                # built from public_baseurl so that it is a usable absolute URL.
-                # We import here to avoid a circular import at module load time.
-                from synapse.rest.synapse.client.media_upload_limit import (
-                    MEDIA_UPLOAD_LIMIT_PATH,
-                )
-
-                self.media_upload_limit_fallback_needed = True
-                info_uri = (
-                    self.root.server.public_baseurl
-                    + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
-                )
-
+            # `info_uri` may be None, in which case the static fallback page
+            # served by Synapse is used when the error is generated.
             self.media_upload_limits.append(
                 MediaUploadLimit(
                     max_bytes=entry.max_size,
                     time_period_ms=entry.time_period,
-                    info_uri=info_uri,
+                    info_uri=entry.info_uri,
                     can_upgrade=entry.can_upgrade,
                 )
             )
 
-        # If any limit relies on the static fallback page, load the template
-        # used to render it. This lets server administrators customize the page
-        # via a custom template directory.
-        self.media_upload_limit_exceeded_template = None
-        if self.media_upload_limit_fallback_needed:
-            self.media_upload_limit_exceeded_template = self.read_templates(
-                ["media_upload_limit_exceeded.html"],
-                (td for td in (self.root.server.custom_template_directory,) if td),
-            )[0]
+        # The absolute URI of the static fallback page, used as the `info_uri`
+        # for any limit (whether from config or a module callback) that doesn't
+        # specify one. Built from public_baseurl so that it is a usable absolute
+        # URL. We import here to avoid a circular import at module load time.
+        from synapse.rest.synapse.client.media_upload_limit import (
+            MEDIA_UPLOAD_LIMIT_PATH,
+        )
+
+        self.media_upload_limit_fallback_info_uri = (
+            self.root.server.public_baseurl + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
+        )
+
+        # Load the template used to render the fallback page. This lets server
+        # administrators customize the page via a custom template directory.
+        # Since module callbacks can return limits without an `info_uri` at any
+        # time, the template (and its resource) are always available when the
+        # media repo is enabled.
+        self.media_upload_limit_exceeded_template = self.read_templates(
+            ["media_upload_limit_exceeded.html"],
+            (td for td in (self.root.server.custom_template_directory,) if td),
+        )[0]
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None

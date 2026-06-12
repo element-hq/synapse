@@ -62,8 +62,10 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
     }
 
     # Fallback page served as the `info_uri` for media upload limits that don't
-    # have an explicit `info_uri` configured. Only mounted when actually needed.
-    if hs.config.media.media_upload_limit_fallback_needed:
+    # have an explicit `info_uri`. Mounted whenever the media repo is enabled,
+    # since limits without an `info_uri` can be returned by module callbacks at
+    # any time. The template is only set when the media repo is enabled.
+    if hs.config.media.media_upload_limit_exceeded_template is not None:
         resources[MEDIA_UPLOAD_LIMIT_PATH] = MediaUploadLimitResource(hs)
 
     if hs.config.mas.enabled:

@@ -398,10 +398,18 @@ class MediaRepository:
                     attempted_bytes=content_length,
                 )
 
+                # Fall back to the static page served by Synapse when the limit
+                # doesn't specify its own `info_uri` (e.g. limits returned by a
+                # module callback without one).
+                info_uri = (
+                    limit.info_uri
+                    or self.hs.config.media.media_upload_limit_fallback_info_uri
+                )
+
                 raise UserLimitExceededError(
                     403,
                     "Media upload limit exceeded",
-                    limit.info_uri,
+                    info_uri,
                     limit.can_upgrade,
                 )
 

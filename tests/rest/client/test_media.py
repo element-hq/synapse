@@ -3074,20 +3074,21 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         )
         self.assertIn(b"upload limit", page.result["body"])
 
-    def test_fallback_page_not_mounted_when_not_needed(self) -> None:
-        """When every limit has an explicit info_uri, the fallback resource
-        should not be mounted."""
-        # The default config for this test case sets an info_uri on every limit,
-        # so the fallback should not be needed.
-        self.assertFalse(self.hs.config.media.media_upload_limit_fallback_needed)
-
-        # And the fallback page should not be served.
+    def test_fallback_page_always_mounted(self) -> None:
+        """The fallback resource is always mounted when the media repo is
+        enabled, even if every configured limit has an explicit info_uri, since
+        module callbacks can return limits without an info_uri at any time."""
+        # The default config for this test case sets an info_uri on every limit.
         page = self.make_request(
             "GET",
             MEDIA_UPLOAD_LIMIT_PATH,
             shorthand=False,
         )
-        self.assertEqual(page.code, 404)
+        self.assertEqual(page.code, 200)
+        self.assertEqual(
+            page.headers.getRawHeaders("Content-Type"),
+            ["text/html; charset=utf-8"],
+        )
 
     @override_config(
         {
@@ -3344,3 +3345,42 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 500)
         self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 800)
+
+    def test_module_limit_without_info_uri_falls_back(self) -> None:
+        """A limit returned by a module callback without an info_uri falls back
+        to the static page served by Synapse when the error is generated."""
+
+        async def _limits_without_info_uri(
+            user_id: str,
+        ) -> list[MediaUploadLimit] | None:
+            # info_uri is omitted (defaults to None).
+            return [
+                MediaUploadLimit(
+                    time_period_ms=Config.parse_duration("1d"),
+                    max_bytes=1024,
+                )
+            ]
+
+        self.hs.get_module_api().register_media_repository_callbacks(
+            get_media_upload_limits_for_user=_limits_without_info_uri,
+        )
+
+        # user3 has no other callback overriding it, so uses the above.
+        channel = self.upload_media(500, self.tok3)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800, self.tok3)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+
+        expected_info_uri = (
+            self.hs.config.server.public_baseurl + MEDIA_UPLOAD_LIMIT_PATH.lstrip("/")
+        )
+        self.assertEqual(channel.json_body["info_uri"], expected_info_uri)
+
+        # The limit passed to the on_media_upload_limit_exceeded callback keeps
+        # its unresolved (None) info_uri.
+        assert self.last_media_upload_limit_exceeded is not None
+        limit = self.last_media_upload_limit_exceeded["limit"]
+        assert isinstance(limit, MediaUploadLimit)
+        self.assertIsNone(limit.info_uri)
