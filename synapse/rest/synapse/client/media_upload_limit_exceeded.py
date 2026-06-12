@@ -39,5 +39,4 @@ class MediaUploadLimitExceededResource(DirectServeHtmlResource):
         self._template = hs.config.media.media_upload_limit_exceeded_template
 
     async def _async_render_GET(self, request: SynapseRequest) -> None:
-        assert self._template is not None
         respond_with_html(request, 200, self._template.render())

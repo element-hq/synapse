@@ -3078,9 +3078,9 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertIn(b"upload limit", page.result["body"])
 
     def test_fallback_page_always_mounted(self) -> None:
-        """The fallback resource is always mounted when the media repo is
-        enabled, even if every configured limit has an explicit info_uri, since
-        module callbacks can return limits without an info_uri at any time."""
+        """The fallback resource is always mounted, even if every configured
+        limit has an explicit info_uri, since module callbacks can return
+        limits without an info_uri at any time."""
         # The default config for this test case sets an info_uri on every limit.
         page = self.make_request(
             "GET",
