@@ -2312,7 +2312,7 @@ class EventCreationHandler:
             )
 
         if not dummy_event_sent:
-            logger.info(
+            logger.warning(
                 "Failed to send dummy event into room %s after remote join; "
                 "no local user with permission was found",
                 room_id,
