@@ -2215,7 +2215,7 @@ Options for each entry include:
 
 * `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
 
-* `info_uri` (string): URI return to the client for where the user can find information about the upload limit. Optional. If not set then a static `data:text/html` URI is returned with a simple message. It is recommended to provide an `info_uri` that points to a page with more information about the upload limit and how users can reduce their upload usage or request an upload limit increase.
+* `info_uri` (string): URI return to the client for where the user can find information about the upload limit and how users can reduce their upload usage or request an upload limit increase. Optional. If not set then the `media_upload_limit_exceeded.html` template is served by Synapse and used instead.
 
 * `can_upgrade` (boolean): Value returned to the client for whether the limit can be increased. Optional default `false`. Defaults to `false`.
 
