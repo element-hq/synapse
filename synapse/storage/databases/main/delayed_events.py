@@ -175,9 +175,9 @@ class DelayedEventsStore(SQLBaseStore):
                 assert row
                 err = LimitExceededError(
                     limiter_name="add_delayed_event",
-                    retry_after_ms=next_send_ts - creation_ts,
+                    retry_after_ms=row[0] - creation_ts,
                 )
-                e.msg = "The maximum number of delayed events has been reached."
+                err.msg = "The maximum number of delayed events has been reached."
                 raise err
 
             self.db_pool.simple_insert_txn(
