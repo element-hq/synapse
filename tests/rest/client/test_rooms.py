@@ -2605,6 +2605,50 @@ class RoomDelayedEventTestCase(RoomBase):
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 5,
+            },
+        }
+    )
+    def test_delayed_event_custom_user_limit_exceeded(self) -> None:
+        """
+        Test that delayed event limits work propertly when
+        the number of already scheduled events exceeds the limit.
+        """
+        for i in range(3):
+            send_after_ms = 1000 * i
+            args = (
+                "POST",
+                (
+                    f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after_ms}"
+                    % self.room_id
+                ).encode("ascii"),
+                {"body": f"test{i}", "msgtype": "m.text"},
+            )
+            channel = self.make_request(*args)
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        self.hs.config.server.max_delayed_events_per_user = 1
+
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertEqual(
+            Codes.LIMIT_EXCEEDED,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+        retry_after_header = channel.headers.getRawHeaders("Retry-After")
+        assert retry_after_header
+        retry_after_ms = int(retry_after_header[0])
+        assert retry_after_ms > 0
+
+        self.reactor.advance(retry_after_ms)
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_delayed_event_with_negative_delay(self) -> None:
         """Test that sending a delayed event fails if its delay is negative."""
