@@ -1,7 +1,7 @@
 --
 -- This file is licensed under the Affero General Public License (AGPL) version 3.
 --
--- Copyright (C) 2026 New Vector Ltd
+-- Copyright (C) 2026 Element Creations Ltd
 --
 -- This program is free software: you can redistribute it and/or modify
 -- it under the terms of the GNU Affero General Public License as
@@ -12,15 +12,16 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- Backfill last_receipt_stream_ordering for event_push_summary rows created
--- with last_receipt_stream_ordering=NULL by the rotation job before the code
--- fix in _handle_new_receipts_for_notifs_txn was applied.
+-- with last_receipt_stream_ordering=NULL by the rotation job before
+-- the fix in https://github.com/element-hq/synapse/pull/19785.
 --
--- NULL has a dual meaning in this column (see the schema delta that added it):
+-- NULL has a dual meaning in this column (see
+-- synapse/storage/schema/main/delta/72/01event_push_summary_receipt.sql):
 --   1. Legacy rows from old Synapse that maintained counts synchronously.
 --   2. Bug-affected rows where the receipt UPDATE was a silent no-op.
 --
 -- For a given event_push_summary row, the relevant receipts are unthreaded
--- receipts (cover all threads) and the threaded receipt for that thread.
+-- receipts (marks all threads as read) and the threaded receipt for that thread.
 --
 -- For both kinds of stale row, if stream_ordering <= the max relevant receipt
 -- then every event in the summary predates the receipt and the counts should
@@ -35,6 +36,7 @@ SET last_receipt_stream_ordering = (
         WHERE r.user_id      = event_push_summary.user_id
           AND r.room_id      = event_push_summary.room_id
           AND r.receipt_type IN ('m.read', 'm.read.private')
+          AND r.event_stream_ordering IS NOT NULL
           AND (r.thread_id IS NULL OR r.thread_id = event_push_summary.thread_id)
     ),
     notif_count = CASE
@@ -44,6 +46,7 @@ SET last_receipt_stream_ordering = (
             WHERE r.user_id      = event_push_summary.user_id
               AND r.room_id      = event_push_summary.room_id
               AND r.receipt_type IN ('m.read', 'm.read.private')
+              AND r.event_stream_ordering IS NOT NULL
               AND (r.thread_id IS NULL OR r.thread_id = event_push_summary.thread_id)
         ) THEN 0
         ELSE notif_count
@@ -55,6 +58,7 @@ SET last_receipt_stream_ordering = (
             WHERE r.user_id      = event_push_summary.user_id
               AND r.room_id      = event_push_summary.room_id
               AND r.receipt_type IN ('m.read', 'm.read.private')
+              AND r.event_stream_ordering IS NOT NULL
               AND (r.thread_id IS NULL OR r.thread_id = event_push_summary.thread_id)
         ) THEN 0
         ELSE unread_count
@@ -65,5 +69,6 @@ WHERE last_receipt_stream_ordering IS NULL
       WHERE r.user_id      = event_push_summary.user_id
         AND r.room_id      = event_push_summary.room_id
         AND r.receipt_type IN ('m.read', 'm.read.private')
+        AND r.event_stream_ordering IS NOT NULL
         AND (r.thread_id IS NULL OR r.thread_id = event_push_summary.thread_id)
   );

@@ -1527,23 +1527,25 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                     (user_id, room_id),
                 )
                 pending_thread_ids = [row[0] for row in txn]
-                for pending_thread_id in pending_thread_ids:
-                    self.db_pool.simple_upsert_txn(
-                        txn,
-                        table="event_push_summary",
-                        keyvalues={
-                            "user_id": user_id,
-                            "room_id": room_id,
-                            "thread_id": pending_thread_id,
-                        },
-                        values={},
-                        insertion_values={
-                            "notif_count": 0,
-                            "unread_count": 0,
-                            "stream_ordering": old_rotate_stream_ordering,
-                            "last_receipt_stream_ordering": stream_ordering,
-                        },
-                    )
+                self.db_pool.simple_upsert_many_txn(
+                    txn,
+                    table="event_push_summary",
+                    key_names=("user_id", "room_id", "thread_id"),
+                    key_values=[
+                        (user_id, room_id, pending_thread_id)
+                        for pending_thread_id in pending_thread_ids
+                    ],
+                    value_names=(
+                        "notif_count",
+                        "unread_count",
+                        "stream_ordering",
+                        "last_receipt_stream_ordering",
+                    ),
+                    value_values=[
+                        (0, 0, old_rotate_stream_ordering, stream_ordering)
+                        for _ in pending_thread_ids
+                    ],
+                )
 
             # For a threaded receipt, we *always* want to update that receipt,
             # event if there are no new notifications in that thread. This ensures
