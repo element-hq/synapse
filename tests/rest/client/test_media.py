@@ -3129,7 +3129,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         }
     )
     def test_returns_soft_user_limit_exceeded(self) -> None:
-        """Test that the MSC4335 error is returned with can_upgrade True when experimental feature is enabled."""
+        """Test that the M_USER_LIMIT_EXCEEDED error is returned with
+        can_upgrade True when specified in config."""
         channel = self.upload_media(500)
         self.assertEqual(channel.code, 200)
 
