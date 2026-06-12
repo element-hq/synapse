@@ -210,7 +210,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         should_delete_expr = "state_events.state_key IS NULL"
         should_delete_params: tuple[Any, ...] = ()
         if not delete_local_events:
-            should_delete_expr += " AND event_id NOT LIKE ?"
+            should_delete_expr += " AND sender NOT LIKE ?"
 
             # We include the parameter twice since we use the expression twice
             should_delete_params += ("%:" + self.hs.hostname, "%:" + self.hs.hostname)
