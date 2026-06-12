@@ -154,20 +154,28 @@ class DelayedEventsStore(SQLBaseStore):
                 keyvalues={"user_localpart": user_localpart},
                 retcol="COUNT(*)",
             )
-            next_send_ts: Timestamp | None
             if num_existing >= limit:
-                next_send_ts = self.db_pool.simple_select_one_onecol_txn(
-                    txn,
-                    table="delayed_events",
-                    keyvalues={
-                        "is_processed": False,
-                        "user_localpart": user_localpart,
-                    },
-                    retcol="MIN(send_ts)",
+                # Cover case of num_existing > limit, which can happen by reducing
+                # the configured limit after delayed events have already been added
+                # (or by calling this method with a limit lower than the configured one)
+                txn.execute(
+                    """
+                    SELECT MAX(send_ts) FROM (
+                        SELECT * FROM delayed_events
+                        WHERE user_localpart = ? AND NOT is_processed
+                        ORDER BY send_ts LIMIT ?
+                    )
+                    """,
+                    (
+                        user_localpart,
+                        num_existing - limit + 1,
+                    ),
                 )
+                row = txn.fetchone()
+                assert row
                 e = LimitExceededError(
                     limiter_name="add_delayed_event",
-                    retry_after_ms=next_send_ts - creation_ts,
+                    retry_after_ms=row[0] - creation_ts,
                 )
                 e.msg = "The maximum number of delayed events has been reached."
                 raise e
