@@ -552,7 +552,25 @@ class LoggingTransaction:
     def copy_write(
         self, sql: str, args: Iterable[Any], values: Iterable[Iterable[Any]]
     ) -> None:
-        """Corresponds to a PostgreSQL COPY (...) FROM STDIN call."""
+        """
+        Corresponds to a PostgreSQL COPY (...) FROM STDIN call using psycopg v3
+        attributes and helpers.
+
+        Note that COPY commands do not have an INSERT INTO or similar, merely the
+        tablename and the columns in the order of insertion. Assumes no return values.
+        Do not use for DELETE, UPSERTs or when needing a RETURNING value
+
+        Instead of
+            INSERT INTO table (user_id, email, locked) VALUES ("alice", "a@here.com", False)
+
+        it would be
+            COPY table (user_id, email, locked) FROM STDIN
+
+        The 'values' parameter input should not change, a Collection of Iterables.
+        Details on formatting are handled by psycopg.
+
+        The most performant way to insert data, especially at scale.
+        """
         assert isinstance(self.database_engine, PsycopgEngine)
 
         def f(
