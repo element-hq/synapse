@@ -617,3 +617,6 @@ class ExperimentalConfig(Config):
         # MSC4455: Preview URL capability
         # Tracked in: https://github.com/element-hq/synapse/issues/19719
         self.msc4452_enabled: bool = experimental.get("msc4452_enabled", False)
+
+        # MSC4491: Invite reasons in room creation
+        self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
