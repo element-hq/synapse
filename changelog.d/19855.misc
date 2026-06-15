@@ -1,1 +1,1 @@
-Fix lint failures in the in-repo Complement tests.
+Provide remote servers a way to find out about an event created during the remote join handshake. Contributed by @FrenchGithubUser and @jason-famedly @ Famedly.
