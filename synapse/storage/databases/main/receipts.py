@@ -961,7 +961,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
                 # The remaining check compares stream orderings, so skip
                 # receipts for older events, and remote receipts whose event we
-                # don't have (NULL ordering) since it's safe to clobber those.
+                # don't have (NULL ordering). It's safe to clobber events with
+                # NULL ordering as they are pointing at unknown events that we
+                # haven't seen (and are likely from before we joined the room).
                 if so is None or int(so) < stream_ordering:
                     continue
 
