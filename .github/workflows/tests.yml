@@ -60,9 +60,10 @@ jobs:
               - 'poetry.lock'
               - 'docker/**'
               - '.ci/**'
-              - 'scripts-dev/complement.sh'
               - '.github/workflows/tests.yml'
+              - 'scripts-dev/complement.sh'
               - '.github/workflows/complement_tests.yml'
+              - 'complement/**'
 
             linting:
               - 'synapse/**'
