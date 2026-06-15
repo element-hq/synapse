@@ -11,7 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -25,8 +24,6 @@ from ._base import client_patterns
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
-
-logger = logging.getLogger(__name__)
 
 
 class RetentionPolicyDict(TypedDict, total=False):
@@ -101,7 +98,7 @@ class RetentionConfigurationServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    # This is a defacto unstable feature, so only register the
+    # This is a de facto unstable feature, so only register the
     # endpoint if enabled.
     if hs.config.retention.retention_enabled:
         RetentionConfigurationServlet(hs).register(http_server)

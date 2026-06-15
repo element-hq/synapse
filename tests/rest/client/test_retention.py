@@ -410,7 +410,8 @@ class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.token = self.login(self.register_user("user", "password"), "password")
+        self.register_user("user", "password")
+        self.token = self.login("user", "password")
 
     def test_disabled_returns_404(self) -> None:
         """The endpoint must 404 when retention is not enabled."""
