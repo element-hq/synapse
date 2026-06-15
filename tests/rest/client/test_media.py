@@ -48,6 +48,7 @@ from twisted.web.resource import Resource
 from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config._base import Config
+from synapse.config.homeserver import HomeServerConfig
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
@@ -3106,7 +3107,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         channel = self.upload_media(1300)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
-        self.assertEqual(channel.json_body["info_uri"], "https://example.com")
+        self.assertEqual(channel.json_body["info_uri"], "https://example.com/")
         # the spec says that can_upgrade should not be included if it is False
         self.assertIsNone(channel.json_body.get("can_upgrade"))
 
@@ -3131,8 +3132,29 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         channel = self.upload_media(800)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
-        self.assertEqual(channel.json_body["info_uri"], "https://example.com")
+        self.assertEqual(channel.json_body["info_uri"], "https://example.com/")
         self.assertEqual(channel.json_body["can_upgrade"], True)
+
+    def test_allows_extra_fields_in_config(self) -> None:
+        """Config parsing used to be more lax, this test ensures that extra
+        fields in the config don't break parsing."""
+        config_dict = self.default_config()
+
+        HomeServerConfig().parse_config_dict(
+            {
+                "media_upload_limits": [
+                    {
+                        "time_period": "1d",
+                        "max_size": "1K",
+                        "extra_field": "test",
+                        "extra_config": {"dynamic_thumbnails": True},
+                    }
+                ],
+                **config_dict,
+            },
+            "",
+            "",
+        )
 
 
 class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):

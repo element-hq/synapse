@@ -23,10 +23,9 @@
 import logging
 import os
 from typing import Annotated, Any
-from urllib.parse import urlparse
 
 import attr
-from pydantic import AfterValidator, BeforeValidator, ValidationError
+from pydantic import AnyUrl, BeforeValidator, ValidationError
 
 from synapse.config.server import generate_ip_set, parse_proxy_config
 from synapse.types import JsonDict
@@ -150,18 +149,13 @@ class MediaUploadLimit:
     """Whether the user can upgrade their plan to increase the limit. This is returned in the M_USER_LIMIT_EXCEEDED error."""
 
 
-def _validate_info_uri(value: str | None) -> str | None:
-    if value and not urlparse(value).scheme:
-        raise ValueError(f"info_uri must be a valid URI with a scheme, got: {value!r}")
-    return value
-
-
 class MediaUploadLimitConfigModel(ParseModel):
     """Internal model for parsing a single media_upload_limits config entry."""
 
     max_size: Annotated[int, BeforeValidator(Config.parse_size)]
     time_period: Annotated[int, BeforeValidator(Config.parse_duration)]
-    info_uri: Annotated[str | None, AfterValidator(_validate_info_uri)] = None
+    info_uri: AnyUrl | None = None
+    """We accept AnyUrl as a subset of valid URIs. It could be widened in future if needed."""
     can_upgrade: bool = False
 
 
@@ -362,18 +356,19 @@ class ContentRepositoryConfig(Config):
         self.media_upload_limits: list[MediaUploadLimit] = []
         for raw_entry in config.get("media_upload_limits", []):
             try:
-                entry = MediaUploadLimitConfigModel(**raw_entry)
+                entry = MediaUploadLimitConfigModel.model_validate(raw_entry)
             except ValidationError as e:
                 raise ConfigError(
                     "Could not validate media_upload_limits entry",
                     ("media_upload_limits",),
                 ) from e
 
+            info_uri = str(entry.info_uri) if entry.info_uri is not None else None
             self.media_upload_limits.append(
                 MediaUploadLimit(
                     max_bytes=entry.max_size,
                     time_period_ms=entry.time_period,
-                    info_uri=entry.info_uri,
+                    info_uri=info_uri,
                     can_upgrade=entry.can_upgrade,
                 )
             )
