@@ -114,6 +114,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+EVENT_PUSH_SUMMARY_LAST_RECEIPT_STREAM_ORDERING_BACKFILL = (
+    "event_push_summary_last_receipt_stream_ordering_backfill"
+)
+
 DEFAULT_NOTIF_ACTION: list[dict | str] = [
     "notify",
     {"set_tweak": "highlight", "value": False},
@@ -312,6 +316,10 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             "event_push_drop_null_thread_id_indexes",
             self._background_drop_null_thread_id_indexes,
         )
+        self.db_pool.updates.register_background_update_handler(
+            EVENT_PUSH_SUMMARY_LAST_RECEIPT_STREAM_ORDERING_BACKFILL,
+            self._background_backfill_event_push_summary_last_receipt_stream_ordering,
+        )
 
         # Add a room ID index to speed up room deletion
         self.db_pool.updates.register_background_index_update(
@@ -346,6 +354,123 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             "event_push_drop_null_thread_id_indexes"
         )
         return 0
+
+    async def _background_backfill_event_push_summary_last_receipt_stream_ordering(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """Backfill stale event_push_summary receipt positions in small batches.
+
+        Rows with `last_receipt_stream_ordering` NULL can be either genuinely
+        legacy rows or rows hit by the receipt/rotation race fixed in #19785.
+        If there is no relevant receipt we leave the row as-is and advance past
+        it; future receipts are handled by the normal receipt rotation path.
+        """
+
+        last_user_id = progress.get("last_user_id", "")
+        last_room_id = progress.get("last_room_id", "")
+        last_thread_id = progress.get("last_thread_id", "")
+
+        def backfill_txn(txn: LoggingTransaction) -> int:
+            txn.execute(
+                """
+                SELECT user_id, room_id, thread_id
+                FROM event_push_summary
+                WHERE last_receipt_stream_ordering IS NULL
+                    AND (
+                        user_id > ?
+                        OR (user_id = ? AND room_id > ?)
+                        OR (user_id = ? AND room_id = ? AND thread_id > ?)
+                    )
+                ORDER BY user_id, room_id, thread_id
+                LIMIT ?
+                """,
+                (
+                    last_user_id,
+                    last_user_id,
+                    last_room_id,
+                    last_user_id,
+                    last_room_id,
+                    last_thread_id,
+                    batch_size,
+                ),
+            )
+            rows = cast(list[tuple[str, str, str]], txn.fetchall())
+
+            for user_id, room_id, thread_id in rows:
+                txn.execute(
+                    """
+                    SELECT MAX(event_stream_ordering)
+                    FROM receipts_linearized
+                    WHERE user_id = ?
+                        AND room_id = ?
+                        AND receipt_type IN (?, ?)
+                        AND event_stream_ordering IS NOT NULL
+                        AND (thread_id IS NULL OR thread_id = ?)
+                    """,
+                    (
+                        user_id,
+                        room_id,
+                        ReceiptTypes.READ,
+                        ReceiptTypes.READ_PRIVATE,
+                        thread_id,
+                    ),
+                )
+                row = txn.fetchone()
+                if row is None or row[0] is None:
+                    continue
+
+                receipt_stream_ordering = row[0]
+                txn.execute(
+                    """
+                    UPDATE event_push_summary
+                    SET last_receipt_stream_ordering = ?,
+                        notif_count = CASE
+                            WHEN stream_ordering <= ? THEN 0
+                            ELSE notif_count
+                        END,
+                        unread_count = CASE
+                            WHEN stream_ordering <= ? THEN 0
+                            ELSE unread_count
+                        END
+                    WHERE user_id = ?
+                        AND room_id = ?
+                        AND thread_id = ?
+                        AND last_receipt_stream_ordering IS NULL
+                    """,
+                    (
+                        receipt_stream_ordering,
+                        receipt_stream_ordering,
+                        receipt_stream_ordering,
+                        user_id,
+                        room_id,
+                        thread_id,
+                    ),
+                )
+
+            if rows:
+                self.db_pool.updates._background_update_progress_txn(
+                    txn,
+                    EVENT_PUSH_SUMMARY_LAST_RECEIPT_STREAM_ORDERING_BACKFILL,
+                    {
+                        "last_user_id": rows[-1][0],
+                        "last_room_id": rows[-1][1],
+                        "last_thread_id": rows[-1][2],
+                    },
+                )
+
+            return len(rows)
+
+        rows_processed = await self.db_pool.runInteraction(
+            "_background_backfill_event_push_summary_last_receipt_stream_ordering",
+            backfill_txn,
+        )
+
+        if rows_processed < batch_size:
+            await self.db_pool.updates._end_background_update(
+                EVENT_PUSH_SUMMARY_LAST_RECEIPT_STREAM_ORDERING_BACKFILL
+            )
+
+        return rows_processed
 
     async def get_unread_counts_by_room_for_user(self, user_id: str) -> dict[str, int]:
         """Get the notification count by room for a user. Only considers notifications,
