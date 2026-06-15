@@ -114,7 +114,8 @@ func TestEventBetweenMakeJoinAndSendJoinIsNotLost(t *testing.T) {
 			// Respond with an empty PDU error map, which is the federation /send
 			// success response format: each key would be a PDU ID whose processing
 			// failed; an empty object means all PDUs were accepted.
-			w.Write([]byte(`{"pdus":{}}`))
+			_, err = w.Write([]byte(`{"pdus":{}}`))
+			must.NotError(t, "failed to write response body in /send handler: %v", err)
 		})).
 		Methods("PUT")
 
