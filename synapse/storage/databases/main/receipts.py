@@ -907,14 +907,14 @@ class ReceiptsWorkerStore(SQLBaseStore):
         stream_ordering = int(res[0]) if res else None
         rx_ts = res[1] if res else 0
 
-        # We don't want to clobber receipts for more recent events, so we
-        # have to compare orderings of existing receipts.
+        # We don't want to clobber receipts for more recent events, so we have
+        # to compare orderings of existing receipts.
         #
-        # We fetch the user's existing receipts for this room/type in a single
-        # query: every receipt whose event ordering we know (for the
-        # same-thread comparison below), plus the unthreaded receipt for *this*
-        # event even if we don't know its ordering (for the MSC4102 check
-        # below).
+        # We fetch the user's existing receipts for this room and receipt type
+        # (including both threaded and unthreaded receipts) in a single query:
+        # every receipt whose event ordering we know (for the same-thread
+        # comparison below), plus the unthreaded receipt for *this* event even
+        # if we don't know its ordering (for the MSC4102 check below).
         if stream_ordering is not None:
             sql = """
             SELECT r.event_stream_ordering, r.event_id, r.thread_id
