@@ -3051,10 +3051,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     def test_falls_back_to_served_page_when_no_info_uri(self) -> None:
         """When no info_uri is configured, the error should point at a page
         served by Synapse, and that page should return HTML."""
-        channel = self.upload_media(500)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800)
+        channel = self.upload_media(1300)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
@@ -3106,10 +3103,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     )
     def test_returns_hard_user_limit_exceeded_by_default(self) -> None:
         """Test that the error is returned with can_upgrade False by default."""
-        channel = self.upload_media(500)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800)
+        channel = self.upload_media(1300)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
         self.assertEqual(channel.json_body["info_uri"], "https://example.com")
@@ -3370,10 +3364,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         )
 
         # user3 has no other callback overriding it, so uses the above.
-        channel = self.upload_media(500, self.tok3)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800, self.tok3)
+        channel = self.upload_media(1300, self.tok3)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 

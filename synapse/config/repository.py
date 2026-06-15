@@ -144,8 +144,7 @@ class MediaUploadLimit:
     If left unset (`None`), Synapse falls back to a static page served by itself
     (see `MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH`), which explains that the limit has been
     exceeded and can be customized by server administrators via a custom
-    template. The fallback URI is resolved when the error is generated, not when
-    the limit is constructed."""
+    template."""
 
     can_upgrade: bool = False
     """Whether the user can upgrade their plan to increase the limit. This is returned in the M_USER_LIMIT_EXCEEDED error."""
@@ -184,11 +183,10 @@ class ContentRepositoryConfig(Config):
             + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
         )
 
-        # Load the template used to render the fallback page. This lets server
-        # administrators customize the page via a custom template directory.
-        # This is set up even on processes which don't run the media repo: in a
-        # split-worker deployment the fallback page is served by whichever
-        # process handles `/_synapse/client`, so every process must be able to
+        # Load the template used to render the fallback page.
+        #
+        # We set this up on all workers (not just the media repo) as the fallback page is served by whichever
+        # process handles `/_synapse/client/media_upload_limit_exceeded`, so every process must be able to
         # render it.
         self.media_upload_limit_exceeded_template = self.read_templates(
             ["media_upload_limit_exceeded.html"],

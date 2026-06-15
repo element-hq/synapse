@@ -61,8 +61,8 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
         "/_synapse/client/unsubscribe": UnsubscribeResource(hs),
         # Fallback page served as the `info_uri` for media upload limits that
         # don't have an explicit `info_uri`. Mounted unconditionally: in a
-        # split-worker deployment the media repo (which generates the errors)
-        # typically runs on a different process to the one serving
+        # worker deployment, the media repo (which generates the errors)
+        # typically runs on a different worker than the one serving
         # `/_synapse/client`.
         MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH: MediaUploadLimitExceededResource(hs),
     }
