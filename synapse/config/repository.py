@@ -356,7 +356,9 @@ class ContentRepositoryConfig(Config):
         self.media_upload_limits: list[MediaUploadLimit] = []
         for raw_entry in config.get("media_upload_limits", []):
             try:
-                entry = MediaUploadLimitConfigModel.model_validate(raw_entry)
+                entry = MediaUploadLimitConfigModel.model_validate(
+                    raw_entry, strict=True
+                )
             except ValidationError as e:
                 raise ConfigError(
                     "Could not validate media_upload_limits entry",
