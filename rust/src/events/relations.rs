@@ -29,17 +29,14 @@ use crate::events::{json_object::JsonObject, Event};
 
 /// A thread's bundled summary: its latest event, the number of events in the
 /// thread, and whether the requesting user has participated.
-#[pyclass(frozen, name = "ThreadAggregation", skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object, get_all)]
 #[derive(Clone)]
 pub struct ThreadAggregation {
     /// The latest event in the thread.
-    #[pyo3(get)]
     pub latest_event: Event,
     /// The total number of events in the thread.
-    #[pyo3(get)]
     pub count: i64,
     /// Whether the requesting user has sent an event to the thread.
-    #[pyo3(get)]
     pub current_user_participated: bool,
 }
 
@@ -59,17 +56,14 @@ impl ThreadAggregation {
 ///
 /// Some values require additional processing during serialization (the edit
 /// and the thread's latest event are themselves serialized).
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object, get_all)]
 #[derive(Clone)]
 pub struct BundledAggregations {
     /// The `m.reference` aggregation (e.g. `{"chunk": [{"event_id": ...}]}`).
-    #[pyo3(get)]
     pub references: Option<JsonObject>,
     /// The edit (`m.replace`) event that applies to this event.
-    #[pyo3(get)]
     pub replace: Option<Event>,
     /// The thread (`m.thread`) summary for this event.
-    #[pyo3(get)]
     pub thread: Option<ThreadAggregation>,
 }
 
