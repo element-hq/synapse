@@ -2,6 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -25,7 +26,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import EventTypes
 from synapse.events.utils import FilteredEvent
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import login, retention, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
@@ -394,3 +395,88 @@ class RetentionNoDefaultPolicyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, expected_code, channel.result)
 
         return channel.json_body
+
+
+RETENTION_CONFIGURATION_URL = (
+    "/_matrix/client/unstable/org.matrix.msc1763/retention/configuration"
+)
+
+
+class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        retention.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.token = self.login(self.register_user("user", "password"), "password")
+
+    def test_disabled_returns_404(self) -> None:
+        """The endpoint must 404 when retention is not enabled."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 404, channel.result)
+
+    @override_config(
+        {
+            "retention": {
+                "enabled": True,
+                "default_policy": {
+                    "min_lifetime": one_day_ms,
+                    "max_lifetime": one_day_ms * 3,
+                },
+                "allowed_lifetime_min": one_day_ms,
+                "allowed_lifetime_max": one_day_ms * 3,
+            }
+        }
+    )
+    def test_full_config(self) -> None:
+        """Returns default policy and max_lifetime limits when fully configured."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        body = channel.json_body
+        self.assertEqual(
+            body["policies"]["*"],
+            {"min_lifetime": one_day_ms, "max_lifetime": one_day_ms * 3},
+        )
+        self.assertEqual(
+            body["limits"]["max_lifetime"],
+            {"min": one_day_ms, "max": one_day_ms * 3},
+        )
+
+    @override_config({"retention": {"enabled": True}})
+    def test_no_default_policy_no_limits(self) -> None:
+        """Returns empty policies and limits when nothing is configured."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        body = channel.json_body
+        self.assertEqual(body["policies"], {})
+        self.assertEqual(body["limits"], {})
+
+    @override_config(
+        {
+            "retention": {
+                "enabled": True,
+                "allowed_lifetime_min": one_day_ms,
+                "allowed_lifetime_max": one_day_ms * 7,
+            }
+        }
+    )
+    def test_limits_only(self) -> None:
+        """Returns limits but no default policy entry when only limits are set."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        body = channel.json_body
+        self.assertNotIn("*", body["policies"])
+        self.assertEqual(
+            body["limits"]["max_lifetime"],
+            {"min": one_day_ms, "max": one_day_ms * 7},
+        )
