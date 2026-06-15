@@ -20,7 +20,6 @@
 #
 #
 import collections.abc
-import re
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -28,7 +27,6 @@ from typing import (
     Callable,
     Collection,
     Mapping,
-    Match,
     MutableMapping,
 )
 
@@ -40,25 +38,28 @@ from synapse.api.constants import (
     CANONICALJSON_MIN_INT,
     MAX_PDU_SIZE,
     EventTypes,
-    EventUnsignedContentFields,
-    RelationTypes,
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.logging.opentracing import SynapseTags, set_tag, trace
-from synapse.synapse_rust.events import Unsigned, redact_event
-from synapse.types import JsonDict, Requester
+from synapse.synapse_rust.events import (
+    EventFormat,
+    SerializeEventConfig,
+    Unsigned,
+    redact_event,
+    serialize_events,
+)
+from synapse.types import JsonDict
 
 from . import EventBase, StrippedStateEvent
+
+# These are imported only to re-export them (callers import them from this
+# module); listing them in __all__ stops the unused-import lint flagging them
+# and re-exports them for `import *`.
+__all__ = ["EventFormat", "SerializeEventConfig"]
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
     from synapse.server import HomeServer
-
-
-# Split strings on "." but not "\." (or "\\\.").
-SPLIT_FIELD_REGEX = re.compile(r"\\*\.")
-# Find escaped characters, e.g. those with a \ in front of them.
-ESCAPE_SEQUENCE_PATTERN = re.compile(r"\\(.)")
 
 
 # Module API callback that allows adding fields to the unsigned section of
@@ -88,177 +89,6 @@ def clone_event(event: EventBase) -> EventBase:
     """
 
     return event.deep_copy()
-
-
-def _copy_field(src: JsonDict, dst: JsonDict, field: list[str]) -> None:
-    """Copy the field in 'src' to 'dst'.
-
-    For example, if src={"foo":{"bar":5}} and dst={}, and field=["foo","bar"]
-    then dst={"foo":{"bar":5}}.
-
-    Args:
-        src: The dict to read from.
-        dst: The dict to modify.
-        field: List of keys to drill down to in 'src'.
-    """
-    if len(field) == 0:  # this should be impossible
-        return
-    if len(field) == 1:  # common case e.g. 'origin_server_ts'
-        if field[0] in src:
-            dst[field[0]] = src[field[0]]
-        return
-
-    # Else is a nested field e.g. 'content.body'
-    # Pop the last field as that's the key to move across and we need the
-    # parent dict in order to access the data. Drill down to the right dict.
-    key_to_move = field.pop(-1)
-    sub_dict = src
-    for sub_field in field:  # e.g. sub_field => "content"
-        if sub_field in sub_dict and isinstance(
-            sub_dict[sub_field], collections.abc.Mapping
-        ):
-            sub_dict = sub_dict[sub_field]
-        else:
-            return
-
-    if key_to_move not in sub_dict:
-        return
-
-    # Insert the key into the output dictionary, creating nested objects
-    # as required. We couldn't do this any earlier or else we'd need to delete
-    # the empty objects if the key didn't exist.
-    sub_out_dict = dst
-    for sub_field in field:
-        sub_out_dict = sub_out_dict.setdefault(sub_field, {})
-    sub_out_dict[key_to_move] = sub_dict[key_to_move]
-
-
-def _escape_slash(m: Match[str]) -> str:
-    """
-    Replacement function; replace a backslash-backslash or backslash-dot with the
-    second character. Leaves any other string alone.
-    """
-    if m.group(1) in ("\\", "."):
-        return m.group(1)
-    return m.group(0)
-
-
-def _split_field(field: str) -> list[str]:
-    """
-    Splits strings on unescaped dots and removes escaping.
-
-    Args:
-        field: A string representing a path to a field.
-
-    Returns:
-        A list of nested fields to traverse.
-    """
-
-    # Convert the field and remove escaping:
-    #
-    # 1. "content.body.thing\.with\.dots"
-    # 2. ["content", "body", "thing\.with\.dots"]
-    # 3. ["content", "body", "thing.with.dots"]
-
-    # Find all dots (and their preceding backslashes). If the dot is unescaped
-    # then emit a new field part.
-    result = []
-    prev_start = 0
-    for match in SPLIT_FIELD_REGEX.finditer(field):
-        # If the match is an *even* number of characters than the dot was escaped.
-        if len(match.group()) % 2 == 0:
-            continue
-
-        # Add a new part (up to the dot, exclusive) after escaping.
-        result.append(
-            ESCAPE_SEQUENCE_PATTERN.sub(
-                _escape_slash, field[prev_start : match.end() - 1]
-            )
-        )
-        prev_start = match.end()
-
-    # Add any part of the field after the last unescaped dot. (Note that if the
-    # character is a dot this correctly adds a blank string.)
-    result.append(re.sub(r"\\(.)", _escape_slash, field[prev_start:]))
-
-    return result
-
-
-def only_fields(dictionary: JsonDict, fields: list[str]) -> JsonDict:
-    """Return a new dict with only the fields in 'dictionary' which are present
-    in 'fields'.
-
-    If there are no event fields specified then all fields are included.
-    The entries may include '.' characters to indicate sub-fields.
-    So ['content.body'] will include the 'body' field of the 'content' object.
-    A literal '.' or '\' character in a field name may be escaped using a '\'.
-
-    Args:
-        dictionary: The dictionary to read from.
-        fields: A list of fields to copy over. Only shallow refs are
-        taken.
-    Returns:
-        A new dictionary with only the given fields. If fields was empty,
-        the same dictionary is returned.
-    """
-    if len(fields) == 0:
-        return dictionary
-
-    # for each field, convert it:
-    # ["content.body.thing\.with\.dots"] => [["content", "body", "thing\.with\.dots"]]
-    split_fields = [_split_field(f) for f in fields]
-
-    output: JsonDict = {}
-    for field_array in split_fields:
-        _copy_field(dictionary, output, field_array)
-    return output
-
-
-def format_event_raw(d: JsonDict) -> JsonDict:
-    return d
-
-
-def format_event_for_client_v1(d: JsonDict) -> JsonDict:
-    d = format_event_for_client_v2(d)
-
-    sender = d.get("sender")
-    if sender is not None:
-        d["user_id"] = sender
-
-    copy_keys = (
-        "age",
-        "redacted_because",
-        "replaces_state",
-        "prev_content",
-        "invite_room_state",
-        "knock_room_state",
-    )
-    for key in copy_keys:
-        if key in d["unsigned"]:
-            d[key] = d["unsigned"][key]
-
-    return d
-
-
-def format_event_for_client_v2(d: JsonDict) -> JsonDict:
-    drop_keys = (
-        "auth_events",
-        "prev_events",
-        "hashes",
-        "signatures",
-        "depth",
-        "origin",
-        "prev_state",
-    )
-    for key in drop_keys:
-        d.pop(key, None)
-    return d
-
-
-def format_event_for_client_v2_without_room_id(d: JsonDict) -> JsonDict:
-    d = format_event_for_client_v2(d)
-    d.pop("room_id", None)
-    return d
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -305,178 +135,13 @@ class FilteredEvent:
         return cls(event=event, membership=None)
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class SerializeEventConfig:
-    as_client_event: bool = True
-    # Function to convert from federation format to client format
-    event_format: Callable[[JsonDict], JsonDict] = format_event_for_client_v1
-    # The entity that requested the event. This is used to determine whether to include
-    # the transaction_id and delay_id in the unsigned section of the event.
-    requester: Requester | None = None
-    # List of event fields to include. If empty, all fields will be returned.
-    only_event_fields: list[str] | None = attr.ib(default=None)
-    # Some events can have stripped room state stored in the `unsigned` field.
-    # This is required for invite and knock functionality. If this option is
-    # False, that state will be removed from the event before it is returned.
-    # Otherwise, it will be kept.
-    include_stripped_room_state: bool = False
-    # When True, sets unsigned fields to help clients identify events which
-    # only server admins can see through other configuration. For example,
-    # whether an event was soft failed by the server.
-    include_admin_metadata: bool = False
-    # Whether MSC4354 (sticky events) is enabled. When True, the sticky TTL
-    # will be computed and included in the unsigned section of sticky events.
-    msc4354_enabled: bool = False
-
-    @only_event_fields.validator
-    def _validate_only_event_fields(
-        self, attribute: attr.Attribute, value: Any
-    ) -> None:
-        if value is None:
-            return
-
-        if not isinstance(value, list) or not all(isinstance(f, str) for f in value):
-            raise TypeError("only_event_fields must be a list of strings")
-
-
 _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
 
 
 def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfig:
-    # Set the options which are only available to server admins,
-    # and copy the rest.
-    return attr.evolve(existing, include_admin_metadata=True)
-
-
-def _serialize_event(
-    e: JsonDict | EventBase,
-    time_now_ms: int,
-    *,
-    config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
-    membership: str | None = None,
-) -> JsonDict:
-    """Serialize event for clients
-
-    Args:
-        e
-        time_now_ms
-        config: Event serialization config
-        membership: The requesting user's membership at the time of the event,
-            to be injected into unsigned.membership (MSC4115).
-
-    Returns:
-        The serialized event dictionary.
-    """
-
-    # FIXME(erikj): To handle the case of presence events and the like
-    if not isinstance(e, EventBase):
-        return e
-
-    time_now_ms = int(time_now_ms)
-
-    # Should this strip out None's?
-    d = dict(e.get_dict().items())
-
-    d["event_id"] = e.event_id
-
-    if "age_ts" in d["unsigned"]:
-        d["unsigned"]["age"] = time_now_ms - d["unsigned"]["age_ts"]
-        del d["unsigned"]["age_ts"]
-
-    # If we have applicable fields saved in the internal_metadata, include them in the
-    # unsigned section of the event if the event was sent by the same session (or when
-    # appropriate, just the same sender) as the one requesting the event.
-    if config.requester is not None and config.requester.user.to_string() == e.sender:
-        txn_id: str | None = getattr(e.internal_metadata, "txn_id", None)
-        if txn_id is not None:
-            # Some events do not have the device ID stored in the internal metadata,
-            # this includes old events as well as those created by appservice, guests,
-            # or with tokens minted with the admin API. For those events, fallback
-            # to using the access token instead.
-            event_device_id: str | None = getattr(
-                e.internal_metadata, "device_id", None
-            )
-            if event_device_id is not None:
-                if event_device_id == config.requester.device_id:
-                    d["unsigned"]["transaction_id"] = txn_id
-
-            else:
-                # Fallback behaviour: only include the transaction ID if the event
-                # was sent from the same access token.
-                #
-                # For regular users, the access token ID can be used to determine this.
-                # This includes access tokens minted with the admin API.
-                #
-                # For guests and appservice users, we can't check the access token ID
-                # so assume it is the same session.
-                event_token_id: int | None = getattr(
-                    e.internal_metadata, "token_id", None
-                )
-                if (
-                    (
-                        event_token_id is not None
-                        and config.requester.access_token_id is not None
-                        and event_token_id == config.requester.access_token_id
-                    )
-                    or config.requester.is_guest
-                    or config.requester.app_service_id
-                ):
-                    d["unsigned"]["transaction_id"] = txn_id
-
-        delay_id: str | None = getattr(e.internal_metadata, "delay_id", None)
-        if delay_id is not None:
-            d["unsigned"]["org.matrix.msc4140.delay_id"] = delay_id
-
-    # invite_room_state and knock_room_state are a list of stripped room state events
-    # that are meant to provide metadata about a room to an invitee/knocker. They are
-    # intended to only be included in specific circumstances, such as down sync, and
-    # should not be included in any other case.
-    if not config.include_stripped_room_state:
-        d["unsigned"].pop("invite_room_state", None)
-        d["unsigned"].pop("knock_room_state", None)
-
-    if config.as_client_event:
-        d = config.event_format(d)
-
-    # Ensure the room_id field is set for create events in MSC4291 rooms
-    if e.type == EventTypes.Create and e.room_version.msc4291_room_ids_as_hashes:
-        d["room_id"] = e.room_id
-
-    # If the event is a redaction, the field with the redacted event ID appears
-    # in a different location depending on the room version. e.redacts handles
-    # fetching from the proper location; copy it to the other location for forwards-
-    # and backwards-compatibility with clients.
-    if e.type == EventTypes.Redaction and e.redacts is not None:
-        if e.room_version.updated_redaction_rules:
-            d["redacts"] = e.redacts
-        else:
-            d["content"] = dict(d["content"])
-            d["content"]["redacts"] = e.redacts
-
-    if config.include_admin_metadata:
-        if e.internal_metadata.is_soft_failed():
-            d["unsigned"]["io.element.synapse.soft_failed"] = True
-        if e.internal_metadata.policy_server_spammy:
-            d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
-
-    if config.msc4354_enabled:
-        sticky_duration = e.sticky_duration()
-        if sticky_duration:
-            expires_at = (
-                # min() ensures that the origin server can't lie about the time and
-                # send the event 'in the future', as that would allow them to exceed
-                # the 1 hour limit on stickiness duration.
-                min(e.origin_server_ts, time_now_ms) + sticky_duration.as_millis()
-            )
-            if expires_at > time_now_ms:
-                d["unsigned"][EventUnsignedContentFields.STICKY_TTL] = (
-                    expires_at - time_now_ms
-                )
-
-    if membership is not None:
-        d["unsigned"][EventUnsignedContentFields.MEMBERSHIP] = membership
-
-    return d
+    # Thin wrapper kept for callers; see SerializeEventConfig.for_admin for the
+    # admin-only options it sets.
+    return existing.for_admin()
 
 
 class EventClientSerializer:
@@ -530,14 +195,14 @@ class EventClientSerializer:
             [event], bundle_aggregations, redaction_map
         )
 
-        return self._serialize_event_core(
-            event,
+        return serialize_events(
+            [(event.event, event.membership)],
             time_now,
             config,
-            bundle_aggregations,
-            redaction_map,
-            unsigned_additions,
-        )
+            bundle_aggregations=bundle_aggregations,
+            redaction_map=redaction_map,
+            unsigned_additions=unsigned_additions,
+        )[0]
 
     async def _update_config(
         self, config: SerializeEventConfig
@@ -557,7 +222,7 @@ class EventClientSerializer:
             config = make_config_for_admin(config)
 
         if self._config.experimental.msc4354_enabled:
-            config = attr.evolve(config, msc4354_enabled=True)
+            config = config.with_msc4354(True)
 
         return config
 
@@ -642,171 +307,6 @@ class EventClientSerializer:
 
         return fetched_redaction_map, unsigned_additions
 
-    def _serialize_event_core(
-        self,
-        event: FilteredEvent,
-        time_now: int,
-        config: SerializeEventConfig,
-        bundle_aggregations: dict[str, "BundledAggregations"] | None,
-        redaction_map: Mapping[str, "EventBase"],
-        unsigned_additions: Mapping[str, JsonDict],
-    ) -> JsonDict:
-        """Synchronously serialize a single event using pre-fetched data.
-
-        All DB/IO must have already been performed by `_prepare_serialization`;
-        this function performs no async work.
-
-        Args:
-            event: The event being serialized.
-            time_now: The current time in milliseconds.
-            config: The resolved serialization config.
-            bundle_aggregations: A map from event_id to the aggregations to be
-                bundled into the event.
-            redaction_map: Pre-fetched map from redaction event_id to event.
-            unsigned_additions: Pre-computed map from event_id to the extra
-                `unsigned` fields contributed by module callbacks.
-
-        Returns:
-            The serialized event
-        """
-        serialized_event = _serialize_event(
-            event.event, time_now, config=config, membership=event.membership
-        )
-
-        # If the event was redacted, include the (pre-fetched) redaction event
-        # in the serialized event's unsigned section.
-        redacted_by: str | None = event.event.internal_metadata.redacted_by
-        if redacted_by is not None:
-            serialized_event.setdefault("unsigned", {})["redacted_by"] = redacted_by
-            redaction_event: EventBase | None = redaction_map.get(redacted_by)
-            if redaction_event is not None:
-                serialized_redaction = _serialize_event(
-                    redaction_event, time_now, config=config
-                )
-                serialized_event.setdefault("unsigned", {})["redacted_because"] = (
-                    serialized_redaction
-                )
-                # format_event_for_client_v1 copies redacted_because to the
-                # top level, but since we add it after that runs, do it here.
-                if (
-                    config.as_client_event
-                    and config.event_format is format_event_for_client_v1
-                ):
-                    serialized_event["redacted_because"] = serialized_redaction
-
-        additions = unsigned_additions.get(event.event.event_id)
-        if additions:
-            # Copy so we don't mutate the shared `unsigned_additions` entry (the
-            # same event may be serialized more than once), and do the `update`
-            # this way round so that modules can't clobber existing fields.
-            new_unsigned = dict(additions)
-            new_unsigned.update(serialized_event["unsigned"])
-            serialized_event["unsigned"] = new_unsigned
-
-        # Only include fields that the client has requested.
-        #
-        # Note: we always return bundled aggregations, though it is unclear why.
-        only_event_fields = config.only_event_fields
-        if only_event_fields:
-            serialized_event = only_fields(serialized_event, only_event_fields)
-
-        # Check if there are any bundled aggregations to include with the event.
-        if bundle_aggregations:
-            if event.event.event_id in bundle_aggregations:
-                self._inject_bundled_aggregations(
-                    event=event.event,
-                    time_now=time_now,
-                    config=config,
-                    bundled_aggregations=bundle_aggregations,
-                    serialized_event=serialized_event,
-                    redaction_map=redaction_map,
-                    unsigned_additions=unsigned_additions,
-                )
-
-        return serialized_event
-
-    def _inject_bundled_aggregations(
-        self,
-        event: EventBase,
-        time_now: int,
-        config: SerializeEventConfig,
-        bundled_aggregations: dict[str, "BundledAggregations"],
-        serialized_event: JsonDict,
-        redaction_map: Mapping[str, "EventBase"],
-        unsigned_additions: Mapping[str, JsonDict],
-    ) -> None:
-        """Potentially injects bundled aggregations into the unsigned portion of the serialized event.
-
-        Args:
-            event: The event being serialized.
-            time_now: The current time in milliseconds
-            config: Event serialization config
-            bundled_aggregations: Bundled aggregations to be injected.
-                A map from event_id to aggregation data. Must contain at least an
-                entry for `event`.
-
-                While serializing the bundled aggregations this map may be searched
-                again for additional events in a recursive manner.
-            serialized_event: The serialized event which may be modified.
-        """
-
-        # We have already checked that aggregations exist for this event.
-        event_aggregations = bundled_aggregations[event.event_id]
-
-        # The JSON dictionary to be added under the unsigned property of the event
-        # being serialized.
-        serialized_aggregations = {}
-
-        if event_aggregations.references:
-            serialized_aggregations[RelationTypes.REFERENCE] = (
-                event_aggregations.references
-            )
-
-        if event_aggregations.replace:
-            # Include information about it in the relations dict.
-            #
-            # Matrix spec v1.5 (https://spec.matrix.org/v1.5/client-server-api/#server-side-aggregation-of-mreplace-relationships)
-            # said that we should only include the `event_id`, `origin_server_ts` and
-            # `sender` of the edit; however MSC3925 proposes extending it to the whole
-            # of the edit, which is what we do here.
-            serialized_aggregations[RelationTypes.REPLACE] = self._serialize_event_core(
-                event=FilteredEvent(event=event_aggregations.replace, membership=None),
-                time_now=time_now,
-                config=config,
-                bundle_aggregations=None,
-                redaction_map=redaction_map,
-                unsigned_additions=unsigned_additions,
-            )
-
-        # Include any threaded replies to this event.
-        if event_aggregations.thread:
-            thread = event_aggregations.thread
-
-            serialized_latest_event = self._serialize_event_core(
-                event=FilteredEvent(event=thread.latest_event, membership=None),
-                time_now=time_now,
-                config=config,
-                bundle_aggregations=bundled_aggregations,
-                redaction_map=redaction_map,
-                unsigned_additions=unsigned_additions,
-            )
-
-            thread_summary = {
-                "latest_event": serialized_latest_event,
-                "count": thread.count,
-                "current_user_participated": thread.current_user_participated,
-            }
-            serialized_aggregations[RelationTypes.THREAD] = thread_summary
-
-        # Include the bundled aggregations in the event.
-        if serialized_aggregations:
-            # There is likely already an "unsigned" field, but a filter might
-            # have stripped it off (via the event_fields option). The server is
-            # allowed to return additional fields, so add it back.
-            serialized_event.setdefault("unsigned", {}).setdefault(
-                "m.relations", {}
-            ).update(serialized_aggregations)
-
     @trace
     async def serialize_events(
         self,
@@ -839,23 +339,26 @@ class EventClientSerializer:
         filtered_events = [e for e in events if isinstance(e, FilteredEvent)]
 
         # Perform all the async DB/IO work up front, then run the synchronous
-        # serialization core for each event.
+        # serialization core for the whole batch in one go.
         redaction_map, unsigned_additions = await self._prepare_serialization(
             filtered_events, bundle_aggregations
         )
 
-        return [
-            # To handle the case of presence events and the like
-            event
-            if not isinstance(event, FilteredEvent)
-            else self._serialize_event_core(
-                event,
+        serialized = iter(
+            serialize_events(
+                [(e.event, e.membership) for e in filtered_events],
                 time_now,
                 config,
-                bundle_aggregations,
-                redaction_map,
-                unsigned_additions,
+                bundle_aggregations=bundle_aggregations,
+                redaction_map=redaction_map,
+                unsigned_additions=unsigned_additions,
             )
+        )
+
+        # Stitch the serialized events back in, passing through anything that
+        # wasn't a FilteredEvent (e.g. presence events) unchanged.
+        return [
+            event if not isinstance(event, FilteredEvent) else next(serialized)
             for event in events
         ]
 

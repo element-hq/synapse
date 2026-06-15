@@ -22,19 +22,16 @@
 import unittest as stdlib_unittest
 from typing import TYPE_CHECKING, Any, Mapping
 
-from parameterized import parameterized
-
 from synapse.api.constants import EventContentFields
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.events.utils import (
+    EventFormat,
     FilteredEvent,
     PowerLevelsContent,
     SerializeEventConfig,
-    _split_field,
     clone_event,
     copy_and_fixup_power_levels_contents,
-    format_event_raw,
     make_config_for_admin,
     maybe_upsert_event_field,
     prune_event,
@@ -879,7 +876,7 @@ class SerializeEventTestCase(HomeserverTestCase):
         non_default_config = SerializeEventConfig(
             include_admin_metadata=False,  # should be True in a moment
             as_client_event=False,  # default True
-            event_format=format_event_raw,  # default format_event_for_client_v1
+            event_format=EventFormat.Raw,  # default EventFormat.ClientV1
             requester=create_requester("@example:example.org"),  # default None
             only_event_fields=["foo"],  # default None
             include_stripped_room_state=True,  # default False
@@ -1019,40 +1016,3 @@ class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
     def test_invalid_nesting_raises_type_error(self) -> None:
         with self.assertRaises(TypeError):
             copy_and_fixup_power_levels_contents({"a": {"b": {"c": 1}}})  # type: ignore[dict-item]
-
-
-class SplitFieldTestCase(stdlib_unittest.TestCase):
-    @parameterized.expand(
-        [
-            # A field with no dots.
-            ["m", ["m"]],
-            # Simple dotted fields.
-            ["m.foo", ["m", "foo"]],
-            ["m.foo.bar", ["m", "foo", "bar"]],
-            # Backslash is used as an escape character.
-            [r"m\.foo", ["m.foo"]],
-            [r"m\\.foo", ["m\\", "foo"]],
-            [r"m\\\.foo", [r"m\.foo"]],
-            [r"m\\\\.foo", ["m\\\\", "foo"]],
-            [r"m\foo", [r"m\foo"]],
-            [r"m\\foo", [r"m\foo"]],
-            [r"m\\\foo", [r"m\\foo"]],
-            [r"m\\\\foo", [r"m\\foo"]],
-            # Ensure that escapes at the end don't cause issues.
-            ["m.foo\\", ["m", "foo\\"]],
-            ["m.foo\\", ["m", "foo\\"]],
-            [r"m.foo\.", ["m", "foo."]],
-            [r"m.foo\\.", ["m", "foo\\", ""]],
-            [r"m.foo\\\.", ["m", r"foo\."]],
-            # Empty parts (corresponding to properties which are an empty string) are allowed.
-            [".m", ["", "m"]],
-            ["..m", ["", "", "m"]],
-            ["m.", ["m", ""]],
-            ["m..", ["m", "", ""]],
-            ["m..foo", ["m", "", "foo"]],
-            # Invalid escape sequences.
-            [r"\m", [r"\m"]],
-        ]
-    )
-    def test_split_field(self, input: str, expected: str) -> None:
-        self.assertEqual(_split_field(input), expected)

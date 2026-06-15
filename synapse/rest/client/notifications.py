@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING
 
 from synapse.api.constants import ReceiptTypes
 from synapse.events.utils import (
+    EventFormat,
     FilteredEvent,
     SerializeEventConfig,
-    format_event_for_client_v2_without_room_id,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
@@ -99,7 +99,7 @@ class NotificationsServlet(RestServlet):
         next_token = None
 
         serialize_options = SerializeEventConfig(
-            event_format=format_event_for_client_v2_without_room_id,
+            event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
         now = self.clock.time_msec()

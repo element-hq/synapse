@@ -88,6 +88,7 @@ pub mod formats;
 pub mod internal_metadata;
 pub mod json_object;
 pub mod relations;
+pub mod serialize;
 pub mod signatures;
 pub mod unsigned;
 pub mod utils;
@@ -110,9 +111,12 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<Event>()?;
     child_module.add_class::<relations::BundledAggregations>()?;
     child_module.add_class::<relations::ThreadAggregation>()?;
+    child_module.add_class::<serialize::EventFormat>()?;
+    child_module.add_class::<serialize::SerializeEventConfig>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;
+    child_module.add_function(wrap_pyfunction!(serialize::serialize_events, m)?)?;
 
     m.add_submodule(&child_module)?;
 

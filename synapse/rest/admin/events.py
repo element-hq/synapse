@@ -3,9 +3,9 @@ from typing import TYPE_CHECKING
 
 from synapse.api.errors import NotFoundError
 from synapse.events.utils import (
+    EventFormat,
     FilteredEvent,
     SerializeEventConfig,
-    format_event_raw,
 )
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -59,7 +59,7 @@ class EventRestServlet(RestServlet):
 
         config = SerializeEventConfig(
             as_client_event=False,
-            event_format=format_event_raw,
+            event_format=EventFormat.Raw,
             requester=requester,
             only_event_fields=None,
             include_stripped_room_state=True,

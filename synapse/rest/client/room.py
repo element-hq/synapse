@@ -53,9 +53,9 @@ from synapse.api.errors import (
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
     EventClientSerializer,
+    EventFormat,
     FilteredEvent,
     SerializeEventConfig,
-    format_event_for_client_v2,
 )
 from synapse.handlers.pagination import GetMessagesResult
 from synapse.http.server import HttpServer
@@ -290,7 +290,7 @@ class RoomStateEventRestServlet(RestServlet):
                 FilteredEvent.state(data),
                 self.clock.time_msec(),
                 config=SerializeEventConfig(
-                    event_format=format_event_for_client_v2,
+                    event_format=EventFormat.ClientV2,
                     requester=requester,
                 ),
             )

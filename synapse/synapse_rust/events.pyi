@@ -13,7 +13,7 @@
 from typing import Any, Iterator, Mapping
 
 from synapse.synapse_rust.room_versions import RoomVersion
-from synapse.types import JsonDict, JsonMapping, StrSequence
+from synapse.types import JsonDict, JsonMapping, Requester, StrSequence
 from synapse.util.duration import Duration
 
 class EventInternalMetadata:
@@ -349,6 +349,79 @@ class BundledAggregations:
     @property
     def thread(self) -> ThreadAggregation | None: ...
     def __bool__(self) -> bool: ...
+
+class EventFormat:
+    """The format used to convert an event to the shape sent to clients."""
+
+    Raw: EventFormat
+    ClientV1: EventFormat
+    ClientV2: EventFormat
+    ClientV2WithoutRoomId: EventFormat
+
+class SerializeEventConfig:
+    """Configuration for serializing an event for clients."""
+
+    def __init__(
+        self,
+        *,
+        as_client_event: bool = True,
+        event_format: EventFormat = ...,
+        requester: Requester | None = None,
+        only_event_fields: list[str] | None = None,
+        include_stripped_room_state: bool = False,
+        include_admin_metadata: bool = False,
+        msc4354_enabled: bool = False,
+    ) -> None: ...
+    @property
+    def as_client_event(self) -> bool: ...
+    @property
+    def event_format(self) -> EventFormat: ...
+    @property
+    def requester(self) -> Requester | None: ...
+    @property
+    def only_event_fields(self) -> list[str] | None: ...
+    @property
+    def include_stripped_room_state(self) -> bool: ...
+    @property
+    def include_admin_metadata(self) -> bool: ...
+    @property
+    def msc4354_enabled(self) -> bool: ...
+    def for_admin(self) -> SerializeEventConfig:
+        """Return a copy of this config with ``include_admin_metadata`` enabled."""
+
+    def with_msc4354(self, enabled: bool = True) -> SerializeEventConfig:
+        """Return a copy of this config with ``msc4354_enabled`` set as given."""
+
+def serialize_events(
+    events: list[tuple[Event, str | None]],
+    time_now_ms: int,
+    config: SerializeEventConfig,
+    *,
+    bundle_aggregations: Mapping[str, BundledAggregations] | None = None,
+    redaction_map: Mapping[str, Event] | None = None,
+    unsigned_additions: Mapping[str, JsonDict] | None = None,
+) -> list[JsonDict]:
+    """Synchronously serialize a batch of events for clients using pre-fetched data.
+
+    All DB/IO must already have been done by the caller; the keyword maps below
+    are all keyed by event ID and shared across the whole batch.
+
+    Args:
+        events: The events to serialize, as `(event, membership)` pairs.
+            `membership` is the requesting user's membership at the time of the
+            event, injected into `unsigned.membership` (MSC4115).
+        time_now_ms: The current time in milliseconds.
+        config: The serialization config.
+        bundle_aggregations: Map from event_id to the `BundledAggregations` to
+            bundle into the event's `unsigned.m.relations`.
+        redaction_map: Map from redaction event_id to the redaction `Event`,
+            used to populate `unsigned.redacted_because` for redacted events.
+        unsigned_additions: Map from event_id to extra `unsigned` fields
+            contributed by module callbacks.
+
+    Returns:
+        The serialized events, in the same order as `events`.
+    """
 
 def redact_event(event: Event) -> Event:
     """Returns a pruned version of the given event, which removes all keys we
