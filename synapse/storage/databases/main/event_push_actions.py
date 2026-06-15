@@ -1509,42 +1509,12 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                         "last_receipt_stream_ordering": stream_ordering,
                     },
                 )
-                # If no summary row exists yet for a thread that has pending push
-                # actions (room active but not yet through a rotation cycle), the
-                # UPDATE above is a silent no-op for that thread and
-                # last_receipt_stream_ordering is never persisted.
-                # _rotate_notifs_before_txn would then INSERT the row with
-                # last_receipt_stream_ordering=NULL, causing the badge query to
-                # include every event before the receipt as unread.  Pre-populate
-                # rows for every thread with pending push actions so rotation
-                # only counts events that arrive after this receipt.
-                txn.execute(
-                    """
-                    SELECT DISTINCT thread_id
-                    FROM event_push_actions
-                    WHERE user_id = ? AND room_id = ?
-                    """,
-                    (user_id, room_id),
-                )
-                pending_thread_ids = [row[0] for row in txn]
-                self.db_pool.simple_upsert_many_txn(
+                self._upsert_missing_thread_push_summaries_txn(
                     txn,
-                    table="event_push_summary",
-                    key_names=("user_id", "room_id", "thread_id"),
-                    key_values=[
-                        (user_id, room_id, pending_thread_id)
-                        for pending_thread_id in pending_thread_ids
-                    ],
-                    value_names=(
-                        "notif_count",
-                        "unread_count",
-                        "stream_ordering",
-                        "last_receipt_stream_ordering",
-                    ),
-                    value_values=[
-                        (0, 0, old_rotate_stream_ordering, stream_ordering)
-                        for _ in pending_thread_ids
-                    ],
+                    user_id,
+                    room_id,
+                    old_rotate_stream_ordering,
+                    stream_ordering,
                 )
 
             # For a threaded receipt, we *always* want to update that receipt,
@@ -1592,6 +1562,99 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         )
 
         return len(rows) < limit
+
+    def _upsert_missing_thread_push_summaries_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: str,
+        room_id: str,
+        old_rotate_stream_ordering: int,
+        receipt_stream_ordering: int,
+    ) -> None:
+        """Pre-populate missing thread summaries after an unthreaded receipt.
+
+        Existing summary rows for the room/user have already been cleared by the
+        caller.  This only creates rows for threads which have pending push
+        actions but no summary row yet, so that rotation does not later insert a
+        summary with a NULL last_receipt_stream_ordering.
+        """
+
+        if "event_push_summary" not in self.db_pool._unsafe_to_upsert_tables:
+            txn.execute(
+                """
+                INSERT INTO event_push_summary (
+                    user_id,
+                    room_id,
+                    thread_id,
+                    notif_count,
+                    unread_count,
+                    stream_ordering,
+                    last_receipt_stream_ordering
+                )
+                SELECT ?, ?, epa.thread_id, 0, 0, ?, ?
+                FROM event_push_actions AS epa
+                LEFT JOIN event_push_summary AS eps
+                    ON eps.user_id = epa.user_id
+                    AND eps.room_id = epa.room_id
+                    AND eps.thread_id = epa.thread_id
+                WHERE epa.user_id = ?
+                    AND epa.room_id = ?
+                    AND eps.thread_id IS NULL
+                GROUP BY epa.thread_id
+                ON CONFLICT (user_id, room_id, thread_id) DO UPDATE SET
+                    notif_count = EXCLUDED.notif_count,
+                    unread_count = EXCLUDED.unread_count,
+                    stream_ordering = EXCLUDED.stream_ordering,
+                    last_receipt_stream_ordering = EXCLUDED.last_receipt_stream_ordering
+                """,
+                (
+                    user_id,
+                    room_id,
+                    old_rotate_stream_ordering,
+                    receipt_stream_ordering,
+                    user_id,
+                    room_id,
+                ),
+            )
+            return
+
+        # If the unique index has not finished building yet, use the generic
+        # emulated upsert path. It locks the table where possible and avoids
+        # relying on ON CONFLICT before the index exists.
+        txn.execute(
+            """
+            SELECT DISTINCT epa.thread_id
+            FROM event_push_actions AS epa
+            LEFT JOIN event_push_summary AS eps
+                ON eps.user_id = epa.user_id
+                AND eps.room_id = epa.room_id
+                AND eps.thread_id = epa.thread_id
+            WHERE epa.user_id = ?
+                AND epa.room_id = ?
+                AND eps.thread_id IS NULL
+            """,
+            (user_id, room_id),
+        )
+        missing_thread_ids = [row[0] for row in txn]
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="event_push_summary",
+            key_names=("user_id", "room_id", "thread_id"),
+            key_values=[
+                (user_id, room_id, missing_thread_id)
+                for missing_thread_id in missing_thread_ids
+            ],
+            value_names=(
+                "notif_count",
+                "unread_count",
+                "stream_ordering",
+                "last_receipt_stream_ordering",
+            ),
+            value_values=[
+                (0, 0, old_rotate_stream_ordering, receipt_stream_ordering)
+                for _ in missing_thread_ids
+            ],
+        )
 
     def _rotate_notifs_txn(self, txn: LoggingTransaction) -> bool:
         """Archives older notifications (from event_push_actions) into event_push_summary.
