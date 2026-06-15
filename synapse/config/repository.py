@@ -185,9 +185,10 @@ class ContentRepositoryConfig(Config):
 
         # Load the template used to render the fallback page.
         #
-        # We set this up on all workers (not just the media repo) as the fallback page is served by whichever
-        # process handles `/_synapse/client/media_upload_limit_exceeded`, so every process must be able to
-        # render it.
+        # We set this up on all workers (not just the media repo) as the
+        # fallback page is served by whichever process handles
+        # `/_synapse/client/media_upload_limit_exceeded`, so every process must
+        # be able to render it.
         self.media_upload_limit_exceeded_template = self.read_templates(
             ["media_upload_limit_exceeded.html"],
             (td for td in (self.root.server.custom_template_directory,) if td),
