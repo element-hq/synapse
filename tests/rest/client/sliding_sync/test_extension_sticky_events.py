@@ -21,7 +21,7 @@ import synapse.rest.client.account_data
 from synapse.api.constants import EventTypes, EventUnsignedContentFields
 from synapse.rest.client import account_data, login, register, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, StreamKeyType
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -320,6 +320,64 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         self._assert_sticky_events_response(
             channel.json_body,
             {room_id: [sticky_event_id]},
+        )
+
+    def test_wait_for_new_data_timeout(self) -> None:
+        """
+        Test that the sliding sync request waits for new sticky events to arrive
+        and times out when no data arrives before the deadline.
+        (Only applies to incremental syncs with a `timeout` specified).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("u2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Initial sync with no sticky events
+        sync_body = {
+            "lists": DUMMY_LISTS,
+            "extensions": {
+                "org.matrix.msc4354.sticky_events": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the sliding sync request with a timeout
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + "?timeout=10000" + f"&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Wake-up `notifier.wait_for_events(...)` that will cause us test
+        # `SlidingSyncResult.__bool__` for new results.
+        self._bump_notifier_wait_for_events(
+            # wake key is intentionally unrelated to sticky events
+            user1_id,
+            wake_stream_key=StreamKeyType.ACCOUNT_DATA,
+        )
+        # Block for a little bit more to ensure we don't see any new results.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=4000)
+        # Wait for the sync to complete (wait for the rest of the 10 second timeout,
+        # 5000 + 4000 + 1200 > 10000)
+        channel.await_result(timeout_ms=1200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self._assert_sticky_events_response(
+            channel.json_body,
+            None,
         )
 
     def test_ignored_users_sticky_events(self) -> None:
