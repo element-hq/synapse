@@ -369,8 +369,6 @@ class ContentRepositoryConfig(Config):
                     ("media_upload_limits",),
                 ) from e
 
-            # `info_uri` may be None, in which case the static fallback page
-            # served by Synapse is used when the error is generated.
             self.media_upload_limits.append(
                 MediaUploadLimit(
                     max_bytes=entry.max_size,
