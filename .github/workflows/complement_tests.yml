@@ -92,13 +92,24 @@ jobs:
         #     are underpowered and don't like running tons of Synapse instances at once.
         # -json: Output JSON format so that gotestfmt can parse it.
         #
-        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
+        # tee /tmp/gotest-sanity-check-complement.log: We tee the raw JSON to a
+        # file so we can re-process it later for better formatting with gotestfmt
+        # (and upload it as an artifact).
+        #
+        # We deliberately do not dump the raw JSON to the terminal as it is huge
+        # and unreadable. Instead we pipe it through `jq` to print a compact,
+        # real-time progress view: for each `go test -json` event we print only
+        # completed tests (`pass`/`skip`/`fail`, including subtests), dropping the
+        # noisy `run`/`output` events and package-level lines. The full detail
+        # lives in the raw log we tee to the file above. Non-JSON lines (e.g. the
+        # image build output and `set -x` traces that `go test -json` does not
+        # wrap) are passed through unchanged rather than parsed, so we still see
+        # them and the filter never aborts the pipeline.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 | tee /tmp/gotest-sanity-check-complement.log
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 \
+            | tee /tmp/gotest-sanity-check-complement.log \
+            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -121,13 +132,16 @@ jobs:
         #     are underpowered and don't like running tons of Synapse instances at once.
         # -json: Output JSON format so that gotestfmt can parse it.
         #
-        # tee /tmp/gotest-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
+        # tee /tmp/gotest-complement.log: We tee the raw JSON to a file so we can
+        # re-process it later for better formatting with gotestfmt (and upload it
+        # as an artifact), and pipe it through `jq` for a compact, real-time
+        # progress view. See the sanity check step above for details on the jq
+        # filter.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | tee /tmp/gotest-complement.log
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 \
+            | tee /tmp/gotest-complement.log \
+            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -151,13 +165,16 @@ jobs:
         #     are underpowered and don't like running tons of Synapse instances at once.
         # -json: Output JSON format so that gotestfmt can parse it.
         #
-        # tee /tmp/gotest-in-repo-complement.log: We tee the output to a file so that we can re-process it
-        # later on for better formatting with gotestfmt. But we still want the command
-        # to output to the terminal as it runs so we can see what's happening in
-        # real-time.
+        # tee /tmp/gotest-in-repo-complement.log: We tee the raw JSON to a file so
+        # we can re-process it later for better formatting with gotestfmt (and
+        # upload it as an artifact), and pipe it through `jq` for a compact,
+        # real-time progress view. See the sanity check step above for details on
+        # the jq filter.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 | tee /tmp/gotest-in-repo-complement.log
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 \
+            | tee /tmp/gotest-in-repo-complement.log \
+            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -174,3 +191,18 @@ jobs:
         # it derives several values under `$settings` and passes them to our
         # custom `.ci/complement_package.gotpl` template to render the output.
         run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
+
+      - name: Upload Complement logs
+        # Always upload the logs (as artifacts) if we attempted to run the
+        # Complement tests, so we can debug failures without scrolling through
+        # the (very large) raw output in the build log.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          # The matrix values keep the name unique across the three matrix
+          # combinations (upload-artifact rejects duplicate names within a run).
+          name: Complement Logs - ${{ job.status }} - (${{ matrix.arrangement }}, ${{ matrix.database }})
+          path: |
+            /tmp/gotest-sanity-check-complement.log
+            /tmp/gotest-complement.log
+            /tmp/gotest-in-repo-complement.log
