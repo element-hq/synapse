@@ -1182,12 +1182,12 @@ class SlidingSyncRestServlet(RestServlet):
                 sticky_events_to_write = possibly_duplicated_sticky_events
             else:
                 sent_event_ids_in_room_section = {
-                    ev.event_id for ev in room_result.timeline_events
+                    ev.event.event_id for ev in room_result.timeline_events
                 }
                 sticky_events_to_write = [
                     ev
                     for ev in possibly_duplicated_sticky_events
-                    if ev.event_id not in sent_event_ids_in_room_section
+                    if ev.event.event_id not in sent_event_ids_in_room_section
                 ]
             rooms_out[room_id] = {
                 "events": await self.event_serializer.serialize_events(

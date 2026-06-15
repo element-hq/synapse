@@ -26,7 +26,7 @@ from typing import (
 from typing_extensions import TypeAlias, assert_never
 
 from synapse.api.constants import AccountDataTypes, EduTypes, StickyEvent
-from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
@@ -1033,9 +1033,9 @@ class SlidingSyncExtensionHandler:
             # > Any joined user is authorised to see sticky events for the duration they remain sticky.
             always_include_ids=frozenset(all_sticky_event_ids),
         )
-        filtered_event_map = {ev.event_id: ev for ev in filtered_events}
+        filtered_event_map = {ev.event.event_id: ev for ev in filtered_events}
 
-        room_id_to_sticky_events: dict[str, list[EventBase]] = {}
+        room_id_to_sticky_events: dict[str, list[FilteredEvent]] = {}
         for room_id, sticky_event_ids in room_to_event_ids.items():
             filtered_events_for_room = [
                 filtered_event_map[event_id]

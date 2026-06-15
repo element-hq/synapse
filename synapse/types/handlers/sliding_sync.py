@@ -436,7 +436,7 @@ class SlidingSyncResult:
                     events that also appear in the timeline.
             """
 
-            room_id_to_sticky_events: Mapping[str, list[EventBase]]
+            room_id_to_sticky_events: Mapping[str, list[FilteredEvent]]
             next_batch: SlidingSyncStickyEventsToken
 
             def __bool__(self) -> bool:
