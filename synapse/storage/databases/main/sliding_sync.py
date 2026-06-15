@@ -186,25 +186,7 @@ class SlidingSyncStore(SQLBaseStore):
         # First we fetch (or create) the connection key associated with the
         # previous connection position.
         if previous_connection_position is not None:
-            # The `previous_connection_position` is a user-supplied value, so we
-            # need to make sure that the one they supplied is actually theirs.
-            sql = """
-                SELECT connection_key
-                FROM sliding_sync_connection_positions
-                INNER JOIN sliding_sync_connections USING (connection_key)
-                WHERE
-                    connection_position = ?
-                    AND user_id = ? AND effective_device_id = ? AND conn_id = ?
-            """
-            txn.execute(
-                sql, (previous_connection_position, user_id, device_id, conn_id)
-            )
-            row = txn.fetchone()
-            if row is None:
-                raise SlidingSyncUnknownPosition()
-
-            (connection_key,) = row
-
+            lock_clause = ""
             if isinstance(self.database_engine, PostgresEngine):
                 # Lock the sliding sync connection row for update upfront,
                 # to prevent deadlocks between concurrent transactions
@@ -221,15 +203,27 @@ class SlidingSyncStore(SQLBaseStore):
                 #     "sliding_sync_connection_lazy_members_idx" UNIQUE, btree
                 #     (connection_key, room_id, user_id)
                 # https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS
-                txn.execute(
-                    """
-                    SELECT 1
-                    FROM sliding_sync_connections
-                    WHERE connection_key = ?
-                    FOR NO KEY UPDATE
-                    """,
-                    (connection_key,),
-                )
+                lock_clause = "FOR NO KEY UPDATE OF sliding_sync_connections"
+
+            # The `previous_connection_position` is a user-supplied value, so we
+            # need to make sure that the one they supplied is actually theirs.
+            sql = f"""
+                SELECT connection_key
+                FROM sliding_sync_connection_positions
+                INNER JOIN sliding_sync_connections USING (connection_key)
+                WHERE
+                    connection_position = ?
+                    AND user_id = ? AND effective_device_id = ? AND conn_id = ?
+                {lock_clause}
+            """
+            txn.execute(
+                sql, (previous_connection_position, user_id, device_id, conn_id)
+            )
+            row = txn.fetchone()
+            if row is None:
+                raise SlidingSyncUnknownPosition()
+
+            (connection_key,) = row
         else:
             # We're restarting the connection, so we clear the previous existing data we
             # used to track it. We do this here to ensure that if we get lots of
