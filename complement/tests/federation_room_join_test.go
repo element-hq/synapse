@@ -32,7 +32,13 @@ import (
 //
 // This test lives as a in-repo Synapse Complement test because the spec doesn't mandate
 // which events should be resolvable after the `/make_join`/`/send_join` dance (or that
-// a homeserver should send `m.dummy` events to tie things together)
+// a homeserver should send `m.dummy` events to tie things together).
+//
+// To be clear, resolving the events in the `/make_join`/`/send_join` gap would happen
+// naturally as soon as someone else sends an event who is on a homeserver aware of the
+// events in the gap (tie it into the DAG). The goal of the dummy events is to make this
+// happen automatically by sending a `m.dummy` event that ties things in instead of
+// waiting for another event to be sent naturally.
 func TestEventBetweenMakeJoinAndSendJoinIsNotLost(t *testing.T) {
 	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
