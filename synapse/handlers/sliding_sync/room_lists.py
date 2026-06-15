@@ -52,6 +52,7 @@ from synapse.storage.roommember import (
     RoomsForUserStateReset,
 )
 from synapse.types import (
+    Absent,
     MutableStateMap,
     RoomStreamToken,
     StateMap,
@@ -71,7 +72,6 @@ from synapse.types.handlers.sliding_sync import (
 from synapse.types.state import StateFilter
 from synapse.util import MutableOverlayMapping
 from synapse.util.duration import Duration
-from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -1727,10 +1727,8 @@ class SlidingSyncRoomLists:
         # (applies to invite/knock rooms)
         rooms_ids_without_stripped_state: set[str] = set()
         for room_id in room_ids_without_results:
-            stripped_state_map = room_id_to_stripped_state_map.get(
-                room_id, Sentinel.UNSET_SENTINEL
-            )
-            assert stripped_state_map is not Sentinel.UNSET_SENTINEL, (
+            stripped_state_map = room_id_to_stripped_state_map.get(room_id, Absent)
+            assert stripped_state_map is not Absent, (
                 f"Stripped state left unset for room {room_id}. "
                 + "Make sure you're calling `_bulk_get_stripped_state_for_rooms_from_sync_room_map(...)` "
                 + "with that room_id. (this is a problem with Synapse itself)"

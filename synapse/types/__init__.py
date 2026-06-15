@@ -120,8 +120,8 @@ class AbsentType(Enum):
     Type of a sentinel to use as an alternative to `None`
     for when we really mean 'absent' and not JSON null.
 
-    For a Sentinel for internal (non-API-facing) use, instead consider
-    `Sentinel.UNSET_SENTINEL`.
+    Generally suitable for distinguishing a default state from user-suppliable values.
+    Has no meaning on its own.
 
     It is falsy (like None is), so shorthand forms like `x or 0` can be used.
     """
@@ -200,8 +200,12 @@ Absent: Final = AbsentType._Absent
 Sentinel to use as an alternative to `None`
 for when we really mean 'absent' and not JSON null.
 
-For a Sentinel for internal (non-API-facing) use, instead consider
-`Sentinel.UNSET_SENTINEL`.
+Generally suitable for distinguishing a default state from user-suppliable values.
+Has no meaning on its own.
+
+It is falsy (like None is), so shorthand forms like `x or 0` can be used.
+
+(Previously known as `Sentinel.UNSET_SENTINEL`.)
 """
 
 
