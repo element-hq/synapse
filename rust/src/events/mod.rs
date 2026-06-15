@@ -87,6 +87,7 @@ pub mod filter;
 pub mod formats;
 pub mod internal_metadata;
 pub mod json_object;
+pub mod relations;
 pub mod signatures;
 pub mod unsigned;
 pub mod utils;
@@ -107,6 +108,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<json_object::JsonObjectValuesView>()?;
     child_module.add_class::<json_object::JsonObjectItemsView>()?;
     child_module.add_class::<Event>()?;
+    child_module.add_class::<relations::BundledAggregations>()?;
+    child_module.add_class::<relations::ThreadAggregation>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;
@@ -129,7 +132,11 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 /// metadata, rejection reason, and a reference to the room version that
 /// produced this event). See the module-level docs for the high-level
 /// design.
-#[pyclass(frozen, weakref)]
+///
+/// `Clone` is shallow (see [`FormattedEvent`]) and lets an `Event` be held by
+/// value, e.g. inside [`BundledAggregations`](crate::events::relations::BundledAggregations).
+#[pyclass(frozen, weakref, skip_from_py_object)]
+#[derive(Clone)]
 pub struct Event {
     /// The parsed event JSON.
     parsed_event: FormattedEvent,

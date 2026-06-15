@@ -17,14 +17,16 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use pyo3::{
     exceptions::{PyKeyError, PyTypeError},
+    prelude::Borrowed,
     pyclass, pymethods,
     types::{
         PyAnyMethods, PyIterator, PyList, PyListMethods, PyMapping, PySet, PySetMethods, PyTuple,
     },
-    Bound, IntoPyObject, IntoPyObjectExt, Py, PyAny, PyResult, Python,
+    Bound, FromPyObject, IntoPyObject, IntoPyObjectExt, Py, PyAny, PyErr, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// A generic class for representing immutable JSON objects.
 ///
@@ -40,33 +42,45 @@ pub struct JsonObject {
     object: Arc<BTreeMap<Box<str>, serde_json::Value>>,
 }
 
+// We implement `FromPyObject` to allow `JsonObject` to be used as function
+// arguments.
+impl<'py> FromPyObject<'_, 'py> for JsonObject {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        // Fast path: already a JsonObject, so just share the underlying map
+        // (cheap, as it's immutable and behind an `Arc`).
+        if let Ok(obj) = ob.cast::<JsonObject>() {
+            return Ok(JsonObject {
+                object: obj.get().object.clone(),
+            });
+        }
+
+        // Otherwise accept any mapping and convert it via pythonize. Unlike the
+        // `#[new]` constructor we don't accept `None` here: an absent value is
+        // represented as `Option<JsonObject>` at the field/argument level.
+        let mapping = ob
+            .cast::<PyMapping>()
+            .map_err(|_| PyTypeError::new_err("expected a mapping"))?;
+        let object: BTreeMap<Box<str>, Value> = depythonize(&mapping)?;
+        Ok(JsonObject {
+            object: Arc::new(object),
+        })
+    }
+}
+
 #[pymethods]
 impl JsonObject {
     #[new]
     #[pyo3(signature = (content = None))]
-    fn new<'a, 'py>(content: Option<&'a Bound<'py, PyAny>>) -> PyResult<Self> {
-        let Some(content) = content else {
+    fn new(content: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        match content {
             // If no content is provided, default to an empty object.
-            return Ok(Self::default());
-        };
-
-        if let Ok(content) = content.cast::<JsonObject>() {
-            // If the content is already a JsonObject, we can just clone the
-            // underlying map (this is safe as the object is immutable).
-            return Ok(JsonObject {
-                object: content.get().object.clone(),
-            });
+            None => Ok(Self::default()),
+            // Otherwise reuse the `FromPyObject` path, which accepts an
+            // existing `JsonObject` or any Python mapping.
+            Some(content) => JsonObject::extract(content.as_borrowed()),
         }
-
-        let Ok(content) = content.cast::<PyMapping>() else {
-            return Err(PyTypeError::new_err("'content' must be a mapping"));
-        };
-
-        // Use pythonize to try and convert from a mapping.
-        let content = depythonize(content)?;
-        Ok(Self {
-            object: Arc::new(content),
-        })
     }
 
     fn __len__(&self) -> usize {
@@ -196,6 +210,30 @@ impl JsonObject {
 impl JsonObject {
     pub fn get_field(&self, key: &str) -> Option<&serde_json::Value> {
         self.object.get(key)
+    }
+
+    /// Returns a `serde_json::Value::Object` containing a clone of this
+    /// object's entries.
+    pub fn as_map(&self) -> &BTreeMap<Box<str>, Value> {
+        &self.object
+    }
+
+    /// Whether the object has no entries.
+    pub fn is_empty(&self) -> bool {
+        self.object.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Box<str>, &Value)> {
+        self.object.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a JsonObject {
+    type Item = (&'a Box<str>, &'a serde_json::Value);
+    type IntoIter = std::collections::btree_map::Iter<'a, Box<str>, serde_json::Value>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.object.as_ref().iter()
     }
 }
 

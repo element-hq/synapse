@@ -28,8 +28,6 @@ from typing import (
     Sequence,
 )
 
-import attr
-
 from synapse.api.constants import Direction, EventTypes, RelationTypes
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase, relation_from_event
@@ -38,6 +36,14 @@ from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.relations import ThreadsNextBatch, _RelatedEvent
 from synapse.streams.config import PaginationConfig
+
+# `BundledAggregations` and `ThreadAggregation` are implemented in Rust; they
+# are re-exported here so existing call sites can keep importing them from
+# `synapse.handlers.relations`.
+from synapse.synapse_rust.events import (  # noqa: F401
+    BundledAggregations,
+    ThreadAggregation,
+)
 from synapse.types import JsonDict, Requester, UserID
 from synapse.util.async_helpers import gather_results
 from synapse.visibility import filter_and_transform_events_for_client
@@ -54,32 +60,6 @@ class ThreadsListInclude(str, enum.Enum):
 
     all = "all"
     participated = "participated"
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class _ThreadAggregation:
-    # The latest event in the thread.
-    latest_event: EventBase
-    # The total number of events in the thread.
-    count: int
-    # True if the current user has sent an event to the thread.
-    current_user_participated: bool
-
-
-@attr.s(slots=True, auto_attribs=True)
-class BundledAggregations:
-    """
-    The bundled aggregations for an event.
-
-    Some values require additional processing during serialization.
-    """
-
-    references: JsonDict | None = None
-    replace: EventBase | None = None
-    thread: _ThreadAggregation | None = None
-
-    def __bool__(self) -> bool:
-        return bool(self.references or self.replace or self.thread)
 
 
 class RelationsHandler:
@@ -310,7 +290,7 @@ class RelationsHandler:
         relations_by_id: dict[str, str],
         user_id: str,
         ignored_users: frozenset[str],
-    ) -> dict[str, _ThreadAggregation]:
+    ) -> dict[str, ThreadAggregation]:
         """Get the bundled aggregations for threads for the requested events.
 
         Args:
@@ -421,7 +401,7 @@ class RelationsHandler:
                     continue
                 latest_thread_event = event.event
 
-            results[event_id] = _ThreadAggregation(
+            results[event_id] = ThreadAggregation(
                 latest_event=latest_thread_event,
                 count=thread_count,
                 # If there's a thread summary it must also exist in the
@@ -478,8 +458,12 @@ class RelationsHandler:
             # The event should get bundled aggregations.
             events_by_id[event.event_id] = event
 
-        # event ID -> bundled aggregation in non-serialized form.
-        results: dict[str, BundledAggregations] = {}
+        # `BundledAggregations` is immutable, so we collect each kind of
+        # aggregation into its own map keyed by event ID and assemble the
+        # results once everything has been fetched.
+        thread_by_id: dict[str, ThreadAggregation] = {}
+        references_by_id: dict[str, JsonDict] = {}
+        replace_by_id: dict[str, EventBase] = {}
 
         # Fetch any ignored users of the requesting user.
         ignored_users = await self._main_store.ignored_users(user_id)
@@ -495,7 +479,7 @@ class RelationsHandler:
             ignored_users,
         )
         for event_id, thread in threads.items():
-            results.setdefault(event_id, BundledAggregations()).thread = thread
+            thread_by_id[event_id] = thread
 
             # If the latest event in a thread is not already being fetched,
             # add it. This ensures that the bundled aggregations for the
@@ -516,7 +500,7 @@ class RelationsHandler:
             )
             for event_id, references in references_by_event_id.items():
                 if references:
-                    results.setdefault(event_id, BundledAggregations()).references = {
+                    references_by_id[event_id] = {
                         "chunk": [{"event_id": ev.event_id} for ev in references]
                     }
 
@@ -535,7 +519,13 @@ class RelationsHandler:
                 ]
             )
             for event_id, edit in edits.items():
-                results.setdefault(event_id, BundledAggregations()).replace = edit
+                # `get_applicable_edits` returns `None` for events with no
+                # applicable edit. Skip those rather than recording an entry: a
+                # `None` replace contributes nothing during serialization, so
+                # the old code's empty `BundledAggregations` for such events was
+                # inert anyway.
+                if edit is not None:
+                    replace_by_id[event_id] = edit
 
         # Parallelize the calls for annotations, references, and edits since they
         # are unrelated.
@@ -548,7 +538,17 @@ class RelationsHandler:
             )
         )
 
-        return results
+        # Assemble one (immutable) bundled aggregation per event that has any.
+        return {
+            event_id: BundledAggregations(
+                references=references_by_id.get(event_id),
+                replace=replace_by_id.get(event_id),
+                thread=thread_by_id.get(event_id),
+            )
+            for event_id in thread_by_id.keys()
+            | references_by_id.keys()
+            | replace_by_id.keys()
+        }
 
     async def get_threads(
         self,

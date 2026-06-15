@@ -309,6 +309,47 @@ class Event:
         ``SynapseDuration`` representing the sticky duration. Otherwise returns
         ``None``."""
 
+class ThreadAggregation:
+    """The bundled thread summary for an event."""
+
+    def __init__(
+        self,
+        latest_event: Event,
+        count: int,
+        current_user_participated: bool,
+    ) -> None: ...
+    @property
+    def latest_event(self) -> Event:
+        """The latest event in the thread."""
+
+    @property
+    def count(self) -> int:
+        """The total number of events in the thread."""
+
+    @property
+    def current_user_participated(self) -> bool:
+        """Whether the requesting user has sent an event to the thread."""
+
+class BundledAggregations:
+    """The bundled aggregations for an event.
+
+    Some values require additional processing during serialization.
+    """
+
+    def __init__(
+        self,
+        references: JsonMapping | None = None,
+        replace: Event | None = None,
+        thread: ThreadAggregation | None = None,
+    ) -> None: ...
+    @property
+    def references(self) -> JsonMapping | None: ...
+    @property
+    def replace(self) -> Event | None: ...
+    @property
+    def thread(self) -> ThreadAggregation | None: ...
+    def __bool__(self) -> bool: ...
+
 def redact_event(event: Event) -> Event:
     """Returns a pruned version of the given event, which removes all keys we
     don't know about or think could potentially be dodgy.
