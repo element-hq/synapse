@@ -77,7 +77,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
 
         self.mock_resolver = AsyncMock(spec=SrvResolver)
 
-        config_dict = default_config("test", parse=False)
+        config_dict = default_config(server_name="test", parse=False)
         config_dict["federation_custom_ca_list"] = [get_test_ca_cert_file()]
 
         self._config = config = HomeServerConfig()
@@ -1019,7 +1019,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         self.mock_resolver.resolve_service.return_value = []
         self.reactor.lookups["testserv"] = "1.2.3.4"
 
-        config = default_config("test", parse=True)
+        config = default_config(server_name="test", parse=True)
 
         # Build a new agent and WellKnownResolver with a different tls factory
         tls_factory = FederationPolicyForHTTPS(config)

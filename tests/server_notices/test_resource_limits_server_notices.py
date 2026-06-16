@@ -40,7 +40,7 @@ from tests.utils import default_config
 
 class TestResourceLimitsServerNotices(unittest.HomeserverTestCase):
     def default_config(self) -> JsonDict:
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         config.update(
             {

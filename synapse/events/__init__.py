@@ -20,48 +20,37 @@
 #
 #
 
-import abc
 import collections.abc
 from typing import (
     TYPE_CHECKING,
     Any,
-    Generic,
-    Iterable,
-    Literal,
-    TypeVar,
+    TypeAlias,
     Union,
-    overload,
 )
 
 import attr
-from typing_extensions import deprecated
-from unpaddedbase64 import encode_base64
+from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     RelationTypes,
-    StickyEvent,
 )
-from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.synapse_rust.events import (
-    EventInternalMetadata,
-    JsonObject,
-    Signatures,
-    Unsigned,
-)
+from synapse.api.errors import Codes, SynapseError
+from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.synapse_rust.events import Event
 from synapse.types import (
     JsonDict,
-    JsonMapping,
     StateKey,
-    StrCollection,
 )
-from synapse.util.caches import intern_dict
-from synapse.util.duration import Duration
-from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
     from synapse.events.builder import EventBuilder
+
+# The base class for events used to be called EventBase, but it was renamed to
+# Event when we switched to using the Rust implementation. We keep the old name
+# around for backwards compatibility.
+EventBase: TypeAlias = Event
 
 
 USE_FROZEN_DICTS = False
@@ -70,626 +59,10 @@ Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
 bugs where we accidentally share e.g. signature dicts. However, converting a
 dict to frozen_dicts is expensive.
 
-NOTE: This is overridden by the configuration by the Synapse worker apps, but
-for the sake of tests, it is set here because it cannot be configured on the
-homeserver object itself.
-
-FIXME: Because of how this option works (changing the underlying types), it causes
-subtle downstream bugs that makes type comparisons brittle, tracked by
-https://github.com/element-hq/synapse/issues/18117
+FIXME: Remove `USE_FROZEN_DICTS` and `use_frozen_dicts` config as this is no
+longer used since we switched to using the Rust implementation, all events are
+immutable already (and so don't benefit from freezing).
 """
-
-T = TypeVar("T")
-
-
-# DictProperty (and DefaultDictProperty) require the classes they're used with to
-# have a _dict property to pull properties from.
-#
-# TODO _DictPropertyInstance should not include EventBuilder but due to
-# https://github.com/python/mypy/issues/5570 it thinks the DictProperty and
-# DefaultDictProperty get applied to EventBuilder when it is in a Union with
-# EventBase. This is the least invasive hack to get mypy to comply.
-#
-# Note that DictProperty/DefaultDictProperty cannot actually be used with
-# EventBuilder as it lacks a _dict property.
-_DictPropertyInstance = Union["EventBase", "EventBuilder"]
-
-
-class DictProperty(Generic[T]):
-    """An object property which delegates to the `_dict` within its parent object."""
-
-    __slots__ = ["key"]
-
-    def __init__(self, key: str):
-        self.key = key
-
-    @overload
-    def __get__(
-        self,
-        instance: Literal[None],
-        owner: type[_DictPropertyInstance] | None = None,
-    ) -> "DictProperty": ...
-
-    @overload
-    def __get__(
-        self,
-        instance: _DictPropertyInstance,
-        owner: type[_DictPropertyInstance] | None = None,
-    ) -> T: ...
-
-    def __get__(
-        self,
-        instance: _DictPropertyInstance | None,
-        owner: type[_DictPropertyInstance] | None = None,
-    ) -> T | "DictProperty":
-        # if the property is accessed as a class property rather than an instance
-        # property, return the property itself rather than the value
-        if instance is None:
-            return self
-        try:
-            assert isinstance(instance, EventBase)
-            return instance._dict[self.key]
-        except KeyError as e1:
-            # We want this to look like a regular attribute error (mostly so that
-            # hasattr() works correctly), so we convert the KeyError into an
-            # AttributeError.
-            #
-            # To exclude the KeyError from the traceback, we explicitly
-            # 'raise from e1.__context__' (which is better than 'raise from None',
-            # because that would omit any *earlier* exceptions).
-            #
-            raise AttributeError(
-                "'%s' has no '%s' property" % (type(instance), self.key)
-            ) from e1.__context__
-
-    def __set__(self, instance: _DictPropertyInstance, v: T) -> None:
-        assert isinstance(instance, EventBase)
-        instance._dict[self.key] = v
-
-    def __delete__(self, instance: _DictPropertyInstance) -> None:
-        assert isinstance(instance, EventBase)
-        try:
-            del instance._dict[self.key]
-        except KeyError as e1:
-            raise AttributeError(
-                "'%s' has no '%s' property" % (type(instance), self.key)
-            ) from e1.__context__
-
-
-class DefaultDictProperty(DictProperty, Generic[T]):
-    """An extension of DictProperty which provides a default if the property is
-    not present in the parent's _dict.
-
-    Note that this means that hasattr() on the property always returns True.
-    """
-
-    __slots__ = ["default"]
-
-    def __init__(self, key: str, default: T):
-        super().__init__(key)
-        self.default = default
-
-    @overload
-    def __get__(
-        self,
-        instance: Literal[None],
-        owner: type[_DictPropertyInstance] | None = None,
-    ) -> "DefaultDictProperty": ...
-
-    @overload
-    def __get__(
-        self,
-        instance: _DictPropertyInstance,
-        owner: type[_DictPropertyInstance] | None = None,
-    ) -> T: ...
-
-    def __get__(
-        self,
-        instance: _DictPropertyInstance | None,
-        owner: type[_DictPropertyInstance] | None = None,
-    ) -> T | "DefaultDictProperty":
-        if instance is None:
-            return self
-        assert isinstance(instance, EventBase)
-        return instance._dict.get(self.key, self.default)
-
-
-class EventBase(metaclass=abc.ABCMeta):
-    @property
-    @abc.abstractmethod
-    def format_version(self) -> int:
-        """The EventFormatVersion implemented by this event"""
-        ...
-
-    def __init__(
-        self,
-        event_dict: JsonDict,
-        room_version: RoomVersion,
-        signatures: dict[str, dict[str, str]],
-        unsigned: JsonDict,
-        internal_metadata_dict: JsonDict,
-        rejected_reason: str | None,
-    ):
-        assert room_version.event_format == self.format_version
-
-        if "content" in event_dict:
-            event_dict["content"] = JsonObject(event_dict["content"])
-
-        # We intern these strings because they turn up a lot (especially when
-        # caching).
-        event_dict = intern_dict(event_dict)
-
-        if USE_FROZEN_DICTS:
-            frozen_dict = freeze(event_dict)
-        else:
-            frozen_dict = event_dict
-
-        self.room_version = room_version
-        self.signatures = Signatures(signatures)
-        self.unsigned = Unsigned(unsigned)
-        self.rejected_reason = rejected_reason
-
-        self._dict = frozen_dict
-
-        self.internal_metadata = EventInternalMetadata(internal_metadata_dict)
-
-    depth: DictProperty[int] = DictProperty("depth")
-    content: DictProperty[JsonMapping] = DictProperty("content")
-    hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
-    origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
-    sender: DictProperty[str] = DictProperty("sender")
-    # TODO state_key should be str | None. This is generally asserted in Synapse
-    # by calling is_state() first (which ensures it is not None), but it is hard (not possible?)
-    # to properly annotate that calling is_state() asserts that state_key exists
-    # and is non-None. It would be better to replace such direct references with
-    # get_state_key() (and a check for None).
-    state_key: DictProperty[str] = DictProperty("state_key")
-    type: DictProperty[str] = DictProperty("type")
-
-    # This is a deprecated property, use `sender` instead. Only used by modules.
-    user_id: DictProperty[str] = DictProperty("sender")
-
-    @property
-    def event_id(self) -> str:
-        raise NotImplementedError()
-
-    @property
-    def room_id(self) -> str:
-        raise NotImplementedError()
-
-    @property
-    def membership(self) -> str:
-        return self.content["membership"]
-
-    @property
-    def redacts(self) -> str | None:
-        """MSC2176 moved the redacts field into the content."""
-        if self.room_version.updated_redaction_rules:
-            return self.content.get("redacts")
-        return self.get("redacts")
-
-    def is_state(self) -> bool:
-        return self.get_state_key() is not None
-
-    def get_state_key(self) -> str | None:
-        """Get the state key of this event, or None if it's not a state event"""
-        return self._dict.get("state_key")
-
-    def get_dict(self) -> JsonDict:
-        """Convert the event to a dictionary suitable for serialisation."""
-
-        d = dict(self._dict)
-        if "content" in d:
-            # Convert the content (which is a JsonObject) back to a dict. Json
-            # serialization should handle JsonObjects fine, but for sanities
-            # sake we want `get_dict()` and `get_pdu_json()` to return plain
-            # dicts.
-            d["content"] = dict(self.content)
-        d.update(
-            {
-                "signatures": self.signatures.as_dict(),
-                "unsigned": self.unsigned.for_event(),
-            }
-        )
-
-        return d
-
-    def get_dict_for_persistence(self) -> JsonDict:
-        """Convert the event to a dictionary suitable for persistence."""
-        d = dict(self._dict)
-        d.update(
-            {
-                "signatures": self.signatures.as_dict(),
-                "unsigned": self.unsigned.for_persistence(),
-            }
-        )
-
-        return d
-
-    def get(self, key: str, default: Any | None = None) -> Any:
-        return self._dict.get(key, default)
-
-    def get_internal_metadata_dict(self) -> JsonDict:
-        return self.internal_metadata.get_dict()
-
-    def get_pdu_json(self, time_now: int | None = None) -> JsonDict:
-        pdu_json = self.get_dict()
-
-        if time_now is not None and "age_ts" in pdu_json["unsigned"]:
-            age = time_now - pdu_json["unsigned"]["age_ts"]
-            pdu_json.setdefault("unsigned", {})["age"] = int(age)
-            del pdu_json["unsigned"]["age_ts"]
-
-        # This may be a frozen event
-        pdu_json["unsigned"].pop("redacted_because", None)
-
-        return pdu_json
-
-    def get_templated_pdu_json(self) -> JsonDict:
-        """
-        Return a JSON object suitable for a templated event, as used in the
-        make_{join,leave,knock} workflow.
-        """
-        # By using _dict directly we don't pull in signatures/unsigned.
-        template_json = dict(self._dict)
-        # The hashes (similar to the signature) need to be recalculated by the
-        # joining/leaving/knocking server after (potentially) modifying the
-        # event.
-        template_json.pop("hashes")
-
-        return template_json
-
-    def __contains__(self, field: str) -> bool:
-        return field in self._dict
-
-    def items(self) -> list[tuple[str, Any | None]]:
-        return list(self._dict.items())
-
-    def keys(self) -> Iterable[str]:
-        return self._dict.keys()
-
-    def prev_event_ids(self) -> list[str]:
-        """Returns the list of prev event IDs. The order matches the order
-        specified in the event, though there is no meaning to it.
-
-        Returns:
-            The list of event IDs of this event's prev_events
-        """
-        return [e for e, _ in self._dict["prev_events"]]
-
-    def auth_event_ids(self) -> StrCollection:
-        """Returns the list of auth event IDs. The order matches the order
-        specified in the event, though there is no meaning to it.
-
-        Returns:
-            The list of event IDs of this event's auth_events
-        """
-        return [e for e, _ in self._dict["auth_events"]]
-
-    def freeze(self) -> None:
-        """'Freeze' the event dict, so it cannot be modified by accident"""
-
-        # this will be a no-op if the event dict is already frozen.
-        self._dict = freeze(self._dict)
-
-    def sticky_duration(self) -> Duration | None:
-        """
-        Returns the effective sticky duration of this event, or None
-        if the event does not have a sticky duration.
-        (Sticky Events are a MSC4354 feature.)
-
-        Clamps the sticky duration to the maximum allowed duration.
-        """
-        sticky_obj = self.get_dict().get(StickyEvent.EVENT_FIELD_NAME, None)
-        if type(sticky_obj) is not dict:
-            return None
-        sticky_duration_ms = sticky_obj.get("duration_ms", None)
-        # MSC: Clamp to 0 and MAX_DURATION (1 hour)
-        # We use `type(...) is int` to avoid accepting bools as `isinstance(True, int)`
-        # (bool is a subclass of int)
-        if type(sticky_duration_ms) is int and sticky_duration_ms >= 0:
-            return min(
-                Duration(milliseconds=sticky_duration_ms),
-                StickyEvent.MAX_DURATION,
-            )
-        return None
-
-    def __str__(self) -> str:
-        return self.__repr__()
-
-    def __repr__(self) -> str:
-        rejection = f"REJECTED={self.rejected_reason}, " if self.rejected_reason else ""
-
-        conditional_membership_string = ""
-        if self.get("type") == EventTypes.Member:
-            conditional_membership_string = f"membership={self.membership}, "
-
-        return (
-            f"<{self.__class__.__name__} "
-            f"{rejection}"
-            f"event_id={self.event_id}, "
-            f"type={self.get('type')}, "
-            f"state_key={self.get('state_key')}, "
-            f"{conditional_membership_string}"
-            f"outlier={self.internal_metadata.is_outlier()}"
-            ">"
-        )
-
-    # Using `__getitem__` is deprecated. Only used by modules.
-    @deprecated("Use attribute access instead")
-    def __getitem__(self, field: str) -> Any | None:
-        return self._dict[field]
-
-
-class FrozenEvent(EventBase):
-    format_version = EventFormatVersions.ROOM_V1_V2  # All events of this type are V1
-
-    def __init__(
-        self,
-        event_dict: JsonDict,
-        room_version: RoomVersion,
-        internal_metadata_dict: JsonDict | None = None,
-        rejected_reason: str | None = None,
-    ):
-        internal_metadata_dict = internal_metadata_dict or {}
-
-        event_dict = dict(event_dict)
-
-        # Signatures is a dict of dicts, and this is faster than doing a
-        # copy.deepcopy
-        signatures = {
-            name: dict(sigs.items())
-            for name, sigs in event_dict.pop("signatures", {}).items()
-        }
-
-        unsigned = event_dict.pop("unsigned", {})
-
-        self._event_id = event_dict["event_id"]
-
-        super().__init__(
-            event_dict,
-            room_version=room_version,
-            signatures=signatures,
-            unsigned=unsigned,
-            internal_metadata_dict=internal_metadata_dict,
-            rejected_reason=rejected_reason,
-        )
-
-    @property
-    def event_id(self) -> str:
-        return self._event_id
-
-    @property
-    def room_id(self) -> str:
-        return self._dict["room_id"]
-
-
-class FrozenEventV2(EventBase):
-    format_version = EventFormatVersions.ROOM_V3  # All events of this type are V2
-
-    def __init__(
-        self,
-        event_dict: JsonDict,
-        room_version: RoomVersion,
-        internal_metadata_dict: JsonDict | None = None,
-        rejected_reason: str | None = None,
-    ):
-        internal_metadata_dict = internal_metadata_dict or {}
-
-        event_dict = dict(event_dict)
-
-        # Signatures is a dict of dicts, and this is faster than doing a
-        # copy.deepcopy
-        signatures = {
-            name: dict(sigs.items())
-            for name, sigs in event_dict.pop("signatures", {}).items()
-        }
-
-        assert "event_id" not in event_dict
-
-        unsigned = event_dict.pop("unsigned", {})
-
-        self._event_id: str | None = None
-
-        super().__init__(
-            event_dict,
-            room_version=room_version,
-            signatures=signatures,
-            unsigned=unsigned,
-            internal_metadata_dict=internal_metadata_dict,
-            rejected_reason=rejected_reason,
-        )
-
-    @property
-    def event_id(self) -> str:
-        # We have to import this here as otherwise we get an import loop which
-        # is hard to break.
-        from synapse.crypto.event_signing import compute_event_reference_hash
-
-        if self._event_id:
-            return self._event_id
-        self._event_id = "$" + encode_base64(compute_event_reference_hash(self)[1])
-        return self._event_id
-
-    @property
-    def room_id(self) -> str:
-        return self._dict["room_id"]
-
-    def prev_event_ids(self) -> list[str]:
-        """Returns the list of prev event IDs. The order matches the order
-        specified in the event, though there is no meaning to it.
-
-        Returns:
-            The list of event IDs of this event's prev_events
-        """
-        return self._dict["prev_events"]
-
-    def auth_event_ids(self) -> StrCollection:
-        """Returns the list of auth event IDs. The order matches the order
-        specified in the event, though there is no meaning to it.
-
-        Returns:
-            The list of event IDs of this event's auth_events
-        """
-        return self._dict["auth_events"]
-
-
-class FrozenEventV3(FrozenEventV2):
-    """FrozenEventV3, which differs from FrozenEventV2 only in the event_id format"""
-
-    format_version = EventFormatVersions.ROOM_V4_PLUS  # All events of this type are V3
-
-    @property
-    def event_id(self) -> str:
-        # We have to import this here as otherwise we get an import loop which
-        # is hard to break.
-        from synapse.crypto.event_signing import compute_event_reference_hash
-
-        if self._event_id:
-            return self._event_id
-        self._event_id = "$" + encode_base64(
-            compute_event_reference_hash(self)[1], urlsafe=True
-        )
-        return self._event_id
-
-
-class FrozenEventV4(FrozenEventV3):
-    """FrozenEventV4 for MSC4291 room IDs are hashes"""
-
-    format_version = EventFormatVersions.ROOM_V11_HYDRA_PLUS
-
-    """Override the room_id for m.room.create events"""
-
-    def __init__(
-        self,
-        event_dict: JsonDict,
-        room_version: RoomVersion,
-        internal_metadata_dict: JsonDict | None = None,
-        rejected_reason: str | None = None,
-    ):
-        super().__init__(
-            event_dict=event_dict,
-            room_version=room_version,
-            internal_metadata_dict=internal_metadata_dict,
-            rejected_reason=rejected_reason,
-        )
-        self._room_id: str | None = None
-
-    @property
-    def room_id(self) -> str:
-        # if we have calculated the room ID already, don't do it again.
-        if self._room_id:
-            return self._room_id
-
-        is_create_event = self.type == EventTypes.Create and self.get_state_key() == ""
-
-        # for non-create events: use the supplied value from the JSON, as per FrozenEventV3
-        if not is_create_event:
-            self._room_id = self._dict["room_id"]
-            assert self._room_id is not None
-            return self._room_id
-
-        # for create events: calculate the room ID
-        from synapse.crypto.event_signing import compute_event_reference_hash
-
-        self._room_id = "!" + encode_base64(
-            compute_event_reference_hash(self)[1], urlsafe=True
-        )
-        return self._room_id
-
-    def auth_event_ids(self) -> StrCollection:
-        """Returns the list of auth event IDs. The order matches the order
-        specified in the event, though there is no meaning to it.
-        Returns:
-            The list of event IDs of this event's auth_events
-            Includes the creation event ID for convenience of all the codepaths
-            which expects the auth chain to include the creator ID, even though
-            it's explicitly not included on the wire. Excludes the create event
-            for the create event itself.
-        """
-        create_event_id = "$" + self.room_id[1:]
-        assert create_event_id not in self._dict["auth_events"]
-        if self.type == EventTypes.Create and self.get_state_key() == "":
-            return self._dict["auth_events"]  # should be []
-        return [*self._dict["auth_events"], create_event_id]
-
-
-class FrozenEventVMSC4242(FrozenEventV4):
-    """FrozenEventVMSC4242, which differs from FrozenEventV4 only in the addition of prev_state_events"""
-
-    format_version = EventFormatVersions.ROOM_VMSC4242
-    prev_state_events: DictProperty[StrCollection] = DictProperty("prev_state_events")
-
-    def __init__(
-        self,
-        event_dict: JsonDict,
-        room_version: RoomVersion,
-        internal_metadata_dict: JsonDict | None = None,
-        rejected_reason: str | None = None,
-    ):
-        # Similar to how we assert event_id isn't in V2+ events, we do the same with auth_events.
-        # We don't expect `auth_events` in the wire format because we calculate it from prev_state_events.
-        assert "auth_events" not in event_dict
-        super().__init__(
-            event_dict=event_dict,
-            room_version=room_version,
-            internal_metadata_dict=internal_metadata_dict,
-            rejected_reason=rejected_reason,
-        )
-
-    def auth_event_ids(self) -> StrCollection:
-        """Returns the list of _calculated_ auth event IDs.
-
-        Returns:
-            The list of event IDs of this event's auth events
-        """
-        # Catches cases where we accidentally call auth_event_ids() prior to calculating what they
-        # actually are. The exception being the m.room.create event which has no auth events.
-        if self.type != EventTypes.Create:
-            assert len(self.internal_metadata.calculated_auth_event_ids) > 0
-        return self.internal_metadata.calculated_auth_event_ids
-
-    def __repr__(self) -> str:
-        rejection = f"REJECTED={self.rejected_reason}, " if self.rejected_reason else ""
-
-        return (
-            f"<{self.__class__.__name__} "
-            f"{rejection}"
-            f"event_id={self.event_id}, "
-            f"type={self.get('type')}, "
-            f"state_key={self.get('state_key')}, "
-            f"prev_events={self.get('prev_events')}, "
-            f"prev_state_events={self.get('prev_state_events')}, "
-            f"outlier={self.internal_metadata.is_outlier()}"
-            ">"
-        )
-
-
-def _event_type_from_format_version(
-    format_version: int,
-) -> type[FrozenEvent | FrozenEventV2 | FrozenEventV3 | FrozenEventVMSC4242]:
-    """Returns the python type to use to construct an Event object for the
-    given event format version.
-
-    Args:
-        format_version: The event format version
-
-    Returns:
-        A type that can be initialized as per the initializer of `FrozenEvent`
-    """
-
-    if format_version == EventFormatVersions.ROOM_V1_V2:
-        return FrozenEvent
-    elif format_version == EventFormatVersions.ROOM_V3:
-        return FrozenEventV2
-    elif format_version == EventFormatVersions.ROOM_V4_PLUS:
-        return FrozenEventV3
-    elif format_version == EventFormatVersions.ROOM_VMSC4242:
-        return FrozenEventVMSC4242
-    elif format_version == EventFormatVersions.ROOM_V11_HYDRA_PLUS:
-        return FrozenEventV4
-    else:
-        raise Exception("No event format %r" % (format_version,))
 
 
 def make_event_from_dict(
@@ -697,12 +70,38 @@ def make_event_from_dict(
     room_version: RoomVersion = RoomVersions.V1,
     internal_metadata_dict: JsonDict | None = None,
     rejected_reason: str | None = None,
-) -> EventBase:
+) -> Event:
     """Construct an EventBase from the given event dict"""
-    event_type = _event_type_from_format_version(room_version.event_format)
-    return event_type(
-        event_dict, room_version, internal_metadata_dict or {}, rejected_reason
+
+    # Event constructor only takes JSON string, see Event constructor for
+    # details.
+    event_json = encode_canonical_json(event_dict).decode("utf-8")
+
+    return make_event_from_json(
+        event_json=event_json,
+        room_version=room_version,
+        internal_metadata_dict=internal_metadata_dict,
+        rejected_reason=rejected_reason,
     )
+
+
+def make_event_from_json(
+    event_json: str,
+    room_version: RoomVersion = RoomVersions.V1,
+    internal_metadata_dict: JsonDict | None = None,
+    rejected_reason: str | None = None,
+) -> Event:
+    """Construct an EventBase from the given event JSON string"""
+
+    try:
+        return Event(
+            event_json=event_json,
+            room_version=room_version,
+            internal_metadata_dict=internal_metadata_dict or {},
+            rejected_reason=rejected_reason,
+        )
+    except ValueError:
+        raise SynapseError(400, "Invalid event JSON", Codes.BAD_JSON)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -716,7 +115,7 @@ class _EventRelation:
     aggregation_key: str | None
 
 
-def relation_from_event(event: EventBase) -> _EventRelation | None:
+def relation_from_event(event: Event) -> _EventRelation | None:
     """
     Attempt to parse relation information an event.
 
