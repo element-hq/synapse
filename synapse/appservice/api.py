@@ -357,8 +357,21 @@ class ApplicationServiceApi(SimpleHttpClient):
         if service.supports_ephemeral:
             body.update(
                 {
-                    # TODO: Update to stable prefixes once MSC2409 completes FCP merge.
+                    "ephemeral": ephemeral,
+                }
+            )
+        if service.supports_unstable_ephemeral:
+            body.update(
+                {
                     "de.sorunome.msc2409.ephemeral": ephemeral,
+                }
+            )
+        if service.supports_ephemeral or service.supports_unstable_ephemeral:
+            body.update(
+                {
+                    # TODO: Update to stable prefixes once MSC4203 completes FCP merge.
+                    #  Previously, this was part of MSC2409 which is why it has the
+                    #  mismatched unstable identifier
                     "de.sorunome.msc2409.to_device": to_device_messages,
                 }
             )
