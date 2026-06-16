@@ -1,1 +1,1 @@
-Stabilize support for sending ephemeral events to application services, as per [MSC2409](https://github.com/matrix-org/matrix-spec-proposals/pull/2409). Contribute by @jason-famedly @ Famedly.
+Stabilize support for sending ephemeral events to application services, as per [MSC2409](https://github.com/matrix-org/matrix-spec-proposals/pull/2409). Contributed by @jason-famedly @ Famedly.
