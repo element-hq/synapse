@@ -12,23 +12,22 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.app.phone_stats_home import (
-    PHONE_HOME_INTERVAL,
-    start_phone_stats_home,
-    user_count_gauge,
-)
+from synapse.app.phone_stats_home import PHONE_HOME_INTERVAL, start_phone_stats_home
+from synapse.appservice import ApplicationService
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
+
+from . import get_latest_metrics
 
 TEST_REPORT_STATS_ENDPOINT = "https://fake.endpoint/stats"
 TEST_SERVER_CONTEXT = "test-server-context"
@@ -276,7 +275,21 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
         config["enable_metrics"] = True
-        return self.setup_test_homeserver(config=config)
+        self.appservice = ApplicationService(
+            token="i_am_an_app_service",
+            id="1234",
+            namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
+            # Note: this user does not match the regex above, so that tests
+            # can distinguish the sender from the AS user.
+            sender=UserID.from_string("@as_main:test"),
+        )
+
+        mock_load_appservices = Mock(return_value=[self.appservice])
+        with patch(
+            "synapse.storage.databases.main.appservice.load_appservices",
+            mock_load_appservices,
+        ):
+            return self.setup_test_homeserver(config=config)
 
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -286,30 +299,54 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
         start_phone_stats_home(hs=homeserver)
         super().prepare(reactor, clock, homeserver)
 
-    def test_generate_total_users_gauge(self) -> None:
-        """
-        Test that generate_total_users() populates user_count_gauge correctly,
-        counting only active (non-deactivated) users split by app_service.
-        """
-        server_name = self.hs.config.server.server_name
+    def _get_user_count_metrics(self) -> dict[str, str]:
+        self.reactor.advance(Duration(minutes=5).as_secs())
+        return get_latest_metrics()
 
-        # Register two native users and deactivate one to confirm it is excluded.
-        self.register_user("gauge_user_1", "password")
-        user_2 = self.register_user("gauge_user_2", "password")
+    def _native_key(self) -> str:
+        return f'synapse_user_count{{app_service="native",server_name="{self.hs.config.server.server_name}"}}'
+
+    def _appservice_key(self) -> str:
+        return f'synapse_user_count{{app_service="{self.appservice.id}",server_name="{self.hs.config.server.server_name}"}}'
+
+    def test_two_native_users(self) -> None:
+        """Two registered native users are counted correctly."""
+        self.register_user("user_1", "password")
+        self.register_user("user_2", "password")
+
+        metrics = self._get_user_count_metrics()
+
+        self.assertEqual(metrics.get(self._native_key()), "2.0")
+
+    def test_deactivated_native_user_excluded(self) -> None:
+        """A deactivated native user is not counted."""
+        self.register_user("user_1", "password")
+        user_2 = self.register_user("user_2", "password")
         self.get_success(
             self.store.set_user_deactivated_status(user_id=user_2, deactivated=True)
         )
 
-        # Advance past the 5-minute looping interval so generate_total_users fires again.
-        self.reactor.advance(Duration(minutes=5).as_secs() + 1)
+        metrics = self._get_user_count_metrics()
 
-        # Collect gauge samples for our server_name.
-        samples = {
-            sample.labels["app_service"]: sample.value
-            for metric_family in user_count_gauge.collect()
-            for sample in metric_family.samples
-            if sample.labels.get("server_name") == server_name
-        }
+        self.assertEqual(metrics.get(self._native_key()), "1.0")
 
-        # Only the one active native user should be counted.
-        self.assertEqual(samples.get("native"), 1.0)
+    def test_native_and_appservice_users(self) -> None:
+        """A native user and an appservice user are counted under separate labels."""
+        self.register_user("user_1", "password")
+        self.register_appservice_user("as_user_1", self.appservice.token)
+
+        metrics = self._get_user_count_metrics()
+
+        self.assertEqual(metrics.get(self._native_key()), "1.0")
+        self.assertEqual(metrics.get(self._appservice_key()), "1.0")
+
+    def test_deactivated_appservice_user_excluded(self) -> None:
+        """A deactivated appservice user is not counted."""
+        as_user, _ = self.register_appservice_user("as_user_1", self.appservice.token)
+        self.get_success(
+            self.store.set_user_deactivated_status(user_id=as_user, deactivated=True)
+        )
+
+        metrics = self._get_user_count_metrics()
+
+        self.assertIsNone(metrics.get(self._appservice_key()))

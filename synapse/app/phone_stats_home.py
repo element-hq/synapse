@@ -74,8 +74,8 @@ registered_reserved_users_mau_gauge = Gauge(
     labelnames=[SERVER_NAME_LABEL],
 )
 user_count_gauge = Gauge(
-    "synapse_admin_user_count",
-    "Total active user count within the Synapse database, split by appservice",
+    "synapse_user_count",
+    "Total non-deactivated user count within the Synapse database, split by appservice",
     labelnames=["app_service", SERVER_NAME_LABEL],
 )
 
@@ -272,6 +272,8 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
             result = await store.get_user_count_by_service()
 
+            # Should an appservice disappear, we want to ensure
+            # we don't have stale data.
             user_count_gauge.clear()
 
             for app_service, count in result:

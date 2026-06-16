@@ -42,6 +42,8 @@ from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
 
+from . import get_latest_metrics
+
 
 def get_sample_labels_value(sample: Sample) -> tuple[dict[str, str], float]:
     """Extract the labels and values of a sample.
@@ -390,26 +392,3 @@ class LaterGaugeTests(unittest.HomeserverTestCase):
             f"Missing metric {hs2_metric} in cache metrics {metrics_map}",
         )
         self.assertEqual(hs2_metric_value, "2.0")
-
-
-def get_latest_metrics() -> dict[str, str]:
-    """
-    Collect the latest metrics from the registry and parse them into an easy to use map.
-    The key includes the metric name and labels.
-
-    Example output:
-    {
-        "synapse_util_caches_cache_size": "0.0",
-        "synapse_util_caches_cache_max_size{name="some_cache",server_name="hs1"}": "777.0",
-        ...
-    }
-    """
-    metric_map = {
-        x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-        for x in filter(
-            lambda x: len(x) > 0 and not x.startswith(b"#"),
-            generate_latest(REGISTRY).split(b"\n"),
-        )
-    }
-
-    return metric_map
