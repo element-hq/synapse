@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7ad9fb8f.js";
+            window.path_to_searchindex_js = "searchindex-8ba4ece5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -2012,7 +2012,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.154.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.155.0</td><td>v1.100.0</td></tr>
 </tbody>
 </table>
 </div>
@@ -8471,6 +8471,39 @@ loggers:
 <p>The above logging config will set Synapse as ‘INFO’ logging level by default,
 with the SQL layer at ‘WARNING’, and will log JSON formatted messages to a
 remote endpoint at 10.1.2.3:9999.</p>
+<h2 id="google-cloud-logging-gke"><a class="header" href="#google-cloud-logging-gke">Google Cloud Logging (GKE)</a></h2>
+<p>When running Synapse on GKE, use <code>synapse.logging.GcpJsonFormatter</code>. It outputs
+JSON to stdout with a <code>severity</code> field that Google Cloud Logging maps to the
+correct per-entry severity. Without this, GKE assigns <code>ERROR</code> to everything
+written to stderr regardless of the actual Python log level.</p>
+<p>Example output:</p>
+<pre><code class="language-json">{"severity":"INFO","message":"Processed request: 3.481sec 200 GET /sync","logger":"synapse.access.http.8008","time":"2026-05-12T13:40:37.829Z"}
+</code></pre>
+<p>Configuration:</p>
+<pre><code class="language-yaml">version: 1
+disable_existing_loggers: false
+
+formatters:
+    gcp_json:
+        class: synapse.logging.GcpJsonFormatter
+
+handlers:
+    console:
+        class: logging.StreamHandler
+        formatter: gcp_json
+        stream: ext://sys.stdout
+
+loggers:
+    synapse.storage.SQL:
+        level: WARNING
+    twisted:
+        handlers: [console]
+        propagate: false
+
+root:
+    level: INFO
+    handlers: [console]
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="templates-1"><a class="header" href="#templates-1">Templates</a></h1>
 <p>Synapse uses parametrised templates to generate the content of emails it sends and
@@ -18034,8 +18067,11 @@ writing new pages, please
 <a href="https://github.com/element-hq/synapse/tree/develop/docs#adding-to-the-documentation">build <code>docs</code> to a book</a>
 to check that your contributions render correctly. The docs are written in
 <a href="https://guides.github.com/features/mastering-markdown/">GitHub-Flavoured Markdown</a>.</p>
+<h2 id="making-changes-to-the-rust-code"><a class="header" href="#making-changes-to-the-rust-code">Making changes to the Rust code</a></h2>
 <p>When changes are made to any Rust code then you must call either <code>poetry install</code>
-or <code>maturin develop</code> (if installed) to rebuild the Rust code. Using <a href="https://github.com/PyO3/maturin"><code>maturin</code></a>
+or <code>maturin develop</code> (if installed) to rebuild the Rust code.</p>
+<p>You can use <code>poetry install -v</code> or <code>-vv</code> to get more info about build failures.</p>
+<p>Using <a href="https://github.com/PyO3/maturin"><code>maturin</code></a>
 is quicker than <code>poetry install</code>, so is recommended when making frequent
 changes to the Rust code.</p>
 <h1 id="8-test-test-test"><a class="header" href="#8-test-test-test">8. Test, test, test!</a></h1>
@@ -21372,7 +21408,7 @@ people building from source should ensure they can fetch recent versions of Rust
 (e.g. by using <a href="https://rustup.rs/">rustup</a>).</p>
 <p>The oldest supported version of SQLite is the version
 <a href="https://packages.debian.org/oldstable/libsqlite3-0">provided</a> by
-<a href="https://wiki.debian.org/DebianOldStable">Debian oldstable</a>.</p>
+<a href="https://wiki.debian.org/DebianOldStable">Debian oldstable</a> or the oldest maintenance/security-supported <a href="https://endoflife.date/ubuntu">Ubuntu LTS</a> (Ubuntu versions with only Expanded Security Maintenance are not included).</p>
 <h3 id="context"><a class="header" href="#context">Context</a></h3>
 <p>It is important for system admins to have a clear understanding of the platform
 requirements of Synapse and its deprecation policies so that they can
