@@ -545,7 +545,7 @@ class HomeserverTestCase(TestCase):
         """
         Get a default HomeServer config dict.
         """
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         # apply any additional config which was specified via the override_config
         # decorator.

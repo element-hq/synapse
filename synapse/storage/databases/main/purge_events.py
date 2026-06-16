@@ -326,6 +326,65 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
                 ")" % (table,)
             )
 
+        # Some of the `event_push_actions` we're about to delete may have already
+        # been rotated into the aggregate `event_push_summary` counts. Deleting
+        # the rows without adjusting those counts would leave the summary
+        # over-counting, inflating users' notification counts. So first work out
+        # how much of each summary is attributable to the events being deleted and
+        # decrement it.
+        #
+        # We only count rows that have already been rotated into the summary:
+        # those at or before the rotated-up-to position
+        # (`event_push_summary_stream_ordering`) and after the receipt used to
+        # compute the summary. Rows beyond that position aren't in the summary
+        # yet (they're still counted live from `event_push_actions`), so deleting
+        # them needs no adjustment here. This mirrors how rotation counts them in
+        # `_rotate_notifs_before_txn`.
+        logger.info("[purge] adjusting event_push_summary for deleted events")
+        txn.execute(
+            """
+            SELECT epa.user_id, epa.thread_id,
+                COUNT(CASE WHEN epa.notif = 1 THEN 1 END),
+                COUNT(CASE WHEN epa.unread = 1 THEN 1 END)
+            FROM event_push_actions AS epa
+            INNER JOIN event_push_summary AS eps USING (user_id, room_id, thread_id)
+            WHERE epa.room_id = ?
+                AND epa.event_id IN (
+                    SELECT event_id FROM events_to_purge WHERE should_delete
+                )
+                AND epa.stream_ordering <= (
+                    SELECT stream_ordering FROM event_push_summary_stream_ordering
+                )
+                AND (
+                    eps.last_receipt_stream_ordering IS NULL
+                    OR epa.stream_ordering > eps.last_receipt_stream_ordering
+                )
+            GROUP BY epa.user_id, epa.thread_id
+            """,
+            (room_id,),
+        )
+        summary_decrements = cast(list[tuple[str, str, int, int]], txn.fetchall())
+
+        # `unread_count` is nullable, so `COALESCE` it before subtracting (else
+        # the result would be NULL). Clamp both counts at 0 via `GREATEST`/`MAX`
+        # to guard against ever driving a count negative if the summary is
+        # somehow out of sync with `event_push_actions`.
+        greatest_func = (
+            "GREATEST" if isinstance(self.database_engine, PostgresEngine) else "MAX"
+        )
+        txn.execute_batch(
+            f"""
+            UPDATE event_push_summary
+            SET notif_count = {greatest_func}(notif_count - ?, 0),
+                unread_count = {greatest_func}(COALESCE(unread_count, 0) - ?, 0)
+            WHERE room_id = ? AND user_id = ? AND thread_id = ?
+            """,
+            [
+                (notif_count, unread_count, room_id, user_id, thread_id)
+                for user_id, thread_id, notif_count, unread_count in summary_decrements
+            ],
+        )
+
         # event_push_actions lacks an index on event_id, and has one on
         # (room_id, event_id) instead.
         for table in ("event_push_actions",):
