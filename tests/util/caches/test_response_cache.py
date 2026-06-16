@@ -3,6 +3,7 @@
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -15,7 +16,8 @@
 # Originally licensed under the Apache License, Version 2.0:
 # <http://www.apache.org/licenses/LICENSE-2.0>.
 #
-# [This file includes modifications made by New Vector Limited]
+# [This file includes modifications made by New Vector Limited
+# and Element Creations Ltd]
 #
 #
 
@@ -234,9 +236,9 @@ class ResponseCacheTestCase(TestCase):
                 [], cache.keys(), "cache should not have the result now"
             )
 
-    def test_cache_func_errors(self) -> None:
+    def test_errors_raised_to_all_waiters(self) -> None:
         """If the callback raises an error, the error should be raised to all
-        callers and the result should not be cached"""
+        concurrent callers that were waiting on the same in-flight result."""
         cache = self.with_cache("error_cache", ms=3000)
 
         expected_error = Exception("oh no")
@@ -258,6 +260,60 @@ class ResponseCacheTestCase(TestCase):
         # both results should have completed with the error
         self.assertFailure(wrap_d, Exception)
         self.assertFailure(wrap2_d, Exception)
+
+    def test_errors_are_not_cached(self) -> None:
+        """If the callback raises an error, the error is not cached and
+        served to any subsequent requests.
+        """
+        cache = self.with_cache("error_not_cached", ms=3000)
+
+        return_error = True
+
+        REQUEST_FAKE_WORK_SLEEP_TIME = Duration(seconds=1)
+
+        async def erring_then_fine(_: str) -> str:
+            """
+            This function raises an error the first time it is called,
+            then is fine the next time it is called.
+            """
+            nonlocal return_error
+
+            # pretend to do some work
+            await self.clock.sleep(REQUEST_FAKE_WORK_SLEEP_TIME)
+
+            if return_error:
+                return_error = False
+                raise RuntimeError("this is a temporary error!")
+            return "fine"
+
+        # First call: should get an error
+        wrap_d = defer.ensureDeferred(cache.wrap(0, erring_then_fine, "ignored"))
+
+        # Should be pending
+        self.assertNoResult(wrap_d)
+
+        # Wait for the time it takes for the request to resolve to an error
+        self.reactor.advance(REQUEST_FAKE_WORK_SLEEP_TIME.as_secs())
+
+        # Check that the Deferred resolved to an error of the correct type
+        self.failureResultOf(wrap_d, RuntimeError)
+
+        # Second call: the error shouldn't be replayed
+        # and the next call should succeed, so we should get a successful response
+        wrap2_d = defer.ensureDeferred(cache.wrap(0, erring_then_fine, "ignored"))
+
+        # Since this is a new request (not coalesced with the previous failed one),
+        # this should still be pending
+        self.assertNoResult(wrap2_d)
+
+        # Wait for the time it takes for the request to resolve
+        self.reactor.advance(REQUEST_FAKE_WORK_SLEEP_TIME.as_secs())
+
+        self.assertEqual(
+            self.successResultOf(wrap2_d),
+            "fine",
+            "should get the fresh result, not the cached error",
+        )
 
     def test_cache_cancel_first_wait(self) -> None:
         """Test that cancellation of the deferred returned by wrap() on the
