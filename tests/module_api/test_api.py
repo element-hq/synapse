@@ -265,7 +265,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.message")
         self.assertEqual(event.room_id, room_id)
         self.assertFalse(hasattr(event, "state_key"))
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         expected_requester = create_requester(
             user_id, authenticated_entity=self.hs.hostname
@@ -301,7 +301,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(event.type, "m.room.power_levels")
         self.assertEqual(event.room_id, room_id)
         self.assertEqual(event.state_key, "")
-        self.assertDictEqual(event.content, content)
+        self.assertDictEqual(dict(event.content), content)
 
         # Check that the event was sent
         self.event_creation_handler.create_and_send_nonmember_event.assert_called_with(
@@ -841,10 +841,10 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         create_event = state[(EventTypes.Create, "")]
 
         # `.user_id` is a deprecated alias for `.sender`.
-        self.assertEqual(create_event.user_id, user_id)
+        self.assertEqual(create_event.user_id, user_id)  # type: ignore[attr-defined]
 
         # The event supports looking up keys via `__getitem__` although deprecated
-        self.assertEqual(create_event["room_id"], room_id)
+        self.assertEqual(create_event["room_id"], room_id)  # type: ignore[index]
 
 
 class ModuleApiWorkerTestCase(BaseModuleApiTestCase, BaseMultiWorkerStreamTestCase):

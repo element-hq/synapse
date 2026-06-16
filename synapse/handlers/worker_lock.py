@@ -54,7 +54,18 @@ logger = logging.getLogger(__name__)
 # will not disappear under our feet as long as we don't delete the room.
 NEW_EVENT_DURING_PURGE_LOCK_NAME = "new_event_during_purge_lock"
 
-WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=60)
+WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=5)
+"""
+The maximum wait time before retrying to acquire the lock.
+
+Better to retry more quickly than have workers wait around. 5 seconds is still a
+reasonable gap in time to not overwhelm the CPU/Database.
+
+This matters most when locks go stale as normally, when the lock holder releases, we
+signal to other locks (with the same name/key) that they should try reacquiring the lock
+immediately. But stale locks are never released and instead forcefully reaped behind the
+scenes.
+"""
 WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION = Duration(minutes=10)
 
 

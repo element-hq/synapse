@@ -286,6 +286,83 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         _rotate()
         _assert_counts(0, 0)
 
+    def test_count_aggregation_after_purge(self) -> None:
+        """Purging history must not leave stale counts in event_push_summary.
+
+        Regression test: if notifications had been rotated into
+        `event_push_summary` before a history purge, deleting the purged rows
+        from `event_push_actions` left the summary counts unchanged, inflating
+        the notification count.
+        """
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+
+        def _assert_count(notif_count: int) -> None:
+            aggregate_counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            self.assertEqual(aggregate_counts.get(room_id, 0), notif_count)
+
+        def _create_event() -> str:
+            result = self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content={"msgtype": "m.text", "body": "msg"},
+                tok=other_token,
+            )
+            return result["event_id"]
+
+        def _mark_read(event_id: str) -> None:
+            self.get_success(
+                self.store.insert_receipt(
+                    room_id,
+                    "m.read",
+                    user_id=user_id,
+                    event_ids=[event_id],
+                    thread_id=None,
+                    data={},
+                )
+            )
+
+        def _purge_before(event_id: str) -> None:
+            token = self.get_success(
+                self.store.get_topological_token_for_event(event_id)
+            )
+            token_str = self.get_success(token.to_string(self.store))
+            self.get_success(
+                self.store.purge_history(room_id, token_str, delete_local_events=True)
+            )
+
+        # Mark an initial event as read so that the summary tracks a receipt.
+        read_event_id = _create_event()
+        _mark_read(read_event_id)
+        _assert_count(0)
+
+        # Send some events and rotate them into the summary table.
+        _create_event()
+        _create_event()
+        cutoff_event_id = _create_event()
+        self.get_success(self.store._rotate_notifs())
+        _assert_count(3)
+
+        # Purge history before the most recent event, which deletes the earlier
+        # events (including the one before the read receipt).
+        _purge_before(cutoff_event_id)
+
+        # Only the most recent event survives, so the count should be 1.
+        _assert_count(1)
+
+        # A subsequent rotation must not resurrect the purged counts.
+        self.get_success(self.store._rotate_notifs())
+        _assert_count(1)
+
+        # Reading the surviving event clears the count entirely.
+        _mark_read(cutoff_event_id)
+        _assert_count(0)
+
     def test_count_aggregation_threads(self) -> None:
         """
         This is essentially the same test as test_count_aggregation, but adds

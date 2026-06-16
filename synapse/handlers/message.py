@@ -53,8 +53,9 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.api.urls import ConsentURIBuilder
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase, FrozenEventVMSC4242, relation_from_event
+from synapse.events import EventBase, relation_from_event
 from synapse.events.builder import EventBuilder
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -79,6 +80,7 @@ from synapse.types import (
     Requester,
     RoomAlias,
     StateMap,
+    StrCollection,
     StreamToken,
     UserID,
     create_requester,
@@ -341,7 +343,7 @@ class MessageHandler:
         Returns:
             A dict of user_id to profile info
         """
-        if not requester.app_service:
+        if not requester.app_service_id:
             # We check AS auth after fetching the room membership, as it
             # requires us to pull out all joined members anyway.
             membership, _ = await self.auth.check_user_in_room_or_world_readable(
@@ -363,12 +365,14 @@ class MessageHandler:
         # If this is an AS, double check that they are allowed to see the members.
         # This can either be because the AS user is in the room or because there
         # is a user in the room that the AS is "interested in"
-        if (
-            requester.app_service
-            and requester.user.to_string() not in users_with_profile
-        ):
+        app_service = (
+            self.store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
+        if app_service and requester.user.to_string() not in users_with_profile:
             for uid in users_with_profile:
-                if requester.app_service.is_interested_in_user(uid):
+                if app_service.is_interested_in_user(uid):
                     break
             else:
                 # Loop fell through, AS has no interested users in room
@@ -589,7 +593,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """
@@ -844,7 +848,7 @@ class EventCreationHandler:
             return
 
         # exempt AS users from needing consent
-        if requester.app_service is not None:
+        if requester.app_service_id is not None:
             return
 
         user_id = requester.authenticated_entity
@@ -982,7 +986,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         """
@@ -1127,7 +1131,7 @@ class EventCreationHandler:
         ignore_shadow_ban: bool = False,
         outlier: bool = False,
         depth: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
         delay_id: str | None = None,
     ) -> tuple[EventBase, int]:
         room_id = event_dict["room_id"]
@@ -1253,7 +1257,7 @@ class EventCreationHandler:
         state_map: StateMap[str] | None = None,
         for_batch: bool = False,
         current_state_group: int | None = None,
-        prev_state_events: list[str] | None = None,
+        prev_state_events: StrCollection | None = None,
     ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """Create a new event for a local client. If bool for_batch is true, will
         create an event using the prev_event_ids, and will create an event context for
@@ -1423,8 +1427,10 @@ class EventCreationHandler:
             else:
                 context = await self.state.calculate_context_info(event)
 
-        if requester:
-            context.app_service = requester.app_service
+        if requester and requester.app_service_id:
+            context.app_service = self.store.get_app_service_by_id(
+                requester.app_service_id
+            )
 
         res, new_content = await self._third_party_event_rules.check_event_allowed(
             event, context
@@ -1602,8 +1608,7 @@ class EventCreationHandler:
                         auth_event = event_id_to_event.get(event_id)
                         if auth_event:
                             batched_auth_events[event_id] = auth_event
-                    if event.room_version.msc4242_state_dags:
-                        assert isinstance(event, FrozenEventVMSC4242)
+                    if supports_msc4242_state_dag(event):
                         # State DAG rooms will check that the prev_state_events are not rejected.
                         # To do that, we need to make sure we pass in the prev_state_events as
                         # batched_auth_events, else we will fail the event due to the
@@ -1872,7 +1877,7 @@ class EventCreationHandler:
             state_entry = await self.state.resolve_state_groups_for_events(
                 event.room_id,
                 event_ids=event.prev_state_events
-                if isinstance(event, FrozenEventVMSC4242)
+                if supports_msc4242_state_dag(event)
                 else event.prev_event_ids(),
             )
 
@@ -2089,10 +2094,9 @@ class EventCreationHandler:
                         returned_invite = await federation_handler.send_invite(
                             invitee.domain, event
                         )
-                        event.unsigned.pop("room_state", None)
 
                         # TODO: Make sure the signatures actually are correct.
-                        event.signatures.update(returned_invite.signatures)
+                        event.signatures.update(returned_invite.signatures.as_dict())
 
                 if event.content["membership"] == Membership.KNOCK:
                     maybe_upsert_event_field(
@@ -2291,7 +2295,32 @@ class EventCreationHandler:
                 now = self.clock.time_msec()
                 self._rooms_to_exclude_from_dummy_event_insertion[room_id] = now
 
-    async def _send_dummy_event_for_room(self, room_id: str) -> bool:
+    async def _send_dummy_event_after_room_join(self, room_id: str) -> None:
+        """
+        Creates and sends a dummy event into the given room, referencing the
+        current forward extremities (via `prev_events`).
+        This should only be triggered when handling a remote join while events
+        were sent during the make_join/send_join handshake. The joining
+        homeserver would otherwise not immediately know to backfill those events
+        and would "miss" them.
+        """
+        async with self._worker_lock_handler.acquire_read_write_lock(
+            NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
+        ):
+            dummy_event_sent = await self._send_dummy_event_for_room(
+                room_id, proactively_send=True
+            )
+
+        if not dummy_event_sent:
+            logger.warning(
+                "Failed to send dummy event into room %s after remote join; "
+                "no local user with permission was found",
+                room_id,
+            )
+
+    async def _send_dummy_event_for_room(
+        self, room_id: str, proactively_send: bool = False
+    ) -> bool:
         """Attempt to send a dummy event for the given room.
 
         Args:
@@ -2323,8 +2352,7 @@ class EventCreationHandler:
                             },
                         )
                         context = await unpersisted_context.persist(event)
-
-                        event.internal_metadata.proactively_send = False
+                        event.internal_metadata.proactively_send = proactively_send
 
                         # Since this is a dummy-event it is OK if it is sent by a
                         # shadow-banned user.

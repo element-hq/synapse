@@ -930,7 +930,7 @@ class SpamCheckerTestCaseLegacy(unittest.HomeserverTestCase):
         return resources
 
     def default_config(self) -> dict[str, Any]:
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         config.update(
             {
