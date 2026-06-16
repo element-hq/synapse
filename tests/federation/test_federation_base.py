@@ -36,6 +36,9 @@ class FederationBaseTestCase(unittest.HomeserverTestCase):
             "type": "m.room.message",
             "room_id": "!r:domain",
             "sender": f"@u:{self.hs.config.server.server_name}",
+            "auth_events": [],
+            "prev_events": [],
+            "depth": 1,
             "signatures": {},
             "unsigned": {"age_ts": 1000000},
         }

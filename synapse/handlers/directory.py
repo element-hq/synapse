@@ -132,7 +132,11 @@ class DirectoryHandler:
                 Codes.INVALID_PARAM,
             )
 
-        service = requester.app_service
+        service = (
+            self.store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
         if service:
             if not service.is_room_alias_in_namespace(room_alias_str):
                 raise SynapseError(

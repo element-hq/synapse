@@ -420,8 +420,8 @@ class MSC3861DelegatedAuth(BaseAuth):
                 parent_span.set_tag("user_id", requester.user.to_string())
                 if requester.device_id is not None:
                     parent_span.set_tag("device_id", requester.device_id)
-                if requester.app_service is not None:
-                    parent_span.set_tag("appservice_id", requester.app_service.id)
+                if requester.app_service_id is not None:
+                    parent_span.set_tag("appservice_id", requester.app_service_id)
             return requester
 
     async def _wrapped_get_user_by_req(

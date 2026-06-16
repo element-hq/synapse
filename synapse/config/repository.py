@@ -163,30 +163,9 @@ class ContentRepositoryConfig(Config):
     section = "media"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        # The absolute URI of the static fallback page, used as the `info_uri`
-        # for any media upload limit (whether from config or a module callback)
-        # that doesn't specify one. Built from public_baseurl so that it is a
-        # usable absolute URL. We import here to avoid a circular import at
-        # module load time.
-        from synapse.rest.synapse.client.media_upload_limit_exceeded import (
-            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
-        )
-
-        self.media_upload_limit_fallback_info_uri = (
-            self.root.server.public_baseurl
-            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
-        )
-
-        # Load the template used to render the fallback page.
-        #
-        # We set this up on all workers (not just the media repo) as the
-        # fallback page is served by whichever process handles
-        # `/_synapse/client/media_upload_limit_exceeded`, so every process must
-        # be able to render it.
-        self.media_upload_limit_exceeded_template = self.read_templates(
-            ["media_upload_limit_exceeded.html"],
-            (td for td in (self.root.server.custom_template_directory,) if td),
-        )[0]
+        # We need to set this configuration flag even if this worker
+        # is not a media repo worker, as it's exposed in `/capabilities`
+        self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
 
         # Only enable the media repo if either the media repo is enabled or the
         # current worker app is the media repo.
@@ -291,7 +270,6 @@ class ContentRepositoryConfig(Config):
         self.thumbnail_requirements = parse_thumbnail_requirements(
             config.get("thumbnail_sizes", DEFAULT_THUMBNAIL_SIZES)
         )
-        self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
 
         if self.url_preview_enabled:
             check_requirements("url-preview")
@@ -374,6 +352,31 @@ class ContentRepositoryConfig(Config):
                     can_upgrade=entry.can_upgrade,
                 )
             )
+
+        # The absolute URI of the static fallback page, used as the `info_uri`
+        # for any media upload limit (whether from config or a module callback)
+        # that doesn't specify one. Built from public_baseurl so that it is a
+        # usable absolute URL. We import here to avoid a circular import at
+        # module load time.
+        from synapse.rest.synapse.client.media_upload_limit_exceeded import (
+            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
+        )
+
+        self.media_upload_limit_fallback_info_uri = (
+            self.root.server.public_baseurl
+            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
+        )
+
+        # Load the template used to render the fallback page.
+        #
+        # We set this up on all workers (not just the media repo) as the
+        # fallback page is served by whichever process handles
+        # `/_synapse/client/media_upload_limit_exceeded`, so every process must
+        # be able to render it.
+        self.media_upload_limit_exceeded_template = self.read_templates(
+            ["media_upload_limit_exceeded.html"],
+            (td for td in (self.root.server.custom_template_directory,) if td),
+        )[0]
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None

@@ -43,7 +43,13 @@ from synapse.rest.admin._base import (
 from synapse.storage.databases.main.media_repository import (
     MediaSortOrder,
 )
-from synapse.types import JsonDict, UserID
+from synapse.types import (
+    JsonDict,
+    MultiWriterStreamToken,
+    StreamKeyType,
+    StreamToken,
+    UserID,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -243,6 +249,7 @@ class ListQuarantineChanges(RestServlet):
         self.auth = hs.get_auth()
         self.server_name = hs.hostname
         self.replication = hs.get_replication_data_handler()
+        self.notifier = hs.get_notifier()
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
@@ -256,8 +263,7 @@ class ListQuarantineChanges(RestServlet):
             # The caller is trying to get future data, which we don't allow because
             # we know it's an invalid state that should never happen. We could
             # wait until we reach the token but we might as well not waste our
-            # resources on that which is why `wait_for_quarantined_media_stream_id(...)`
-            # has assertions around this.
+            # resources on that.
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "The `from` token is considered invalid because it includes stream positions "
@@ -268,9 +274,16 @@ class ListQuarantineChanges(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
+        # Create a `StreamToken` that's compatible with `wait_for_stream_token`.
+        #
+        # FIXME: Ideally, this endpoint would use a `StreamToken` to begin with
+        from_token = StreamToken.START.copy_and_replace(
+            StreamKeyType.QUARANTINED_MEDIA, MultiWriterStreamToken(stream=from_id)
+        )
+
         # We need to wait to ensure that our current worker is actually caught up with
         # the stream position, otherwise we might not return what we think we're returning.
-        if not await self.store.wait_for_quarantined_media_stream_id(from_id):
+        if not await self.notifier.wait_for_stream_token(from_token):
             raise SynapseError(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 "Timed out while waiting for the worker serving this request to catch up to the given "
@@ -280,7 +293,7 @@ class ListQuarantineChanges(RestServlet):
                 errcode=Codes.UNKNOWN,
             )
 
-        to_id = await self.store.get_current_quarantined_media_stream_id()
+        to_id = self.store.get_current_quarantined_media_stream_id()
         changes = await self.store.get_quarantined_media_changes(
             from_id=from_id,
             to_id=to_id,

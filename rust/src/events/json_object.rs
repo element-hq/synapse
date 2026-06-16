@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 /// 1. Fast access of top-level keys (e.g. `event.content["key"]`)
 /// 2. Pure Rust implementation.
 #[derive(Serialize, Deserialize, Clone, Default)]
-#[pyclass(mapping, frozen)]
+#[pyclass(mapping, frozen, skip_from_py_object)]
 #[serde(transparent)]
 pub struct JsonObject {
     object: Arc<BTreeMap<Box<str>, serde_json::Value>>,
@@ -193,11 +193,17 @@ impl JsonObject {
     }
 }
 
+impl JsonObject {
+    pub fn get_field(&self, key: &str) -> Option<&serde_json::Value> {
+        self.object.get(key)
+    }
+}
+
 /// Helper class returned by `JsonObject.keys()` to act as a view into the keys
 /// of the object.
 ///
 /// This needs to both be iterable *and* operate like a set.
-#[pyclass(frozen)]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct JsonObjectKeysView {
     object: JsonObject,
@@ -397,7 +403,7 @@ impl JsonObjectKeysView {
 
 /// Helper class returned by `JsonObject.values()` to act as a view into the
 /// values of the object.
-#[pyclass(frozen)]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct JsonObjectValuesView {
     object: JsonObject,
@@ -440,7 +446,7 @@ impl JsonObjectValuesView {
 /// unless the values are unhashable. Since the values are immutable we could
 /// support it, but it's more work and nobody seems to actually use the set
 /// operations on `dict_items` in practice.
-#[pyclass(frozen)]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct JsonObjectItemsView {
     object: JsonObject,
