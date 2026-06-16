@@ -324,9 +324,16 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
             },
             "erase": False,
         }
+
+        # If an appservice calls this, append the user_id
+        url = (
+            f"account/deactivate?user_id={user_id}"
+            if tok == self.appservice.token
+            else "account/deactivate"
+        )
         channel = self.make_request(
             "POST",
-            "account/deactivate",
+            url,
             request_data,
             access_token=tok,
         )
@@ -367,3 +374,12 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(metrics.get(self._native_key()), "1.0")
         self.assertEqual(metrics.get(self._appservice_key()), "1.0")
+
+    def test_deactivated_appservice_user_excluded(self) -> None:
+        """A deactivated appservice user is not counted."""
+        as_user, _ = self.register_appservice_user("as_user_1", self.appservice.token)
+        self._deactivate_user(as_user, self.appservice.token)
+
+        metrics = self._get_user_count_metrics()
+
+        self.assertIsNone(metrics.get(self._appservice_key()))
