@@ -3146,8 +3146,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
                     {
                         "time_period": "1d",
                         "max_size": "1K",
-                        "extra_field": "test",
-                        "extra_config": {"dynamic_thumbnails": True},
+                        "extra_unknown_field": "test",
+                        "extra_unknown_config": {"foo": True},
                     }
                 ],
                 **config_dict,
