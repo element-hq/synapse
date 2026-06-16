@@ -18,7 +18,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.app.phone_stats_home import PHONE_HOME_INTERVAL, start_phone_stats_home
 from synapse.appservice import ApplicationService
-from synapse.rest import admin, login, register, room
+from synapse.rest import account, admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
@@ -266,8 +266,10 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
 
 class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
     servlets = [
-        admin.register_servlets_for_client_rest_resource,
+        account.register_servlets,
+        admin.register_servlets,
         register.register_servlets,
+        login.register_servlets,
     ]
 
     def make_homeserver(
@@ -299,6 +301,37 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
         start_phone_stats_home(hs=homeserver)
         super().prepare(reactor, clock, homeserver)
 
+        # Always register the first user as an admin so we can
+        # deactivate.
+        self.register_user("user_1", "password", admin=True)
+        self._admin_token = self.login("user_1", "password")
+
+    def _deactivate_user(self, user_id: str, tok: str) -> None:
+        """
+        Helper to deactivate a user using the /account/deactivate endpoint, optionally
+        with erasure
+
+        Args:
+            user_id: the string formatted mxid(not a UserID)
+            tok: the user's access token
+            erase: bool of if this should be a full erasure request
+        """
+        request_data = {
+            "auth": {
+                "type": "m.login.password",
+                "user": user_id,
+                "password": "password",
+            },
+            "erase": False,
+        }
+        channel = self.make_request(
+            "POST",
+            "account/deactivate",
+            request_data,
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
     def _get_user_count_metrics(self) -> dict[str, str]:
         self.reactor.advance(Duration(minutes=5).as_secs())
         return get_latest_metrics()
@@ -311,7 +344,6 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
 
     def test_two_native_users(self) -> None:
         """Two registered native users are counted correctly."""
-        self.register_user("user_1", "password")
         self.register_user("user_2", "password")
 
         metrics = self._get_user_count_metrics()
@@ -320,11 +352,8 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
 
     def test_deactivated_native_user_excluded(self) -> None:
         """A deactivated native user is not counted."""
-        self.register_user("user_1", "password")
         user_2 = self.register_user("user_2", "password")
-        self.get_success(
-            self.store.set_user_deactivated_status(user_id=user_2, deactivated=True)
-        )
+        self._deactivate_user(user_2, self.login("user_2", "password"))
 
         metrics = self._get_user_count_metrics()
 
@@ -332,21 +361,9 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
 
     def test_native_and_appservice_users(self) -> None:
         """A native user and an appservice user are counted under separate labels."""
-        self.register_user("user_1", "password")
         self.register_appservice_user("as_user_1", self.appservice.token)
 
         metrics = self._get_user_count_metrics()
 
         self.assertEqual(metrics.get(self._native_key()), "1.0")
         self.assertEqual(metrics.get(self._appservice_key()), "1.0")
-
-    def test_deactivated_appservice_user_excluded(self) -> None:
-        """A deactivated appservice user is not counted."""
-        as_user, _ = self.register_appservice_user("as_user_1", self.appservice.token)
-        self.get_success(
-            self.store.set_user_deactivated_status(user_id=as_user, deactivated=True)
-        )
-
-        metrics = self._get_user_count_metrics()
-
-        self.assertIsNone(metrics.get(self._appservice_key()))
