@@ -2615,7 +2615,7 @@ class RoomDelayedEventTestCase(RoomBase):
     )
     def test_delayed_event_custom_user_limit_exceeded(self) -> None:
         """
-        Test that delayed event limits work propertly when
+        Test that delayed event limits work properly when
         the number of already scheduled events exceeds the configured limit.
 
         This can be invoked by the server admin lowering the configured limit & restarting the server
