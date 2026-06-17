@@ -513,7 +513,7 @@ class RoomSummaryHandler:
         ):
             return None
 
-        room_entry = await self._build_room_entry(room_id, for_federation=bool(origin))
+        room_entry = await self._build_room_entry(room_id)
 
         # If the room is not a space return just the room information.
         if room_entry.get("room_type") != RoomTypes.SPACE or not include_children:
@@ -769,14 +769,12 @@ class RoomSummaryHandler:
         # pending invite, etc.
         return await self._is_local_room_accessible(room_id, requester)
 
-    async def _build_room_entry(self, room_id: str, for_federation: bool) -> JsonDict:
+    async def _build_room_entry(self, room_id: str) -> JsonDict:
         """
         Generate en entry summarising a single room.
 
         Args:
             room_id: The room ID to summarize.
-            for_federation: True if this is a summary requested over federation.
-                Unused; kept for API stability.
 
         Returns:
             The JSON dictionary for the room.
