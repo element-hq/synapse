@@ -17,6 +17,7 @@
 //!  - Database pool [`PythonDatabasePoolWrapper`] which allows you to start a...
 //!  - transaction [`LoggingTransactionWrapper`] and query the database
 
+use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
@@ -263,4 +264,12 @@ impl Transaction for LoggingTransactionWrapper {
         })
         .map_err(anyhow::Error::from)
     }
+}
+
+struct PythonRow {
+    // TODO
+}
+
+impl Row for PythonRow {
+    // TODO
 }

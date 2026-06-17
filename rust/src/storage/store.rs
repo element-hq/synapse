@@ -93,11 +93,15 @@ impl<P: DatabasePool> Store<P> {
                         )
                         .await?;
 
-                    // `None` (no row) and a falsy value are treated the same.
-                    let enabled = rows
-                        .first()
-                        .and_then(|row| row.first())
-                        .is_some_and(|value| parse_db_bool(value));
+                    let enabled = match &rows[..] {
+                        // If there is no row, default to disabled
+                        [] => false,
+                        // Found an entry for the user
+                        [row] => row.try_get(0),
+                        _ => {
+                            panic!("Programming error")
+                        }
+                    };
 
                     Ok(enabled)
                 }
@@ -107,12 +111,4 @@ impl<P: DatabasePool> Store<P> {
 
         Ok(is_feature_enabled_for_user)
     }
-}
-
-/// Parse a boolean as returned by either database engine.
-///
-/// Postgres renders `BOOLEAN` columns as `"True"`/`"False"` while SQLite stores
-/// them as integers (`"1"`/`"0"`).
-fn parse_db_bool(value: &str) -> bool {
-    matches!(value, "True" | "true" | "t" | "1")
 }

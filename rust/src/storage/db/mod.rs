@@ -14,19 +14,12 @@
  */
 
 use std::future::Future;
+use std::str::FromStr;
 
 use futures::future::BoxFuture;
 
 pub mod python_db_pool;
 pub mod rust_db_pool;
-
-/// A single database row, represented as the textual value of each column.
-///
-/// This is intentionally a lossy, engine-agnostic representation: it is the
-/// lowest common denominator that both the Python (`LoggingTransaction`) and
-/// native `tokio-postgres` backends can produce. Callers are responsible for
-/// parsing the strings into richer types as needed.
-pub type Row = Vec<String>;
 
 /// A database connection pool.
 ///
@@ -60,5 +53,22 @@ pub trait DatabasePool: Send + Sync {
 /// interact with the database
 #[async_trait::async_trait]
 pub trait Transaction: Send {
-    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error>;
+    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<dyn Row>, anyhow::Error>;
+}
+
+/// A row of data returned from the database by a query.
+pub trait Row {
+    /// Returns the number of values in the row.
+    fn len(&self) -> usize;
+
+    /// Deserializes a value from the row.
+    ///
+    /// The value can be specified by its numeric index in the row.
+    fn try_get<T>(&self, index: usize) -> Result<T, anyhow::Error>;
+}
+
+impl std::fmt::Debug for dyn Row {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO
+    }
 }
