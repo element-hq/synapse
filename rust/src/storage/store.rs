@@ -97,9 +97,9 @@ impl<P: DatabasePool> Store<P> {
                         .await?;
 
                     let enabled = match &rows[..] {
-                        // If there is no row, default to disabled
+                        // If there is no row for this user, default to disabled
                         [] => false,
-                        // Found an entry for the user
+                        // Otherwise, we should only find a single row for this (user, feature)
                         [row] => row.try_get(0)?,
                         _ => {
                             panic!("Programming error")
