@@ -20,14 +20,19 @@
 #
 from unittest.mock import AsyncMock, Mock
 
+from canonicaljson import encode_canonical_json
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import (
-    MAX_EDU_SIZE,
     MAX_EDUS_PER_TRANSACTION,
+    SOFT_MAX_EDU_SIZE,
     EduTypes,
 )
 from synapse.api.errors import Codes
+from synapse.handlers.devicemessage import (
+    _create_new_to_device_edu,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, sendtodevice, sync
 from synapse.server import HomeServer
@@ -122,8 +127,8 @@ class SendToDeviceTestCase(HomeserverTestCase):
         _ = self.register_user("u1", "pass")
         user1_tok = self.login("u1", "pass", "d1")
 
-        # Create a message that is over the `MAX_EDU_SIZE`
-        test_msg = {"foo": "a" * MAX_EDU_SIZE}
+        # Create a message that is over the `SOFT_MAX_EDU_SIZE`
+        test_msg = {"foo": "a" * SOFT_MAX_EDU_SIZE}
         channel = self.make_request(
             "PUT",
             "/_matrix/client/r0/sendToDevice/m.test/12345",
@@ -153,7 +158,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # 2 messages, each just big enough to fit into their own EDU
         for i in range(2):
             messages[f"@remote_user{i}:" + destination] = {
-                "device": {"foo": "a" * (MAX_EDU_SIZE - 1000)}
+                "device": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)}
             }
 
         channel = self.make_request(
@@ -171,6 +176,107 @@ class SendToDeviceTestCase(HomeserverTestCase):
             number_of_edus_sent += len(call[0][1]()["edus"])
 
         self.assertEqual(number_of_edus_sent, 2)
+
+    def test_edu_large_messages_splitting_one_user(self) -> None:
+        """
+        Test that a bunch of to-device messages for the same user are split over multiple EDUs if they are
+        collectively too large to fit into a single EDU
+        """
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
+
+        sender = self.hs.get_federation_sender()
+
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        messages = {}
+
+        # 2 messages, each just big enough to fit into their own EDU
+        messages["@remote_user:" + destination] = {
+            "device1": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)},
+            "device2": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)},
+        }
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/12345678",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        self.get_success(sender.send_device_messages([destination]))
+
+        number_of_edus_sent = 0
+        for call in mock_send_transaction.call_args_list:
+            number_of_edus_sent += len(call[0][1]()["edus"])
+
+        self.assertEqual(number_of_edus_sent, 2)
+
+    def test_edu_large_messages_not_splitting_one_user(self) -> None:
+        """Test that a couple of to-device messages for the same user that just
+        collectively fit in a single EDU do not get split into multiple EDUs.
+
+        This tests that we don't over-split messages into multiple EDUs when we
+        don't need to.
+        """
+
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
+
+        sender = self.hs.get_federation_sender()
+
+        user_id = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        remote_user = "@remote_user:" + destination
+        messages = {}
+
+        # We create two messages such that the combined size of the messages is
+        # just under the `SOFT_MAX_EDU_SIZE` limit, so they should be able to
+        # fit in a single EDU together, but not separately.
+        wrapper_size = len(
+            encode_canonical_json(_create_new_to_device_edu(user_id, "m.test", {}))
+        )
+        max_size_of_message = (
+            SOFT_MAX_EDU_SIZE
+            - wrapper_size
+            # Size of the device content wrapper, `{"remote_user": …}`
+            - (len(remote_user) + 5)
+        )
+        messages[remote_user] = {
+            # The constants are the size of each individual message
+            "d1": {"a": "a" * (max_size_of_message - 13 - 16)},
+            "d2": {"b": "b"},
+        }
+
+        # The full EDU size should now be just shy of the `SOFT_MAX_EDU_SIZE` limit
+        full_edu = encode_canonical_json(
+            _create_new_to_device_edu(user_id, "m.test", messages)
+        )
+        self.assertEqual(len(full_edu), SOFT_MAX_EDU_SIZE - 1)
+
+        # Now send the messages, and check they are sent in a single EDU.
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/12345678",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        self.get_success(sender.send_device_messages([destination]))
+
+        number_of_edus_sent = 0
+        for call in mock_send_transaction.call_args_list:
+            number_of_edus_sent += len(call[0][1]()["edus"])
+
+        self.assertEqual(number_of_edus_sent, 1)
 
     def test_edu_small_messages_not_splitting(self) -> None:
         """
@@ -226,7 +332,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         for i in range(number_of_edus_to_send):
             messages[f"@remote_user{i}:" + destination] = {
-                "device": {"foo": "a" * (MAX_EDU_SIZE - 1000)}
+                "device": {"foo": "a" * (SOFT_MAX_EDU_SIZE - 1000)}
             }
 
         channel = self.make_request(

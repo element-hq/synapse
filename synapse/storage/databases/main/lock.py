@@ -53,9 +53,9 @@ logger = logging.getLogger(__name__)
 _RENEWAL_INTERVAL = Duration(seconds=30)
 
 # How long before an acquired lock times out.
-_LOCK_TIMEOUT_MS = 2 * 60 * 1000
+_LOCK_TIMEOUT = Duration(minutes=2)
 
-_LOCK_REAP_INTERVAL = Duration(milliseconds=_LOCK_TIMEOUT_MS / 10.0)
+_LOCK_REAP_INTERVAL = Duration(milliseconds=_LOCK_TIMEOUT.as_millis() / 10.0)
 
 
 class LockStore(SQLBaseStore):
@@ -63,7 +63,7 @@ class LockStore(SQLBaseStore):
 
     Locks are identified by a name and key. A lock is acquired by inserting into
     the `worker_locks` table if a) there is no existing row for the name/key or
-    b) the existing row has a `last_renewed_ts` older than `_LOCK_TIMEOUT_MS`.
+    b) the existing row has a `last_renewed_ts` older than `_LOCK_TIMEOUT`.
 
     When a lock is taken out the instance inserts a random `token`, the instance
     that holds that token holds the lock until it drops (or times out).
@@ -182,7 +182,7 @@ class LockStore(SQLBaseStore):
                     self._instance_name,
                     token,
                     now,
-                    now - _LOCK_TIMEOUT_MS,
+                    now - _LOCK_TIMEOUT.as_millis(),
                 ),
             )
 
@@ -340,7 +340,9 @@ class LockStore(SQLBaseStore):
         """
 
         def reap_stale_read_write_locks_txn(txn: LoggingTransaction) -> None:
-            txn.execute(delete_sql, (self.clock.time_msec() - _LOCK_TIMEOUT_MS,))
+            txn.execute(
+                delete_sql, (self.clock.time_msec() - _LOCK_TIMEOUT.as_millis(),)
+            )
             if txn.rowcount:
                 logger.info("Reaped %d stale locks", txn.rowcount)
 
@@ -489,7 +491,7 @@ class Lock:
         )
         return (
             last_renewed_ts is not None
-            and self._clock.time_msec() - _LOCK_TIMEOUT_MS < last_renewed_ts
+            and self._clock.time_msec() - _LOCK_TIMEOUT.as_millis() < last_renewed_ts
         )
 
     async def __aenter__(self) -> None:

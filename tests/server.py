@@ -101,6 +101,7 @@ from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 from tests.utils import (
     LEAVE_DB,
@@ -422,7 +423,7 @@ def make_request(
         path = b"/" + path
 
     if isinstance(content, dict):
-        content = json.dumps(content).encode("utf8")
+        content = json_encoder.encode(content).encode("utf8")
     if isinstance(content, str):
         content = content.encode("utf8")
 
@@ -1107,7 +1108,7 @@ def setup_test_homeserver(
         reactor = ThreadedMemoryReactorClock()
 
     if config is None:
-        config = default_config(server_name, parse=True)
+        config = default_config(server_name=server_name, parse=True)
 
     server_name = config.server.server_name
     if not isinstance(server_name, str):

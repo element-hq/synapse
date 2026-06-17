@@ -39,7 +39,18 @@ MAX_PDU_SIZE = 65536
 # Allowing oversized EDU's results in failed `/federation/v1/send` transactions (because
 # the request overall can overrun the `max_request_body_size`) which are retried over
 # and over and prevent other outbound federation traffic from happening.
-MAX_EDU_SIZE = 65536
+#
+# We may send EDU's that are larger than this, but we aim to avoid doing so.
+SOFT_MAX_EDU_SIZE = 65536
+
+# This is the maximum size of the content of a to-device message. This is not
+# (yet) spec'ed but is our own reasonable default. We need to set a limit on the
+# size of to-device message contents, as they get sent over federation and
+# therefore need to fit inside transactions.
+#
+# https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding this to the
+# spec.
+MAX_TO_DEVICE_CONTENT_SIZE = SOFT_MAX_EDU_SIZE
 
 # This is defined in the Matrix spec and enforced by the receiver.
 MAX_EDUS_PER_TRANSACTION = 100

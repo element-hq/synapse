@@ -40,7 +40,7 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.events import EventBase
-from synapse.events.utils import SerializeEventConfig
+from synapse.events.utils import FilteredEvent, SerializeEventConfig
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
@@ -357,8 +357,21 @@ class ApplicationServiceApi(SimpleHttpClient):
         if service.supports_ephemeral:
             body.update(
                 {
-                    # TODO: Update to stable prefixes once MSC2409 completes FCP merge.
+                    "ephemeral": ephemeral,
+                }
+            )
+        if service.supports_unstable_ephemeral:
+            body.update(
+                {
                     "de.sorunome.msc2409.ephemeral": ephemeral,
+                }
+            )
+        if service.supports_ephemeral or service.supports_unstable_ephemeral:
+            body.update(
+                {
+                    # TODO: Update to stable prefixes once MSC4203 completes FCP merge.
+                    #  Previously, this was part of MSC2409 which is why it has the
+                    #  mismatched unstable identifier
                     "de.sorunome.msc2409.to_device": to_device_messages,
                 }
             )
@@ -545,7 +558,7 @@ class ApplicationServiceApi(SimpleHttpClient):
     ) -> list[JsonDict]:
         time_now = self.clock.time_msec()
         return await self._event_serializer.serialize_events(
-            list(events),
+            [FilteredEvent(event=e, membership=None) for e in events],
             time_now,
             config=SerializeEventConfig(
                 as_client_event=True,

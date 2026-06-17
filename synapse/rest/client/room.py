@@ -53,6 +53,7 @@ from synapse.api.errors import (
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
     EventClientSerializer,
+    FilteredEvent,
     SerializeEventConfig,
     format_event_for_client_v2,
 )
@@ -286,7 +287,7 @@ class RoomStateEventRestServlet(RestServlet):
 
         if format == "event":
             event = await self._event_serializer.serialize_event(
-                data,
+                FilteredEvent.state(data),
                 self.clock.time_msec(),
                 config=SerializeEventConfig(
                     event_format=format_event_for_client_v2,
@@ -335,7 +336,7 @@ class RoomStateEventRestServlet(RestServlet):
                 )
 
         origin_server_ts = None
-        if requester.app_service:
+        if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
         sticky_duration_ms: int | None = None
@@ -434,7 +435,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         content = parse_json_object_from_request(request)
 
         origin_server_ts = None
-        if requester.app_service:
+        if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
         sticky_duration_ms: int | None = None
@@ -866,7 +867,9 @@ async def encode_messages_response(
         serialized_result[
             "state"
         ] = await serialize_deps.event_serializer.serialize_events(
-            get_messages_result.state, time_now, config=serialize_options
+            [FilteredEvent.state(e) for e in get_messages_result.state],
+            time_now,
+            config=serialize_options,
         )
 
     return serialized_result
@@ -1172,7 +1175,7 @@ class RoomEventContextServlet(RestServlet):
                 config=serializer_options,
             ),
             "state": await self._event_serializer.serialize_events(
-                event_context.state,
+                [FilteredEvent.state(e) for e in event_context.state],
                 time_now,
                 config=serializer_options,
             ),
@@ -1715,16 +1718,18 @@ class RoomHierarchyRestServlet(RestServlet):
 
 class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
     PATTERNS = (
-        # deprecated endpoint, to be removed
+        # deprecated unstable endpoint, to be removed
         re.compile(
             "^/_matrix/client/unstable/im.nheko.summary"
             "/rooms/(?P<room_identifier>[^/]*)/summary$"
         ),
-        # recommended endpoint
+        # recommended unstable endpoint
         re.compile(
             "^/_matrix/client/unstable/im.nheko.summary"
             "/summary/(?P<room_identifier>[^/]*)$"
         ),
+        # stable endpoint
+        re.compile("^/_matrix/client/v1/room_summary/(?P<room_identifier>[^/]*)$"),
     )
     CATEGORY = "Client API requests"
 
@@ -1772,8 +1777,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomTypingRestServlet(hs).register(http_server)
     RoomEventContextServlet(hs).register(http_server)
     RoomHierarchyRestServlet(hs).register(http_server)
-    if hs.config.experimental.msc3266_enabled:
-        RoomSummaryRestServlet(hs).register(http_server)
+    RoomSummaryRestServlet(hs).register(http_server)
     RoomEventServlet(hs).register(http_server)
     JoinedRoomsRestServlet(hs).register(http_server)
     RoomAliasListServlet(hs).register(http_server)
