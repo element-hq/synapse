@@ -97,7 +97,7 @@ impl<P: DatabasePool> Store<P> {
                         // If there is no row, default to disabled
                         [] => false,
                         // Found an entry for the user
-                        [row] => row.try_get(0),
+                        [row] => row.try_get(0)?,
                         _ => {
                             panic!("Programming error")
                         }

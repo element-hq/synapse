@@ -17,12 +17,16 @@
 // interfaces are compatible with `tokio-postgres`.
 
 use anyhow::Context;
-use bb8_postgres::tokio_postgres::{self, types::ToSql, IsolationLevel};
+use bb8_postgres::tokio_postgres::{
+    self,
+    types::{ToSql, Type},
+    IsolationLevel,
+};
 use bb8_postgres::PostgresConnectionManager;
 use futures::future::BoxFuture;
 use postgres_native_tls::MakeTlsConnector;
 
-use crate::storage::db::{DatabasePool, Row, Transaction};
+use crate::storage::db::{DatabasePool, Row, Transaction, Value};
 
 /// Native Rust database access backed by `tokio-postgres` (for use in synapse-rust-apps)
 pub struct RustDatabasePool {
@@ -96,7 +100,11 @@ struct TokioPostgresTransaction<'a> {
 
 #[async_trait::async_trait]
 impl Transaction for TokioPostgresTransaction<'_> {
-    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
+    async fn query(
+        &mut self,
+        sql: &str,
+        args: &[&str],
+    ) -> Result<Vec<Box<dyn Row>>, anyhow::Error> {
         // Synapse SQL uses `?` placeholders; `tokio-postgres` uses `$1`, `$2`, ...
         let sql = convert_param_style(sql);
 
@@ -108,20 +116,79 @@ impl Transaction for TokioPostgresTransaction<'_> {
             .await
             .context("Failed to run query")?;
 
-        let mut out: Vec<Row> = Vec::with_capacity(rows.len());
-        for row in rows {
-            let mut cells: Row = Vec::with_capacity(row.len());
-            for i in 0..row.len() {
-                // Best-effort textual extraction to match the engine-agnostic
-                // `Row` type. A real implementation would map column types
-                // properly; this only exists to prove the interface fits.
-                let value: String = row.try_get(i).unwrap_or_default();
-                cells.push(value);
-            }
-            out.push(cells);
-        }
+        let out = rows
+            .into_iter()
+            .map(|row| Box::new(TokioPostgresRow { row }) as Box<dyn Row>)
+            .collect();
 
         Ok(out)
+    }
+}
+
+/// A [`Row`] backed by a native [`tokio_postgres::Row`].
+#[derive(Debug)]
+struct TokioPostgresRow {
+    row: tokio_postgres::Row,
+}
+
+impl Row for TokioPostgresRow {
+    fn len(&self) -> usize {
+        self.row.len()
+    }
+
+    fn value(&self, index: usize) -> Result<Value, anyhow::Error> {
+        let column = self.row.columns().get(index).ok_or_else(|| {
+            anyhow::anyhow!(
+                "tried to get column {index} but the row only has {} column(s)",
+                self.row.len()
+            )
+        })?;
+
+        // Dispatch on the column's Postgres type, leaning on `tokio-postgres`'s
+        // own `FromSql` impls to read the cell. Everything is read as
+        // `Option<_>` so a SQL `NULL` becomes `Value::Null`.
+        let ty = column.type_();
+        let value = if *ty == Type::BOOL {
+            self.row
+                .try_get::<_, Option<bool>>(index)?
+                .map_or(Value::Null, Value::Bool)
+        } else if *ty == Type::INT2 {
+            self.row
+                .try_get::<_, Option<i16>>(index)?
+                .map_or(Value::Null, |v| Value::Int(v.into()))
+        } else if *ty == Type::INT4 {
+            self.row
+                .try_get::<_, Option<i32>>(index)?
+                .map_or(Value::Null, |v| Value::Int(v.into()))
+        } else if *ty == Type::INT8 {
+            self.row
+                .try_get::<_, Option<i64>>(index)?
+                .map_or(Value::Null, Value::Int)
+        } else if *ty == Type::FLOAT4 {
+            self.row
+                .try_get::<_, Option<f32>>(index)?
+                .map_or(Value::Null, |v| Value::Float(v.into()))
+        } else if *ty == Type::FLOAT8 {
+            self.row
+                .try_get::<_, Option<f64>>(index)?
+                .map_or(Value::Null, Value::Float)
+        } else if *ty == Type::TEXT
+            || *ty == Type::VARCHAR
+            || *ty == Type::BPCHAR
+            || *ty == Type::NAME
+        {
+            self.row
+                .try_get::<_, Option<String>>(index)?
+                .map_or(Value::Null, Value::Text)
+        } else if *ty == Type::BYTEA {
+            self.row
+                .try_get::<_, Option<Vec<u8>>>(index)?
+                .map_or(Value::Null, Value::Bytes)
+        } else {
+            anyhow::bail!("unsupported Postgres column type `{ty}` at column {index}");
+        };
+
+        Ok(value)
     }
 }
 

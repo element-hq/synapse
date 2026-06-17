@@ -14,7 +14,6 @@
  */
 
 use std::future::Future;
-use std::str::FromStr;
 
 use futures::future::BoxFuture;
 
@@ -53,22 +52,118 @@ pub trait DatabasePool: Send + Sync {
 /// interact with the database
 #[async_trait::async_trait]
 pub trait Transaction: Send {
-    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<dyn Row>, anyhow::Error>;
+    async fn query(&mut self, sql: &str, args: &[&str])
+        -> Result<Vec<Box<dyn Row>>, anyhow::Error>;
+}
+
+/// A single backend-agnostic value within a [`Row`].
+///
+/// Each pool maps the values its database driver hands back into this common
+/// set, so callers can work with one representation regardless of engine.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    /// A SQL `NULL`.
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Text(String),
+    Bytes(Vec<u8>),
 }
 
 /// A row of data returned from the database by a query.
-pub trait Row {
+///
+/// Modelled after [`tokio_postgres::Row`]: values are pulled out by their numeric
+/// index with [`get`](Self::get) / [`try_get`](Self::try_get). Each database pool
+/// implements this trait for its own native row type — the Python pool inspects
+/// the Python type of each cell, while the `tokio-postgres` pool reuses that
+/// crate's own `FromSql` machinery — converting cells into the engine-agnostic
+/// [`Value`] returned by [`Row::value`].
+pub trait Row: std::fmt::Debug + Send {
     /// Returns the number of values in the row.
     fn len(&self) -> usize;
 
-    /// Deserializes a value from the row.
+    /// Returns whether the row contains no values.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the backend-agnostic [`Value`] at `index`, converting from the
+    /// pool's native representation.
     ///
-    /// The value can be specified by its numeric index in the row.
-    fn try_get<T>(&self, index: usize) -> Result<T, anyhow::Error>;
+    /// Errors if `index` is out of bounds.
+    fn value(&self, index: usize) -> Result<Value, anyhow::Error>;
 }
 
-impl std::fmt::Debug for dyn Row {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO
+impl dyn Row {
+    /// Deserializes a value from the row, specified by its numeric index,
+    /// returning an error if the index is out of bounds or the value cannot be
+    /// converted into `T`.
+    pub fn try_get<T: FromValue>(&self, index: usize) -> Result<T, anyhow::Error> {
+        T::from_value(self.value(index)?)
+    }
+}
+
+/// Converts a backend-agnostic [`Value`] into a concrete Rust type, analogous to
+/// `tokio-postgres`'s `FromSql`.
+pub trait FromValue: Sized {
+    fn from_value(value: Value) -> Result<Self, anyhow::Error>;
+}
+
+impl FromValue for bool {
+    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+        match value {
+            Value::Bool(b) => Ok(b),
+            // SQLite has no native boolean type and stores them as integers.
+            Value::Int(i) => Ok(i != 0),
+            other => anyhow::bail!("cannot read {other:?} as bool"),
+        }
+    }
+}
+
+impl FromValue for i64 {
+    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+        match value {
+            Value::Int(i) => Ok(i),
+            Value::Bool(b) => Ok(b as i64),
+            other => anyhow::bail!("cannot read {other:?} as i64"),
+        }
+    }
+}
+
+impl FromValue for f64 {
+    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+        match value {
+            Value::Float(f) => Ok(f),
+            Value::Int(i) => Ok(i as f64),
+            other => anyhow::bail!("cannot read {other:?} as f64"),
+        }
+    }
+}
+
+impl FromValue for String {
+    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+        match value {
+            Value::Text(s) => Ok(s),
+            other => anyhow::bail!("cannot read {other:?} as String"),
+        }
+    }
+}
+
+impl FromValue for Vec<u8> {
+    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+        match value {
+            Value::Bytes(b) => Ok(b),
+            other => anyhow::bail!("cannot read {other:?} as bytes"),
+        }
+    }
+}
+
+impl<T: FromValue> FromValue for Option<T> {
+    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+        match value {
+            Value::Null => Ok(None),
+            other => Ok(Some(T::from_value(other)?)),
+        }
     }
 }

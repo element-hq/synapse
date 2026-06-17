@@ -21,10 +21,15 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
-use pyo3::{exceptions::PyRuntimeError, intern, prelude::*, types::PyCFunction, types::PyList};
+use pyo3::{
+    exceptions::{PyRuntimeError, PyTypeError},
+    intern,
+    prelude::*,
+    types::{PyBool, PyBytes, PyCFunction, PyFloat, PyInt, PyList, PyString},
+};
 
 use crate::http_client::await_deferred;
-use crate::storage::db::{DatabasePool, Row, Transaction};
+use crate::storage::db::{DatabasePool, Row, Transaction, Value};
 
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
@@ -231,8 +236,12 @@ impl LoggingTransactionWrapper {
 
 #[async_trait::async_trait]
 impl Transaction for LoggingTransactionWrapper {
-    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
-        Python::attach(|py| -> PyResult<Vec<Row>> {
+    async fn query(
+        &mut self,
+        sql: &str,
+        args: &[&str],
+    ) -> Result<Vec<Box<dyn Row>>, anyhow::Error> {
+        Python::attach(|py| -> PyResult<Vec<Box<dyn Row>>> {
             // Convert the Rust `&[&str]` of SQL parameters into a Python sequence
             // so it can be passed through to the Python-side `execute`. Note that
             // `LoggingTransaction.execute` converts `?` placeholders into the
@@ -241,23 +250,21 @@ impl Transaction for LoggingTransactionWrapper {
             let args = PyList::new(py, args)?;
             self.execute(py, sql, args.as_any())?;
 
-            // Pull the rows back out. Each cell is converted to its textual
-            // representation so we have a single engine-agnostic `Row` type;
-            // callers parse the strings into richer types as needed.
+            // Pull the rows back out, converting each cell from its Python type
+            // into the engine-agnostic `Value` representation as we go.
             let rows_py = self
                 .logging_transaction_py
                 .bind(py)
                 .call_method0(intern!(py, "fetchall"))?;
 
-            let mut rows: Vec<Row> = Vec::new();
+            let mut rows: Vec<Box<dyn Row>> = Vec::new();
             for row_py in rows_py.try_iter()? {
                 let row_py = row_py?;
-                let mut row: Row = Vec::new();
+                let mut values: Vec<Value> = Vec::new();
                 for cell in row_py.try_iter()? {
-                    let cell = cell?;
-                    row.push(cell.str()?.to_string_lossy().into_owned());
+                    values.push(py_cell_to_value(&cell?)?);
                 }
-                rows.push(row);
+                rows.push(Box::new(PythonRow { values }));
             }
 
             Ok(rows)
@@ -266,10 +273,51 @@ impl Transaction for LoggingTransactionWrapper {
     }
 }
 
+/// Convert a single cell from a Python row into a backend-agnostic [`Value`] by
+/// inspecting its Python type (the pyo3 equivalent of `isinstance` checks).
+fn py_cell_to_value(cell: &Bound<'_, PyAny>) -> PyResult<Value> {
+    // `None` maps to SQL `NULL`.
+    if cell.is_none() {
+        return Ok(Value::Null);
+    }
+
+    // A `bool` *is* an `int` in Python, so ensure we try `bool` first.
+    if let Ok(b) = cell.cast::<PyBool>() {
+        Ok(Value::Bool(b.extract()?))
+    } else if let Ok(i) = cell.cast::<PyInt>() {
+        Ok(Value::Int(i.extract()?))
+    } else if let Ok(f) = cell.cast::<PyFloat>() {
+        Ok(Value::Float(f.extract()?))
+    } else if let Ok(s) = cell.cast::<PyString>() {
+        Ok(Value::Text(s.to_string()))
+    } else if let Ok(bytes) = cell.cast::<PyBytes>() {
+        Ok(Value::Bytes(bytes.as_bytes().to_vec()))
+    } else {
+        Err(PyTypeError::new_err(format!(
+            "unsupported column type {} returned from the database",
+            cell.get_type().name()?
+        )))
+    }
+}
+
+/// A [`Row`] backed by values pulled out of a Python `LoggingTransaction`.
+#[derive(Debug)]
 struct PythonRow {
-    // TODO
+    /// Each cell, already converted from its Python type into a [`Value`].
+    values: Vec<Value>,
 }
 
 impl Row for PythonRow {
-    // TODO
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn value(&self, index: usize) -> Result<Value, anyhow::Error> {
+        self.values.get(index).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "tried to get column {index} but the row only has {} column(s)",
+                self.values.len()
+            )
+        })
+    }
 }
