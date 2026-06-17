@@ -2616,7 +2616,10 @@ class RoomDelayedEventTestCase(RoomBase):
     def test_delayed_event_custom_user_limit_exceeded(self) -> None:
         """
         Test that delayed event limits work propertly when
-        the number of already scheduled events exceeds the limit.
+        the number of already scheduled events exceeds the configured limit.
+
+        This can be invoked by the server admin lowering the configured limit & restarting the server
+        while a user has fewer scheduled delayed events than the old limit, but more than the new limit.
         """
         for i in range(3):
             send_after_ms = 1000 * i
@@ -2631,6 +2634,7 @@ class RoomDelayedEventTestCase(RoomBase):
             channel = self.make_request(*args)
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
+        # Simulate lowering the configured limit & applying it with a server restart
         self.hs.config.server.max_delayed_events_per_user = 1
 
         channel = self.make_request(*args)
