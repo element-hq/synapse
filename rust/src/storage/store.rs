@@ -16,7 +16,10 @@
 use futures::FutureExt;
 use serde::Serialize;
 
-use crate::{config::SynapseConfig, storage::db::DatabasePool};
+use crate::{
+    config::SynapseConfig,
+    storage::db::{DatabasePool, RowExt},
+};
 
 /// Currently supported per-user features
 #[derive(Serialize, Debug)]

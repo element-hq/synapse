@@ -17,7 +17,6 @@
 //!  - Database pool [`PythonDatabasePoolWrapper`] which allows you to start a...
 //!  - transaction [`LoggingTransactionWrapper`] and query the database
 
-use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
@@ -25,7 +24,7 @@ use pyo3::{
     exceptions::{PyRuntimeError, PyTypeError},
     intern,
     prelude::*,
-    types::{PyBool, PyBytes, PyCFunction, PyFloat, PyInt, PyList, PyString},
+    types::{PyBool, PyCFunction, PyFloat, PyInt, PyList, PyString},
 };
 
 use crate::http_client::await_deferred;
@@ -236,12 +235,8 @@ impl LoggingTransactionWrapper {
 
 #[async_trait::async_trait]
 impl Transaction for LoggingTransactionWrapper {
-    async fn query(
-        &mut self,
-        sql: &str,
-        args: &[&str],
-    ) -> Result<Vec<Box<dyn Row>>, anyhow::Error> {
-        Python::attach(|py| -> PyResult<Vec<Box<dyn Row>>> {
+    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
+        Python::attach(|py| -> PyResult<Vec<Row>> {
             // Convert the Rust `&[&str]` of SQL parameters into a Python sequence
             // so it can be passed through to the Python-side `execute`. Note that
             // `LoggingTransaction.execute` converts `?` placeholders into the
@@ -257,14 +252,14 @@ impl Transaction for LoggingTransactionWrapper {
                 .bind(py)
                 .call_method0(intern!(py, "fetchall"))?;
 
-            let mut rows: Vec<Box<dyn Row>> = Vec::new();
+            let mut rows: Vec<Row> = Vec::new();
             for row_py in rows_py.try_iter()? {
                 let row_py = row_py?;
-                let mut values: Vec<Value> = Vec::new();
+                let mut row: Row = Vec::new();
                 for cell in row_py.try_iter()? {
-                    values.push(py_cell_to_value(&cell?)?);
+                    row.push(py_cell_to_value(&cell?)?);
                 }
-                rows.push(Box::new(PythonRow { values }));
+                rows.push(row);
             }
 
             Ok(rows)
@@ -281,7 +276,7 @@ fn py_cell_to_value(cell: &Bound<'_, PyAny>) -> PyResult<Value> {
         return Ok(Value::Null);
     }
 
-    // A `bool` *is* an `int` in Python, so ensure we try `bool` first.
+    // A `bool` *is* an `int` in SQLite, so ensure we try `bool` first.
     if let Ok(b) = cell.cast::<PyBool>() {
         Ok(Value::Bool(b.extract()?))
     } else if let Ok(i) = cell.cast::<PyInt>() {
@@ -290,34 +285,10 @@ fn py_cell_to_value(cell: &Bound<'_, PyAny>) -> PyResult<Value> {
         Ok(Value::Float(f.extract()?))
     } else if let Ok(s) = cell.cast::<PyString>() {
         Ok(Value::Text(s.to_string()))
-    } else if let Ok(bytes) = cell.cast::<PyBytes>() {
-        Ok(Value::Bytes(bytes.as_bytes().to_vec()))
     } else {
         Err(PyTypeError::new_err(format!(
             "unsupported column type {} returned from the database",
             cell.get_type().name()?
         )))
-    }
-}
-
-/// A [`Row`] backed by values pulled out of a Python `LoggingTransaction`.
-#[derive(Debug)]
-struct PythonRow {
-    /// Each cell, already converted from its Python type into a [`Value`].
-    values: Vec<Value>,
-}
-
-impl Row for PythonRow {
-    fn len(&self) -> usize {
-        self.values.len()
-    }
-
-    fn value(&self, index: usize) -> Result<Value, anyhow::Error> {
-        self.values.get(index).cloned().ok_or_else(|| {
-            anyhow::anyhow!(
-                "tried to get column {index} but the row only has {} column(s)",
-                self.values.len()
-            )
-        })
     }
 }

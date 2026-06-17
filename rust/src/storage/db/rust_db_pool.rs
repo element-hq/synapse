@@ -17,11 +17,7 @@
 // interfaces are compatible with `tokio-postgres`.
 
 use anyhow::Context;
-use bb8_postgres::tokio_postgres::{
-    self,
-    types::{ToSql, Type},
-    IsolationLevel,
-};
+use bb8_postgres::tokio_postgres::{self, types::ToSql, IsolationLevel};
 use bb8_postgres::PostgresConnectionManager;
 use futures::future::BoxFuture;
 use postgres_native_tls::MakeTlsConnector;
@@ -100,11 +96,7 @@ struct TokioPostgresTransaction<'a> {
 
 #[async_trait::async_trait]
 impl Transaction for TokioPostgresTransaction<'_> {
-    async fn query(
-        &mut self,
-        sql: &str,
-        args: &[&str],
-    ) -> Result<Vec<Box<dyn Row>>, anyhow::Error> {
+    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
         // Synapse SQL uses `?` placeholders; `tokio-postgres` uses `$1`, `$2`, ...
         let sql = convert_param_style(sql);
 
@@ -116,79 +108,38 @@ impl Transaction for TokioPostgresTransaction<'_> {
             .await
             .context("Failed to run query")?;
 
-        let out = rows
-            .into_iter()
-            .map(|row| Box::new(TokioPostgresRow { row }) as Box<dyn Row>)
-            .collect();
-
-        Ok(out)
+        rows.iter().map(tokio_row_to_row).collect()
     }
 }
 
-/// A [`Row`] backed by a native [`tokio_postgres::Row`].
-#[derive(Debug)]
-struct TokioPostgresRow {
-    row: tokio_postgres::Row,
+/// Convert a native [`tokio_postgres::Row`] into our engine-agnostic [`Row`].
+fn tokio_row_to_row(row: &tokio_postgres::Row) -> Result<Row, anyhow::Error> {
+    (0..row.len())
+        .map(|index| tokio_cell_to_value(row, index))
+        .collect()
 }
 
-impl Row for TokioPostgresRow {
-    fn len(&self) -> usize {
-        self.row.len()
-    }
-
-    fn value(&self, index: usize) -> Result<Value, anyhow::Error> {
-        let column = self.row.columns().get(index).ok_or_else(|| {
-            anyhow::anyhow!(
-                "tried to get column {index} but the row only has {} column(s)",
-                self.row.len()
-            )
-        })?;
-
-        // Dispatch on the column's Postgres type, leaning on `tokio-postgres`'s
-        // own `FromSql` impls to read the cell. Everything is read as
-        // `Option<_>` so a SQL `NULL` becomes `Value::Null`.
-        let ty = column.type_();
-        let value = if *ty == Type::BOOL {
-            self.row
-                .try_get::<_, Option<bool>>(index)?
-                .map_or(Value::Null, Value::Bool)
-        } else if *ty == Type::INT2 {
-            self.row
-                .try_get::<_, Option<i16>>(index)?
-                .map_or(Value::Null, |v| Value::Int(v.into()))
-        } else if *ty == Type::INT4 {
-            self.row
-                .try_get::<_, Option<i32>>(index)?
-                .map_or(Value::Null, |v| Value::Int(v.into()))
-        } else if *ty == Type::INT8 {
-            self.row
-                .try_get::<_, Option<i64>>(index)?
-                .map_or(Value::Null, Value::Int)
-        } else if *ty == Type::FLOAT4 {
-            self.row
-                .try_get::<_, Option<f32>>(index)?
-                .map_or(Value::Null, |v| Value::Float(v.into()))
-        } else if *ty == Type::FLOAT8 {
-            self.row
-                .try_get::<_, Option<f64>>(index)?
-                .map_or(Value::Null, Value::Float)
-        } else if *ty == Type::TEXT
-            || *ty == Type::VARCHAR
-            || *ty == Type::BPCHAR
-            || *ty == Type::NAME
-        {
-            self.row
-                .try_get::<_, Option<String>>(index)?
-                .map_or(Value::Null, Value::Text)
-        } else if *ty == Type::BYTEA {
-            self.row
-                .try_get::<_, Option<Vec<u8>>>(index)?
-                .map_or(Value::Null, Value::Bytes)
-        } else {
-            anyhow::bail!("unsupported Postgres column type `{ty}` at column {index}");
-        };
-
-        Ok(value)
+/// Convert a single cell of a [`tokio_postgres::Row`] into a [`Value`].
+///
+/// Dispatch on the column's Postgres type, leaning on `tokio-postgres`'s own
+/// `FromSql` impls to read the cell. Everything is read as `Option<_>` so a SQL
+/// `NULL` becomes `Value::Null`.
+fn tokio_cell_to_value(row: &tokio_postgres::Row, index: usize) -> Result<Value, anyhow::Error> {
+    if let Ok(value) = row.try_get::<_, Option<bool>>(index) {
+        Ok(value.map_or(Value::Null, Value::Bool))
+    } else if let Ok(value) = row.try_get::<_, Option<i64>>(index) {
+        Ok(value.map_or(Value::Null, Value::Int))
+    } else if let Ok(value) = row.try_get::<_, Option<f64>>(index) {
+        Ok(value.map_or(Value::Null, Value::Float))
+    } else if let Ok(value) = row.try_get::<_, Option<String>>(index) {
+        Ok(value.map_or(Value::Null, Value::Text))
+    } else {
+        let ty = row.columns()[index].type_();
+        anyhow::bail!(
+            "Unsupported `tokio-postgres` type {} encountered when trying to convert it \
+            to our generic database `Value` type. You probably just need to implement it in `tokio_cell_to_value(...)`.",
+            ty
+        )
     }
 }
 

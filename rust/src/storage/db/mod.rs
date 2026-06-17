@@ -52,8 +52,7 @@ pub trait DatabasePool: Send + Sync {
 /// interact with the database
 #[async_trait::async_trait]
 pub trait Transaction: Send {
-    async fn query(&mut self, sql: &str, args: &[&str])
-        -> Result<Vec<Box<dyn Row>>, anyhow::Error>;
+    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error>;
 }
 
 /// A single backend-agnostic value within a [`Row`].
@@ -68,39 +67,37 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Text(String),
-    Bytes(Vec<u8>),
 }
 
 /// A row of data returned from the database by a query.
 ///
-/// Modelled after [`tokio_postgres::Row`]: values are pulled out by their numeric
-/// index with [`get`](Self::get) / [`try_get`](Self::try_get). Each database pool
-/// implements this trait for its own native row type — the Python pool inspects
-/// the Python type of each cell, while the `tokio-postgres` pool reuses that
-/// crate's own `FromSql` machinery — converting cells into the engine-agnostic
-/// [`Value`] returned by [`Row::value`].
-pub trait Row: std::fmt::Debug + Send {
-    /// Returns the number of values in the row.
-    fn len(&self) -> usize;
+/// Each pool converts the cells its database driver hands back into the
+/// engine-agnostic [`Value`] representation, so a row is simply a list of them.
+/// Values are pulled out by their numeric index with [`RowExt::try_get`].
+pub type Row = Vec<Value>;
 
-    /// Returns whether the row contains no values.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Returns the backend-agnostic [`Value`] at `index`, converting from the
-    /// pool's native representation.
-    ///
-    /// Errors if `index` is out of bounds.
-    fn value(&self, index: usize) -> Result<Value, anyhow::Error>;
-}
-
-impl dyn Row {
+/// Extension methods for reading typed values out of a [`Row`].
+///
+/// Modelled after [`tokio_postgres::Row`]'s `try_get`: [`try_get`](Self::try_get)
+/// converts the [`Value`] at a given index into the requested type via
+/// [`FromValue`] (our analogue of `tokio-postgres`'s `FromSql`).
+pub trait RowExt {
     /// Deserializes a value from the row, specified by its numeric index,
     /// returning an error if the index is out of bounds or the value cannot be
     /// converted into `T`.
-    pub fn try_get<T: FromValue>(&self, index: usize) -> Result<T, anyhow::Error> {
-        T::from_value(self.value(index)?)
+    fn try_get<T: FromValue>(&self, index: usize) -> Result<T, anyhow::Error>;
+}
+
+impl RowExt for Row {
+    fn try_get<T: FromValue>(&self, index: usize) -> Result<T, anyhow::Error> {
+        let value = self.get(index).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "tried to get column {index} but the row only has {} column(s)",
+                self.len()
+            )
+        })?;
+
+        T::from_value(value)
     }
 }
 
@@ -146,15 +143,6 @@ impl FromValue for String {
         match value {
             Value::Text(s) => Ok(s),
             other => anyhow::bail!("cannot read {other:?} as String"),
-        }
-    }
-}
-
-impl FromValue for Vec<u8> {
-    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
-        match value {
-            Value::Bytes(b) => Ok(b),
-            other => anyhow::bail!("cannot read {other:?} as bytes"),
         }
     }
 }
