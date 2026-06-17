@@ -155,16 +155,15 @@ class DelayedEventsStore(SQLBaseStore):
                 retcol="COUNT(*)",
             )
             if num_existing >= limit:
-                # Cover case of num_existing > limit, which can happen by reducing
-                # the configured limit after delayed events have already been added
-                # (or by calling this method with a limit lower than the configured one)
-                # TODO Remove "AS subquery" after dropping support for PostgreSQL <16
+                #
+                # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
                 txn.execute(
                     """
                     SELECT MAX(send_ts) FROM (
                         SELECT * FROM delayed_events
                         WHERE user_localpart = ?
-                        ORDER BY send_ts LIMIT ?
+                        ORDER BY send_ts ASC
+                        LIMIT ?
                     ) AS subquery
                     """,
                     (
