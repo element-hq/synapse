@@ -13,12 +13,13 @@
 #
 
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
-from synapse.api.errors import ShadowBanError, SynapseError
+from synapse.api.errors import Codes, ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.http.site import SynapseRequest
@@ -353,12 +354,31 @@ class DelayedEventsHandler:
         Returns: The ID of the added delayed event.
 
         Raises:
-            SynapseError: if the delayed event fails validation checks.
+            SynapseError: if the delayed event fails validation checks, or
+                if the requested delay is longer than allowed, or
+                if sending delayed events has been disallowed entirely.
         """
         # Use standard request limiter for scheduling new delayed events.
         # TODO: Instead apply ratelimiting based on the scheduled send time.
         # See https://github.com/element-hq/synapse/issues/18021
         await self._request_ratelimiter.ratelimit(requester)
+
+        max_delay = self._config.server.max_event_delay_ms
+        if (
+            max_delay is None
+            or max_delay <= 0
+            or (limit := self._config.server.max_delayed_events_per_user) <= 0
+        ):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Sending delayed events has been disallowed",
+            )
+        if delay > max_delay:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "The requested delay exceeds the allowed maximum",
+                Codes.INVALID_PARAM,
+            )
 
         self._event_creation_handler.validator.validate_builder(
             self._event_creation_handler.event_builder_factory.for_room_version(
@@ -385,7 +405,7 @@ class DelayedEventsHandler:
             origin_server_ts=origin_server_ts,
             content=content,
             delay=delay,
-            limit=self._config.server.max_delayed_events_per_user,
+            limit=limit,
             sticky_duration_ms=sticky_duration_ms,
         )
 

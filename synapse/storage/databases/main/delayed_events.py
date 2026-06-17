@@ -139,11 +139,6 @@ class DelayedEventsStore(SQLBaseStore):
                 how many delayed events they may have scheduled at once.
             SynapseError: if the user is not allowed to schedule any delayed events.
         """
-        if limit <= 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Sending delayed events has been disallowed",
-            )
         delay_id = _generate_delay_id()
         send_ts = Timestamp(creation_ts + delay)
 

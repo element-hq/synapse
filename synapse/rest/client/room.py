@@ -215,7 +215,6 @@ class RoomStateEventRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self._event_serializer = hs.get_event_client_serializer()
-        self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
@@ -343,7 +342,7 @@ class RoomStateEventRestServlet(RestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_delay(request, self._max_event_delay_ms)
+        delay = _parse_request_delay(request)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -416,7 +415,6 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
-        self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
@@ -442,7 +440,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_delay(request, self._max_event_delay_ms)
+        delay = _parse_request_delay(request)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -515,39 +513,19 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-def _parse_request_delay(
-    request: SynapseRequest,
-    max_delay: int | None,
-) -> int | None:
+def _parse_request_delay(request: SynapseRequest) -> int | None:
     """Parses from the request string the delay parameter for
         delayed event requests, and checks it for correctness.
 
     Args:
         request: the twisted HTTP request.
-        max_delay: the maximum allowed value of the delay parameter,
-            or None if no delay parameter is allowed.
     Returns:
         The value of the requested delay, or None if it was absent.
 
     Raises:
-        SynapseError: if the delay parameter is present and forbidden,
-            or if it exceeds the maximum allowed value.
+        SynapseError: if the delay parameter is present and invalid.
     """
-    delay = parse_integer(request, "org.matrix.msc4140.delay")
-    if delay is None:
-        return None
-    if max_delay is None:
-        raise SynapseError(
-            HTTPStatus.BAD_REQUEST,
-            "Sending delayed events has been disallowed",
-        )
-    if delay > max_delay:
-        raise SynapseError(
-            HTTPStatus.BAD_REQUEST,
-            "The requested delay exceeds the allowed maximum.",
-            Codes.INVALID_PARAM,
-        )
-    return delay
+    return parse_integer(request, "org.matrix.msc4140.delay")
 
 
 # TODO: Needs unit testing for room ID + alias joins
