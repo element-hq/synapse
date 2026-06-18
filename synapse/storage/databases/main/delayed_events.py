@@ -13,12 +13,11 @@
 #
 
 import logging
-from http import HTTPStatus
 from typing import TYPE_CHECKING, NewType
 
 import attr
 
-from synapse.api.errors import LimitExceededError, NotFoundError, SynapseError
+from synapse.api.errors import LimitExceededError, NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
