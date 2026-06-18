@@ -15,9 +15,8 @@ import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Coroutine, Generator, TypeVar, Union
+from typing import Any, TypeVar
 
-from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.logging.context import (
@@ -118,31 +117,6 @@ class HttpClientTestCase(HomeserverTestCase):
             for callbable, args, kwargs in triggers:
                 callbable(*args, **kwargs)
 
-    def till_deferred_has_result(
-        self,
-        awaitable: Union[
-            "Coroutine[Deferred[Any], Any, T]",
-            "Generator[Deferred[Any], Any, T]",
-            "Deferred[T]",
-        ],
-    ) -> "Deferred[T]":
-        """Wait until a deferred has a result.
-
-        This is useful because the Rust HTTP client will resolve the deferred
-        using reactor.callFromThread, which are only run when we call
-        reactor.advance.
-        """
-        deferred = ensureDeferred(awaitable)
-        tries = 0
-        while not deferred.called:
-            time.sleep(0.1)
-            self.reactor.advance(0)
-            tries += 1
-            if tries > 100:
-                raise Exception("Timed out waiting for deferred to resolve")
-
-        return deferred
-
     def _check_current_logcontext(self, expected_logcontext_string: str) -> None:
         context = current_context()
         assert isinstance(context, LoggingContext) or isinstance(context, _Sentinel), (
@@ -159,32 +133,31 @@ class HttpClientTestCase(HomeserverTestCase):
         Test to make sure we can make a basic request and get the expected
         response.
         """
+        request_d = self._rust_http_client.get(
+            url=self.server.endpoint,
+            response_limit=1 * 1024 * 1024,
+        )
+        self.wait_on_thread(request_d)
 
-        async def do_request() -> None:
-            resp_body = await self._rust_http_client.get(
-                url=self.server.endpoint,
-                response_limit=1 * 1024 * 1024,
-            )
-            raw_response = json_decoder.decode(resp_body.decode("utf-8"))
-            self.assertEqual(raw_response, {"ok": True})
+        resp_body = self.get_success(request_d)
+        raw_response = json_decoder.decode(resp_body.decode("utf-8"))
+        self.assertEqual(raw_response, {"ok": True})
 
-        self.get_success(self.till_deferred_has_result(do_request()))
         self.assertEqual(self.server.calls, 1)
 
     def test_request_response_limit_exceeded(self) -> None:
         """
         Test to make sure we handle the response limit being exceeded
         """
-
-        async def do_request() -> None:
-            await self._rust_http_client.get(
-                url=self.server.endpoint,
-                # Small limit so we hit the limit
-                response_limit=1,
-            )
+        request_d = self._rust_http_client.get(
+            url=self.server.endpoint,
+            # Small limit so we hit the limit
+            response_limit=1,
+        )
+        self.wait_on_thread(request_d)
 
         self.assertFailure(
-            self.till_deferred_has_result(do_request()),
+            request_d,
             RuntimeError,
         )
         self.assertEqual(self.server.calls, 1)
