@@ -26,7 +26,7 @@
 //! The entry point is [`serialize_events`], which reads the Python inputs (the
 //! redaction map, bundled aggregations and module-callback additions) once per
 //! batch and then serializes each event — recursing entirely in Rust into
-//! redactions and bundled aggregations via [`serialize_core_inner`].
+//! redactions and bundled aggregations via [`serialize_event`].
 
 use std::collections::HashMap;
 
@@ -254,7 +254,7 @@ pub fn serialize_events<'py>(
     events
         .iter()
         .map(|(event, membership)| {
-            let serialized = serialize_core_inner(
+            let serialized = serialize_event(
                 event.get(),
                 time_now_ms,
                 config,
@@ -272,7 +272,7 @@ pub fn serialize_events<'py>(
 /// module-callback additions and field filtering, then recurse into any
 /// bundled aggregations.
 #[allow(clippy::too_many_arguments)]
-fn serialize_core_inner(
+fn serialize_event(
     event: &Event,
     time_now_ms: i64,
     config: &SerializeEventConfig,
@@ -386,7 +386,7 @@ fn inject_bundled_aggregations(
         // aggregations). The spec (v1.5) only requires event_id/origin_server_ts/
         // sender, but per MSC3925 we include the full edit.
         // https://spec.matrix.org/v1.5/client-server-api/#server-side-aggregation-of-mreplace-relationships
-        let serialized = serialize_core_inner(
+        let serialized = serialize_event(
             replace,
             time_now_ms,
             config,
@@ -402,7 +402,7 @@ fn inject_bundled_aggregations(
     if let Some(thread) = &aggregation.thread {
         // The thread's latest event is serialized with the same bundle map, so
         // it may recurse further.
-        let serialized_latest = serialize_core_inner(
+        let serialized_latest = serialize_event(
             &thread.latest_event,
             time_now_ms,
             config,
