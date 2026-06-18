@@ -461,8 +461,8 @@ fn serialize_event_value(
         }
     };
 
-    // Always include the event_id field, for room version v3+ these aren't in
-    // the event JSON.
+    // Always include the `event_id` field in a client event. For room version
+    // v3+, these aren't in the PDU event JSON.
     d.insert(
         EVENT_ID.to_owned(),
         Value::String(event.event_id().to_owned()),
