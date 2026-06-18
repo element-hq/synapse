@@ -133,31 +133,35 @@ class HttpClientTestCase(HomeserverTestCase):
         Test to make sure we can make a basic request and get the expected
         response.
         """
-        request_d = self._rust_http_client.get(
-            url=self.server.endpoint,
-            response_limit=1 * 1024 * 1024,
+        resp_body = self.get_success(
+            # We have to wait for the async Rust (running on the Tokio thread pool) to do
+            # its thing (see `create_deferred(...)` usage)
+            self.wait_on_thread(
+                self._rust_http_client.get(
+                    url=self.server.endpoint,
+                    response_limit=1 * 1024 * 1024,
+                )
+            )
         )
-        self.wait_on_thread(request_d)
-
-        resp_body = self.get_success(request_d)
         raw_response = json_decoder.decode(resp_body.decode("utf-8"))
-        self.assertEqual(raw_response, {"ok": True})
 
+        self.assertEqual(raw_response, {"ok": True})
         self.assertEqual(self.server.calls, 1)
 
     def test_request_response_limit_exceeded(self) -> None:
         """
         Test to make sure we handle the response limit being exceeded
         """
-        request_d = self._rust_http_client.get(
-            url=self.server.endpoint,
-            # Small limit so we hit the limit
-            response_limit=1,
-        )
-        self.wait_on_thread(request_d)
-
         self.assertFailure(
-            request_d,
+            # We have to wait for the async Rust (running on the Tokio thread pool) to do
+            # its thing (see `create_deferred(...)` usage)
+            self.wait_on_thread(
+                self._rust_http_client.get(
+                    url=self.server.endpoint,
+                    # Small limit so we hit the limit
+                    response_limit=1,
+                )
+            ),
             RuntimeError,
         )
         self.assertEqual(self.server.calls, 1)

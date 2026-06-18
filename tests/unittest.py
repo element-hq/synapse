@@ -96,6 +96,8 @@ setup_logging()
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
+
 TV = TypeVar("TV")
 _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
 
@@ -474,17 +476,47 @@ class HomeserverTestCase(TestCase):
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False
 
-    def wait_on_thread(self, deferred: Deferred, timeout: int = 10) -> None:
+    def wait_on_thread(
+        self,
+        awaitable: Awaitable[TV],
+        timeout: int = 10,
+    ) -> Deferred[TV]:
         """
-        Wait until a Deferred is done, where it's waiting on a real thread.
+        Wait until the Awaitable is done, where it's waiting on a real thread. This
+        could be things spawned on the Twisted reactor threadpool or Tokio runtime
+        (async Rust code).
+
+        Ideally, this behavior (giving time for other threads to drive forward) would be
+        built-in to wherever we drive the Twisted reactor but we don't want to slow down
+        the entire test suite with real sleeps.
+
+        With other functions like `get_success(...)`, it only advances the reactor's
+        *virtual* clock in a tight loop, never yielding real wall-clock time, so the
+        Tokio threads never get a chance to run. Instead we advance the Twisted reactor
+        while also sleeping a little real time each iteration.
+
+        Args:
+            awaitable: The thing to wait for
+            timeout: The maximum amount of real time we should before giving up
         """
         start_time = time.time()
 
+        deferred: Deferred[TV] = ensureDeferred(awaitable)  # type: ignore[arg-type]
         while not deferred.called:
             if start_time + timeout < time.time():
-                raise ValueError("Timed out waiting for threadpool")
-            self.reactor.advance(0.01)
+                raise ValueError(
+                    "Timed out waiting for work happening on a thread to finish"
+                )
+            # Give some real wall-clock time for other threads to do work. This could be
+            # things spawned on the Twisted reactor threadpool or Tokio thread pool
+            # (async Rust code).
             time.sleep(0.01)
+            # Advance the Twisted reactor as the thread may have scheduled something on
+            # the reactor to run (like `reactor.callFromThread(...)`)
+            self.reactor.advance(0)
+
+        # Make it easy to chain other things
+        return deferred
 
     def wait_for_background_updates(self) -> None:
         """Block until all background database updates have completed."""
