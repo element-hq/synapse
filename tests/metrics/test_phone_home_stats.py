@@ -2,6 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright (C) 2025 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -16,13 +17,16 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.app.phone_stats_home import PHONE_HOME_INTERVAL, start_phone_stats_home
+from synapse.app.phone_stats_home import (
+    COUNT_USERS_INTERVAL,
+    PHONE_HOME_INTERVAL,
+    start_phone_stats_home,
+)
 from synapse.appservice import ApplicationService
 from synapse.rest import account, admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
-from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -306,14 +310,14 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
         self.register_user("user_1", "password", admin=True)
         self._admin_token = self.login("user_1", "password")
 
-    def _deactivate_user(self, user_id: str, tok: str) -> None:
+    def _deactivate_user(self, user_id: str, access_token: str) -> None:
         """
         Helper to deactivate a user using the /account/deactivate endpoint, optionally
         with erasure
 
         Args:
             user_id: the string formatted mxid(not a UserID)
-            tok: the user's access token
+            access_token: the user's access token
             erase: bool of if this should be a full erasure request
         """
         request_data = {
@@ -328,26 +332,27 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
         # If an appservice calls this, append the user_id
         url = (
             f"account/deactivate?user_id={user_id}"
-            if tok == self.appservice.token
+            if access_token == self.appservice.token
             else "account/deactivate"
         )
         channel = self.make_request(
             "POST",
             url,
             request_data,
-            access_token=tok,
+            access_token=access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
     def _get_user_count_metrics(self) -> dict[str, str]:
-        self.reactor.advance(Duration(minutes=5).as_secs())
+        # Ensure we have the latest stats by advancing the timer.
+        self.reactor.advance(COUNT_USERS_INTERVAL.as_secs())
         return get_latest_metrics()
 
     def _native_key(self) -> str:
-        return f'synapse_user_count{{app_service="native",server_name="{self.hs.config.server.server_name}"}}'
+        return f'synapse_non_deactivated_user_count{{app_service="native",server_name="{self.hs.config.server.server_name}"}}'
 
     def _appservice_key(self) -> str:
-        return f'synapse_user_count{{app_service="{self.appservice.id}",server_name="{self.hs.config.server.server_name}"}}'
+        return f'synapse_non_deactivated_user_count{{app_service="{self.appservice.id}",server_name="{self.hs.config.server.server_name}"}}'
 
     def test_two_native_users(self) -> None:
         """Two registered native users are counted correctly."""
@@ -360,6 +365,8 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
     def test_deactivated_native_user_excluded(self) -> None:
         """A deactivated native user is not counted."""
         user_2 = self.register_user("user_2", "password")
+        metrics = self._get_user_count_metrics()
+        self.assertEqual(metrics.get(self._native_key()), "2.0")
         self._deactivate_user(user_2, self.login("user_2", "password"))
 
         metrics = self._get_user_count_metrics()
@@ -378,6 +385,9 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
     def test_deactivated_appservice_user_excluded(self) -> None:
         """A deactivated appservice user is not counted."""
         as_user, _ = self.register_appservice_user("as_user_1", self.appservice.token)
+        metrics = self._get_user_count_metrics()
+
+        self.assertEqual(metrics.get(self._appservice_key()), "1.0")
         self._deactivate_user(as_user, self.appservice.token)
 
         metrics = self._get_user_count_metrics()
