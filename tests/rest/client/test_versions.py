@@ -74,7 +74,9 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             "GET",
             "/_matrix/client/versions",
             content={},
+            await_result=False,
         )
+        channel.await_rust_result()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
 
@@ -87,7 +89,9 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/versions",
             content={},
             access_token=user1_tok,
+            await_result=False,
         )
+        channel.await_rust_result()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
 
@@ -103,7 +107,9 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/versions",
             content={},
             access_token=user1_tok,
+            await_result=False,
         )
+        channel.await_rust_result()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
@@ -121,7 +127,9 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/versions",
             content={},
             access_token=user1_tok,
+            await_result=False,
         )
+        channel.await_rust_result()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
@@ -136,7 +144,9 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/versions",
             content={},
             access_token=user2_tok,
+            await_result=False,
         )
+        channel.await_rust_result()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(

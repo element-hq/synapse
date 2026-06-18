@@ -311,6 +311,34 @@ class FakeChannel:
 
             self._reactor.advance(0.1)
 
+    def await_rust_result(self, timeout_ms: int = 1000) -> None:
+        """
+        Wait until the request is finished (a request that includes async Rust work).
+
+        This is separate from `await_result` because we don't want to slow down the
+        entire test suite with real sleeps. Prefer `await_result` if possible.
+
+        The default `await_result` only advances the reactor's *virtual* clock in a
+        tight loop, never yielding real wall-clock time, so the Tokio threads never get
+        a chance to run and the request times out. Instead we pump the reactor while
+        also sleeping a little real time each iteration, the same way
+        `HomeserverTestCase.wait_on_thread()` does.
+        """
+        end_time = self._reactor.seconds() + timeout_ms / 1000.0
+        self._reactor.run()
+
+        while not self.is_finished():
+            if self._reactor.seconds() > end_time:
+                raise TimedOutException("Timed out waiting for request to finish.")
+
+            # Pump the Twisted reactor
+            self._reactor.advance(0.1)
+
+            # Give some real wall-clock time for other threads to do work. This could be
+            # things spawned on the Twisted reactor threadpool but this is primarily
+            # meant for the Tokio thread pool (async Rust code).
+            time.sleep(0.01)
+
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
 

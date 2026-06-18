@@ -483,7 +483,11 @@ class HomeserverTestCase(TestCase):
         while not deferred.called:
             if start_time + timeout < time.time():
                 raise ValueError("Timed out waiting for threadpool")
+            # Pump the Twisted reactor
             self.reactor.advance(0.01)
+            # Give some real wall-clock time for other threads to do work. This could be
+            # things spawned on the Twisted reactor threadpool or Tokio thread pool
+            # (async Rust code).
             time.sleep(0.01)
 
     def wait_for_background_updates(self) -> None:
