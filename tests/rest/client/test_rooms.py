@@ -2595,10 +2595,12 @@ class RoomDelayedEventTestCase(RoomBase):
         # Confirm that the response includes the time remaining until the next of the user's
         # delayed events to be sent, at which point another delayed event may be scheduled
         # without exceeding the limit
-        retry_after_header = channel.headers.getRawHeaders("Retry-After")
-        assert retry_after_header
-        retry_after_ms = int(retry_after_header[0])
+        retry_after_headers = channel.headers.getRawHeaders("Retry-After")
+        assert retry_after_headers
+        retry_after_ms = int(retry_after_headers[0])
         assert retry_after_ms > 0
+        # Confirm that there is only a single value to the Retry-After header, as per RFC9110
+        self.assertEqual(1, len(retry_after_headers))
 
         self.reactor.advance(retry_after_ms)
         channel = self.make_request(*args)
