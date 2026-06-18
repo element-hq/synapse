@@ -67,7 +67,7 @@ class DelayedEventsHandler:
 
         self._request_ratelimiter = hs.get_request_ratelimiter()
 
-        # Ratelimiters for management of existing delayed events
+        # Ratelimiter for management of existing delayed events
         self._delayed_event_mgmt_ratelimiter = Ratelimiter(
             store=self._store,
             clock=self._clock,
@@ -463,6 +463,11 @@ class DelayedEventsHandler:
         await self._send_event(event)
 
     async def _mgmt_ratelimit(self, request: SynapseRequest, delay_id: str) -> None:
+        """
+        Ratelimit requests with the `_delayed_event_mgmt_ratelimiter` keyed on the
+        ID of the delayed event to be managed, and either the
+        user making the request, or the request's IP address if unauthed.
+        """
         # NOTE: it would be more accurate to run this in a transaction that also contains
         # the action to be done with the delay_id, but the worst that can happen without it
         # is the possibility of the delay_id disappearing after having checked for it here,

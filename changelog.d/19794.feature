@@ -1,1 +1,1 @@
-[MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Allow authentication on delayed event management endpoints (such as `/restart`) to bypass ratelimits based on the client IP address.
+[MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Allow authentication on delayed event management endpoints (such as `/restart`) to bypass ratelimits for unauthenticated requests based on the client IP address.
