@@ -2598,7 +2598,7 @@ class RoomDelayedEventTestCase(RoomBase):
         retry_after_headers = channel.headers.getRawHeaders("Retry-After")
         assert retry_after_headers
         retry_after_ms = int(retry_after_headers[0])
-        assert retry_after_ms > 0
+        self.assertGreater(retry_after_ms, 0)
         # Confirm that there is only a single value to the Retry-After header, as per RFC9110
         self.assertEqual(1, len(retry_after_headers))
 
