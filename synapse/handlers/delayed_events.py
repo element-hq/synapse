@@ -67,7 +67,7 @@ class DelayedEventsHandler:
 
         self._request_ratelimiter = hs.get_request_ratelimiter()
 
-        # Ratelimiters for management of existing delayed events
+        # Ratelimiter for management of existing delayed events
         self._delayed_event_mgmt_ratelimiter = Ratelimiter(
             store=self._store,
             clock=self._clock,
