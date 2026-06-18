@@ -2580,6 +2580,11 @@ class RoomDelayedEventTestCase(RoomBase):
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
+        # Confirm that lifting temporal ratelimits doesn't lift this storage-based limit
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
+        )
+
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
         self.assertEqual(
@@ -2591,15 +2596,6 @@ class RoomDelayedEventTestCase(RoomBase):
         assert retry_after_header
         retry_after_ms = int(retry_after_header[0])
         assert retry_after_ms > 0
-
-        # Confirm that lifing temporal ratelimits doesn't lift this storage-based limit
-        self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
-        )
-        channel = self.make_request(*args)
-        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
-        self.assertIn("retry_after_ms", channel.json_body)
-        assert channel.headers.getRawHeaders("Retry-After")
 
         self.reactor.advance(retry_after_ms)
         channel = self.make_request(*args)
