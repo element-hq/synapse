@@ -478,7 +478,7 @@ class HomeserverTestCase(TestCase):
         self,
         awaitable: Awaitable[TV],
         timeout: int = 10,
-    ) -> Deferred[TV]:
+    ) -> "Deferred[TV]":
         """
         Wait until the Awaitable is done, where it's waiting on a real thread. This
         could be things spawned on the Twisted reactor threadpool or Tokio runtime
