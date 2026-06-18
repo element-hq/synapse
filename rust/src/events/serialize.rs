@@ -102,7 +102,7 @@ pub struct SerializeEventConfig {
     as_client_event: bool,
     event_format: EventFormat,
     requester: Option<Requester>,
-    only_event_fields: Option<Vec<String>>,
+    event_field_allowlist: Option<Vec<String>>,
     include_stripped_room_state: bool,
     include_admin_metadata: bool,
     msc4354_enabled: bool,
@@ -117,7 +117,7 @@ impl SerializeEventConfig {
         as_client_event = true,
         event_format = EventFormat::ClientV1,
         requester = None,
-        only_event_fields = None,
+        event_field_allowlist = None,
         include_stripped_room_state = false,
         include_admin_metadata = false,
         msc4354_enabled = false,
@@ -126,7 +126,7 @@ impl SerializeEventConfig {
         as_client_event: bool,
         event_format: EventFormat,
         requester: Option<Bound<'_, Requester>>,
-        only_event_fields: Option<Vec<String>>,
+        event_field_allowlist: Option<Vec<String>>,
         include_stripped_room_state: bool,
         include_admin_metadata: bool,
         msc4354_enabled: bool,
@@ -137,7 +137,7 @@ impl SerializeEventConfig {
             as_client_event,
             event_format,
             requester,
-            only_event_fields,
+            event_field_allowlist,
             include_stripped_room_state,
             include_admin_metadata,
             msc4354_enabled,
@@ -163,8 +163,8 @@ impl SerializeEventConfig {
     }
 
     #[getter]
-    fn only_event_fields(&self) -> Option<Vec<String>> {
-        self.only_event_fields.clone()
+    fn event_field_allowlist(&self) -> Option<Vec<String>> {
+        self.event_field_allowlist.clone()
     }
 
     #[getter]
@@ -310,7 +310,7 @@ fn serialize_core_inner(
     }
 
     // Only include fields that the client has requested.
-    if let Some(fields) = &config.only_event_fields {
+    if let Some(fields) = &config.event_field_allowlist {
         if !fields.is_empty() {
             serialized = only_fields(&serialized, fields);
         }
@@ -643,7 +643,7 @@ fn object_entry_mut<'a>(map: &'a mut Map<String, Value>, key: &str) -> &'a mut M
 }
 
 /// Return a new map containing only the given (possibly dotted) field paths,
-/// implementing the `only_event_fields` client filter.
+/// implementing the `event_field_allowlist` client filter.
 fn only_fields(dictionary: &Map<String, Value>, fields: &[String]) -> Map<String, Value> {
     let mut output = Map::new();
     for field in fields {

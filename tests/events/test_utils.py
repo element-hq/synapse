@@ -663,7 +663,7 @@ class SerializeEventTestCase(HomeserverTestCase):
                 FilteredEvent(event=ev, membership=None),
                 1479807801915,
                 config=SerializeEventConfig(
-                    only_event_fields=fields,
+                    event_field_allowlist=fields,
                     include_admin_metadata=include_admin_metadata,
                 ),
                 redaction_map=redaction_map,
@@ -786,7 +786,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_fail_if_fields_not_str(self) -> None:
         with self.assertRaises(TypeError):
             SerializeEventConfig(
-                only_event_fields=["room_id", 4],  # type: ignore[list-item]
+                event_field_allowlist=["room_id", 4],  # type: ignore[list-item]
             )
 
     def test_default_serialize_config_excludes_admin_metadata(self) -> None:
@@ -878,7 +878,7 @@ class SerializeEventTestCase(HomeserverTestCase):
             as_client_event=False,  # default True
             event_format=EventFormat.Raw,  # default EventFormat.ClientV1
             requester=create_requester("@example:example.org"),  # default None
-            only_event_fields=["foo"],  # default None
+            event_field_allowlist=["foo"],  # default None
             include_stripped_room_state=True,  # default False
         )
         admin_config = make_config_for_admin(non_default_config)
@@ -888,7 +888,7 @@ class SerializeEventTestCase(HomeserverTestCase):
         self.assertEqual(admin_config.event_format, non_default_config.event_format)
         self.assertEqual(admin_config.requester, non_default_config.requester)
         self.assertEqual(
-            admin_config.only_event_fields, non_default_config.only_event_fields
+            admin_config.event_field_allowlist, non_default_config.event_field_allowlist
         )
         self.assertEqual(
             admin_config.include_stripped_room_state,
@@ -899,7 +899,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_redacted_because_is_filtered_out(self) -> None:
         """If an event's unsigned dict has a `redacted_by` field, then the
         `redacted_because` should be filtered out if not specified in
-        `only_event_fields`."""
+        `event_field_allowlist`."""
 
         redaction_id = "$redaction_event_id"
 

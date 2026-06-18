@@ -312,7 +312,7 @@ class SyncRestServlet(RestServlet):
         serialize_options = SerializeEventConfig(
             event_format=event_formatter,
             requester=requester,
-            only_event_fields=filter.event_fields,
+            event_field_allowlist=filter.event_fields,
         )
         stripped_serialize_options = SerializeEventConfig(
             event_format=event_formatter,

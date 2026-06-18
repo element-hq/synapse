@@ -61,7 +61,7 @@ class EventRestServlet(RestServlet):
             as_client_event=False,
             event_format=EventFormat.Raw,
             requester=requester,
-            only_event_fields=None,
+            event_field_allowlist=None,
             include_stripped_room_state=True,
             include_admin_metadata=True,
         )

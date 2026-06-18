@@ -367,7 +367,7 @@ class SerializeEventConfig:
         as_client_event: bool = True,
         event_format: EventFormat = ...,
         requester: Requester | None = None,
-        only_event_fields: list[str] | None = None,
+        event_field_allowlist: list[str] | None = None,
         include_stripped_room_state: bool = False,
         include_admin_metadata: bool = False,
         msc4354_enabled: bool = False,
@@ -379,7 +379,7 @@ class SerializeEventConfig:
     @property
     def requester(self) -> Requester | None: ...
     @property
-    def only_event_fields(self) -> list[str] | None: ...
+    def event_field_allowlist(self) -> list[str] | None: ...
     @property
     def include_stripped_room_state(self) -> bool: ...
     @property
