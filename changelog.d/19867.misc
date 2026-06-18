@@ -1,0 +1,1 @@
+Remove custom `till_deferred_has_result(...)` in favor of `HomeserverTestCase.wait_on_thread(...)` to drive async Rust (Tokio runtime/thread pool).
