@@ -311,7 +311,7 @@ class FakeChannel:
 
             self._reactor.advance(0.1)
 
-    def await_rust_result(self, timeout_ms: int = 1000) -> None:
+    def await_result_with_rust(self, timeout_ms: int = 1000) -> None:
         """
         Wait until the request is finished (a request that includes async Rust work).
 

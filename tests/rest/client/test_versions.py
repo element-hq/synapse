@@ -76,7 +76,7 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             content={},
             await_result=False,
         )
-        channel.await_rust_result()
+        channel.await_result_with_rust()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
 
@@ -91,7 +91,7 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             access_token=user1_tok,
             await_result=False,
         )
-        channel.await_rust_result()
+        channel.await_result_with_rust()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
 
@@ -109,7 +109,7 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             access_token=user1_tok,
             await_result=False,
         )
-        channel.await_rust_result()
+        channel.await_result_with_rust()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
@@ -129,7 +129,7 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             access_token=user1_tok,
             await_result=False,
         )
-        channel.await_rust_result()
+        channel.await_result_with_rust()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
@@ -146,7 +146,7 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             access_token=user2_tok,
             await_result=False,
         )
-        channel.await_rust_result()
+        channel.await_result_with_rust()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
