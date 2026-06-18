@@ -380,6 +380,9 @@ class ExperimentalConfig(Config):
     ) -> None:
         experimental = config.get("experimental_features") or {}
 
+        # MSC1763 (retention policy configuration endpoint)
+        self.msc1763_enabled: bool = experimental.get("msc1763_enabled", False)
+
         # MSC3026 (busy presence state)
         self.msc3026_enabled: bool = experimental.get("msc3026_enabled", False)
 
