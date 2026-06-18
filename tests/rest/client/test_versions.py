@@ -11,19 +11,17 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 import logging
-import time
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, versions
 from synapse.server import HomeServer
-from synapse.synapse_rust.http_client import HttpClient
-from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.types import JsonDict
+from synapse.synapse_rust.http_client import HttpClient
 
 from tests import unittest
-from tests.server import FakeChannel, TimedOutException
 
 logger = logging.getLogger(__name__)
 
@@ -71,40 +69,12 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")
 
-    def _request_versions(self, access_token: str | None = None) -> FakeChannel:
-        """
-        Make a `GET /_matrix/client/versions` request and wait for it to finish.
-
-        The endpoint is served by a Rust handler that is async and relies on the Tokio
-        thread pool (posting back via `reactor.callFromThread`). The default
-        `make_request` pump only advances the reactor's *virtual* clock in a tight loop,
-        never yielding real wall-clock time, so the Tokio threads never get a chance to
-        run and the request times out. Instead we pump the reactor while also sleeping a
-        little real time each iteration, the same way `wait_on_thread` and
-        `tests.synapse_rust.test_http_client.till_deferred_has_result` do.
-        """
+    def test_unauthenticated(self) -> None:
         channel = self.make_request(
             "GET",
             "/_matrix/client/versions",
             content={},
-            access_token=access_token,
-            # We will pump it ourselves just below
-            await_result=False,
         )
-
-        deadline = time.time() + 10
-        while not channel.is_finished():
-            if time.time() > deadline:
-                raise TimedOutException("Timed out waiting for request to finish.")
-            # Drain anything the Tokio threads have posted back...
-            self.reactor.advance(0.1)
-            # ...then give them real time to make more progress.
-            time.sleep(0.01)
-
-        return channel
-
-    def test_unauthenticated(self) -> None:
-        channel = self._request_versions()
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
 
@@ -112,7 +82,12 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        channel = self._request_versions(access_token=user1_tok)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/versions",
+            content={},
+            access_token=user1_tok,
+        )
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
 
@@ -123,7 +98,12 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         user2_tok = self.login(user2_id, "pass")
 
         # Sanity check that the experimental feature should not be enabled yet
-        channel = self._request_versions(access_token=user1_tok)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/versions",
+            content={},
+            access_token=user1_tok,
+        )
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
@@ -136,7 +116,12 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         self._enable_experimental_feature_for_user(target_user_id=user1_id)
 
         # The experimental feature should be enabled for this user
-        channel = self._request_versions(access_token=user1_tok)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/versions",
+            content={},
+            access_token=user1_tok,
+        )
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
@@ -146,7 +131,12 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         )
 
         # But not for other users
-        channel = self._request_versions(access_token=user2_tok)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/versions",
+            content={},
+            access_token=user2_tok,
+        )
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
         self.assertEqual(
