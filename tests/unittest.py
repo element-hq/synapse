@@ -96,8 +96,6 @@ setup_logging()
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
 TV = TypeVar("TV")
 _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
 
@@ -498,6 +496,9 @@ class HomeserverTestCase(TestCase):
         Args:
             awaitable: The thing to wait for
             timeout: The maximum amount of real time we should before giving up
+
+        Returns:
+            Deferred (wrapping the awaitable that was passed in)
         """
         start_time = time.time()
 
