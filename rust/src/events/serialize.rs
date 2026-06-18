@@ -527,10 +527,9 @@ fn serialize_event_value(
 
     // Strip invite/knock room state unless requested.
     if !config.include_stripped_room_state {
-        if let Some(Value::Object(unsigned)) = d.get_mut(UNSIGNED) {
-            unsigned.remove(unsigned_field::INVITE_ROOM_STATE);
-            unsigned.remove(unsigned_field::KNOCK_ROOM_STATE);
-        }
+        let unsigned = unsigned_mut(&mut d);
+        unsigned.remove(unsigned_field::INVITE_ROOM_STATE);
+        unsigned.remove(unsigned_field::KNOCK_ROOM_STATE);
     }
 
     if config.as_client_event {
