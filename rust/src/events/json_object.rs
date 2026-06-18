@@ -212,8 +212,7 @@ impl JsonObject {
         self.object.get(key)
     }
 
-    /// Returns a `serde_json::Value::Object` containing a clone of this
-    /// object's entries.
+    /// Returns a reference to the underlying map of this object's entries.
     pub fn as_map(&self) -> &BTreeMap<Box<str>, Value> {
         &self.object
     }
