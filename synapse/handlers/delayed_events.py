@@ -463,6 +463,10 @@ class DelayedEventsHandler:
         await self._send_event(event)
 
     async def _mgmt_ratelimit(self, request: SynapseRequest) -> None:
+        """
+        Ratelimit requests with the `_delayed_event_mgmt_ratelimiter` keyed on the
+        user making the request, or the request's IP address if unauthed.
+        """
         if self._auth.has_access_token(request):
             requester = await self._auth.get_user_by_req(request)
             key = None
