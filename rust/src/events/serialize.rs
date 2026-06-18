@@ -99,12 +99,30 @@ pub enum EventFormat {
 #[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct SerializeEventConfig {
+    /// Whether to apply the client event format transform (v1/v2/raw). When
+    /// `false`, the federation-format event is returned as-is.
     as_client_event: bool,
+    /// Which client event format variant to apply (only used when
+    /// `as_client_event` is `true`).
     event_format: EventFormat,
+    /// The entity requesting the event. Used to gate sender-only fields such as
+    /// `transaction_id` and `delay_id`.
     requester: Option<Requester>,
+    /// If set, only include these field paths in the output. An empty list
+    /// returns an empty event; `None` returns all fields.
+    ///
+    /// The fields can be "dotted" fields, e.g. `content.body`.
     event_field_allowlist: Option<Vec<String>>,
+    /// Whether to include `invite_room_state` / `knock_room_state` in
+    /// `unsigned`. These are stripped by default and only included for specific
+    /// endpoints (e.g. `/sync` invite/knock handling).
     include_stripped_room_state: bool,
+    /// When `true`, add server-admin-only metadata to `unsigned`
+    /// (`io.element.synapse.soft_failed`,
+    /// `io.element.synapse.policy_server_spammy`).
     include_admin_metadata: bool,
+    /// Whether MSC4354 (sticky events) is enabled. When `true`, the remaining
+    /// stickiness TTL is computed and added to `unsigned`.
     msc4354_enabled: bool,
 }
 

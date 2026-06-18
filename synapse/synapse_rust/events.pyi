@@ -373,19 +373,43 @@ class SerializeEventConfig:
         msc4354_enabled: bool = False,
     ) -> None: ...
     @property
-    def as_client_event(self) -> bool: ...
+    def as_client_event(self) -> bool:
+        """Whether to apply the client event format transform (v1/v2/raw). When
+        ``False``, the federation-format event is returned as-is."""
+
     @property
-    def event_format(self) -> EventFormat: ...
+    def event_format(self) -> EventFormat:
+        """Which client event format variant to apply (only used when
+        ``as_client_event`` is ``True``)."""
+
     @property
-    def requester(self) -> Requester | None: ...
+    def requester(self) -> Requester | None:
+        """The entity requesting the event. Used to gate sender-only fields such
+        as ``transaction_id`` and ``delay_id``."""
+
     @property
-    def event_field_allowlist(self) -> list[str] | None: ...
+    def event_field_allowlist(self) -> list[str] | None:
+        """If set, only include these field paths in the output. An empty list
+        returns an empty event; ``None`` returns all fields.
+
+        The fields can be "dotted" fields, e.g. ``content.body``."""
+
     @property
-    def include_stripped_room_state(self) -> bool: ...
+    def include_stripped_room_state(self) -> bool:
+        """Whether to include ``invite_room_state`` / ``knock_room_state`` in
+        ``unsigned``. These are stripped by default and only included for
+        specific endpoints (e.g. ``/sync`` invite/knock handling)."""
+
     @property
-    def include_admin_metadata(self) -> bool: ...
+    def include_admin_metadata(self) -> bool:
+        """When ``True``, add server-admin-only metadata to ``unsigned``
+        (``io.element.synapse.soft_failed``,
+        ``io.element.synapse.policy_server_spammy``)."""
+
     @property
-    def msc4354_enabled(self) -> bool: ...
+    def msc4354_enabled(self) -> bool:
+        """Whether MSC4354 (sticky events) is enabled. When ``True``, the
+        remaining stickiness TTL is computed and added to ``unsigned``."""
     def for_admin(self) -> SerializeEventConfig:
         """Return a copy of this config with ``include_admin_metadata`` enabled."""
 
