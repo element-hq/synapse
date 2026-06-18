@@ -611,18 +611,28 @@ def _wait_for_actions(gh_token: str | None) -> None:
         if len(resp["workflow_runs"]) == 0:
             continue
 
-        if all(
-            workflow["status"] != "in_progress" for workflow in resp["workflow_runs"]
-        ):
-            success = all(
-                workflow["status"] == "completed" for workflow in resp["workflow_runs"]
-            )
-            if success:
-                _notify("Workflows successful. You can now continue the release.")
-            else:
-                _notify("Workflows failed.")
-                click.confirm("Continue anyway?", abort=True)
+        # Notify early if any workflow run has already failed.
+        failed_workflows = [
+            workflow
+            for workflow in resp["workflow_runs"]
+            if workflow["status"] == "completed" and workflow["conclusion"] != "success"
+        ]
+        if failed_workflows:
+            for workflow in failed_workflows:
+                print(
+                    f"Workflow run failed ({workflow['conclusion']}): {workflow['name']}"
+                )
+                print(f"    see {workflow['html_url']}")
+            _notify("A workflow run has failed.")
+            click.confirm("Continue anyway?", abort=True)
+            break
 
+        # If every run has completed successfully, we are done.
+        if all(
+            workflow["status"] == "completed" and workflow["conclusion"] == "success"
+            for workflow in resp["workflow_runs"]
+        ):
+            _notify("Workflows successful. You can now continue the release.")
             break
 
 

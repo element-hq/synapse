@@ -129,16 +129,16 @@ def setupdb() -> None:
 
 @overload
 def default_config(
-    server_name: str, parse: Literal[False] = ...
+    *, server_name: str, parse: Literal[False] = ...
 ) -> dict[str, object]: ...
 
 
 @overload
-def default_config(server_name: str, parse: Literal[True]) -> HomeServerConfig: ...
+def default_config(*, server_name: str, parse: Literal[True]) -> HomeServerConfig: ...
 
 
 def default_config(
-    server_name: str, parse: bool = False
+    *, server_name: str, parse: bool = False
 ) -> dict[str, object] | HomeServerConfig:
     """
     Create a reasonable test config.
