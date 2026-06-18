@@ -98,7 +98,5 @@ class RetentionConfigurationServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    # This is a de facto unstable feature, so only register the
-    # endpoint if enabled.
-    if hs.config.retention.retention_enabled:
+    if hs.config.retention.retention_enabled and hs.config.experimental.msc1763_enabled:
         RetentionConfigurationServlet(hs).register(http_server)

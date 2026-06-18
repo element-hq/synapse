@@ -413,7 +413,12 @@ class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
         self.register_user("user", "password")
         self.token = self.login("user", "password")
 
-    def test_disabled_returns_404(self) -> None:
+    @override_config(
+        {
+            "experimental_features": {"msc1763_enabled": True},
+        }
+    )
+    def test_disabled_returns_404_no_retention(self) -> None:
         """The endpoint must 404 when retention is not enabled."""
         channel = self.make_request(
             "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
@@ -430,7 +435,29 @@ class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
                 },
                 "allowed_lifetime_min": one_day_ms,
                 "allowed_lifetime_max": one_day_ms * 3,
-            }
+            },
+            "experimental_features": {"msc1763_enabled": False},
+        }
+    )
+    def test_disabled_returns_404_no_msc1763_enabled(self) -> None:
+        """The endpoint must 404 when retention is not enabled."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 404, channel.result)
+
+    @override_config(
+        {
+            "retention": {
+                "enabled": True,
+                "default_policy": {
+                    "min_lifetime": one_day_ms,
+                    "max_lifetime": one_day_ms * 3,
+                },
+                "allowed_lifetime_min": one_day_ms,
+                "allowed_lifetime_max": one_day_ms * 3,
+            },
+            "experimental_features": {"msc1763_enabled": True},
         }
     )
     def test_full_config(self) -> None:
@@ -449,7 +476,12 @@ class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
             {"min": one_day_ms, "max": one_day_ms * 3},
         )
 
-    @override_config({"retention": {"enabled": True}})
+    @override_config(
+        {
+            "retention": {"enabled": True},
+            "experimental_features": {"msc1763_enabled": True},
+        }
+    )
     def test_no_default_policy_no_limits(self) -> None:
         """Returns empty policies and limits when nothing is configured."""
         channel = self.make_request(
@@ -466,7 +498,8 @@ class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
                 "enabled": True,
                 "allowed_lifetime_min": one_day_ms,
                 "allowed_lifetime_max": one_day_ms * 7,
-            }
+            },
+            "experimental_features": {"msc1763_enabled": True},
         }
     )
     def test_limits_only(self) -> None:
