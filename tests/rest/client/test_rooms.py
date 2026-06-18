@@ -2592,6 +2592,9 @@ class RoomDelayedEventTestCase(RoomBase):
             channel.json_body["errcode"],
             channel.json_body,
         )
+        # Confirm that the response includes the time remaining until the next of the user's
+        # delayed events to be sent, at which point another delayed event may be scheduled
+        # without exceeding the limit
         retry_after_header = channel.headers.getRawHeaders("Retry-After")
         assert retry_after_header
         retry_after_ms = int(retry_after_header[0])
