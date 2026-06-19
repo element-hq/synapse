@@ -119,7 +119,9 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         )
 
         # Enable the feature for this specific user
-        self._enable_experimental_feature_for_user(target_user_id=user1_id)
+        self._enable_experimental_feature_for_user(
+            target_user_id=user1_id, features={"msc3881": True}
+        )
 
         # The experimental feature should be enabled for this user
         channel = self.make_request(
@@ -170,7 +172,9 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             f"Expected `unstable_features` to be a dict mapping feature name to a bool but saw {versions_response}",
         )
 
-    def _enable_experimental_feature_for_user(self, *, target_user_id: str) -> None:
+    def _enable_experimental_feature_for_user(
+        self, *, target_user_id: str, features: dict[str, bool]
+    ) -> None:
         """
         Use the admin API to enable an experimental feature for a specific user
         """
@@ -178,7 +182,7 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             "PUT",
             f"/_synapse/admin/v1/experimental_features/{target_user_id}",
             content={
-                "features": {"msc3881": True},
+                "features": features,
             },
             access_token=self.admin_user_tok,
         )
