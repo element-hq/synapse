@@ -814,7 +814,7 @@ class HomeserverTestCase(TestCase):
         """
         start_time_seconds = time.time()
 
-        deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
+        deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
         while not deferred.called:
             if start_time_seconds + timeout.as_secs() < time.time():
                 raise defer.TimeoutError(
