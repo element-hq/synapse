@@ -808,8 +808,9 @@ class HomeserverTestCase(TestCase):
 
         Raises:
             defer.TimeoutError: If the timeout expires before the awaitable completes.
-            SynchronousTestCase.failureException: If the awaitable has a failure result or has no result
-                (although you would probably run into `defer.TimeoutError` in that case).
+            SynchronousTestCase.failureException: If the awaitable has a success result,
+                or has an unexpected failure result, or has no result (although you would
+                probably run into `defer.TimeoutError` in that case).
         """
         start_time_seconds = time.time()
 
