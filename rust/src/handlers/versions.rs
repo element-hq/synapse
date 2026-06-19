@@ -241,7 +241,6 @@ async fn build_versions_response(
 pub struct UnstableFeatureMap {
     msc3881: bool,
     msc3575: bool,
-    msc4222: bool,
     e2ee_forced_public: bool,
     e2ee_forced_private: bool,
     e2ee_forced_trusted_private: bool,
@@ -253,7 +252,6 @@ pub fn synapse_config_to_global_unstable_feature_map(config: &SynapseConfig) -> 
     UnstableFeatureMap {
         msc3881: config.experimental.msc3881_enabled,
         msc3575: config.experimental.msc3575_enabled,
-        msc4222: config.experimental.msc4222_enabled,
         e2ee_forced_public: config
             .room
             .encryption_enabled_by_default_for_room_presets
