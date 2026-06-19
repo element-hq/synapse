@@ -130,9 +130,7 @@ fn make_deferred_yieldable<'py>(
 }
 
 /// Called when registering modules with python.
-pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    _ = m;
-
+pub fn register_module(py: Python<'_>, _m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Make sure we fail early if we can't load some modules
     defer(py)?;
 
