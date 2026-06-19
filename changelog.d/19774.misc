@@ -1,1 +1,0 @@
-Refactor MSC4242 state DAG checks behind a single `TypeIs` helper to avoid scattered `isinstance` casts.

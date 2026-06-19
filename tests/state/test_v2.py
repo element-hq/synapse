@@ -97,9 +97,6 @@ class FakeEvent:
         Args:
             auth_events: list of event_ids
             prev_events: list of event_ids
-
-        Returns:
-            FrozenEvent
         """
         global ORIGIN_SERVER_TS
 

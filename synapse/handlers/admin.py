@@ -433,7 +433,7 @@ class AdminHandler:
 
         r = task.params.get("requester")
         assert r is not None
-        admin = Requester.deserialize(self._store, r)
+        admin = Requester.deserialize(r)
 
         user_id = task.params.get("user_id")
         assert user_id is not None

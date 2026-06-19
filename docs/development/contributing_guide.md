@@ -153,8 +153,14 @@ writing new pages, please
 to check that your contributions render correctly. The docs are written in
 [GitHub-Flavoured Markdown](https://guides.github.com/features/mastering-markdown/).
 
+## Making changes to the Rust code
+
 When changes are made to any Rust code then you must call either `poetry install`
-or `maturin develop` (if installed) to rebuild the Rust code. Using [`maturin`](https://github.com/PyO3/maturin)
+or `maturin develop` (if installed) to rebuild the Rust code.
+
+You can use `poetry install -v` or `-vv` to get more info about build failures.
+
+Using [`maturin`](https://github.com/PyO3/maturin)
 is quicker than `poetry install`, so is recommended when making frequent
 changes to the Rust code.
 

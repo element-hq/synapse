@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.153/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.155/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -2244,8 +2244,8 @@ properties:
 
 
       This is a ratelimiting option that ratelimits attempts to restart, cancel,
-      or view delayed events based on the sending client's account and device
-      ID.
+      or view delayed events based on the sending client's account,
+      or its source IP when requests are unauthenticated.
 
 
       Attempts to create or send delayed events are ratelimited not by this
