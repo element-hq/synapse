@@ -734,7 +734,12 @@ class HomeserverTestCase(TestCase):
         # second steps/increments. We assume this was done so that when you use the
         # clock to schedule something that schedules more things, it tries to run the
         # whole chain to completion.
-        self.reactor.pump([by] * 100)
+        for _ in range(100):
+            self.reactor.advance(by)
+            # Allow other threads to make progress. This is real sleep time so we don't
+            # want to actually sleep for the same amount of time someone wants to
+            # advance the Twisted clock for.
+            time.sleep(0)
 
     def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
