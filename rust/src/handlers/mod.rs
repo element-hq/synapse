@@ -52,15 +52,16 @@ impl RustHandlers {
         let db_pool = PythonDatabasePoolWrapper::new(db_pool_py, reactor.clone_ref(py));
 
         // Store is shared across all of the handlers so let's use an `Arc`
-        let store = Arc::new(Store {
-            config: config.clone(),
-            db_pool,
-        });
+        let store = Arc::new(Store { db_pool });
+
+        let global_unstable_feature_map = Arc::new(
+            versions::synapse_config_to_global_unstable_feature_map(&config),
+        );
 
         let versions = Py::new(
             py,
             versions::VersionsHandler {
-                config: config.clone(),
+                global_unstable_feature_map: Arc::clone(&global_unstable_feature_map),
                 store: Arc::clone(&store),
                 reactor: reactor.clone_ref(py),
             },

@@ -32,16 +32,6 @@ pub enum PerUserExperimentalFeature {
     MSC4222,
 }
 
-impl PerUserExperimentalFeature {
-    pub fn is_globally_enabled(&self, config: &SynapseConfig) -> bool {
-        match self {
-            PerUserExperimentalFeature::MSC3881 => config.experimental.msc3881_enabled,
-            PerUserExperimentalFeature::MSC3575 => config.experimental.msc3575_enabled,
-            PerUserExperimentalFeature::MSC4222 => config.experimental.msc4222_enabled,
-        }
-    }
-}
-
 impl std::fmt::Display for PerUserExperimentalFeature {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
@@ -60,20 +50,18 @@ impl std::fmt::Display for PerUserExperimentalFeature {
 }
 
 pub struct Store<P: DatabasePool> {
-    pub config: SynapseConfig,
     pub db_pool: P,
 }
 
 impl<P: DatabasePool> Store<P> {
-    pub async fn is_feature_enabled(
+    /// Checks whether a given feature is enabled/disabled for this user
+    ///
+    /// If there is no entry, returns None
+    pub async fn is_feature_enabled_for_user(
         &self,
         user_id: &str,
         feature: PerUserExperimentalFeature,
-    ) -> Result<bool, anyhow::Error> {
-        if feature.is_globally_enabled(&self.config) {
-            return Ok(true);
-        }
-
+    ) -> Result<Option<bool>, anyhow::Error> {
         // It's not enabled globally, so check whether it's enabled per-user.
         //
         // Owned copies so the callback can be `'static` (it may be moved to
@@ -97,10 +85,10 @@ impl<P: DatabasePool> Store<P> {
                         .await?;
 
                     let enabled = match &rows[..] {
-                        // If there is no row for this user, default to disabled
-                        [] => false,
+                        // No row for this user
+                        [] => None,
                         // Otherwise, we should only find a single row for this (user, feature)
-                        [row] => row.try_get(0)?,
+                        [row] => Some(row.try_get(0)?),
                         _ => {
                             panic!("Programming error")
                         }
