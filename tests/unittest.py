@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import os
 import functools
 import gc
 import hashlib
@@ -511,7 +512,13 @@ class HomeserverTestCase(TestCase):
             # Give some real wall-clock time for other threads to do work. This could be
             # things spawned on the Twisted reactor threadpool or Tokio thread pool
             # (async Rust code).
-            time.sleep(0.01)
+            # time.sleep(0)
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # We could also use `time.sleep(0)` here
+            os.sched_yield()
             # Advance the Twisted reactor as the thread may have scheduled something on
             # the reactor to run (like `reactor.callFromThread(...)`)
             self.reactor.advance(0)
