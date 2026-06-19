@@ -495,9 +495,7 @@ class HomeserverTestCase(TestCase):
         while not self.get_success(
             store.db_pool.updates.has_completed_background_updates()
         ):
-            self.get_success(
-                store.db_pool.updates.do_next_background_update(False), by=0.1
-            )
+            self.get_success(store.db_pool.updates.do_next_background_update(False))
 
     def make_homeserver(
         self, reactor: ThreadedMemoryReactorClock, clock: Clock
@@ -740,7 +738,10 @@ class HomeserverTestCase(TestCase):
         self.reactor.pump([by] * 100)
 
     def get_success(
-        self, d: Awaitable[TV], timeout: Duration = Duration(seconds=10)
+        self,
+        d: Awaitable[TV],
+        # 2-second default timeout as tests should be fast
+        timeout: Duration = Duration(seconds=2),
     ) -> TV:
         """
         Get the success result of an awaitable.
@@ -789,7 +790,8 @@ class HomeserverTestCase(TestCase):
         self,
         d: Awaitable[Any],
         exc: type[_ExcType],
-        timeout: Duration = Duration(seconds=10),
+        # 2-second default timeout as tests should be fast
+        timeout: Duration = Duration(seconds=2),
     ) -> _TypedFailure[_ExcType]:
         """
         Get the failure result of an awaitable. The failure must be of the type `exc`.
