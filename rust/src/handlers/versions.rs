@@ -261,7 +261,7 @@ pub fn synapse_config_to_global_unstable_feature_map(config: &SynapseConfig) -> 
         e2ee_forced_private: config
             .room
             .encryption_enabled_by_default_for_room_presets
-            .contains(&RoomCreationPreset::PrviateChat),
+            .contains(&RoomCreationPreset::PrivateChat),
         e2ee_forced_trusted_private: config
             .room
             .encryption_enabled_by_default_for_room_presets
