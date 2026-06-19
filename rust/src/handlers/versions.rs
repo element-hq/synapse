@@ -94,14 +94,11 @@ async fn build_versions_response(
                 true
             } else {
                 // Look up whether it's explicitly enabled/disabled for this user
-                match store
+                store
                     .is_feature_enabled_for_user(user_id, PerUserExperimentalFeature::MSC3881)
                     .await?
-                {
-                    Some(enabled) => enabled,
                     // Default to false if there is no entry for this user
-                    None => false,
-                }
+                    .unwrap_or(false)
             }
         }
         None => global_unstable_feature_map.msc3881,
@@ -114,14 +111,11 @@ async fn build_versions_response(
                 true
             } else {
                 // Look up whether it's explicitly enabled/disabled for this user
-                match store
+                store
                     .is_feature_enabled_for_user(user_id, PerUserExperimentalFeature::MSC3575)
                     .await?
-                {
-                    Some(enabled) => enabled,
                     // Default to false if there is no entry for this user
-                    None => false,
-                }
+                    .unwrap_or(false)
             }
         }
         None => global_unstable_feature_map.msc3575,
