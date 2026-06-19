@@ -183,7 +183,7 @@ class SlidingSyncStickyEventsToken:
         return self.serialise()
 
 
-# Starting reading a stream at 0 ensures all stream fact rows wlil be read
+# Starting reading a stream at 0 ensures all stream fact rows will be read
 SlidingSyncStickyEventsToken.START = SlidingSyncStickyEventsToken(
     sticky_events_stream_id=0
 )
