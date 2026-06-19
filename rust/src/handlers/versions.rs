@@ -19,7 +19,7 @@ use pyo3::prelude::*;
 use pythonize::{pythonize, PythonizeError};
 use serde::{Deserialize, Serialize};
 
-use crate::config::SynapseConfig;
+use crate::config::{RoomCreationPreset, SynapseConfig};
 use crate::deferred::create_deferred;
 use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
@@ -121,20 +121,6 @@ async fn build_versions_response(
         None => global_unstable_feature_map.msc3575,
     };
 
-    // TODO: Calculate these once since they shouldn't change after start-up.
-    // e2ee_forced_public = (
-    //     RoomCreationPreset.PUBLIC_CHAT
-    //     in config.room.encryption_enabled_by_default_for_room_presets
-    // );
-    // e2ee_forced_private = (
-    //     RoomCreationPreset.PRIVATE_CHAT
-    //     in config.room.encryption_enabled_by_default_for_room_presets
-    // );
-    // e2ee_forced_trusted_private = (
-    //     RoomCreationPreset.TRUSTED_PRIVATE_CHAT
-    //     in config.room.encryption_enabled_by_default_for_room_presets
-    // );
-
     Ok(VersionsResponse {
         versions: Vec::from([
             // XXX: at some point we need to decide whether we need to include
@@ -176,9 +162,18 @@ async fn build_versions_response(
             // // Implements additional endpoints as described in MSC2666
             // ("uk.half-shot.msc2666.query_mutual_rooms.stable".to_string(), true),
             // // Whether new rooms will be set to encrypted or not (based on presets).
-            // ("io.element.e2ee_forced.public".to_string(), e2ee_forced_public),
-            // ("io.element.e2ee_forced.private".to_string(), e2ee_forced_private),
-            // ("io.element.e2ee_forced.trusted_private".to_string(), e2ee_forced_trusted_private),
+            (
+                "io.element.e2ee_forced.public".to_string(),
+                global_unstable_feature_map.e2ee_forced_public,
+            ),
+            (
+                "io.element.e2ee_forced.private".to_string(),
+                global_unstable_feature_map.e2ee_forced_private,
+            ),
+            (
+                "io.element.e2ee_forced.trusted_private".to_string(),
+                global_unstable_feature_map.e2ee_forced_trusted_private,
+            ),
             // // Supports the busy presence state described in MSC3026.
             // ("org.matrix.msc3026.busy_presence".to_string(), config.experimental.msc3026_enabled),
             // // Supports receiving private read receipts as per MSC2285
@@ -247,6 +242,9 @@ pub struct UnstableFeatureMap {
     msc3881: bool,
     msc3575: bool,
     msc4222: bool,
+    e2ee_forced_public: bool,
+    e2ee_forced_private: bool,
+    e2ee_forced_trusted_private: bool,
 }
 
 /// Convert from [`SynapseConfig`] to the global defaults for unstable features that the
@@ -256,5 +254,17 @@ pub fn synapse_config_to_global_unstable_feature_map(config: &SynapseConfig) -> 
         msc3881: config.experimental.msc3881_enabled,
         msc3575: config.experimental.msc3575_enabled,
         msc4222: config.experimental.msc4222_enabled,
+        e2ee_forced_public: config
+            .room
+            .encryption_enabled_by_default_for_room_presets
+            .contains(&RoomCreationPreset::PublicChat),
+        e2ee_forced_private: config
+            .room
+            .encryption_enabled_by_default_for_room_presets
+            .contains(&RoomCreationPreset::PrviateChat),
+        e2ee_forced_trusted_private: config
+            .room
+            .encryption_enabled_by_default_for_room_presets
+            .contains(&RoomCreationPreset::TrustedPrivateChat),
     }
 }

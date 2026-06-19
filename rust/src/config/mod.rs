@@ -13,20 +13,44 @@
  *
  */
 
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyRuntimeError, prelude::*};
+use std::collections::BTreeSet;
 
 #[derive(FromPyObject, Clone)]
 pub struct SynapseConfig {
+    pub room: RoomConfig,
     pub experimental: ExperimentalConfig,
 }
 
-// #[derive(FromPyObject)]
-// #[serde(rename_all = "snake_case")]
-// pub enum RoomCreationPreset {
-//     PrviateChat,
-//     PublicChat,
-//     TrustedPrivateChat,
-// }
+#[derive(Clone, Ord)]
+pub enum RoomCreationPreset {
+    PrviateChat,
+    PublicChat,
+    TrustedPrivateChat,
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for RoomCreationPreset {
+    type Error = PyErr;
+
+    /// Extract from a Python `LoggingTransaction` passed as an argument.
+    fn extract(value_py: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        Ok(match value_py.extract()? {
+            "private_chat" => RoomCreationPreset::PrviateChat,
+            "public_chat" => RoomCreationPreset::PublicChat,
+            "trusted_private_chat" => RoomCreationPreset::TrustedPrivateChat,
+            other => {
+                return Err(PyRuntimeError::new_err(
+                    format!("Unknown variant {other:#} does not translate to `RoomCreationPreset`. This is a Synapse programming error."),
+                ))
+            }
+        })
+    }
+}
+
+#[derive(FromPyObject, Clone)]
+pub struct RoomConfig {
+    pub encryption_enabled_by_default_for_room_presets: BTreeSet<RoomCreationPreset>,
+}
 
 #[derive(FromPyObject, Clone)]
 pub struct ExperimentalConfig {

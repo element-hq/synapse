@@ -17,9 +17,9 @@ from twisted.internet.testing import MemoryReactor
 from synapse.rest import admin
 from synapse.rest.client import login, versions
 from synapse.server import HomeServer
-from synapse.util.clock import Clock
-from synapse.types import JsonDict
 from synapse.synapse_rust.http_client import HttpClient
+from synapse.types import JsonDict
+from synapse.util.clock import Clock
 
 from tests import unittest
 
