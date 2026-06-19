@@ -25,6 +25,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import secrets
 import time
 from typing import (
@@ -48,6 +49,7 @@ import signedjson.key
 import unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 
+from twisted.internet import defer
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from twisted.python.failure import Failure
@@ -77,6 +79,7 @@ from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -736,9 +739,50 @@ class HomeserverTestCase(TestCase):
         # whole chain to completion.
         self.reactor.pump([by] * 100)
 
-    def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
+    def get_success(
+        self, d: Awaitable[TV], timeout: Duration = Duration(seconds=10)
+    ) -> TV:
+        """
+        Get the success result of an awaitable.
+
+        Does not advance time in the Twisted reactor clock but will loop until the
+        real-time `timeout` waiting for a result. The loop 1) allows `clock.call_later`
+        scheduled callbacks to run if they are scheduled to run now and 2) will also
+        allow other threads to make progress. This could be things spawned on the
+        Twisted reactor threadpool or Tokio runtime (async Rust code).
+
+        Args:
+            d: awaitable
+            timeout: Real-time time to wait for the awaitable to have a result.
+                We use real-time as we may have to wait for work on other threads.
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a failure result or has no result
+                (although you would probably run into `defer.TimeoutError` in that case).
+        """
+        start_time_seconds = time.time()
+
         deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by=by)
+        while not deferred.called:
+            if start_time_seconds + timeout.as_secs() < time.time():
+                raise defer.TimeoutError(
+                    "Timed out waiting for work happening on a thread to finish"
+                )
+
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # We could also use `time.sleep(0)` here but this is more precise
+            os.sched_yield()
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # In terms of other threads, they may have scheduled something on the
+            # reactor to run (like `reactor.callFromThread(...)`)
+            self.reactor.advance(0)
+
         return self.successResultOf(deferred)
 
     def get_failure(
