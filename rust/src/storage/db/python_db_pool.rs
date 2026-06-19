@@ -27,7 +27,7 @@ use pyo3::{
     types::{PyBool, PyCFunction, PyFloat, PyInt, PyList, PyString},
 };
 
-use crate::http_client::await_deferred;
+use crate::deferred::await_deferred;
 use crate::storage::db::{DatabasePool, Row, Transaction, Value};
 
 /// The database engines we support in the Python side of Synapse

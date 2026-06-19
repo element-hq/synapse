@@ -7,6 +7,7 @@ use pyo3_log::ResetHandle;
 pub mod acl;
 pub mod canonical_json;
 pub mod config;
+pub mod deferred;
 pub mod duration;
 pub mod errors;
 pub mod events;
@@ -22,6 +23,7 @@ pub mod rendezvous;
 pub mod room_versions;
 pub mod segmenter;
 pub mod storage;
+pub mod tokio_runtime;
 pub mod types;
 
 lazy_static! {
@@ -68,6 +70,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(reset_logging_config, m)?)?;
 
     acl::register_module(py, m)?;
+    deferred::register_module(py, m)?;
     push::register_module(py, m)?;
     events::register_module(py, m)?;
     handlers::register_module(py, m)?;

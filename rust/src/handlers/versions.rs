@@ -20,7 +20,7 @@ use pythonize::{pythonize, PythonizeError};
 use serde::{Deserialize, Serialize};
 
 use crate::config::SynapseConfig;
-use crate::http_client::create_deferred;
+use crate::deferred::create_deferred;
 use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
