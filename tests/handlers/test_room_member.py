@@ -8,7 +8,7 @@ import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import FrozenEventV3
+from synapse.events import make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
@@ -124,7 +124,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             create_event_source,
             self.hs.config.server.default_room_version,
         )
-        create_event = FrozenEventV3(
+        create_event = make_event_from_dict(
             create_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -148,7 +148,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = FrozenEventV3(
+        join_event = make_event_from_dict(
             join_event_source,
             self.hs.config.server.default_room_version,
             {},

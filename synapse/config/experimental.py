@@ -380,6 +380,9 @@ class ExperimentalConfig(Config):
     ) -> None:
         experimental = config.get("experimental_features") or {}
 
+        # MSC1763 (retention policy configuration endpoint)
+        self.msc1763_enabled: bool = experimental.get("msc1763_enabled", False)
+
         # MSC3026 (busy presence state)
         self.msc3026_enabled: bool = experimental.get("msc3026_enabled", False)
 
@@ -389,6 +392,8 @@ class ExperimentalConfig(Config):
         # MSC2409 (this setting only relates to optionally sending to-device messages).
         # Presence, typing and read receipt EDUs are already sent to application services that
         # have opted in to receive them. If enabled, this adds to-device messages to that list.
+        # This is also for MSC4203 which was broken off of MSC2409 but kept the same unstable
+        # identifier.
         self.msc2409_to_device_messages_enabled: bool = experimental.get(
             "msc2409_to_device_messages_enabled", False
         )

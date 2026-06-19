@@ -98,6 +98,8 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
     deferred.
 
     If consumeErrors is true errors will be captured from the origin deferred.
+    In that case, errors will NOT be propagated onto any errbacks added to this
+    `ObservableDeferred`; instead the success callbacks will be called with `None`.
 
     Cancelling or otherwise resolving an observer will not affect the original
     ObservableDeferred.

@@ -915,7 +915,9 @@ class PersistEventsStore:
         # instances as we'll potentially be pulling more events from the DB and
         # we don't need the overhead of fetching/parsing the full event JSON.
         event_to_types = {e.event_id: (e.type, e.state_key) for e in state_events}
-        event_to_auth_chain = {e.event_id: e.auth_event_ids() for e in state_events}
+        event_to_auth_chain: dict[str, StrCollection] = {
+            e.event_id: e.auth_event_ids() for e in state_events
+        }
         event_to_room_id = {e.event_id: e.room_id for e in state_events}
 
         return self._calculate_chain_cover_index(

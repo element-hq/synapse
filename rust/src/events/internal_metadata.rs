@@ -510,7 +510,7 @@ fn attr_err<T>(val: Option<T>, name: &str) -> PyResult<T> {
 #[pymethods]
 impl EventInternalMetadata {
     #[new]
-    fn new(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn new(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
         let mut data = Vec::with_capacity(dict.len());
 
         for (key, value) in dict.iter() {
@@ -536,7 +536,10 @@ impl EventInternalMetadata {
         })
     }
 
-    fn copy(&self) -> PyResult<Self> {
+    /// Create a deep copy of this `EventInternalMetadata` to allow modification
+    /// without affecting other references to the same metadata. This is needed
+    /// when we clone an event.
+    pub fn deep_copy(&self) -> PyResult<Self> {
         let guard = self.read_inner()?;
         Ok(EventInternalMetadata {
             inner: Arc::new(RwLock::new(guard.clone())),
@@ -560,7 +563,7 @@ impl EventInternalMetadata {
         Ok(dict.into())
     }
 
-    fn is_outlier(&self) -> PyResult<bool> {
+    pub fn is_outlier(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.is_outlier())
     }
 
@@ -723,7 +726,7 @@ impl EventInternalMetadata {
         attr_err(self.read_inner()?.get_redacted(), "redacted")
     }
     #[setter]
-    fn set_redacted(&self, obj: bool) -> PyResult<()> {
+    pub fn set_redacted(&self, obj: bool) -> PyResult<()> {
         self.write_inner()?.set_redacted(obj);
         Ok(())
     }
@@ -742,7 +745,7 @@ impl EventInternalMetadata {
 
     /// The calculated auth event IDs, if it was set when the event was created.
     #[getter]
-    fn get_calculated_auth_event_ids(&self) -> PyResult<Vec<String>> {
+    pub fn get_calculated_auth_event_ids(&self) -> PyResult<Vec<String>> {
         let guard = self.read_inner()?;
         attr_err(
             guard.get_calculated_auth_event_ids().cloned(),
