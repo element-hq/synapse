@@ -200,7 +200,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
 
             # Let's be sure we are over the delay introduced by slow_update_membership
-            self.get_success(self.clock.sleep(Duration(milliseconds=20)), by=1)
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
 
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
@@ -278,7 +278,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
             # Let's be sure we are over the delay introduced by slow_update_membership
             # and that the task was not executed as expected
-            self.get_success(self.clock.sleep(Duration(milliseconds=20)), by=1)
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
 
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
@@ -300,7 +300,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
 
             # Let's be sure we are over the delay introduced by slow_update_membership
-            self.get_success(self.clock.sleep(Duration(milliseconds=20)), by=1)
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
 
             # Updates should have been resumed from room 2 after the restart
             # so room 1 should not have been updated this time

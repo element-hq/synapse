@@ -15,9 +15,8 @@ import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Coroutine, Generator, TypeVar, Union
+from typing import Any, TypeVar
 
-from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.logging.context import (
