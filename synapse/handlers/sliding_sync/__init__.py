@@ -327,13 +327,13 @@ class SlidingSyncHandler:
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
+            all_interested_room_ids=interested_rooms.all_rooms,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
             # extensions care about more than just normal events in the rooms (like
             # account data, read receipts, typing indicators, to-device messages, etc).
             actual_room_ids=set(relevant_room_map.keys()),
-            all_interested_room_ids=interested_rooms.all_rooms,
             actual_room_response_map=rooms,
             from_token=from_token,
             to_token=to_token,

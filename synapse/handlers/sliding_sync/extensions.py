@@ -87,9 +87,9 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
+        all_interested_room_ids: set[str],
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: set[str],
-        all_interested_room_ids: set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
@@ -101,12 +101,12 @@ class SlidingSyncExtensionHandler:
             previous_connection_state: Snapshot of the current per-connection state
             new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state during this request.
-            actual_lists: Sliding window API. A map of list key to list results in the
-                Sliding Sync response.
-            actual_room_ids: The actual room IDs in the the Sliding Sync response.
             all_interested_room_ids: The IDs of all rooms that the client is interested in,
                 even if they don't appear in the current limited window.
                 See `SlidingSyncInterestedRooms.all_rooms`.
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response.
             to_token: The latest point in the stream to sync up to.
