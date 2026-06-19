@@ -584,6 +584,9 @@ fn serialize_event_value(
         if let Some(sticky_duration) = event.sticky_duration() {
             // min() ensures the origin server can't claim a time in the future
             // to exceed the stickiness duration limit.
+            //
+            // The `as i64` cast is safe as sticky duration are capped to an
+            // hour, which is well within the i64 range.
             let expires_at = std::cmp::min(event.origin_server_ts(), time_now_ms)
                 + sticky_duration.as_millis() as i64;
             if expires_at > time_now_ms {
