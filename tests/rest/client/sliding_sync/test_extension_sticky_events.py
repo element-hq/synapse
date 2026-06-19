@@ -116,7 +116,9 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
 
         actual_rooms = sticky_events["rooms"]
         # Check that we have the expected rooms
-        self.assertIncludes(set(actual_rooms.keys()), set(expected_events_by_room.keys()), exact=True)
+        self.assertIncludes(
+            set(actual_rooms.keys()), set(expected_events_by_room.keys()), exact=True
+        )
 
         # Check the events in each room
         for room_id, expected_events in expected_events_by_room.items():
