@@ -1879,7 +1879,7 @@ class DatabasePool:
             if allow_none:
                 return None
             else:
-                raise StoreError(404, "No row found (%s)" % (table,))
+                raise StoreError(404, f"No row found ({table})")
 
     @staticmethod
     def simple_select_onecol_txn(
