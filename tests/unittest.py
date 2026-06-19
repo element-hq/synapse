@@ -786,15 +786,56 @@ class HomeserverTestCase(TestCase):
         return self.successResultOf(deferred)
 
     def get_failure(
-        self, d: Awaitable[Any], exc: type[_ExcType], by: float = 0.0
+        self,
+        d: Awaitable[Any],
+        exc: type[_ExcType],
+        timeout: Duration = Duration(seconds=10),
     ) -> _TypedFailure[_ExcType]:
         """
-        Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
+        Get the failure result of an awaitable. The failure must be of the type `exc`.
+
+        Does not advance time in the Twisted reactor clock but will loop until the
+        real-time `timeout` waiting for a result. The loop 1) allows `clock.call_later`
+        scheduled callbacks to run if they are scheduled to run now and 2) will also
+        allow other threads to make progress. This could be things spawned on the
+        Twisted reactor threadpool or Tokio runtime (async Rust code).
+
+        Args:
+            d: awaitable
+            exc: Exception type to expect
+            timeout: Real-time time to wait for the awaitable to have a result.
+                We use real-time as we may have to wait for work on other threads.
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a failure result or has no result
+                (although you would probably run into `defer.TimeoutError` in that case).
         """
-        deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by)
+        start_time_seconds = time.time()
+
+        deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
+        while not deferred.called:
+            if start_time_seconds + timeout.as_secs() < time.time():
+                raise defer.TimeoutError(
+                    "Timed out waiting for work happening on a thread to finish"
+                )
+
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # We could also use `time.sleep(0)` here but this is more precise
+            os.sched_yield()
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # In terms of other threads, they may have scheduled something on the
+            # reactor to run (like `reactor.callFromThread(...)`)
+            self.reactor.advance(0)
+
         return self.failureResultOf(deferred, exc)
 
+    # FIXME: Remove
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Drive deferred to completion and return result or raise exception
         on failure.
