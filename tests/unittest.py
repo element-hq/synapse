@@ -744,7 +744,7 @@ class HomeserverTestCase(TestCase):
         timeout: Duration = Duration(seconds=2),
     ) -> None:
         """
-        Wait for the awaitable to finish or raise (with real-time timeout).
+        Wait for the deferred to finish or raise (with real-time timeout).
 
         Does not advance time in the Twisted reactor clock but will loop until the
         real-time `timeout` waiting for a result. The loop 1) allows `clock.call_later`
@@ -753,12 +753,12 @@ class HomeserverTestCase(TestCase):
         Twisted reactor threadpool or Tokio runtime (async Rust code).
 
         Args:
-            d: awaitable
-            timeout: Real-time time to wait for the awaitable to have a result.
+            d: Twisted Deferred
+            timeout: Real-time time to wait for the deferred to have a result.
                 We use real-time as we may have to wait for work on other threads.
 
         Raises:
-            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            defer.TimeoutError: If the timeout expires before the deferred completes.
         """
         start_time_seconds = time.time()
 
