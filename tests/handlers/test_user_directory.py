@@ -555,9 +555,14 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         # Process the leave and join in one go.
         dir_handler.update_user_directory = True
         dir_handler.notify_new_event()
-        # `notify_new_event` is fire-and-forget but the actual changes that happen are
-        # part of a processing loop which we need to wait for. We're specifically
-        # waiting for the database queries in the `notify_new_event` processing loop.
+
+        # Wait for the user directory to update
+        #
+        # `notify_new_event` is fire-and-forget and the actual changes happen as part of
+        # a background process loop which isn't waited on.
+        #
+        # We're specifically waiting for the database queries in the `notify_new_event`
+        # background process.
         self.reactor.advance(0)
 
         # The user sharing tables should have been updated.
