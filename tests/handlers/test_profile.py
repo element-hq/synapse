@@ -299,6 +299,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 )
             )
 
+            # Wait for the `TaskScheduler.SCHEDULE_INTERVAL`
+            self.reactor.advance(Duration(minutes=1).as_secs())
             # Let's be sure we are over the delay introduced by slow_update_membership
             self.reactor.advance(Duration(milliseconds=20).as_secs())
 
