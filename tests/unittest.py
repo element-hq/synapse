@@ -762,7 +762,19 @@ class HomeserverTestCase(TestCase):
         """
         start_time_seconds = time.time()
 
-        while not d.called:
+        # Wait until the deferred has a result
+        #
+        # Checking `d.called` by itself is not sufficient by itself as this is possible:
+        #
+        # If you have a first `Deferred` `D1`, you can add a callback which returns
+        # another `Deferred` `D2`, and `D2` must then complete before any further
+        # callbacks on `D1` will execute (and later callbacks on `D1` get the *result*
+        # of `D2` rather than `D2` itself).
+        #
+        # So, `D1` might have `called=True` (as in, it has started running its
+        # callbacks), but any new callbacks added to `D1` won't get run until `D2`
+        # completes. Fortunately, we can detect this by checking `d.paused`.
+        while not d.called or d.paused:
             if start_time_seconds + timeout.as_secs() < time.time():
                 raise defer.TimeoutError(
                     "Timed out waiting for work happening on a thread to finish"
