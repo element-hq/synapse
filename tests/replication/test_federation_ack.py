@@ -81,6 +81,14 @@ class FederationAckTestCase(HomeserverTestCase):
             )
         )
 
+        # Wait for the FEDERATION_ACK to be sent
+        #
+        # `on_rdata` handles this as part of a background process (see
+        # `FederationSenderHandler.update_token`)
+        #
+        # We're specifically waiting for the database queries in the background process
+        self.reactor.advance(0)
+
         # now check that the FEDERATION_ACK was sent
         mock_connection.send_command.assert_called_once()
         cmd = mock_connection.send_command.call_args[0][0]
