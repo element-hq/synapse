@@ -24,8 +24,6 @@ import weakref
 from typing import Any
 from unittest.mock import patch
 
-from twisted.internet.defer import ensureDeferred
-
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
