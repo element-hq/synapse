@@ -727,7 +727,7 @@ class HomeserverTestCase(TestCase):
 
     def _wait_for_deferred(
         self,
-        d: Deferred[Any],
+        d: "Deferred[Any]",
         # 2-second default timeout as tests should be fast
         timeout: Duration = Duration(seconds=2),
     ) -> None:
