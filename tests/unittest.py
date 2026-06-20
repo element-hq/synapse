@@ -737,6 +737,50 @@ class HomeserverTestCase(TestCase):
         # whole chain to completion.
         self.reactor.pump([by] * 100)
 
+    def _wait_for_deferred(
+        self,
+        d: Deferred[Any],
+        # 2-second default timeout as tests should be fast
+        timeout: Duration = Duration(seconds=2),
+    ) -> None:
+        """
+        Wait for the awaitable to finish or raise (with real-time timeout).
+
+        Does not advance time in the Twisted reactor clock but will loop until the
+        real-time `timeout` waiting for a result. The loop 1) allows `clock.call_later`
+        scheduled callbacks to run if they are scheduled to run now and 2) will also
+        allow other threads to make progress. This could be things spawned on the
+        Twisted reactor threadpool or Tokio runtime (async Rust code).
+
+        Args:
+            d: awaitable
+            timeout: Real-time time to wait for the awaitable to have a result.
+                We use real-time as we may have to wait for work on other threads.
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+        """
+        start_time_seconds = time.time()
+
+        while not d.called:
+            if start_time_seconds + timeout.as_secs() < time.time():
+                raise defer.TimeoutError(
+                    "Timed out waiting for work happening on a thread to finish"
+                )
+
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # We could also use `time.sleep(0)` here but this is more precise
+            os.sched_yield()
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # In terms of other threads, they may have scheduled something on the
+            # reactor to run (like `reactor.callFromThread(...)`)
+            self.reactor.advance(0)
+
     def get_success(
         self,
         d: Awaitable[TV],
@@ -762,27 +806,8 @@ class HomeserverTestCase(TestCase):
             SynchronousTestCase.failureException: If the awaitable has a failure result or has no result
                 (although you would probably run into `defer.TimeoutError` in that case).
         """
-        start_time_seconds = time.time()
-
         deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-        while not deferred.called:
-            if start_time_seconds + timeout.as_secs() < time.time():
-                raise defer.TimeoutError(
-                    "Timed out waiting for work happening on a thread to finish"
-                )
-
-            # Suspend execution of this thread to allow other threads to do work. This
-            # could be things spawned on the Twisted reactor threadpool or Tokio thread
-            # pool (async Rust code).
-            #
-            # We could also use `time.sleep(0)` here but this is more precise
-            os.sched_yield()
-
-            # Advance the Twisted reactor and run any scheduled callbacks
-            #
-            # In terms of other threads, they may have scheduled something on the
-            # reactor to run (like `reactor.callFromThread(...)`)
-            self.reactor.advance(0)
+        self._wait_for_deferred(deferred, timeout)
 
         return self.successResultOf(deferred)
 
@@ -814,27 +839,8 @@ class HomeserverTestCase(TestCase):
                 or has an unexpected failure result, or has no result (although you would
                 probably run into `defer.TimeoutError` in that case).
         """
-        start_time_seconds = time.time()
-
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        while not deferred.called:
-            if start_time_seconds + timeout.as_secs() < time.time():
-                raise defer.TimeoutError(
-                    "Timed out waiting for work happening on a thread to finish"
-                )
-
-            # Suspend execution of this thread to allow other threads to do work. This
-            # could be things spawned on the Twisted reactor threadpool or Tokio thread
-            # pool (async Rust code).
-            #
-            # We could also use `time.sleep(0)` here but this is more precise
-            os.sched_yield()
-
-            # Advance the Twisted reactor and run any scheduled callbacks
-            #
-            # In terms of other threads, they may have scheduled something on the
-            # reactor to run (like `reactor.callFromThread(...)`)
-            self.reactor.advance(0)
+        self._wait_for_deferred(deferred, timeout)
 
         return self.failureResultOf(deferred, exc)
 
