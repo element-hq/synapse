@@ -784,8 +784,8 @@ class HomeserverTestCase(TestCase):
     def get_success(
         self,
         d: Awaitable[TV],
-        # 2-second default timeout as tests should be fast
-        timeout: Duration = Duration(seconds=2),
+        # 1 second default timeout as tests should be fast
+        timeout: Duration = Duration(seconds=1),
     ) -> TV:
         """
         Get the success result of an awaitable.
@@ -795,6 +795,15 @@ class HomeserverTestCase(TestCase):
         scheduled callbacks to run if they are scheduled to run now and 2) will also
         allow other threads to make progress. This could be things spawned on the
         Twisted reactor threadpool or Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
 
         Args:
             d: awaitable
@@ -815,8 +824,8 @@ class HomeserverTestCase(TestCase):
         self,
         d: Awaitable[Any],
         exc: type[_ExcType],
-        # 2-second default timeout as tests should be fast
-        timeout: Duration = Duration(seconds=2),
+        # 1 second default timeout as tests should be fast
+        timeout: Duration = Duration(seconds=1),
     ) -> _TypedFailure[_ExcType]:
         """
         Get the failure result of an awaitable. The failure must be of the type `exc`.
