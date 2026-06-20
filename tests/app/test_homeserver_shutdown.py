@@ -115,10 +115,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # Pump the background updates by a single iteration, just to ensure any extra
         # resources it uses have been started.
         store = weakref.proxy(self.hs.get_datastores().main)
-        background_update_d = ensureDeferred(
-            store.db_pool.updates.do_next_background_update(False)
-        )
-        self.get_success(background_update_d)
+        self.get_success(store.db_pool.updates.do_next_background_update(False))
 
         hs_ref = weakref.ref(self.hs)
 
