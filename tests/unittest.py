@@ -477,18 +477,6 @@ class HomeserverTestCase(TestCase):
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False
 
-    def wait_on_thread(self, deferred: Deferred, timeout: int = 10) -> None:
-        """
-        Wait until a Deferred is done, where it's waiting on a real thread.
-        """
-        start_time = time.time()
-
-        while not deferred.called:
-            if start_time + timeout < time.time():
-                raise ValueError("Timed out waiting for threadpool")
-            self.reactor.advance(0.01)
-            time.sleep(0.01)
-
     def wait_for_background_updates(self) -> None:
         """Block until all background database updates have completed."""
         store = self.hs.get_datastores().main
