@@ -24,6 +24,8 @@ import weakref
 from typing import Any
 from unittest.mock import patch
 
+from twisted.internet.defer import ensureDeferred
+
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.logging.context import LoggingContext
 from synapse.storage.background_updates import UpdaterStatus
@@ -76,6 +78,13 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         self.get_success(shutdown())
 
+        # XXX: There can be a few already dispatched database queries (from normal
+        # background tasks in Synapse) and the threadless `ThreadPool` that we use in
+        # tests uses *untracked* clock calls to pass database results back so `shutdown`
+        # doesn't cancel those calls. This is a quirk of our test infrastructure
+        # (threadless `ThreadPool`) so this kind of "hack" is fine.
+        self.reactor.advance(0)
+
         # Cleanup the internal reference in our test case
         del self.hs
 
@@ -106,7 +115,10 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # Pump the background updates by a single iteration, just to ensure any extra
         # resources it uses have been started.
         store = weakref.proxy(self.hs.get_datastores().main)
-        self.get_success(store.db_pool.updates.do_next_background_update(False), by=0.1)
+        background_update_d = ensureDeferred(
+            store.db_pool.updates.do_next_background_update(False)
+        )
+        self.get_success(background_update_d)
 
         hs_ref = weakref.ref(self.hs)
 
@@ -126,6 +138,13 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
                 await self.hs.shutdown()
 
         self.get_success(shutdown())
+
+        # XXX: There can be a few already dispatched database queries (from normal
+        # background tasks in Synapse) and the threadless `ThreadPool` that we use in
+        # tests uses *untracked* clock calls to pass database results back so `shutdown`
+        # doesn't cancel those calls. This is a quirk of our test infrastructure
+        # (threadless `ThreadPool`) so this kind of "hack" is fine.
+        self.reactor.advance(0)
 
         # Cleanup the internal reference in our test case
         del self.hs
