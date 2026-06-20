@@ -12,8 +12,8 @@
 
 import json
 import logging
+import os
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, TypeVar
 
@@ -202,7 +202,14 @@ class HttpClientTestCase(HomeserverTestCase):
             with PreserveLoggingContext():
                 while not callback_finished:
                     # Allow the async Rust to run
-                    time.sleep(0)
+                    #
+                    # Suspend execution of this thread to allow other the  Tokio thread
+                    # pool to do work.
+                    os.sched_yield()
+                    # Advance the Twisted reactor and run any scheduled callbacks
+                    #
+                    # In terms of other threads, they may have scheduled something on the
+                    # reactor to run (like `reactor.callFromThread(...)`)
                     self.reactor.advance(0)
 
             # check that the logcontext is left in a sane state.
