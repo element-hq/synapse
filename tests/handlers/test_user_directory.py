@@ -555,7 +555,10 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         # Process the leave and join in one go.
         dir_handler.update_user_directory = True
         dir_handler.notify_new_event()
-        self.wait_for_background_updates()
+        # `notify_new_event` is fire-and-forget but the actual changes that happen are
+        # part of a processing loop which we need to wait for. We're specifically
+        # waiting for the database queries in the `notify_new_event` processing loop.
+        self.reactor.advance(0)
 
         # The user sharing tables should have been updated.
         public3 = self.get_success(self.user_dir_helper.get_users_in_public_rooms())
@@ -1124,7 +1127,6 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
 
         # Alice leaves the other. She should still be in the directory.
         self.helper.leave(room2, alice, tok=alice_token)
-        self.wait_for_background_updates()
         users, in_public, in_private = self.get_success(
             self.user_dir_helper.get_tables()
         )
