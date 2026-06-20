@@ -799,6 +799,7 @@ class HomeserverTestCase(TestCase):
         If you need to advance the Twisted reactor by an actual time increment, you can
         use the following pattern:
         ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
         task_d = ensureDeferred(my_async_task())
         # Please explain why/what scheduled call you're trying to trigger
         self.reactor.advance(Duration(seconds=1).as_secs())
@@ -835,6 +836,16 @@ class HomeserverTestCase(TestCase):
         scheduled callbacks to run if they are scheduled to run now and 2) will also
         allow other threads to make progress. This could be things spawned on the
         Twisted reactor threadpool or Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
 
         Args:
             d: awaitable
