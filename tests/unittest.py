@@ -844,7 +844,7 @@ class HomeserverTestCase(TestCase):
 
         return self.failureResultOf(deferred, exc)
 
-    # FIXME: Remove as the the exact same semantics as `get_success()`. In
+    # FIXME: Remove as this has the exact same semantics as `get_success()`. In
     # https://github.com/matrix-org/synapse/pull/8402#discussion_r495992506 where it was
     # introduced, it was claimed that "get_success fails the test if the deferred fails
     # rather than raising, which I find a bit unintuitive." but `get_success()` actually
