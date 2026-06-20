@@ -838,7 +838,13 @@ class HomeserverTestCase(TestCase):
 
         return self.failureResultOf(deferred, exc)
 
-    # FIXME: Remove
+    # FIXME: Remove as the the exact same semantics as `get_success()`. In
+    # https://github.com/matrix-org/synapse/pull/8402#discussion_r495992506 where it was
+    # introduced, it was claimed that "get_success fails the test if the deferred fails
+    # rather than raising, which I find a bit unintuitive." but `get_success()` actually
+    # does raise "@raise SynchronousTestCase.failureException : If the
+    # L{Deferred<twisted.internet.defer.Deferred>} has no result or has a failure
+    # result." at-least in today's world.
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Drive deferred to completion and return result or raise exception
         on failure.
