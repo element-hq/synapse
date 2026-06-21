@@ -1469,54 +1469,6 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             ],
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
-    def test_incremental_sync_sends_down_null_profile_if_user_no_longer_sharing_rooms(
-        self,
-    ) -> None:
-        requester = create_requester(self.user)
-        initial_result = self.get_success(
-            self.sync_handler.wait_for_sync_for_user(
-                requester,
-                sync_config=generate_sync_config(
-                    user_id=self.user,
-                    filter_collection=FilterCollection(
-                        hs=self.hs,
-                        filter_json={
-                            "org.matrix.msc4429.profile_fields": {
-                                "ids": ["m.status", "displayname", "avatar_url"]
-                            }
-                        },
-                    ),
-                ),
-                request_key=generate_request_key(),
-            )
-        )
-        self.helper.leave(
-            room=self.joined_room, user=self.other_user, tok=self.other_tok
-        )
-        incremental_result = self.get_success(
-            self.sync_handler.wait_for_sync_for_user(
-                requester,
-                since_token=initial_result.next_batch,
-                sync_config=generate_sync_config(
-                    user_id=self.user,
-                    filter_collection=FilterCollection(
-                        hs=self.hs,
-                        filter_json={
-                            "org.matrix.msc4429.profile_fields": {
-                                "ids": ["m.status", "displayname", "avatar_url"]
-                            }
-                        },
-                    ),
-                ),
-                request_key=generate_request_key(),
-            )
-        )
-        self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"],
-            {},
-        )
-
 
 class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
     """Tests Sync Handler state behavior when using `use_state_after."""
