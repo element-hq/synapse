@@ -1217,7 +1217,16 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
 
     @override_config({"experimental_features": {"msc4429_enabled": True}})
-    def test_initial_sync_responds_with_all_known_profiles(self) -> None:
+    def test_initial_sync_responds_with_tracked_profile_updates(self) -> None:
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -1237,21 +1246,13 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
         )
         self.assertEqual(
-            initial_result.profile_updates["@user:test"]["m.status"],
-            '{"text": "Swimming in the Great Lakes!", "emoji": "\\ud83c\\udfca"}',
-        )
-        self.assertEqual(
-            initial_result.profile_updates["@user:test"]["displayname"], "user"
-        )
-        self.assertEqual(
-            initial_result.profile_updates["@other_user:test"]["displayname"],
-            "other_user",
+            initial_result.profile_updates["@other_user:test"]["m.status"],
+            '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
         )
         self.assertCountEqual(
             initial_result.profile_updates.keys(),
             [
                 "@other_user:test",
-                "@user:test",
             ],
         )
 
@@ -1282,6 +1283,15 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 requester=create_requester(self.other_user),
                 field_name="m.status",
                 new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+        # Check that lazy-loading filters out profile updates as well on initial sync.
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On fire", "emoji": "🔥"}),
             )
         )
         self.helper.send_messages(
@@ -1375,7 +1385,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
 
     @override_config({"experimental_features": {"msc4429_enabled": True}})
-    def test_incremental_sync_sends_down_only_interesting_profile_updates_when_lazy_loading(
+    def test_incremental_sync_does_not_filter_profile_updates_when_lazy_loading(
         self,
     ) -> None:
         third_user = self.register_user("third_user", "password")
@@ -1449,11 +1459,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        # Only third_user is returned, as lazy loading filters out the events from
-        # other_user
+        # Lazy loading only filters initial sync profile updates. Incremental syncs
+        # should include all tracked profile updates for the syncing user.
         self.assertCountEqual(
             incremental_result.profile_updates.keys(),
             [
+                "@other_user:test",
                 "@third_user:test",
             ],
         )
