@@ -2142,7 +2142,7 @@ class SyncHandler:
         *,
         user_id: str,
         sync_result_builder: "SyncResultBuilder",
-        profile_fields: list[str],
+        profile_fields: set[str],
         include_users: set[str] | None,
     ) -> None:
         """
@@ -2159,21 +2159,35 @@ class SyncHandler:
                 for when we have calculated a list of users in our lazy loading
                 sync and want to only return those.
         """
-        # Currently, limited to only local profiles, so filter remote servers out
-        user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
+        updates = await self.store.get_profile_updates_for_user_and_fields(
+            from_id=0,
+            to_id=sync_result_builder.now_token.profile_updates_key,
+            user_id=user_id,
+            field_names=profile_fields,
+            include_users=include_users,
+        )
 
-        if include_users:
-            # Filter down to selected included users
-            user_ids = {user_id for user_id in user_ids if user_id in include_users}
+        user_fields: dict[str, set[str]] = {}
+        for update in updates:
+            if (
+                update.action != ProfileUpdateAction.UPDATE.value
+                # TODO: When would field_name be None?
+                or update.field_name is None
+            ):
+                continue
 
-        if not user_ids:
+            user_fields.setdefault(update.user_id, set()).add(update.field_name)
+
+        if not user_fields:
             return
 
-        profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            user_fields.keys()
+        )
 
         # Serialise the profile updates into the sync response format.
         profile_updates: dict[str, dict[str, JsonValue | None]] = {}
-        for other_user_id in user_ids:
+        for other_user_id, fields in user_fields.items():
             profile_data = profile_data_by_user.get(other_user_id)
             if profile_data is None:
                 # Don't generate anything for users with no profile data
@@ -2181,7 +2195,7 @@ class SyncHandler:
                 continue
 
             per_user_updates: dict[str, JsonValue] = {}
-            for field_name in profile_fields:
+            for field_name in fields:
                 if profile_data.get(field_name):
                     per_user_updates[field_name] = cast(
                         JsonValue, profile_data[field_name]
@@ -2247,42 +2261,23 @@ class SyncHandler:
         if since_token.profile_updates_key == now_token.profile_updates_key:
             return
 
-        updates = await self.store.get_profile_updates_for_fields(
-            from_id=since_token.profile_updates_key,
-            to_id=now_token.profile_updates_key,
-            field_names=profile_fields,
-        )
-        interesting_updates = await self.store.get_profile_updates_per_user_for_user(
+        updates = await self.store.get_profile_updates_for_user_and_fields(
             from_id=since_token.profile_updates_key,
             to_id=now_token.profile_updates_key,
             user_id=user_id,
+            field_names=profile_fields,
         )
-        if include_users:
-            # Further filter down to selected included users
-            updates = [update for update in updates if update.user_id in include_users]
 
         left_room_user_ids = {
             update.user_id
             for update in updates
             if update.action == ProfileUpdateAction.LEFT_ROOM.value
         }
-        # Only include updates we've got for us specifically for field updates
-        updates = [
-            update for update in updates if update.stream_id in interesting_updates
-        ]
         updated_user_ids = {
             update.user_id
             for update in updates
             if update.action == ProfileUpdateAction.UPDATE.value
         }
-        no_longer_sharing_rooms_user_ids: set[str] = set()
-        if left_room_user_ids:
-            shared_left_user_ids = await self.store.do_users_share_a_room(
-                user_id, left_room_user_ids
-            )
-            no_longer_sharing_rooms_user_ids = set(left_room_user_ids) - set(
-                shared_left_user_ids
-            )
 
         if not updated_user_ids and not left_room_user_ids:
             return
@@ -2293,7 +2288,6 @@ class SyncHandler:
 
         # Process field updates
         if updated_user_ids:
-            updated_user_ids.add(user_id)
             user_fields: dict[str, set[str]] = {}
             for update in updates:
                 if not update.field_name or update.user_id not in updated_user_ids:
@@ -2331,8 +2325,8 @@ class SyncHandler:
                     profile_updates[other_user_id] = per_user_updates
 
         # Process left rooms
-        if no_longer_sharing_rooms_user_ids:
-            for other_user_id in no_longer_sharing_rooms_user_ids:
+        if left_room_user_ids:
+            for other_user_id in left_room_user_ids:
                 # Return an empty dictionary to the client
                 profile_updates[other_user_id] = {}
 

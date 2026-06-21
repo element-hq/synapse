@@ -227,7 +227,7 @@ class FilterCollection:
         self.event_fields = filter_json.get("event_fields", [])
         self.event_format = filter_json.get("event_format", "client")
 
-        self.profile_fields: list[str] = []
+        self.profile_fields: set[str] = set()
         if hs.config.experimental.msc4429_enabled:
             profile_fields_filter = filter_json.get("org.matrix.msc4429.profile_fields")
 
@@ -235,7 +235,7 @@ class FilterCollection:
                 ids = profile_fields_filter.get("ids", [])
                 if ids is None:
                     ids = []
-                self.profile_fields = list(ids)
+                self.profile_fields = set(ids)
 
     def __repr__(self) -> str:
         return "<FilterCollection %s>" % (json.dumps(self._filter_json),)

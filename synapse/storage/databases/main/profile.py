@@ -411,7 +411,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 " OR action != ?) "
                 " ORDER BY stream_id ASC"
             )
-            txn.execute(sql, (from_id, to_id, ProfileUpdateAction.UPDATE.value, *args))
+            txn.execute(sql, (from_id, to_id, *args, ProfileUpdateAction.UPDATE.value))
             rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
             updates: list[ProfileUpdate] = []
@@ -429,6 +429,104 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return await self.db_pool.runInteraction(
             "get_profile_updates_for_fields", _get_profile_updates_for_fields_txn
+        )
+
+    async def get_profile_updates_for_user_and_fields(
+        self,
+        *,
+        from_id: int,
+        to_id: int,
+        user_id: str,
+        field_names: set[str],
+        include_users: set[str] | None = None,
+    ) -> list[ProfileUpdate]:
+        """Get profile update markers for a user in a stream range.
+
+        The returned profile update rows are restricted to those with a
+        corresponding `profile_updates_per_user` row for the syncing user.
+
+        Bounds: from_id < ... <= to_id
+
+        Args:
+            from_id: The starting stream ID (exclusive).
+            to_id: The ending stream ID (inclusive).
+            user_id: The full user ID to filter on.
+            field_names: Set of field names to filter update actions against.
+            include_users: If given, only include updates for these user IDs.
+
+        Returns:
+            A list of ProfileUpdates update rows.
+        """
+        if from_id == to_id:
+            return []
+
+        if len(field_names) == 0:
+            return []
+
+        if include_users is not None and len(include_users) == 0:
+            # All updates have been filtered out by lazy-loading.
+            return []
+
+        def _get_profile_updates_for_user_and_fields_txn(
+            txn: LoggingTransaction,
+        ) -> list[ProfileUpdate]:
+            field_clause, field_args = make_in_list_sql_clause(
+                txn.database_engine, "pu.field_name", field_names
+            )
+            user_clause = ""
+            user_args: list[str] = []
+            if include_users is not None:
+                # Filter out rows that aren't in `include_users`, if defined.
+                # This is only relevant when lazy-loading.
+                user_clause, user_args = make_in_list_sql_clause(
+                    txn.database_engine, "pu.user_id", include_users
+                )
+                user_clause = f"AND {user_clause}"
+
+            # Retrieve profile updates where there's a corresponding row in
+            # `profile_updates_per_user` within the given `stream_id` bounds
+            # and the `user_id` and `field_names` match.
+            sql = f"""
+                SELECT pu.stream_id, pu.user_id, pu.action, pu.field_name
+                  FROM profile_updates AS pu
+                  INNER JOIN profile_updates_per_user AS puf
+                  ON pu.stream_id = puf.stream_id
+                  WHERE ? < pu.stream_id AND pu.stream_id <= ?
+                  AND puf.user_id = ?
+                  {user_clause}
+                  AND ({field_clause} OR pu.action != ?)
+                  ORDER BY pu.stream_id ASC
+            """
+
+            txn.execute(
+                sql,
+                (
+                    from_id,
+                    to_id,
+                    user_id,
+                    *user_args,
+                    *field_args,
+                    ProfileUpdateAction.UPDATE.value,
+                ),
+            )
+            rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
+
+            updates: list[ProfileUpdate] = []
+            for stream_id, updated_user_id, action, field_name in rows:
+                updates.append(
+                    ProfileUpdate(
+                        stream_id=stream_id,
+                        user_id=updated_user_id,
+                        action=action,
+                        field_name=field_name,
+                    )
+                )
+
+            return updates
+
+        return await self.db_pool.runInteraction(
+            "get_profile_updates_for_user_and_fields",
+            _get_profile_updates_for_user_and_fields_txn,
         )
 
     async def get_profile_data_for_users(
