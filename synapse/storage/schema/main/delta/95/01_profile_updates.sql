@@ -33,3 +33,17 @@ CREATE TABLE profile_updates (
 
 CREATE INDEX profile_updates_by_user ON profile_updates (user_id, stream_id);
 CREATE INDEX profile_updates_by_field ON profile_updates (field_name, stream_id);
+
+-- Track which local users should receive each profile update.
+CREATE TABLE profile_updates_per_user (
+  stream_id BIGINT NOT NULL,
+
+  -- The full user ID of the local user that should receive the profile update.
+  user_id TEXT NOT NULL,
+
+  -- Unix timestamp. Used to determine when to cull rows (to prevent the table
+  -- from growing indefinitely).
+  inserted_ts BIGINT NOT NULL
+);
+
+CREATE INDEX profile_updates_per_user_by_user_stream ON profile_updates_per_user (user_id, stream_id);
