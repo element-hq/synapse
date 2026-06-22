@@ -203,7 +203,7 @@ class HttpClientTestCase(HomeserverTestCase):
                 while not callback_finished:
                     # Allow the async Rust to run
                     #
-                    # Suspend execution of this thread to allow other the  Tokio thread
+                    # Suspend execution of this thread to allow other the Tokio thread
                     # pool to do work.
                     os.sched_yield()
                     # Advance the Twisted reactor and run any scheduled callbacks
