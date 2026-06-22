@@ -505,6 +505,9 @@ impl EventInternalMetadata {
     }
 
     /// The transaction ID, if set when the event was created.
+    ///
+    /// The transaction ID comes from the `txn_id` path parameter of the
+    /// client-server API request used to send the event.
     pub fn txn_id(&self) -> PyResult<Option<String>> {
         Ok(self.read_inner()?.get_txn_id().map(|s| s.to_owned()))
     }
