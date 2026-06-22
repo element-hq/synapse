@@ -3227,6 +3227,10 @@ properties:
       options relating to auto-joining rooms below.
 
 
+      Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart`
+      to a user who's part of the invite-only rooms.
+
+
       As Spaces are just rooms under the hood, Space aliases may also be used.
     items:
       type: string
