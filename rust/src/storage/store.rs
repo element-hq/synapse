@@ -63,7 +63,7 @@ impl<P: DatabasePool> Store<P> {
         //
         // Owned copies so the callback can be `'static` (it may be moved to
         // another thread and called multiple times under retries).
-        let user_id = user_id.to_string();
+        let user_id = user_id.to_owned();
         let feature = feature.to_string();
 
         let is_feature_enabled_for_user = self
