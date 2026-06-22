@@ -273,10 +273,8 @@ class ReplicationDataHandler:
                 user_ids_to_room_ids = await self.store.get_rooms_for_users(
                     updated_user_ids
                 )
-                # Typing: `user_ids_to_room_ids.values` is a frozenset, but one
-                # can still iterate over it, hence the ignore.
-                for batched_room_ids in user_ids_to_room_ids.values():  # type: ignore[assignment]
-                    room_ids.update(batched_room_ids)
+                for batched_user_ids_to_room_ids in user_ids_to_room_ids.values():
+                    room_ids.update(batched_user_ids_to_room_ids)
 
                 if room_ids:
                     self.notifier.on_new_event(
