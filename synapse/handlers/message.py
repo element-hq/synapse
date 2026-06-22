@@ -2295,7 +2295,32 @@ class EventCreationHandler:
                 now = self.clock.time_msec()
                 self._rooms_to_exclude_from_dummy_event_insertion[room_id] = now
 
-    async def _send_dummy_event_for_room(self, room_id: str) -> bool:
+    async def _send_dummy_event_after_room_join(self, room_id: str) -> None:
+        """
+        Creates and sends a dummy event into the given room, referencing the
+        current forward extremities (via `prev_events`).
+        This should only be triggered when handling a remote join while events
+        were sent during the make_join/send_join handshake. The joining
+        homeserver would otherwise not immediately know to backfill those events
+        and would "miss" them.
+        """
+        async with self._worker_lock_handler.acquire_read_write_lock(
+            NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
+        ):
+            dummy_event_sent = await self._send_dummy_event_for_room(
+                room_id, proactively_send=True
+            )
+
+        if not dummy_event_sent:
+            logger.warning(
+                "Failed to send dummy event into room %s after remote join; "
+                "no local user with permission was found",
+                room_id,
+            )
+
+    async def _send_dummy_event_for_room(
+        self, room_id: str, proactively_send: bool = False
+    ) -> bool:
         """Attempt to send a dummy event for the given room.
 
         Args:
@@ -2327,8 +2352,7 @@ class EventCreationHandler:
                             },
                         )
                         context = await unpersisted_context.persist(event)
-
-                        event.internal_metadata.proactively_send = False
+                        event.internal_metadata.proactively_send = proactively_send
 
                         # Since this is a dummy-event it is OK if it is sent by a
                         # shadow-banned user.

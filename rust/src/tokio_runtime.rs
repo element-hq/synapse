@@ -69,6 +69,16 @@ impl PyTokioRuntime {
     }
 }
 
+/// Get a handle to the Tokio runtime stored on the reactor instance, or create
+/// a new one.
+pub fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
+    if !reactor.hasattr(TOKIO_RUNTIME_ATTR)? {
+        install_runtime(reactor)?;
+    }
+
+    get_runtime(reactor)
+}
+
 /// Install a new Tokio runtime on the reactor instance.
 fn install_runtime(reactor: &Bound<PyAny>) -> PyResult<()> {
     let py = reactor.py();
@@ -94,14 +104,4 @@ fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRunt
     // manually, or if multiple versions of `pyo3-twisted` are used!
     let runtime: Bound<PyTokioRuntime> = reactor.getattr(TOKIO_RUNTIME_ATTR)?.extract()?;
     Ok(runtime.borrow())
-}
-
-/// Get a handle to the Tokio runtime stored on the reactor instance, or create
-/// a new one.
-pub fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
-    if !reactor.hasattr(TOKIO_RUNTIME_ATTR)? {
-        install_runtime(reactor)?;
-    }
-
-    get_runtime(reactor)
 }

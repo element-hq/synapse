@@ -62,7 +62,7 @@ fn defer(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// tokio runtime.
 ///
 /// Does not handle deferred cancellation or contextvars.
-pub(crate) fn create_deferred<'py, F, O>(
+pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
     reactor: &Bound<'py, PyAny>,
     fut: F,
@@ -242,9 +242,7 @@ fn make_deferred_yieldable<'py>(
 }
 
 /// Called when registering modules with python.
-pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    _ = m;
-
+pub fn register_module(py: Python<'_>, _m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Make sure we fail early if we can't load some modules
     defer(py)?;
 

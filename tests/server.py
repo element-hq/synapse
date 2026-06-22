@@ -1136,7 +1136,7 @@ def setup_test_homeserver(
         reactor = ThreadedMemoryReactorClock()
 
     if config is None:
-        config = default_config(server_name, parse=True)
+        config = default_config(server_name=server_name, parse=True)
 
     server_name = config.server.server_name
     if not isinstance(server_name, str):
