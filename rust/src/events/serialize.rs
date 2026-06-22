@@ -477,7 +477,7 @@ fn serialize_event_value(
     // us it *should* be an integer, but it is possible for it to be out of i64
     // range. In that case, just omit `age` rather than erroring.
     let unsigned = unsigned_mut(&mut d);
-    if let Some(age_ts) = unsigned.get(unsigned_field::AGE_TS).and_then(Value::as_i64) {
+    if let Some(age_ts) = event.unsigned().age_ts()?.and_then(|n| n.as_i64()) {
         unsigned.insert(
             unsigned_field::AGE.to_owned(),
             Value::Number(Number::from(time_now_ms - age_ts)),
