@@ -13,9 +13,10 @@
  *
  */
 
-use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use std::collections::BTreeSet;
 use std::str::FromStr;
+
+use pyo3::{exceptions::PyRuntimeError, prelude::*};
 
 #[derive(FromPyObject, Clone)]
 pub struct SynapseConfig {
