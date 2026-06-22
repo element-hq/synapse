@@ -431,12 +431,41 @@ class ProfileHandler:
         if propagate:
             await self._update_join_states(requester, target_user)
 
-    async def _user_left_room(self, user_id: UserID) -> None:
-        await self.store.add_profile_updates(
+    async def _user_left_room(self, user_id: UserID, room_id: str) -> None:
+        """
+        A user left a room. We now:
+
+        * Add a row to `profile_updates` stating the the user left a certain room.
+        * Check if this user no longer shares any rooms with certain users.
+        * Insert a row for each of those users into `profile_updates_per_user`.
+        * Now, when any of those users sync, the sync code will check
+          `profile_updates` and see that the user left a room. And thus a "clear
+          this user's profile" instruction will be sent down to the client.
+
+        If that is the case, 
+        """
+        user_id_str = user_id.to_string()
+        stream_id = await self.store.add_profile_updates(
             user_id=user_id,
             action=ProfileUpdateAction.LEFT_ROOM.value,
             updated_fields=None,
         )
+
+        users_in_left_room = set(await self.store.get_local_users_in_room(room_id))
+        users_in_left_room.discard(user_id_str)
+        if not users_in_left_room:
+            return
+
+        users_still_sharing_rooms = await self.store.do_users_share_a_room(
+            user_id_str, users_in_left_room
+        )
+
+        users_to_update = users_in_left_room - users_still_sharing_rooms
+        if users_to_update:
+            await self.store.track_profile_updates_per_user(
+                stream_id=stream_id,
+                user_ids=users_to_update,
+            )
 
     def user_left_room(self, user: UserID, room_id: str) -> None:
         if self.hs.is_mine_id(user.to_string()):
@@ -444,6 +473,7 @@ class ProfileHandler:
                 "profile._user_left_room",
                 self._user_left_room,
                 user_id=user,
+                room_id=room_id,
             )
 
     async def delete_profile_upon_deactivation(
