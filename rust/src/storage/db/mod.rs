@@ -50,10 +50,11 @@ pub trait DatabasePool: Send + Sync {
     /// ```
     //
     // Ideally, this method signature would be slightly different to allow downstream
-    // usage to look like the following (simpler) but because allow the work to happen
-    // on other threads, the `Future` needs to be `Send`; As of 2026-06-22, the
-    // `AsyncFn` trait doesn't have a clean way to express that "the future this async
-    // closure produces is `Send`."
+    // usage to look like the following (simpler) but because we allow the work to
+    // happen on other threads, the `Future` needs to be `Send`; As of 2026-06-22, the
+    // `AsyncFn` trait has no stable way to express that "the future this async closure
+    // produces is `Send`". The intended fix is probably return-type-notation
+    // (https://github.com/rust-lang/rust/issues/109417).
     // ```
     // db_pool.run_interaction("description", async move |txn| {
     //     /* do stuff with txn */
