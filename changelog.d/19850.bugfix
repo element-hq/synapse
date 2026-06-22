@@ -1,0 +1,1 @@
+Fix local events being deleted by the [Purge History admin API](https://element-hq.github.io/synapse/v1.155/admin_api/purge_history_api.html) despite `delete_local_events` being set to false, in room versions other than 1 and 2.

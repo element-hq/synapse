@@ -19,13 +19,13 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersions
-from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
+from synapse.events import EventBase
+from synapse.events.py_protocol import MSC4242Event
 from synapse.events.snapshot import EventContext
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
-from tests.test_utils.event_builders import make_test_event
 from tests.unittest import HomeserverTestCase, override_config
 
 
@@ -154,21 +154,16 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
         prev_state_events: list[str],
         rejected: bool = False,
     ) -> tuple[MSC4242Event, EventContext]:
-        ev = make_test_event(
-            {
-                "prev_state_events": prev_state_events,
-                "content": {
-                    "membership": "join",
-                },
-                "sender": "@unimportant:info",
-                "state_key": "@unimportant:info",
-                "type": "m.room.member",
-                "room_id": self.room_id,
-            },
-            room_version=RoomVersions.MSC4242v12,
-        )
-        ev._event_id = id  # type: ignore[attr-defined]
-        assert supports_msc4242_state_dag(ev)
+        # We use a mock here to allow us to set the `event_id`.
+        #
+        # FIXME: Having consistent human-readable event IDs in these tests is
+        # nice but the `Mock` is less than ideal. It would be better to use a
+        # real event but that is more complex to set up.
+        ev = Mock(spec=EventBase)
+        ev.event_id = id
+        ev.prev_state_events = prev_state_events
+        ev.state_key = "@unimportant:info"
+        ev.is_state.return_value = True
         ctx = Mock()
         ctx.rejected = rejected
         return ev, ctx

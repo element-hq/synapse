@@ -50,6 +50,12 @@ jobs:
     name: "Build .deb packages"
     runs-on: ubuntu-latest
     strategy:
+      # Prevent all Debian package builds from being cancelled
+      # when one of them fails. Especially helpful when things are
+      # flaky during a release.
+      #
+      # `fail-fast` defaults to true and applies to the entire test matrix
+      fail-fast: false
       matrix:
         distro: ${{ fromJson(needs.get-distros.outputs.distros) }}
 

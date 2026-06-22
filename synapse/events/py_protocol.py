@@ -33,7 +33,6 @@ predicates here when a new room-version feature gates access to additional
 attributes.
 """
 
-import abc
 from typing import (
     TYPE_CHECKING,
     Sequence,
@@ -42,12 +41,14 @@ from typing import (
 from typing_extensions import TypeIs
 
 from synapse.events import EventBase
+from synapse.synapse_rust.events import Event
+from synapse.types import StrCollection
 
 if TYPE_CHECKING:
     from synapse.events.snapshot import EventContext, EventPersistencePair
 
 
-class _DisableIsInstance(abc.ABCMeta):
+class _DisableIsInstance(type):
     """Metaclass which disables isinstance checks on classes which use it, by
     making isinstance() raise NotImplementedError.
 
@@ -61,15 +62,38 @@ class _DisableIsInstance(abc.ABCMeta):
         raise NotImplementedError("Instance cannot be used.")
 
 
-class EventProtocol(EventBase, metaclass=_DisableIsInstance):
-    """Helper subclass that allows type narrowing for `EventBase` objects."""
+# We now define `EventProtocol` as a helper class for type narrowing.
+#
+# During type checking, we want the type narrowed event classes to still have
+# all the fields as a normal `Event`, so we make `EventProtocol` a subclass of
+# `Event`.
+#
+# However, at runtime we a) can't subclass `Event` because it's a Rust class,
+# and b) don't want to allow `isinstance` checks against `EventProtocol` (as
+# it's purely a type annotation helper, not a real class). So at runtime, we
+# make `EventProtocol` a class with a metaclass that raises on `isinstance`
+# checks.
+if TYPE_CHECKING:
+
+    class EventProtocol(Event):
+        """Helper subclass that allows type narrowing for `EventBase` objects."""
+
+else:
+
+    class EventProtocol(metaclass=_DisableIsInstance):
+        """Helper subclass that allows type narrowing for `EventBase` objects."""
+
+        def __new__(cls):
+            raise NotImplementedError(
+                f"{cls.__name__} cannot be instantiated as it is not a real class."
+            )
 
 
 class MSC4242Event(EventProtocol):
     """Marker protocol for events in MSC4242 rooms. This allows us to narrow the
     type of events."""
 
-    prev_state_events: list[str]
+    prev_state_events: StrCollection
 
 
 def supports_msc4242_state_dag(event: EventBase) -> TypeIs[MSC4242Event]:

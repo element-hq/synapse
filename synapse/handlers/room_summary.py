@@ -513,7 +513,7 @@ class RoomSummaryHandler:
         ):
             return None
 
-        room_entry = await self._build_room_entry(room_id, for_federation=bool(origin))
+        room_entry = await self._build_room_entry(room_id)
 
         # If the room is not a space return just the room information.
         if room_entry.get("room_type") != RoomTypes.SPACE or not include_children:
@@ -769,14 +769,12 @@ class RoomSummaryHandler:
         # pending invite, etc.
         return await self._is_local_room_accessible(room_id, requester)
 
-    async def _build_room_entry(self, room_id: str, for_federation: bool) -> JsonDict:
+    async def _build_room_entry(self, room_id: str) -> JsonDict:
         """
         Generate en entry summarising a single room.
 
         Args:
             room_id: The room ID to summarize.
-            for_federation: True if this is a summary requested over federation
-                (which includes additional fields).
 
         Returns:
             The JSON dictionary for the room.
@@ -805,24 +803,30 @@ class RoomSummaryHandler:
             "encryption": stats.encryption,
         }
 
-        # Federation requests need to provide additional information so the
-        # requested server is able to filter the response appropriately.
-        if for_federation:
-            current_state_ids = (
-                await self._storage_controllers.state.get_current_state_ids(room_id)
+        # Include allowed_room_ids for rooms with restricted join rules so that
+        # clients can determine which memberships grant access.
+        # Only the join rules event is needed for both has_restricted_join_rules
+        # and get_rooms_that_allow_join, so avoid fetching full state.
+        join_rules_state_ids = (
+            await self._storage_controllers.state.get_current_state_ids(
+                room_id,
+                state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
             )
-            room_version = await self._store.get_room_version(room_id)
+        )
 
-            if await self._event_auth_handler.has_restricted_join_rules(
-                current_state_ids, room_version
-            ):
-                allowed_rooms = (
-                    await self._event_auth_handler.get_rooms_that_allow_join(
-                        current_state_ids
-                    )
-                )
-                if allowed_rooms:
-                    entry["allowed_room_ids"] = allowed_rooms
+        try:
+            room_version = await self._store.get_room_version(room_id)
+        except UnsupportedRoomVersionError:
+            room_version = None
+
+        if room_version and await self._event_auth_handler.has_restricted_join_rules(
+            join_rules_state_ids, room_version
+        ):
+            allowed_rooms = await self._event_auth_handler.get_rooms_that_allow_join(
+                join_rules_state_ids
+            )
+            if allowed_rooms:
+                entry["allowed_room_ids"] = allowed_rooms
 
         # Filter out Nones – rather omit the field altogether
         room_entry = {k: v for k, v in entry.items() if v is not None}
@@ -932,7 +936,6 @@ class RoomSummaryHandler:
                 raise NotFoundError("Room not found or is not accessible")
 
             room = dict(room_entry.room)
-            room.pop("allowed_room_ids", None)
 
             # If there was a requester, add their membership.
             # We keep the membership in the local membership table unless the

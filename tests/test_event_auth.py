@@ -93,8 +93,8 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V9,
             creator,
             "public",
+            rejected_reason="stinky",
         )
-        rejected_join_rules.rejected_reason = "stinky"
         auth_events.append(rejected_join_rules)
         event_store.add_event(rejected_join_rules)
 
@@ -1180,7 +1180,10 @@ def _random_state_event(
 
 
 def _join_rules_event(
-    room_version: RoomVersion, sender: str, join_rule: str
+    room_version: RoomVersion,
+    sender: str,
+    join_rule: str,
+    rejected_reason: str | None = None,
 ) -> EventBase:
     return make_test_event(
         {
@@ -1194,6 +1197,7 @@ def _join_rules_event(
             },
         },
         room_version=room_version,
+        rejected_reason=rejected_reason,
     )
 
 

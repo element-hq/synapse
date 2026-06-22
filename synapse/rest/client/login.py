@@ -203,7 +203,11 @@ class LoginRestServlet(RestServlet):
         try:
             if login_submission["type"] == LoginRestServlet.APPSERVICE_TYPE:
                 requester = await self.auth.get_user_by_req(request)
-                appservice = requester.app_service
+                appservice = (
+                    self._main_store.get_app_service_by_id(requester.app_service_id)
+                    if requester.app_service_id
+                    else None
+                )
 
                 if appservice is None:
                     raise InvalidClientTokenError(

@@ -1,3 +1,40 @@
+# Synapse 1.155.0 (2026-06-16)
+
+## End of Life of Debian 12 Bookworm
+
+The next version of Synapse will not include Debian packages for Debian 12 Bookworm
+as it reached end of life on the 10th of June 2026.
+
+## Internal Changes
+
+- When building releases, don't cancel Debian package builds when one of them fails. ([\#19842](https://github.com/element-hq/synapse/issues/19842))
+
+# Synapse 1.155.0rc1 (2026-06-09)
+
+## Bugfixes
+
+- Limit the to-device EDU size to a reasonable value to mitigate long queues of to-device messages preventing outgoing federation because of the size of the transaction. ([\#19617](https://github.com/element-hq/synapse/issues/19617))
+- Work around bug that sometimes breaks joining restricted rooms that require a remote join. Contributed by @tulir @ Beeper. ([\#19730](https://github.com/element-hq/synapse/issues/19730))
+- Update Sliding Sync to return a new response immediately if a room subscription has changed and produced a new response. ([\#19734](https://github.com/element-hq/synapse/issues/19734), [\#19792](https://github.com/element-hq/synapse/issues/19792))
+- Fix the `/capabilities` endpoint returning a 500 error on non-media workers when [MSC4452: Preview URL capabilities API](https://github.com/matrix-org/matrix-spec-proposals/pull/4452) is enabled. ([\#19839](https://github.com/element-hq/synapse/issues/19839))
+
+## Improved Documentation
+
+- Document how to see Rust build failure output when using `poetry install`. ([\#19818](https://github.com/element-hq/synapse/issues/19818))
+- Document that the SQLite version included in Ubuntu LTS, aside from ESM-only versions, is included in our support policy. ([\#19823](https://github.com/element-hq/synapse/issues/19823))
+
+## Internal Changes
+
+- Port the Python Event classes to Rust. ([\#19701](https://github.com/element-hq/synapse/issues/19701), [\#19816](https://github.com/element-hq/synapse/issues/19816), [\#19817](https://github.com/element-hq/synapse/issues/19817), [\#19819](https://github.com/element-hq/synapse/issues/19819))
+- Added tests to ensure that email notification links are sanitized. Contributed by Noah Markert. ([\#19741](https://github.com/element-hq/synapse/issues/19741))
+- Add `GcpJsonFormatter` logging formatter for use with Google Cloud Logging and GKE deployments. ([\#19775](https://github.com/element-hq/synapse/issues/19775))
+- Add more logging to the to-device message replication stream. ([\#19801](https://github.com/element-hq/synapse/issues/19801), [\#19821](https://github.com/element-hq/synapse/issues/19821))
+- Port `Requester` class to Rust. ([\#19828](https://github.com/element-hq/synapse/issues/19828))
+
+# Synapse 1.154.0 (2026-06-04)
+
+No significant changes since 1.154.0rc1.
+
 # Synapse 1.154.0rc1 (2026-05-27)
 
 ## Features

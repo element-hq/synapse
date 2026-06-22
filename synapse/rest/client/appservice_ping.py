@@ -55,25 +55,32 @@ class AppservicePingRestServlet(RestServlet):
         self.as_api = hs.get_application_service_api()
         self.scheduler = hs.get_application_service_scheduler()
         self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
 
     async def on_POST(
         self, request: SynapseRequest, appservice_id: str
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
-        if not requester.app_service:
+        app_service = (
+            self.store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
+
+        if not app_service:
             raise SynapseError(
                 HTTPStatus.FORBIDDEN,
                 "Only application services can use the /appservice/ping endpoint",
                 Codes.FORBIDDEN,
             )
-        elif requester.app_service.id != appservice_id:
+        elif app_service.id != appservice_id:
             raise SynapseError(
                 HTTPStatus.FORBIDDEN,
                 "Mismatching application service ID in path",
                 Codes.FORBIDDEN,
             )
-        elif not requester.app_service.url:
+        elif not app_service.url:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "The application service does not have a URL set",
@@ -85,11 +92,11 @@ class AppservicePingRestServlet(RestServlet):
 
         start = time.monotonic()
         try:
-            await self.as_api.ping(requester.app_service, txn_id)
+            await self.as_api.ping(app_service, txn_id)
 
             # We got a OK response, so if the AS needs to be recovered then lets recover it now.
             # This sets off a task in the background and so is safe to execute and forget.
-            self.scheduler.txn_ctrl.force_retry(requester.app_service)
+            self.scheduler.txn_ctrl.force_retry(app_service)
         except RequestTimedOutError as e:
             raise SynapseError(
                 HTTPStatus.GATEWAY_TIMEOUT,

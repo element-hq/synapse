@@ -239,6 +239,7 @@ information.
     ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
     ^/_matrix/client/v1/rooms/.*/threads$
     ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
+    ^/_matrix/client/v1/room_summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
     ^/_matrix/client/(r0|v3|unstable)/account/deactivate$
