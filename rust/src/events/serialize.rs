@@ -549,12 +549,7 @@ fn serialize_event_value(
     // already in the version-correct place; copy it to the *other* one too,
     // for forwards/backwards-compatibility with clients.
     if event.r#type() == M_ROOM_REDACTION {
-        let common = &event.parsed_event.common_fields;
-        let redacts = if event.room_version.updated_redaction_rules {
-            common.content.get_field(REDACTS)
-        } else {
-            common.other_fields.get(REDACTS)
-        };
+        let redacts = event.redacts();
         // Skip a present-but-null value: the Python `e.redacts` property
         // surfaced JSON null as `None`, and the old code guarded with
         // `e.redacts is not None`.

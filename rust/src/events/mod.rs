@@ -58,6 +58,7 @@ use pyo3::{
     wrap_pyfunction, Bound, IntoPyObject, PyAny, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
+use serde_json::Value;
 
 use crate::events::{
     constants::event_type::M_ROOM_MEMBER,
@@ -604,8 +605,19 @@ impl Event {
         }
     }
 
-    #[getter]
-    fn redacts<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+    /// Returns the `redacts` field of this event, if it has one.
+    #[getter(redacts)]
+    fn redacts_py<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        let value = self.redacts();
+        value
+            .map(|v| pythonize(py, v).map_err(Into::into))
+            .transpose()
+    }
+}
+
+impl Event {
+    /// Returns the `redacts` field of this event, if it has one.
+    pub fn redacts(&self) -> Option<&Value> {
         let common = &self.parsed_event.common_fields;
         let value = if self.room_version.updated_redaction_rules {
             common.content.get_field(REDACTS)
@@ -613,8 +625,6 @@ impl Event {
             common.other_fields.get(REDACTS)
         };
         value
-            .map(|v| pythonize(py, v).map_err(Into::into))
-            .transpose()
     }
 }
 
