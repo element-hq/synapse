@@ -17,7 +17,10 @@
 //!  - Database pool [`PythonDatabasePoolWrapper`] which allows you to start a...
 //!  - transaction [`LoggingTransactionWrapper`] and query the database
 
+use std::future::Future;
+use std::pin::pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use futures::future::BoxFuture;
 use pyo3::{
@@ -105,12 +108,20 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                     let txn_py = args.get_item(0)?;
                     let mut txn = txn_py.extract::<LoggingTransactionWrapper>()?;
 
-                    match futures::executor::block_on(func(&mut txn)) {
-                        Ok(value) => {
+                    // Since we expect people to only call `.await` on [`Transaction`]
+                    // related methods (mentioned in the [`Transaction`] docstring) AND
+                    // because there is no async work to suspend on in the Python
+                    // [`Transaction`] synchronously, we can get away with polling once
+                    // as it should immediately resolve to [`Poll::Ready`]. Getting
+                    // [`Poll::Pending`] would be considered a programming error.
+                    //
+                    // Alternatively, we could just use `futures::executor::block_on`
+                    match poll_once(func(&mut txn)) {
+                        Poll::Ready(Ok(value)) => {
                             *callback_slot.lock().unwrap() = Some(Ok(value));
                             Ok(py.None())
                         }
-                        Err(err) => {
+                        Poll::Ready(Err(err)) => {
                             // Re-raise into Python so `runInteraction` rolls the
                             // transaction back (and can apply its retry logic for
                             // serialization/deadlock errors).
@@ -118,6 +129,12 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                             *callback_slot.lock().unwrap() = Some(Err(err));
                             Err(py_err)
                         }
+                        Poll::Pending => Err(PyRuntimeError::new_err(
+                            "The `run_interaction` transaction callback future returned `Poll::Pending`, \
+                            but we expect Synapse Python database work to resolve synchronously. \
+                            This is a Synapse programming error: genuine async work is \
+                            not supported here.",
+                        )),
                     }
                 },
             )?
@@ -155,6 +172,20 @@ impl DatabasePool for PythonDatabasePoolWrapper {
             },
         }
     }
+}
+
+/// Poll a future exactly once.
+///
+/// Returns [`Poll::Ready`] if the future resolves immediately, or
+/// [`Poll::Pending`] if it would need to suspend. We use this where a future is
+/// expected to never genuinely suspend (e.g. Synapse's synchronous DB query
+/// path) and want to enforce that, rather than driving it to completion with a
+/// blocking executor like `futures::executor::block_on`.
+fn poll_once<F: Future>(future: F) -> Poll<F::Output> {
+    let mut future = pin!(future);
+    let waker = futures::task::noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    future.as_mut().poll(&mut cx)
 }
 
 /// Convert an [`anyhow::Error`] into a [`PyErr`] to re-raise into Python.

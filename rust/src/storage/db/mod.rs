@@ -38,6 +38,10 @@ pub trait DatabasePool: Send + Sync {
     /// `func` may be called multiple times under certain failure modes (like
     /// serialization and deadlock errors), so it is `Fn` rather than `FnOnce`.
     ///
+    /// `func` is async but you should only call `.await` on [`Transaction`] methods.
+    /// This is a minor cosmetic flaw but seems fine, as you don't want to be doing any
+    /// unnecessary waiting in your transaction anyway.
+    ///
     /// Usage:
     /// ```rust
     /// db_pool
@@ -82,6 +86,7 @@ pub trait DatabasePool: Send + Sync {
 /// interact with the database
 #[async_trait::async_trait]
 pub trait Transaction: Send {
+    // `async` as this  is representing a round-trip between the app and database
     async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error>;
 }
 
