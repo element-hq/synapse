@@ -116,6 +116,8 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                     // [`Poll::Pending`] would be considered a programming error.
                     //
                     // Alternatively, we could just use `futures::executor::block_on`
+                    // which is probably cleaner but a single-shot poll is more
+                    // enforcing of the concept we want to represent.
                     match poll_once(func(&mut txn)) {
                         Poll::Ready(Ok(value)) => {
                             *callback_slot.lock().unwrap() = Some(Ok(value));
