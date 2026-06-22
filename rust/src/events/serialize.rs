@@ -130,16 +130,6 @@ pub struct SerializeEventConfig {
 impl SerializeEventConfig {
     #[new]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (
-        *,
-        as_client_event = true,
-        event_format = EventFormat::ClientV1,
-        requester = None,
-        event_field_allowlist = None,
-        include_stripped_room_state = false,
-        include_admin_metadata = false,
-        msc4354_enabled = false,
-    ))]
     fn new(
         as_client_event: bool,
         event_format: EventFormat,
@@ -198,23 +188,6 @@ impl SerializeEventConfig {
     #[getter]
     fn msc4354_enabled(&self) -> bool {
         self.msc4354_enabled
-    }
-
-    /// Returns a copy of this config with `include_admin_metadata` enabled.
-    fn for_admin(&self) -> Self {
-        Self {
-            include_admin_metadata: true,
-            ..self.clone()
-        }
-    }
-
-    /// Returns a copy of this config with `msc4354_enabled` set as given.
-    #[pyo3(signature = (enabled = true))]
-    fn with_msc4354(&self, enabled: bool) -> Self {
-        Self {
-            msc4354_enabled: enabled,
-            ..self.clone()
-        }
     }
 }
 

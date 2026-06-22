@@ -5,7 +5,6 @@ from synapse.api.errors import NotFoundError
 from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
-    SerializeEventConfig,
 )
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
@@ -57,7 +56,7 @@ class EventRestServlet(RestServlet):
         if event is None:
             raise NotFoundError("Event not found")
 
-        config = SerializeEventConfig(
+        config = await self._event_serializer.create_config(
             as_client_event=False,
             event_format=EventFormat.Raw,
             requester=requester,

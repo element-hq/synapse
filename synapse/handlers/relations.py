@@ -31,7 +31,7 @@ from typing import (
 from synapse.api.constants import Direction, EventTypes, RelationTypes
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase, relation_from_event
-from synapse.events.utils import FilteredEvent, SerializeEventConfig
+from synapse.events.utils import FilteredEvent
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.relations import ThreadsNextBatch, _RelatedEvent
@@ -150,7 +150,9 @@ class RelationsHandler:
         )
 
         now = self._clock.time_msec()
-        serialize_options = SerializeEventConfig(requester=requester)
+        serialize_options = await self._event_serializer.create_config(
+            requester=requester
+        )
         return_value: JsonDict = {
             "chunk": await self._event_serializer.serialize_events(
                 filtered_events,

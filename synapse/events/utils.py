@@ -48,6 +48,7 @@ from synapse.synapse_rust.events import (
     redact_event,
     serialize_events,
 )
+from synapse.synapse_rust.types import Requester
 from synapse.types import JsonDict
 
 from . import EventBase, StrippedStateEvent
@@ -135,15 +136,6 @@ class FilteredEvent:
         return cls(event=event, membership=None)
 
 
-_DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
-
-
-def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfig:
-    # Thin wrapper kept for callers; see SerializeEventConfig.for_admin for the
-    # admin-only options it sets.
-    return existing.for_admin()
-
-
 class EventClientSerializer:
     """Serializes events that are to be sent to clients.
 
@@ -160,12 +152,65 @@ class EventClientSerializer:
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
 
+    async def create_config(
+        self,
+        *,
+        as_client_event: bool = True,
+        event_format: EventFormat = EventFormat.ClientV1,
+        requester: Requester | None = None,
+        event_field_allowlist: list[str] | None = None,
+        include_stripped_room_state: bool = False,
+        include_admin_metadata: bool | None = None,
+    ) -> SerializeEventConfig:
+        """
+        Create a new SerializeEventConfig for the given parameters.
+
+        Helper method that sets the `include_admin_metadata` field based on
+        whether the requester is a server admin if it is not explicitly
+        provided. Also sets the `msc4354_enabled` field based on the homeserver
+        config.
+
+        Args:
+            as_client_event: Whether to serialize the events as client events.
+            event_format: The format to serialize events in. requester: The user
+            requesting the events, if any. Used to determine
+                whether to include admin-only metadata in the serialized events.
+            event_field_allowlist: A list of event fields to include in the
+                serialized events.
+            include_stripped_room_state: Whether to include stripped room state
+                in the serialized events.
+            include_admin_metadata: Whether to include admin-only metadata in
+                the serialized events. If None, this will be determined based on
+                whether the requester is a server admin.
+        Returns:
+            A SerializeEventConfig instance.
+        """
+
+        # If include_admin_metadata is None, determine whether to include
+        # admin-only metadata based on the requester.
+        if include_admin_metadata is None:
+            # Check if the requester is a server admin.
+            if requester is not None and await self._auth.is_server_admin(requester):
+                include_admin_metadata = True
+            else:
+                include_admin_metadata = False
+
+        return SerializeEventConfig(
+            as_client_event=as_client_event,
+            event_format=event_format,
+            requester=requester,
+            event_field_allowlist=event_field_allowlist,
+            include_stripped_room_state=include_stripped_room_state,
+            include_admin_metadata=include_admin_metadata,
+            msc4354_enabled=self._config.experimental.msc4354_enabled,
+        )
+
     async def serialize_event(
         self,
         event: JsonDict | FilteredEvent,
         time_now: int,
         *,
-        config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
+        config: SerializeEventConfig | None = None,
         bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
         redaction_map: Mapping[str, "EventBase"] | None = None,
     ) -> JsonDict:
@@ -187,7 +232,9 @@ class EventClientSerializer:
         if not isinstance(event, FilteredEvent):
             return event
 
-        config = await self._update_config(config)
+        if config is None:
+            # Generate default config if none was provided.
+            config = await self.create_config()
 
         # Perform all the async DB/IO work up front, then run the synchronous
         # serialization core.
@@ -203,28 +250,6 @@ class EventClientSerializer:
             redaction_map=redaction_map,
             unsigned_additions=unsigned_additions,
         )[0]
-
-    async def _update_config(
-        self, config: SerializeEventConfig
-    ) -> SerializeEventConfig:
-        """Update the config based on the requester and server config."""
-
-        # Force-enable server admin metadata because the only time an event with
-        # relevant metadata will be when the admin requested it via their admin
-        # client config account data. Also, it's "just" some `unsigned` fields, so
-        # shouldn't cause much in terms of problems to downstream consumers.
-        #
-        # The requester is constant across the whole (recursive) serialization,
-        # so we only need to resolve this once.
-        if config.requester is not None and await self._auth.is_server_admin(
-            config.requester
-        ):
-            config = make_config_for_admin(config)
-
-        if self._config.experimental.msc4354_enabled:
-            config = config.with_msc4354(True)
-
-        return config
 
     async def _prepare_serialization(
         self,
@@ -313,7 +338,7 @@ class EventClientSerializer:
         events: Collection[JsonDict | FilteredEvent],
         time_now: int,
         *,
-        config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
+        config: SerializeEventConfig | None = None,
         bundle_aggregations: dict[str, "BundledAggregations"] | None = None,
     ) -> list[JsonDict]:
         """Serializes multiple events.
@@ -334,7 +359,9 @@ class EventClientSerializer:
             str(len(events)),
         )
 
-        config = await self._update_config(config)
+        if config is None:
+            # Generate default config if none was provided.
+            config = await self.create_config()
 
         filtered_events = [e for e in events if isinstance(e, FilteredEvent)]
 

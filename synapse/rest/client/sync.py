@@ -309,12 +309,12 @@ class SyncRestServlet(RestServlet):
         else:
             raise Exception("Unknown event format %s" % (filter.event_format,))
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self._event_serializer.create_config(
             event_format=event_formatter,
             requester=requester,
             event_field_allowlist=filter.event_fields,
         )
-        stripped_serialize_options = SerializeEventConfig(
+        stripped_serialize_options = await self._event_serializer.create_config(
             event_format=event_formatter,
             requester=requester,
             include_stripped_room_state=True,
@@ -929,7 +929,7 @@ class SlidingSyncRestServlet(RestServlet):
     ) -> JsonDict:
         time_now = self.clock.time_msec()
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self.event_serializer.create_config(
             event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )

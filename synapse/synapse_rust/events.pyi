@@ -364,13 +364,13 @@ class SerializeEventConfig:
     def __init__(
         self,
         *,
-        as_client_event: bool = True,
-        event_format: EventFormat = ...,
-        requester: Requester | None = None,
-        event_field_allowlist: list[str] | None = None,
-        include_stripped_room_state: bool = False,
-        include_admin_metadata: bool = False,
-        msc4354_enabled: bool = False,
+        as_client_event: bool,
+        event_format: EventFormat,
+        requester: Requester | None,
+        event_field_allowlist: list[str] | None,
+        include_stripped_room_state: bool,
+        include_admin_metadata: bool,
+        msc4354_enabled: bool,
     ) -> None: ...
     @property
     def as_client_event(self) -> bool:
@@ -410,11 +410,6 @@ class SerializeEventConfig:
     def msc4354_enabled(self) -> bool:
         """Whether MSC4354 (sticky events) is enabled. When ``True``, the
         remaining stickiness TTL is computed and added to ``unsigned``."""
-    def for_admin(self) -> SerializeEventConfig:
-        """Return a copy of this config with ``include_admin_metadata`` enabled."""
-
-    def with_msc4354(self, enabled: bool = True) -> SerializeEventConfig:
-        """Return a copy of this config with ``msc4354_enabled`` set as given."""
 
 def serialize_events(
     events: list[tuple[Event, str | None]],

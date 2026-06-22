@@ -26,17 +26,14 @@ from synapse.api.constants import EventContentFields
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.events.utils import (
-    EventFormat,
     FilteredEvent,
     PowerLevelsContent,
-    SerializeEventConfig,
     clone_event,
     copy_and_fixup_power_levels_contents,
-    make_config_for_admin,
     maybe_upsert_event_field,
     prune_event,
 )
-from synapse.types import JsonDict, create_requester
+from synapse.types import JsonDict
 from synapse.util.frozenutils import freeze
 
 from tests.test_utils.event_builders import make_test_event
@@ -662,9 +659,11 @@ class SerializeEventTestCase(HomeserverTestCase):
             self._event_serializer.serialize_event(
                 FilteredEvent(event=ev, membership=None),
                 1479807801915,
-                config=SerializeEventConfig(
-                    event_field_allowlist=fields,
-                    include_admin_metadata=include_admin_metadata,
+                config=self.get_success(
+                    self._event_serializer.create_config(
+                        event_field_allowlist=fields,
+                        include_admin_metadata=include_admin_metadata,
+                    )
                 ),
                 redaction_map=redaction_map,
             )
@@ -785,13 +784,19 @@ class SerializeEventTestCase(HomeserverTestCase):
 
     def test_event_fields_fail_if_fields_not_str(self) -> None:
         with self.assertRaises(TypeError):
-            SerializeEventConfig(
-                event_field_allowlist=["room_id", 4],  # type: ignore[list-item]
+            self.get_success_or_raise(
+                self._event_serializer.create_config(
+                    event_field_allowlist=["room_id", 4],  # type: ignore[list-item]
+                )
             )
 
     def test_default_serialize_config_excludes_admin_metadata(self) -> None:
         # We just really don't want this to be set to True accidentally
-        self.assertFalse(SerializeEventConfig().include_admin_metadata)
+        self.assertFalse(
+            self.get_success(
+                self._event_serializer.create_config()
+            ).include_admin_metadata
+        )
 
     def test_event_flagged_for_admins(self) -> None:
         # Default behaviour should be *not* to include it
@@ -871,30 +876,6 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "origin_server_ts": 1,
             },
         )
-
-    def test_make_serialize_config_for_admin_retains_other_fields(self) -> None:
-        non_default_config = SerializeEventConfig(
-            include_admin_metadata=False,  # should be True in a moment
-            as_client_event=False,  # default True
-            event_format=EventFormat.Raw,  # default EventFormat.ClientV1
-            requester=create_requester("@example:example.org"),  # default None
-            event_field_allowlist=["foo"],  # default None
-            include_stripped_room_state=True,  # default False
-        )
-        admin_config = make_config_for_admin(non_default_config)
-        self.assertEqual(
-            admin_config.as_client_event, non_default_config.as_client_event
-        )
-        self.assertEqual(admin_config.event_format, non_default_config.event_format)
-        self.assertEqual(admin_config.requester, non_default_config.requester)
-        self.assertEqual(
-            admin_config.event_field_allowlist, non_default_config.event_field_allowlist
-        )
-        self.assertEqual(
-            admin_config.include_stripped_room_state,
-            admin_config.include_stripped_room_state,
-        )
-        self.assertTrue(admin_config.include_admin_metadata)
 
     def test_redacted_because_is_filtered_out(self) -> None:
         """If an event's unsigned dict has a `redacted_by` field, then the

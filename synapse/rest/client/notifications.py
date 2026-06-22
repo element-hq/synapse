@@ -26,7 +26,6 @@ from synapse.api.constants import ReceiptTypes
 from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
-    SerializeEventConfig,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
@@ -98,7 +97,7 @@ class NotificationsServlet(RestServlet):
 
         next_token = None
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self._event_serializer.create_config(
             event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
