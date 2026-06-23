@@ -230,8 +230,8 @@ class RelationsHandler:
                 event_id.
             relation_types: The types of relations to look for. If "*" is in the list,
                 all related events will be redacted regardless of the type.
-            room_version: The RoomVersion of the room, for deciding where the 'redacts'
-                key should go in the event dict
+            room_version: The RoomVersion of the room. Used for deciding where the
+                'redacts' key should go in the event dict.
 
         Raises:
             ShadowBanError if the requester is shadow-banned
