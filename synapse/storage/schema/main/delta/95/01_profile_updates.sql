@@ -36,7 +36,7 @@ CREATE INDEX profile_updates_by_field ON profile_updates (field_name, stream_id)
 
 -- Track which local users should receive each profile update.
 CREATE TABLE profile_updates_per_user (
-  stream_id BIGINT NOT NULL,
+  stream_id BIGINT NOT NULL REFERENCES profile_updates (stream_id),
 
   -- The full user ID of the local user that should receive the profile update.
   user_id TEXT NOT NULL,
