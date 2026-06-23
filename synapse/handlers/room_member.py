@@ -834,7 +834,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # Prevent local users from changing their per-room displayname if
         # `enable_set_displayname` is disabled.
         if (
-            self.hs.is_mine(target)
             and "displayname" in content
             and not self.hs.config.registration.enable_set_displayname
         ):
