@@ -137,8 +137,9 @@ Body parameters:
   - `address` - **string**, required. The third-party ID itself, e.g. `alice@example.com` for `email` or
     `447470274584` (for a phone number with country code "44") and `19254857364` (for a phone number
     with country code "1") for `msisdn`.
-  Note: If a threepid is removed from a user via this option, Synapse will also attempt to remove
-  that threepid from any identity servers it is aware has a binding for it.
+  > [!NOTE]
+  > If a threepid is removed from a user via this option, Synapse will also attempt to remove
+  > that threepid from any identity servers it is aware has a binding for it.
 - `external_ids` - **array**, optional. Allow setting the identifier of the external identity
   provider for SSO (Single sign-on). More details are in the configuration manual under the
   sections [sso](../usage/configuration/config_documentation.md#sso) and [oidc_providers](../usage/configuration/config_documentation.md#oidc_providers).
@@ -151,15 +152,14 @@ Body parameters:
   granting them access to the Admin API, among other things.
 - `deactivated` - **bool**, optional. If unspecified, deactivation state will be left unchanged.
 
-  Note:
-  - For the password field there is no strict check of the necessity for its presence.
-    It is possible to have active users without a password, e.g. when authenticating with OIDC is configured.
-    You must check yourself whether a password is required when reactivating a user or not.
-  - It is not possible to set a password if the config option `password_config.localdb_enabled` is set `false`.
-  Users' passwords are wiped upon account deactivation, hence the need to set a new one here.
-
-  Note: a user cannot be erased with this API. For more details on
-  deactivating and erasing users see [Deactivate Account](#deactivate-account).
+  > [!NOTE]
+  > - For the password field there is no strict check of the necessity for its presence.
+  >   It is possible to have active users without a password, e.g. when authenticating with OIDC is configured.
+  >   You must check yourself whether a password is required when reactivating a user or not.
+  > - It is not possible to set a password if the config option `password_config.localdb_enabled` is set `false`.
+  > Users' passwords are wiped upon account deactivation, hence the need to set a new one here.
+  > - A user cannot be erased with this API. For more details on
+  >   deactivating and erasing users see [Deactivate Account](#deactivate-account).
 - `locked` - **bool**, optional. If unspecified, locked state will be left unchanged.
 - `user_type` - **string** or null, optional. If not provided, the user type will be
   not be changed. If `null` is given, the user type will be cleared.
@@ -259,12 +259,15 @@ The following parameters should be set in the URL:
    Can be provided multiple times. Possible values are `bot`, `support` or "empty string".
    "empty string" here means to exclude users without a type.
 - `locked` - string representing a bool - Is optional and if `true` will **include** locked users.
-  Defaults to `false` to exclude locked users. Note: Introduced in v1.93.
+  Defaults to `false` to exclude locked users.
+  > [!NOTE]
+  > Introduced in v1.93.
 
-Caution. The database only has indexes on the columns `name` and `creation_ts`.
-This means that if a different sort order is used (`is_guest`, `admin`,
-`user_type`, `deactivated`, `shadow_banned`, `avatar_url` or `displayname`),
-this can cause a large load on the database, especially for large environments.
+> [!CAUTION]
+> The database only has indexes on the columns `name` and `creation_ts`.
+> This means that if a different sort order is used (`is_guest`, `admin`,
+> `user_type`, `deactivated`, `shadow_banned`, `avatar_url` or `displayname`),
+> this can cause a large load on the database, especially for large environments.
 
 **Response**
 
@@ -285,7 +288,9 @@ The following fields are returned in the JSON response body:
   - `avatar_url` - string -  The user's avatar URL if they have set one.
   - `creation_ts` - integer - The user's creation timestamp in ms.
   - `last_seen_ts` - integer - The user's last activity timestamp in ms.
-  - `locked` - bool - Status if that user has been marked as locked. Note: Introduced in v1.93.
+  - `locked` - bool - Status if that user has been marked as locked.
+    > [!NOTE]
+    > Introduced in v1.93.
 - `next_token`: string representing a positive integer - Indication for pagination. See above.
 - `total` - integer - Total number of media.
 
@@ -444,7 +449,8 @@ To unsuspend a user, use the same endpoint with a body of:
 
 ## Reset password
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+> [!NOTE]
+> This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 
 Changes the password of another user. This will automatically log the user out of all their devices.
 
@@ -469,7 +475,8 @@ The parameter `logout_devices` is optional and defaults to `true`.
 
 ## Get whether a user is a server administrator or not
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+> [!NOTE]
+> This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 
 The api is:
 
@@ -488,7 +495,8 @@ A response body like the following is returned:
 
 ## Change whether a user is a server administrator or not
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+> [!NOTE]
+> This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 
 Note that you cannot demote yourself.
 
@@ -615,8 +623,9 @@ The following should be set as query parameters in the URL:
    invites sent at or after the provided timestamp will be returned.
    This works by comparing the provided timestamp to the `received_ts`
    column in the `events` table.
-   Note: https://currentmillis.com/ is a useful tool for converting dates
-   into timestamps and vice versa.
+   > [!NOTE]
+   > https://currentmillis.com/ is a useful tool for converting dates
+   > into timestamps and vice versa.
 
 A response body like the following is returned:
 
@@ -649,8 +658,9 @@ The following should be set as query parameters in the URL:
    invites sent at or after the provided timestamp will be returned.
    This works by comparing the provided timestamp to the `received_ts`
    column in the `events` table.
-   Note: https://currentmillis.com/ is a useful tool for converting dates
-   into timestamps and vice versa.
+   > [!NOTE]
+   > https://currentmillis.com/ is a useful tool for converting dates
+   > into timestamps and vice versa.
 
 A response body like the following is returned:
 
@@ -837,11 +847,12 @@ The following parameters should be set in the URL:
 If neither `order_by` nor `dir` is set, the default order is newest media on top
 (corresponds to `order_by` = `created_ts` and `dir` = `b`).
 
-Caution. The database only has indexes on the columns `media_id`,
-`user_id` and `created_ts`. This means that if a different sort order is used
-(`upload_name`, `last_access_ts`, `media_length`, `media_type`,
-`quarantined_by` or `safe_from_quarantine`), this can cause a large load on the
-database, especially for large environments.
+> [!CAUTION]
+> The database only has indexes on the columns `media_id`,
+> `user_id` and `created_ts`. This means that if a different sort order is used
+> (`upload_name`, `last_access_ts`, `media_length`, `media_type`,
+> `quarantined_by` or `safe_from_quarantine`), this can cause a large load on the
+> database, especially for large environments.
 
 **Response**
 
@@ -898,8 +909,9 @@ The following fields are returned in the JSON response body:
 * `deleted_media`: an array of strings - List of deleted `media_id`
 * `total`: integer - Total number of deleted `media_id`
 
-**Note**: There is no `next_token`. This is not useful for deleting media, because
-after deleting media the remaining media have a new order.
+> [!NOTE]
+> There is no `next_token`. This is not useful for deleting media, because
+> after deleting media the remaining media have a new order.
 
 **Parameters**
 
@@ -910,7 +922,8 @@ delete largest/smallest or newest/oldest files first.
 
 ## Login as a user
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+> [!NOTE]
+> This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 
 Get an access token that can be used to authenticate as that user. Useful for
 when admins wish to do actions on behalf of a user.
@@ -941,9 +954,10 @@ tell they have been logged in as.
 
 To expire the token call the standard `/logout` API with the token.
 
-Note: The token will expire if the *admin* user calls `/logout/all` from any
-of their devices, but the token will *not* expire if the target user does the
-same.
+> [!NOTE]
+> The token will expire if the *admin* user calls `/logout/all` from any
+> of their devices, but the token will *not* expire if the target user does the
+> same.
 
 ## Allow replacing master cross-signing key without User-Interactive Auth
 
@@ -1599,5 +1613,3 @@ The following fields are returned in the JSON response body:
   the corresponding error that caused the redaction to fail
 
 _Added in Synapse 1.116.0._
-
-

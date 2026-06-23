@@ -2,10 +2,11 @@
 
 Synapse supports extending its functionality by configuring external modules.
 
-**Note**: When using third-party modules, you effectively allow someone else to run
-custom code on your Synapse homeserver. Server admins are encouraged to verify the
-provenance of the modules they use on their homeserver and make sure the modules aren't
-running malicious code on their instance.
+> [!NOTE]
+> When using third-party modules, you effectively allow someone else to run
+> custom code on your Synapse homeserver. Server admins are encouraged to verify the
+> provenance of the modules they use on their homeserver and make sure the modules aren't
+> running malicious code on their instance.
 
 ## Using modules
 

@@ -14,10 +14,9 @@ _First introduced in Synapse v1.132.0_
 async def get_ratelimit_override_for_user(user: str, limiter_name: str) -> synapse.module_api.RatelimitOverride | None
 ```
 
-**<span style="color:red">
-Caution: This callback is currently experimental . The method signature or behaviour
-may change without notice.
-</span>**
+> [!CAUTION]
+> This callback is currently experimental. The method signature or behaviour
+> may change without notice.
 
 Called when constructing a ratelimiter of a particular type for a user. The module can
 return a `messages_per_second` and `burst_count` to be used, or `None` if

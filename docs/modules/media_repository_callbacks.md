@@ -14,10 +14,9 @@ _First introduced in Synapse v1.132.0_
 async def get_media_config_for_user(user_id: str) -> JsonDict | None
 ```
 
-**<span style="color:red">
-Caution: This callback is currently experimental . The method signature or behaviour
-may change without notice.
-</span>**
+> [!CAUTION]
+> This callback is currently experimental. The method signature or behaviour
+> may change without notice.
 
 Called when processing a request from a client for the
 [media config endpoint](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv1mediaconfig).
@@ -44,10 +43,9 @@ _First introduced in Synapse v1.132.0_
 async def is_user_allowed_to_upload_media_of_size(user_id: str, size: int) -> bool
 ```
 
-**<span style="color:red">
-Caution: This callback is currently experimental . The method signature or behaviour
-may change without notice.
-</span>**
+> [!CAUTION]
+> This callback is currently experimental. The method signature or behaviour
+> may change without notice.
 
 Called before media is accepted for upload from a user, in case the module needs to
 enforce a different limit for the particular user.
@@ -73,10 +71,9 @@ _First introduced in Synapse v1.139.0_
 async def get_media_upload_limits_for_user(user_id: str, size: int) -> list[synapse.module_api.MediaUploadLimit] | None
 ```
 
-**<span style="color:red">
-Caution: This callback is currently experimental. The method signature or behaviour
-may change without notice.
-</span>**
+> [!CAUTION]
+> This callback is currently experimental. The method signature or behaviour
+> may change without notice.
 
 Called when processing a request to store content in the media repository. This can be used to dynamically override
 the [media upload limits configuration](../usage/configuration/config_documentation.html#media_upload_limits).
@@ -108,10 +105,9 @@ _First introduced in Synapse v1.139.0_
 async def on_media_upload_limit_exceeded(user_id: str, limit: synapse.module_api.MediaUploadLimit, sent_bytes: int, attempted_bytes: int) -> None
 ```
 
-**<span style="color:red">
-Caution: This callback is currently experimental. The method signature or behaviour
-may change without notice.
-</span>**
+> [!CAUTION]
+> This callback is currently experimental. The method signature or behaviour
+> may change without notice.
 
 Called when a user attempts to upload media that would exceed a
 [configured media upload limit](../usage/configuration/config_documentation.html#media_upload_limits).

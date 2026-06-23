@@ -49,9 +49,11 @@ This API allows pausing background updates.
 Background updates should *not* be paused for significant periods of time, as
 this can affect the performance of Synapse.
 
-*Note*: This won't persist over restarts.
+> [!NOTE]
+> This won't persist over restarts.
 
-*Note*: This won't cancel any update query that is currently running. This is
+> [!NOTE]
+> This won't cancel any update query that is currently running. This is
 usually fine since most queries are short lived, except for `CREATE INDEX`
 background updates which won't be cancelled once started.
 
