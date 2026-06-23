@@ -36,6 +36,7 @@ from synapse.storage.databases.main.delayed_events import (
 )
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import (
+    Absent,
     JsonDict,
     Requester,
     RoomID,
@@ -45,7 +46,6 @@ from synapse.types import (
 from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
-from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -273,9 +273,7 @@ class DelayedEventsHandler:
                 )
                 continue
 
-            sender_str = event_id_and_sender_dict.get(
-                delta.event_id, Sentinel.UNSET_SENTINEL
-            )
+            sender_str = event_id_and_sender_dict.get(delta.event_id, Absent)
             if sender_str is None:
                 # An event exists, but the `sender` field was "null" and Synapse
                 # incorrectly accepted the event. This is not expected.
@@ -285,7 +283,7 @@ class DelayedEventsHandler:
                     delta.event_id,
                 )
                 continue
-            if sender_str is Sentinel.UNSET_SENTINEL:
+            if sender_str is Absent:
                 # We have an event ID, but the event was not found in the
                 # datastore. This can happen if a room, or its history, is
                 # purged. State deltas related to the room are left behind, but
