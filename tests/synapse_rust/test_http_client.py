@@ -12,8 +12,8 @@
 
 import json
 import logging
-import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, TypeVar
 
@@ -205,7 +205,7 @@ class HttpClientTestCase(HomeserverTestCase):
                     #
                     # Suspend execution of this thread to allow other the Tokio thread
                     # pool to do work.
-                    os.sched_yield()
+                    time.sleep(0)
                     # Advance the Twisted reactor and run any scheduled callbacks
                     #
                     # In terms of other threads, they may have scheduled something on the

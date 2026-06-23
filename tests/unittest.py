@@ -25,7 +25,6 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import secrets
 import time
 from typing import (
@@ -771,9 +770,7 @@ class HomeserverTestCase(TestCase):
             # Suspend execution of this thread to allow other threads to do work. This
             # could be things spawned on the Twisted reactor threadpool or Tokio thread
             # pool (async Rust code).
-            #
-            # We could also use `time.sleep(0)` here but this is more precise
-            os.sched_yield()
+            time.sleep(0)
 
             # Advance the Twisted reactor and run any scheduled callbacks
             #
