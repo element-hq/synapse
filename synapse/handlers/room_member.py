@@ -831,8 +831,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             ):
                 raise SynapseError(403, "This avatar is not allowed", Codes.FORBIDDEN)
 
-        # Check if the displayname in the membership event differs from what's
-        # stored in the user's profile when changing displayname is disabled.
+        # Prevent local users from changing their per-room displayname if
+        # `enable_set_displayname` is disabled.
         if (
             self.hs.is_mine(target)
             and "displayname" in content
