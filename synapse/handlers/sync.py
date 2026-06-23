@@ -2295,9 +2295,6 @@ class SyncHandler:
             )
             return
 
-        if since_token.profile_updates_key == now_token.profile_updates_key:
-            return
-
         updates = await self.store.get_profile_updates_for_user_and_fields(
             from_id=since_token.profile_updates_key,
             to_id=now_token.profile_updates_key,
@@ -2310,24 +2307,31 @@ class SyncHandler:
             for update in updates
             if update.action == ProfileUpdateAction.LEFT_ROOM.value
         }
-        updated_user_ids = {
+        users = set()
+        updated_users = {
             update.user_id
             for update in updates
             if update.action == ProfileUpdateAction.UPDATE.value
         }
+        # Add any users in the timeline, if we collected them due to lazy loading
+        if include_users:
+            users.update(include_users)
+        # Add users with updates
+        users.update(updated_users)
 
-        if not updated_user_ids and not left_room_user_ids:
+        if not users and not left_room_user_ids:
             return
 
         # Serialise the profile updates into the sync response format.
         # user ID -> {profile field -> value | null if unset }
         profile_updates: dict[str, dict[str, JsonValue | None]] = {}
 
-        # Process field updates
-        if updated_user_ids:
+        # Process field updates and users who have events in the sync response
+        if users:
             user_fields: dict[str, set[str]] = {}
+            # Set fields from updates
             for update in updates:
-                if not update.field_name or update.user_id not in updated_user_ids:
+                if not update.field_name or update.user_id not in users:
                     continue
                 user_fields.setdefault(update.user_id, set()).add(update.field_name)
 
@@ -2339,11 +2343,9 @@ class SyncHandler:
             # profile update will come down a second time.
             #
             # Hopefully clients can just filter these out.
-            profile_data_by_user = await self.store.get_profile_data_for_users(
-                user_fields.keys()
-            )
+            profile_data_by_user = await self.store.get_profile_data_for_users(users)
 
-            for other_user_id, fields in user_fields.items():
+            for other_user_id in users:
                 profile_data = profile_data_by_user.get(other_user_id)
                 if profile_data is None:
                     # No profile data for this user, just return a blank dictionary
@@ -2366,19 +2368,28 @@ class SyncHandler:
                         )
                         cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
                         # Only send the field if we haven't recently sent it
-                        if not cache.get(field_name):
-                            per_user_updates[field_name] = cast(
-                                JsonValue, profile_data.get(field_name)
-                            )
-                            # Update our cache
-                            cache.set(
-                                other_user_id,
-                                cast(str, profile_data.get(field_name)),
-                            )
+                        if cache.get(other_user_id) is None:
+                            # If the field value is a None, don't send it down or
+                            # set the cache unless we're sure it has become None due
+                            # to a profile update, otherwise we'll just be sending the
+                            # same field down in every single incremental lazy sync
+                            # regardless of cache state
+                            if (
+                                profile_data.get(field_name) is not None
+                                or other_user_id in updated_users
+                            ):
+                                per_user_updates[field_name] = cast(
+                                    JsonValue, profile_data.get(field_name)
+                                )
+                                # Update our cache
+                                cache.set(
+                                    other_user_id,
+                                    cast(str, profile_data.get(field_name)),
+                                )
                 else:
                     # Include only the diff
                     # We don't use a cache here as changes are always sent
-                    for field_name in fields:
+                    for field_name in user_fields.get(other_user_id, []):
                         per_user_updates[field_name] = cast(
                             JsonValue, profile_data.get(field_name)
                         )

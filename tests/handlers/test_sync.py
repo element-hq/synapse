@@ -1492,9 +1492,69 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             "third_user",
         )
 
-        # If we have more events from the third_user, and do another lazy sync,
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_incremental_sync_lazy_loading_cache_filters_recently_sent_profiles(
+        self,
+    ) -> None:
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room,
+            num_events=1,
+            tok=self.other_tok,
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Lazy loading incremental sync should include profiles from events
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [
+                "@other_user:test",
+            ],
+        )
+
+        # If we have more events from the other_user, and do another lazy sync,
         # we don't expect the full profile to be sent again due to our cache
-        self.helper.send_messages(room_id=self.joined_room, num_events=1, tok=third_tok)
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=1, tok=self.other_tok
+        )
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 requester,
