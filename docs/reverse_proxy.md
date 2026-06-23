@@ -4,8 +4,10 @@ It is recommended to put a reverse proxy such as
 [nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html),
 [Apache](https://httpd.apache.org/docs/current/mod/mod_proxy_http.html),
 [Caddy](https://caddyserver.com/docs/quick-starts/reverse-proxy),
-[HAProxy](https://www.haproxy.org/) or
-[relayd](https://man.openbsd.org/relayd.8) in front of Synapse.
+[HAProxy](https://www.haproxy.org/),
+[relayd](https://man.openbsd.org/relayd.8) or
+[lighttpd](https://www.lighttpd.net/)
+in front of Synapse.
 This has the advantage of being able to expose the default HTTPS port (443) to Matrix
 clients without requiring Synapse to bind to a privileged port (port numbers less than
 1024), avoiding the need for `CAP_NET_BIND_SERVICE` or running as root.
@@ -309,6 +311,73 @@ relay "matrix_federation" {
     listen on egress port 8448 tls
     protocol "matrix"
     forward to <matrixserver> port 8008 check tcp
+}
+```
+
+### lighttpd
+```conf
+server.modules = (
+    "mod_rewrite",
+    "mod_redirect",
+    "mod_access",
+    "mod_setenv",
+    "mod_openssl",
+    "mod_proxy",
+    "mod_accesslog"
+)
+
+server.username      = "lighttpd"
+server.groupname     = "lighttpd"
+
+# leave commented out for proper IPv6 see below IPv4 0.0.0.0 & IPv6 [::]
+#server.use-ipv6 = "enable"
+
+ssl.pemfile = "/etc/lighttpd/cert+privkey.pem"
+ssl.ca-file = "/etc/lighttpd/fullchain.pem"
+
+$SERVER["socket"] == "0.0.0.0:80" { }
+$SERVER["socket"] == "0.0.0.0:443" { ssl.engine = "enable" }
+$SERVER["socket"] == "0.0.0.0:8448" { ssl.engine = "enable" }
+$SERVER["socket"] == "[::]:80" { }
+$SERVER["socket"] == "[::]:443" { ssl.engine = "enable" }
+$SERVER["socket"] == "[::]:8448" {  ssl.engine = "enable" }
+
+# both lighttpd and synapse need permissions for socket r/w
+$HTTP["url"] =~ "(/_matrix|_synapse/admin|/_synapse/client)" {
+    proxy.balance = "hash"
+    proxy.server = ( 
+        "" => ( 
+            "backend-socket" => (
+                "host" => "/var/lib/synapse/main_public.sock",
+                "port" => 0
+            )
+        )
+    )
+    proxy.forwarded = (
+        "for" => 1,
+        "proto" => 1,
+        "host" => 1,
+    )
+}
+# protect admin access IPv6 ULA only
+$HTTP["remoteip"] !="fd00::/8" {
+    $HTTP["url"] =~ "^/_synapse/admin/" {
+        url.access-deny = ( "" )
+    }
+}
+```
+
+[Delegation](delegate.md) example:
+```conf
+url.rewrite-once = (
+    "^/\.well-known/matrix/client$" => "/.well-known/matrix/client.json",
+    "^/\.well-known/matrix/server$" => "/.well-known/matrix/server.json"
+)
+
+# This condition intentionally matches the post-rewrite URLs.
+$HTTP["url"] =~ "^/\.well-known/matrix/(client|server)\.json$" {
+    mimetype.assign = ( ".json" => "application/json" )
+    setenv.set-response-header = ( "Access-Control-Allow-Origin" => "*" )
 }
 ```
 
