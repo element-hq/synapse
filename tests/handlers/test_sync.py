@@ -1634,6 +1634,86 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@other_user:test"],
         )
 
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_incremental_sync_sends_down_full_profile_for_users_who_have_joined(
+        self,
+    ) -> None:
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        assert incremental_result.profile_updates["@third_user:test"] is not None
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [third_user],
+        )
+        self.assertEqual(
+            incremental_result.profile_updates["@third_user:test"]["displayname"],
+            "third_user",
+        )
+        self.assertIsNone(
+            incremental_result.profile_updates["@third_user:test"]["avatar_url"],
+        )
+
 
 class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
     """Tests Sync Handler state behavior when using `use_state_after."""

@@ -102,8 +102,6 @@ class ProfileHandler:
         )
         self._worker_locks = hs.get_worker_locks_handler()
 
-        hs.get_distributor().observe("user_left_room", self.user_left_room)
-
     async def _record_profile_updates(
         self, user_id: UserID, updated_fields: list[str]
     ) -> None:
@@ -431,18 +429,18 @@ class ProfileHandler:
         if propagate:
             await self._update_join_states(requester, target_user)
 
-    async def _user_left_room(self, user_id: UserID, room_id: str) -> None:
+    async def user_left_room(self, user_id: UserID, room_id: str) -> None:
         """
         A user left a room. We now:
 
-        * Add a row to `profile_updates` stating the the user left a certain room.
+        * Add a row to `profile_updates` stating that the user left a room.
         * Check if this user no longer shares any rooms with certain users.
         * Insert a row for each of those users into `profile_updates_per_user`.
         * Now, when any of those users sync, the sync code will check
           `profile_updates` and see that the user left a room. And thus a "clear
           this user's profile" instruction will be sent down to the client.
 
-        If that is the case, 
+        If that is the case,
         """
         user_id_str = user_id.to_string()
         stream_id = await self.store.add_profile_updates(
@@ -467,13 +465,35 @@ class ProfileHandler:
                 user_ids=users_to_update,
             )
 
-    def user_left_room(self, user: UserID, room_id: str) -> None:
-        if self.hs.is_mine_id(user.to_string()):
-            self.hs.run_as_background_process(
-                "profile._user_left_room",
-                self._user_left_room,
-                user_id=user,
-                room_id=room_id,
+    async def user_joined_room(self, user_id: UserID, room_id: str) -> None:
+        """
+        A user joined a room. We now:
+
+        * Add a row to `profile_updates` stating that the user joined a room.
+        * Get list of users in that room.
+        * Insert a row for each of those users into `profile_updates_per_user`.
+        * Now, when any of those users sync, the sync code will check
+          `profile_updates` and see that the user joined a room. Thus, we can
+          include the users full profile in the case that we need to do so.
+
+        If that is the case,
+        """
+        user_id_str = user_id.to_string()
+        stream_id = await self.store.add_profile_updates(
+            user_id=user_id,
+            action=ProfileUpdateAction.JOINED_ROOM.value,
+            updated_fields=None,
+        )
+
+        users_in_room = set(await self.store.get_local_users_in_room(room_id))
+        users_in_room.discard(user_id_str)
+        if not users_in_room:
+            return
+
+        if users_in_room:
+            await self.store.track_profile_updates_per_user(
+                stream_id=stream_id,
+                user_ids=users_in_room,
             )
 
     async def delete_profile_upon_deactivation(

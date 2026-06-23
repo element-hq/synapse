@@ -526,6 +526,14 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         )
                         if prev_member_event.membership == Membership.JOIN:
                             await self._user_left_room(target, room_id)
+                            # Notify the profile handler. We only want to do this once
+                            # in a multi-worker setup, so we can't listen on the dispatched
+                            # event above.
+                            await self.profile_handler.user_left_room(target, room_id)
+                elif event.membership == Membership.JOIN:
+                    # Notify the profile handler. We only want to do this once
+                    # in a multi-worker setup, so we can't dispatch a hook to all workers.
+                    await self.profile_handler.user_joined_room(target, room_id)
 
                 break
             except PartialStateConflictError as e:
@@ -1541,6 +1549,14 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 prev_member_event = await self.store.get_event(prev_member_event_id)
                 if prev_member_event.membership == Membership.JOIN:
                     await self._user_left_room(target_user, room_id)
+                    # Notify the profile handler. We only want to do this once
+                    # in a multi-worker setup, so we can't listen on the dispatched
+                    # event above.
+                    await self.profile_handler.user_left_room(target_user, room_id)
+        elif event.membership == Membership.JOIN:
+            # Notify the profile handler. We only want to do this once
+            # in a multi-worker setup, so we can't dispatch a hook to all workers.
+            await self.profile_handler.user_joined_room(target_user, room_id)
 
     async def _can_guest_join(self, partial_current_state_ids: StateMap[str]) -> bool:
         """

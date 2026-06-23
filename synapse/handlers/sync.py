@@ -2307,6 +2307,11 @@ class SyncHandler:
             for update in updates
             if update.action == ProfileUpdateAction.LEFT_ROOM.value
         }
+        joined_room_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.JOINED_ROOM.value
+        }
         users = set()
         updated_users = {
             update.user_id
@@ -2318,6 +2323,8 @@ class SyncHandler:
             users.update(include_users)
         # Add users with updates
         users.update(updated_users)
+        # Add any newly joined users
+        users.update(joined_room_user_ids)
 
         if not users and not left_room_user_ids:
             return
@@ -2387,9 +2394,14 @@ class SyncHandler:
                                     cast(str, profile_data.get(field_name)),
                                 )
                 else:
-                    # Include only the diff
+                    # Include only the diff, unless the user recently joined
                     # We don't use a cache here as changes are always sent
-                    for field_name in user_fields.get(other_user_id, []):
+                    fields = (
+                        list(profile_data.keys())
+                        if other_user_id in joined_room_user_ids
+                        else user_fields.get(other_user_id, [])
+                    )
+                    for field_name in fields:
                         per_user_updates[field_name] = cast(
                             JsonValue, profile_data.get(field_name)
                         )
