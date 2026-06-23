@@ -248,9 +248,6 @@ class RelationsHandler:
             )
 
         for related_event_id in related_event_ids:
-            # Depending on the room version involved, the "redacts" key can go in one of
-            # two places. If we only use what was provided in the initial event, it will
-            # only target an event that was already redacted and nothing will happen.
             new_redaction_content = dict(initial_redaction_event.content)
             event_dict: JsonDict = {
                 "type": EventTypes.Redaction,
@@ -258,6 +255,14 @@ class RelationsHandler:
                 "room_id": initial_redaction_event.room_id,
                 "sender": requester.user.to_string(),
             }
+            # Depending on the room version involved, the "redacts" key can go in one of
+            # two places. If we only use what was provided in the initial event, it will
+            # only target an event that was already redacted and nothing will happen.
+            #
+            # The Matrix Spec page for changes in Room Version 11 asks that we maintain
+            # a backward and forwards compatibility for clients over that API. That
+            # compatibility fixup will be in the client Event serialization code. Here
+            # we form and persist the Event strictly by the version of the room.
             if room_version.updated_redaction_rules:
                 event_dict["content"].update({"redacts": related_event_id})
             else:
