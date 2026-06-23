@@ -142,6 +142,8 @@ from synapse.storage.background_updates import (
 from synapse.storage.database import DatabasePool, LoggingTransaction
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.types import (
+    Absent,
+    AbsentType,
     DomainSpecificString,
     JsonDict,
     JsonMapping,
@@ -160,7 +162,6 @@ from synapse.util.caches.descriptors import CachedFunction, cached as _cached
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
-from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     # Old versions don't have `LiteralString`
@@ -1990,7 +1991,7 @@ class ModuleApi:
         self,
         user_id: UserID,
         new_displayname: str,
-        deactivation: bool | Sentinel = Sentinel.UNSET_SENTINEL,
+        deactivation: bool | AbsentType = Absent,
     ) -> None:
         """Sets a user's display name.
 
@@ -2020,7 +2021,7 @@ class ModuleApi:
         """
         requester = create_requester(user_id)
 
-        if deactivation is not Sentinel.UNSET_SENTINEL:
+        if deactivation is not Absent:
             logger.error(
                 "Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: %r). This will break in 2027.",
                 deactivation,

@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.153/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.155/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -2244,8 +2244,8 @@ properties:
 
 
       This is a ratelimiting option that ratelimits attempts to restart, cancel,
-      or view delayed events based on the sending client's account and device
-      ID.
+      or view delayed events based on the sending client's account,
+      or its source IP when requests are unauthenticated.
 
 
       Attempts to create or send delayed events are ratelimited not by this
@@ -3225,6 +3225,10 @@ properties:
       If the room already exists, make certain it is a publicly joinable room,
       i.e. the join rule of the room must be set to `public`. You can find more
       options relating to auto-joining rooms below.
+
+
+      Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart`
+      to a user who's part of the invite-only rooms.
 
 
       As Spaces are just rooms under the hood, Space aliases may also be used.
@@ -4620,11 +4624,15 @@ properties:
         type: boolean
         description: >-
           Use this setting to keep a user's profile fields in sync with
-          information from the identity provider. Currently only syncing the
-          displayname is supported. Fields are checked on every SSO login, and
-          are updated if necessary. Note that enabling this option will override
-          user profile information, regardless of whether users have opted-out
-          of syncing that information when first signing in.
+          information from the identity provider. Fields are checked on every 
+          SSO login, and are updated if necessary. Note that enabling this 
+          option will override user profile information, regardless of whether 
+          users have opted-out of syncing that information when first signing 
+          in.
+          Fields that will be synced:
+            * displayname
+            * picture - only if Synapse media repository is running in the main
+               process (i.e. not workerized) and media is stored locally
         default: false
     examples:
       - client_whitelist:

@@ -34,8 +34,8 @@ from typing import (
     Generator,
     Generic,
     Iterable,
+    Sequence,
     TypeVar,
-    cast,
 )
 
 import attr
@@ -46,7 +46,14 @@ from twisted.internet import defer
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events import EventBase, FrozenEventVMSC4242, event_exists_in_state_dag
+from synapse.events import (
+    EventBase,
+    event_exists_in_state_dag,
+)
+from synapse.events.py_protocol import (
+    MSC4242Event,
+    all_supports_msc4242_state_dag,
+)
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
@@ -637,7 +644,6 @@ class EventsPersistenceStorageController:
         # Get the room version for the first event. This room version is the same for all events
         # as events_and_contexts is all for one room.
         assert len(events_and_contexts) > 0
-        room_version = events_and_contexts[0][0].room_version
 
         for chunk in chunks:
             # We can't easily parallelize these since different chunks
@@ -648,22 +654,18 @@ class EventsPersistenceStorageController:
             new_state_dag_extrems = None
 
             if not backfilled:
-                if room_version.msc4242_state_dags:
+                if all_supports_msc4242_state_dag(chunk):
                     with Measure(
                         self._clock,
                         name="_process_state_dag_forward_extremities_and_state_delta",
                         server_name=self.server_name,
                     ):
-                        assert all(
-                            isinstance(ev, FrozenEventVMSC4242) for ev, _ in chunk
-                        )
                         (
                             new_forward_extremities,  # for prev_events
                             state_delta_for_room,  # for state groups
                             new_state_dag_extrems,  # for prev_state_events
                         ) = await self._process_state_dag_forward_extremities_and_state_delta(
-                            room_id,
-                            cast(list[tuple[FrozenEventVMSC4242, EventContext]], chunk),
+                            room_id, chunk
                         )
                 else:
                     with Measure(
@@ -840,7 +842,7 @@ class EventsPersistenceStorageController:
     async def _process_state_dag_forward_extremities_and_state_delta(
         self,
         room_id: str,
-        event_contexts: list[tuple[FrozenEventVMSC4242, EventContext]],
+        event_contexts: Sequence[tuple[MSC4242Event, EventContext]],
     ) -> tuple[set[str] | None, DeltaState | None, set[str] | None]:
         """Process the forwards extremities for state DAG rooms.
         Returns:
@@ -867,7 +869,7 @@ class EventsPersistenceStorageController:
         )
         new_room_dag_fwd_extrems = await self._calculate_new_extremities(
             room_id,
-            cast(list[EventPersistencePair], event_contexts),
+            event_contexts,
             existing_room_dag_fwd_extrems,
         )
         assert new_room_dag_fwd_extrems, (
@@ -886,7 +888,7 @@ class EventsPersistenceStorageController:
         ):
             (current_state, delta_ids, _) = await self._get_new_state_after_events(
                 room_id,
-                cast(list[EventPersistencePair], event_contexts),
+                event_contexts,
                 existing_state_dag_fwd_extrems,
                 new_state_dag_fwd_extrems,
                 # do not prune forward extremities in the state DAG
@@ -920,7 +922,7 @@ class EventsPersistenceStorageController:
             # extremities.
             is_still_joined = await self._is_server_still_joined(
                 room_id,
-                cast(list[EventPersistencePair], event_contexts),
+                event_contexts,
                 delta,
             )
             if not is_still_joined:
@@ -933,7 +935,7 @@ class EventsPersistenceStorageController:
         self,
         room_id: str,
         existing_fwd_extrems: frozenset[str],
-        event_contexts: list[tuple[FrozenEventVMSC4242, EventContext]],
+        event_contexts: Sequence[tuple[MSC4242Event, EventContext]],
     ) -> set[str]:
         """Calculate the new state dag forward extremities. Modifies existing_fwd_extrems.
 
@@ -1050,7 +1052,7 @@ class EventsPersistenceStorageController:
     async def _calculate_new_extremities(
         self,
         room_id: str,
-        event_contexts: list[EventPersistencePair],
+        event_contexts: Sequence[EventPersistencePair],
         latest_event_ids: AbstractSet[str],
     ) -> set[str]:
         """Calculates the new forward extremities for a room given events to
@@ -1110,7 +1112,7 @@ class EventsPersistenceStorageController:
     async def _get_new_state_after_events(
         self,
         room_id: str,
-        events_context: list[EventPersistencePair],
+        events_context: Sequence[EventPersistencePair],
         old_latest_event_ids: AbstractSet[str],
         new_latest_event_ids: set[str],
         should_prune: bool = True,
@@ -1294,7 +1296,7 @@ class EventsPersistenceStorageController:
         new_latest_event_ids: set[str],
         resolved_state_group: int,
         event_id_to_state_group: dict[str, int],
-        events_context: list[EventPersistencePair],
+        events_context: Sequence[EventPersistencePair],
     ) -> set[str]:
         """See if we can prune any of the extremities after calculating the
         resolved state.
@@ -1431,7 +1433,7 @@ class EventsPersistenceStorageController:
     async def _is_server_still_joined(
         self,
         room_id: str,
-        ev_ctx_rm: list[EventPersistencePair],
+        ev_ctx_rm: Sequence[EventPersistencePair],
         delta: DeltaState,
     ) -> bool:
         """Check if the server will still be joined after the given events have

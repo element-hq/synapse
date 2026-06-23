@@ -1971,7 +1971,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2869,6 +2869,8 @@ enable_3pid_changes: false
 *(array)* Users who register on this homeserver will automatically be joined to the rooms listed under this option.
 
 By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to `public`. You can find more options relating to auto-joining rooms below.
+
+Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart` to a user who's part of the invite-only rooms.
 
 As Spaces are just rooms under the hood, Space aliases may also be used.
 
@@ -3788,7 +3790,10 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:
+    * displayname
+    * picture - only if Synapse media repository is running in the main
+       process (i.e. not workerized) and media is stored locally Defaults to `false`.
 
 Example configuration:
 ```yaml

@@ -1,0 +1,1 @@
+Fix `/sync` caching transient errors for the `sync_response_cache_duration`.

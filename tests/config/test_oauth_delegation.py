@@ -60,7 +60,7 @@ class MSC3861OAuthDelegation(TestCase):
 
     def setUp(self) -> None:
         self.config_dict: JsonDict = {
-            **default_config("test"),
+            **default_config(server_name="test"),
             "public_baseurl": BASE_URL,
             "enable_registration": False,
             "experimental_features": {
@@ -287,7 +287,7 @@ class MasAuthDelegation(TestCase):
 
     def setUp(self) -> None:
         self.config_dict: JsonDict = {
-            **default_config("test"),
+            **default_config(server_name="test"),
             "public_baseurl": BASE_URL,
             "enable_registration": False,
             "matrix_authentication_service": {
