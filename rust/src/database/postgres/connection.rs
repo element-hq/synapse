@@ -4,11 +4,15 @@ use log::warn;
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
-    types::{PyDict, PyTuple},
+    types::{PyDict, PyInt, PyTuple},
 };
 use tokio_postgres::Client;
 
-use crate::database::postgres::helpers::{BlockingPostgres, BlockingPostgresResult};
+use crate::database::postgres::{
+    cursor_state::CursorQueryState,
+    helpers::{BlockingPostgres, BlockingPostgresResult},
+    value::{pg_row_to_py, PgValue},
+};
 
 #[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
@@ -66,6 +70,7 @@ pub struct Cursor {
 struct CursorInner {
     client: Option<Client>,
     connection: Connection,
+    query_state: CursorQueryState,
     in_transaction: bool,
 }
 
@@ -79,6 +84,7 @@ impl Cursor {
             inner: Arc::new(Mutex::new(CursorInner {
                 client: Some(client),
                 connection,
+                query_state: CursorQueryState::new(),
                 in_transaction,
             })),
         }
@@ -118,6 +124,74 @@ impl Cursor {
         client.execute(stmt, &[]).block_on_result(py)?;
 
         inner.connection.put_client(client)?;
+
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl Cursor {
+    #[pyo3(signature = (query, params = None))]
+    fn execute<'py>(
+        &self,
+        py: Python<'py>,
+        query: &str,
+        params: Option<Vec<PgValue>>,
+    ) -> PyResult<()> {
+        let mut inner = self.py_lock()?;
+        inner.execute(py, query, params)
+    }
+
+    fn fetch_one<'py>(&self, py: Python<'py>) -> PyResult<Option<Vec<Option<Py<PyAny>>>>> {
+        let mut inner = self.py_lock()?;
+        let Some(row) = inner.query_state.fetch_one(py)? else {
+            return Ok(None);
+        };
+
+        let py_row = pg_row_to_py(py, &row)?;
+        Ok(Some(py_row))
+    }
+
+    fn fetch_all<'py>(&self, py: Python<'py>) -> PyResult<Vec<Vec<Option<Py<PyAny>>>>> {
+        let mut inner = self.py_lock()?;
+        let rows = inner.query_state.fetch_all(py)?;
+
+        rows.into_iter().map(|row| pg_row_to_py(py, &row)).collect()
+    }
+
+    fn rowcount<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
+        let mut inner = self.py_lock()?;
+        let Some(rowcount) = inner.query_state.rowcount(py)? else {
+            // If we don't have a rowcount yet, PEP-249 says we should return
+            // -1.
+            return Ok((-1i64).into_pyobject(py)?);
+        };
+
+        Ok(rowcount.into_pyobject(py)?)
+    }
+}
+
+impl CursorInner {
+    fn execute<'py>(
+        &mut self,
+        py: Python<'py>,
+        query: &str,
+        params: Option<Vec<PgValue>>,
+    ) -> PyResult<()> {
+        let Some(client) = &mut self.client else {
+            return Err(PyRuntimeError::new_err("cursor already closed"));
+        };
+
+        self.query_state.new_query();
+
+        let statement = &client.prepare(query).block_on_result(py)?;
+
+        let row_stream = client
+            .query_raw(statement, params.unwrap_or_default())
+            .block_on_result(py)?;
+
+        self.query_state
+            .on_query_start(row_stream, statement.columns());
 
         Ok(())
     }

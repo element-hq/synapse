@@ -74,7 +74,7 @@ impl CursorQueryState {
         Ok(rows)
     }
 
-    pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<u64> {
+    pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Option<u64>> {
         // `stream.rows_affected()` is only valid after the stream is
         // drained, so we need to drain it here. This is OK as in Python the
         // rowcount should only be accessed for queries that DO NOT return
@@ -84,11 +84,7 @@ impl CursorQueryState {
             self.rowcount = stream.rows_affected();
         }
 
-        if let Some(rowcount) = self.rowcount {
-            Ok(rowcount)
-        } else {
-            Err(PyRuntimeError::new_err("no active query").into())
-        }
+        Ok(self.rowcount)
     }
 }
 

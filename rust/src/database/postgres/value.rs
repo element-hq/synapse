@@ -17,7 +17,7 @@ use postgres_protocol::types::{
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString};
-use pyo3::{prelude::*, BoundObject, IntoPyObjectExt};
+use pyo3::{prelude::*, BoundObject};
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type, WrongType};
 
 /// Owned representation of a Python value that we can hand to `tokio-postgres`
@@ -155,7 +155,7 @@ pub fn pg_column_to_py(
     py: Python<'_>,
     row: &tokio_postgres::Row,
     idx: usize,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<Option<Py<PyAny>>> {
     let obj: PythonPgFromSql = row.try_get(idx).map_err(|e| {
         PyValueError::new_err(format!(
             "failed to decode column {idx} (type {}): {e}",
@@ -163,7 +163,16 @@ pub fn pg_column_to_py(
         ))
     })?;
 
-    Ok(obj.0.into_py_any(py)?)
+    Ok(obj.0)
+}
+
+pub fn pg_row_to_py(py: Python<'_>, row: &tokio_postgres::Row) -> PyResult<Vec<Option<Py<PyAny>>>> {
+    let mut result = Vec::with_capacity(row.len());
+    for idx in 0..row.len() {
+        let obj = pg_column_to_py(py, row, idx)?;
+        result.push(obj);
+    }
+    Ok(result)
 }
 
 pub struct PythonPgFromSql(pub Option<Py<PyAny>>);
