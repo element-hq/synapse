@@ -261,8 +261,8 @@ class RelationsHandler:
             #
             # The Matrix Spec page for changes in Room Version 11 asks that we maintain
             # a backward and forwards compatibility for clients over that API. That
-            # compatibility fixup will be in the client Event serialization code. Here
-            # we form and persist the Event strictly by the version of the room.
+            # compatibility fixup will be in the client event serialization code. Here
+            # we form and persist the event strictly by the version of the room.
             if room_version.updated_redaction_rules:
                 event_dict["content"].update({"redacts": related_event_id})
             else:
