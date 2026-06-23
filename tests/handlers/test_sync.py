@@ -1245,6 +1245,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        assert initial_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
             initial_result.profile_updates["@other_user:test"]["m.status"],
             '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
@@ -1379,6 +1380,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
             incremental_result.profile_updates["@other_user:test"]["m.status"],
             '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
@@ -1472,7 +1474,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 "@third_user:test",
             ],
         )
-        # This is a field upfate, so should be here
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        # This is a field update, so should be here
         self.assertEqual(
             incremental_result.profile_updates["@other_user:test"]["m.status"],
             '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
@@ -1482,6 +1485,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.assertIsNone(
             incremental_result.profile_updates["@other_user:test"].get("displayname"),
         )
+        assert incremental_result.profile_updates["@third_user:test"] is not None
         # This user has events in the timeline, thus their full profile is included
         self.assertEqual(
             incremental_result.profile_updates["@third_user:test"]["m.status"],
@@ -1581,6 +1585,53 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.assertCountEqual(
             incremental_result.profile_updates.keys(),
             [],
+        )
+
+    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    def test_incremental_sync_sends_down_null_profile_if_user_no_longer_sharing_rooms(
+        self,
+    ) -> None:
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.helper.leave(
+            room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertIsNone(
+            incremental_result.profile_updates["@other_user:test"],
         )
 
 

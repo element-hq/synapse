@@ -252,7 +252,7 @@ class SyncResult:
     presence: list[UserPresenceState]
     account_data: list[JsonDict]
     # user ID -> {profile field -> value | null if unset }
-    profile_updates: dict[str, dict[str, JsonValue | None]]
+    profile_updates: dict[str, dict[str, JsonValue | None] | None]
     joined: list[JoinedSyncResult]
     invited: list[InvitedSyncResult]
     knocked: list[KnockedSyncResult]
@@ -2223,7 +2223,7 @@ class SyncHandler:
         )
 
         # Serialise the profile updates into the sync response format.
-        profile_updates: dict[str, dict[str, JsonValue | None]] = {}
+        profile_updates: dict[str, dict[str, JsonValue | None] | None] = {}
         for other_user_id, fields in user_fields.items():
             profile_data = profile_data_by_user.get(other_user_id)
             if profile_data is None:
@@ -2324,7 +2324,7 @@ class SyncHandler:
 
         # Serialise the profile updates into the sync response format.
         # user ID -> {profile field -> value | null if unset }
-        profile_updates: dict[str, dict[str, JsonValue | None]] = {}
+        profile_updates: dict[str, dict[str, JsonValue | None] | None] = {}
 
         # Process field updates and users who have events in the sync response
         if users:
@@ -2351,7 +2351,7 @@ class SyncHandler:
                     # No profile data for this user, just return a blank dictionary
                     # in incremental sync, telling the clients to remove all profile
                     # information for this user.
-                    profile_updates[other_user_id] = {}
+                    profile_updates[other_user_id] = None
                     continue
 
                 per_user_updates: dict[str, JsonValue] = {}
@@ -2401,7 +2401,7 @@ class SyncHandler:
         if left_room_user_ids:
             for other_user_id in left_room_user_ids:
                 # Return an empty dictionary to the client
-                profile_updates[other_user_id] = {}
+                profile_updates[other_user_id] = None
 
         if profile_updates:
             sync_result_builder.profile_updates = profile_updates
@@ -3441,7 +3441,7 @@ class SyncResultBuilder:
 
     presence: list[UserPresenceState] = attr.Factory(list)
     account_data: list[JsonDict] = attr.Factory(list)
-    profile_updates: dict[str, dict[str, JsonValue | None]] = attr.Factory(dict)
+    profile_updates: dict[str, dict[str, JsonValue | None] | None] = attr.Factory(dict)
     joined: list[JoinedSyncResult] = attr.Factory(list)
     invited: list[InvitedSyncResult] = attr.Factory(list)
     knocked: list[KnockedSyncResult] = attr.Factory(list)
