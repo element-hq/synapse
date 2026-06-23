@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-cdab8aac.js";
+            window.path_to_searchindex_js = "searchindex-2164229f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -256,14 +256,17 @@ they don’t have their own system-level dependencies.</p>
 concerned about the criteria for selecting minimum versions. The only thing of concern
 is making sure we’re not making it unnecessarily difficult for downstream package
 maintainers. Generally, this just means avoiding the bleeding edge for a few months.</p>
-<p>The situation for Rust dependencies is fundamentally different. For packagers, the
-concerns around Python dependency versions do not apply. The <code>cargo</code> tool handles
-downloading and building all libraries to satisfy dependencies, and these libraries are
-statically linked into the final binary. This means that from a packager’s perspective,
-the Rust dependency versions are an internal build detail, not a runtime dependency to
-be managed on the target system. Consequently, we have even greater flexibility to
-upgrade Rust dependencies as needed for the project. Some distros (e.g. Fedora) do
-package Rust libraries, but this appears to be the outlier rather than the norm.</p>
+<p>The situation for Rust dependencies is typically different and
+the concerns around Python dependency versions typically do not apply.
+For example, for packagers of Debian, the packagers have the choice of either
+using a crate packaged in the distro, or vendoring crates in the source package for the
+application.</p>
+<p>This freedom to vendor a dependency crate for a specific application consequently gives
+us even greater flexibility to upgrade Rust dependencies as needed for the project.</p>
+<p>(This is in contrast with Python dependencies, which are generally
+installed system-wide by mainstream distributions’ official packages.)</p>
+<p>Some distros (e.g. Fedora) do not vendor Rust dependencies in their
+official application packages, but these cases appear to be less common.</p>
 
                     </main>
 
