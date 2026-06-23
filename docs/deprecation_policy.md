@@ -82,10 +82,11 @@ maintainers. Generally, this just means avoiding the bleeding edge for a few mon
 The situation for Rust dependencies is typically different and
 the concerns around Python dependency versions typically do not apply.
 For example, for packagers of Debian, the packagers have the choice of either
-using a crate packaged in the distro, or vendoring crates in the source package for the application.
+using a crate packaged in the distro, or vendoring crates in the source package for the
+application.
 
-This freedom to vendor a dependency crate for a specific application consequently gives us even greater flexibility to
-upgrade Rust dependencies as needed for the project.
+This freedom to vendor a dependency crate for a specific application consequently gives
+us even greater flexibility to upgrade Rust dependencies as needed for the project.
 
 (This is in contrast with Python dependencies, which are generally
 installed system-wide by mainstream distributions' official packages.)
