@@ -107,9 +107,17 @@ non_empty_sync_counter = Counter(
 # client for no more than 30 minutes.
 LAZY_LOADED_MEMBERS_CACHE_MAX_AGE = 30 * 60 * 1000
 
+# Store the cache that tracks which lazy-loaded profile fields have been sent to a given
+# client for no more than 30 minutes.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE = 30 * 60 * 1000
+
 # Remember the last 100 members we sent to a client for the purposes of
 # avoiding redundantly sending the same lazy-loaded members to the client
 LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE = 100
+
+# Remember the last 100 profile field updates we sent to a client for the purposes of
+# avoiding redundantly sending the same lazy-loaded full profiles to the client
+LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_SIZE = 100
 
 
 SyncRequestKey = tuple[Any, ...]
@@ -337,6 +345,17 @@ class SyncHandler:
             clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
+        )
+        # ExpiringCache((User, Device, Other User, Profile Field)) -> LruCache(user_id => field_value)
+        self.lazy_loaded_profile_fields_cache: ExpiringCache[
+            tuple[str, str | None, str, str], LruCache[str, str]
+        ] = ExpiringCache(
+            cache_name="lazy_loaded_profile_fields_cache",
+            server_name=self.server_name,
+            hs=hs,
+            clock=self.clock,
+            max_len=0,
+            expiry_ms=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
         )
 
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
@@ -1041,6 +1060,24 @@ class SyncHandler:
                 server_name=self.server_name,
             )
             self.lazy_loaded_members_cache[cache_key] = cache
+        else:
+            logger.debug("found LruCache for %r", cache_key)
+        return cache
+
+    def get_lazy_loaded_profile_fields_cache(
+        self, cache_key: tuple[str, str | None, str, str]
+    ) -> LruCache[str, str]:
+        cache: LruCache[str, str] | None = self.lazy_loaded_profile_fields_cache.get(
+            cache_key
+        )
+        if cache is None:
+            logger.debug("creating LruCache for %r", cache_key)
+            cache = LruCache(
+                max_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_SIZE,
+                clock=self.clock,
+                server_name=self.server_name,
+            )
+            self.lazy_loaded_profile_fields_cache[cache_key] = cache
         else:
             logger.debug("found LruCache for %r", cache_key)
         return cache
@@ -2318,13 +2355,29 @@ class SyncHandler:
                 per_user_updates: dict[str, JsonValue] = {}
                 if include_users and other_user_id in include_users:
                     # Include the full profile as this user has events in
-                    # a lazy loaded sync response
+                    # a lazy loaded sync response, except for fields we've recently
+                    # sent in a previous lazy loaded sync response
                     for field_name in profile_data.keys():
-                        per_user_updates[field_name] = cast(
-                            JsonValue, profile_data.get(field_name)
+                        cache_key = (
+                            sync_config.user.to_string(),
+                            sync_config.device_id,
+                            other_user_id,
+                            field_name,
                         )
+                        cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
+                        # Only send the field if we haven't recently sent it
+                        if not cache.get(field_name):
+                            per_user_updates[field_name] = cast(
+                                JsonValue, profile_data.get(field_name)
+                            )
+                            # Update our cache
+                            cache.set(
+                                other_user_id,
+                                cast(str, profile_data.get(field_name)),
+                            )
                 else:
                     # Include only the diff
+                    # We don't use a cache here as changes are always sent
                     for field_name in fields:
                         per_user_updates[field_name] = cast(
                             JsonValue, profile_data.get(field_name)
