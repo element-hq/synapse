@@ -112,11 +112,11 @@ impl ToSql for PgValue {
                 float8_to_sql(v, buf);
                 Ok(IsNull::No)
             }
-            (&PgValue::Text(ref v), &Type::TEXT | &Type::VARCHAR | &Type::NAME | &Type::BPCHAR) => {
+            (PgValue::Text(v), &Type::TEXT | &Type::VARCHAR | &Type::NAME | &Type::BPCHAR) => {
                 text_to_sql(v, buf);
                 Ok(IsNull::No)
             }
-            (&PgValue::Bytea(ref v), &Type::BYTEA) => {
+            (PgValue::Bytea(v), &Type::BYTEA) => {
                 bytea_to_sql(v, buf);
                 Ok(IsNull::No)
             }
@@ -150,27 +150,16 @@ impl ToSql for PgValue {
     to_sql_checked!();
 }
 
-/// Convert one column of a `tokio_postgres::Row` into a Python object.
-pub fn pg_column_to_py(
-    py: Python<'_>,
-    row: &tokio_postgres::Row,
-    idx: usize,
-) -> PyResult<Option<Py<PyAny>>> {
-    let obj: PythonPgFromSql = row.try_get(idx).map_err(|e| {
-        PyValueError::new_err(format!(
-            "failed to decode column {idx} (type {}): {e}",
-            row.columns()[idx].type_()
-        ))
-    })?;
-
-    Ok(obj.0)
-}
-
-pub fn pg_row_to_py(py: Python<'_>, row: &tokio_postgres::Row) -> PyResult<Vec<Option<Py<PyAny>>>> {
+pub fn pg_row_to_py(row: &tokio_postgres::Row) -> PyResult<Vec<Option<Py<PyAny>>>> {
     let mut result = Vec::with_capacity(row.len());
     for idx in 0..row.len() {
-        let obj = pg_column_to_py(py, row, idx)?;
-        result.push(obj);
+        let obj: PythonPgFromSql = row.try_get(idx).map_err(|e| {
+            PyValueError::new_err(format!(
+                "failed to decode column {idx} (type {}): {e}",
+                row.columns()[idx].type_()
+            ))
+        })?;
+        result.push(obj.0);
     }
     Ok(result)
 }
@@ -233,7 +222,7 @@ impl PythonPgFromSql {
             }
             Type::FLOAT8 => {
                 let f = postgres_protocol::types::float8_from_sql(raw)?;
-                PyFloat::new(py, f.into()).into_any().unbind()
+                PyFloat::new(py, f).into_any().unbind()
             }
             Type::TEXT | Type::VARCHAR | Type::NAME | Type::BPCHAR => {
                 PyString::from_bytes(py, raw)?.into_any().unbind()

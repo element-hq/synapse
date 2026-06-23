@@ -15,6 +15,8 @@ use pyo3::types::PyModule;
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child = PyModule::new(py, "database")?;
 
+    postgres::register_module(py, &child)?;
+
     m.add_submodule(&child)?;
 
     // Mirror the convention used by other rust submodules so

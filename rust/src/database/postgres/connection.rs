@@ -148,7 +148,7 @@ impl Cursor {
             return Ok(None);
         };
 
-        let py_row = pg_row_to_py(py, &row)?;
+        let py_row = pg_row_to_py(&row)?;
         Ok(Some(py_row))
     }
 
@@ -156,7 +156,7 @@ impl Cursor {
         let mut inner = self.py_lock()?;
         let rows = inner.query_state.fetch_all(py)?;
 
-        rows.into_iter().map(|row| pg_row_to_py(py, &row)).collect()
+        rows.into_iter().map(|row| pg_row_to_py(&row)).collect()
     }
 
     fn rowcount<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
