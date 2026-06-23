@@ -839,11 +839,20 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         ):
             is_admin = await self.auth.is_server_admin(requester)
             if not is_admin:
-                profile = await self.store.get_profileinfo(target)
-                if (
-                    profile.display_name is not None
-                    and content["displayname"] != profile.display_name
-                ):
+                member_event = (
+                    await self._storage_controllers.state.get_current_state_event(
+                        room_id=room_id,
+                        event_type=EventTypes.Member,
+                        state_key=target.to_string(),
+                    )
+                )
+
+                displayname = None
+                if member_event is not None:
+                    if member_event.membership == Membership.JOIN:
+                        displayname = member_event.content.get("displayname")
+
+                if displayname is not None and content["displayname"] != displayname:
                     raise SynapseError(
                         400,
                         "Changing display name is disabled on this server",
