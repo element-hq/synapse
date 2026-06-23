@@ -1383,6 +1383,10 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@other_user:test"]["m.status"],
             '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
         )
+        # We only send diffs in incremental sync for profile field updates
+        self.assertIsNone(
+            incremental_result.profile_updates["@other_user:test"].get("displayname"),
+        )
 
     @override_config({"experimental_features": {"msc4429_enabled": True}})
     def test_incremental_sync_does_not_filter_profile_updates_when_lazy_loading(
@@ -1467,6 +1471,25 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 "@other_user:test",
                 "@third_user:test",
             ],
+        )
+        # This is a field upfate, so should be here
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["m.status"],
+            '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
+        )
+        # We don't have events for this user in this response, so their full profile
+        # is not included
+        self.assertIsNone(
+            incremental_result.profile_updates["@other_user:test"].get("displayname"),
+        )
+        # This user has events in the timeline, thus their full profile is included
+        self.assertEqual(
+            incremental_result.profile_updates["@third_user:test"]["m.status"],
+            '{"text": "On fire", "emoji": "\\ud83d\\udd25"}',
+        )
+        self.assertEqual(
+            incremental_result.profile_updates["@third_user:test"]["displayname"],
+            "third_user",
         )
 
 

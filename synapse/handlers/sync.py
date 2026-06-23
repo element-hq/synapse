@@ -2316,10 +2316,19 @@ class SyncHandler:
                     continue
 
                 per_user_updates: dict[str, JsonValue] = {}
-                for field_name in fields:
-                    per_user_updates[field_name] = cast(
-                        JsonValue, profile_data.get(field_name)
-                    )
+                if include_users and other_user_id in include_users:
+                    # Include the full profile as this user has events in
+                    # a lazy loaded sync response
+                    for field_name in profile_data.keys():
+                        per_user_updates[field_name] = cast(
+                            JsonValue, profile_data.get(field_name)
+                        )
+                else:
+                    # Include only the diff
+                    for field_name in fields:
+                        per_user_updates[field_name] = cast(
+                            JsonValue, profile_data.get(field_name)
+                        )
 
                 if per_user_updates:
                     profile_updates[other_user_id] = per_user_updates
