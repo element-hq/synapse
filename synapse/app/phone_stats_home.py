@@ -57,6 +57,8 @@ We recalculate synapse_non_deactivated_user_count every 5 minutes.
 # currently either 0 or 1
 _stats_process: list[tuple[int, "resource.struct_rusage"]] = []
 
+# These Gauges are NOT used by the phone home stats function
+# but are calculated below.
 # Gauges to expose monthly active user control metrics
 current_mau_gauge = Gauge(
     "synapse_admin_mau_current",
