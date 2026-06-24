@@ -14,8 +14,9 @@
 //! There is exactly one `Client` per connection, and it *moves* between the
 //! `Connection` and the `Cursor` rather than being shared. It lives in the
 //! `Connection` between interactions, is *taken out* for the duration of a
-//! `Cursor`, and is *put back* when the cursor finishes. The `Option<Client>`
-//! slots track where it currently is.
+//! `Cursor`, and is *put back* when the cursor finishes. An `Option` on each
+//! side (the `Connection`'s client slot, the `Cursor`'s state) tracks where it
+//! currently is.
 //!
 //! This passing-by-move is deliberate: it means the `Client` can only ever be
 //! in one place at a time, so we structurally cannot
@@ -143,15 +144,18 @@ impl Connection {
 #[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct Cursor {
-    inner: Arc<Mutex<CursorInner>>,
+    /// The cursor's state while the transaction is open; `None` once the
+    /// cursor has been finished/closed (the whole state is taken out at once,
+    /// which also drops the client and any in-flight result set). Its presence
+    /// doubles as the "transaction still open" flag: a cursor only ever holds
+    /// state between `BEGIN` and `finish`.
+    inner: Arc<Mutex<Option<CursorInner>>>,
 }
 
-/// The mutable guts of a [`Cursor`], guarded by the cursor's mutex.
+/// The mutable guts of a [`Cursor`], held while its transaction is open.
 struct CursorInner {
-    /// The client driving the transaction, or `None` once the cursor has been
-    /// finished/closed. Its presence doubles as the "transaction still open"
-    /// flag: a cursor only ever holds a client between `BEGIN` and `finish`.
-    client: Option<Client>,
+    /// The client driving the transaction.
+    client: Client,
     /// The owning connection, so the client can be handed back on finish.
     connection: Connection,
     /// State of the most recent `execute` (live row stream, rowcount, etc.).
@@ -172,11 +176,11 @@ impl Cursor {
     /// Build a cursor that owns `client` on behalf of `connection`.
     fn new(connection: Connection, client: Client) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(CursorInner {
-                client: Some(client),
+            inner: Arc::new(Mutex::new(Some(CursorInner {
+                client,
                 connection,
                 query_state: CursorQueryState::new(),
-            })),
+            }))),
         }
     }
 
@@ -185,20 +189,21 @@ impl Cursor {
     /// Uses `try_lock` rather than `lock`: a cursor is single-threaded by
     /// contract, so contention means it's being used from two threads at once,
     /// which we surface as an error instead of blocking.
-    fn py_lock(&self) -> PyResult<MutexGuard<'_, CursorInner>> {
+    fn py_lock(&self) -> PyResult<MutexGuard<'_, Option<CursorInner>>> {
         match self.inner.try_lock() {
             Ok(guard) => Ok(guard),
             Err(TryLockError::Poisoned(p)) => {
-                // If the mutex is poisoned let's immediately drop the client to
-                // close the connection (as we don't know what state it is in).
-                // Otherwise we'd have to wait for the `Cursor` to be dropped on
-                // the python side, which can take a while.
+                // If the mutex is poisoned let's immediately drop the cursor
+                // state (and thus the client) to close the connection, as we
+                // don't know what state it is in. Otherwise we'd have to wait
+                // for the `Cursor` to be dropped on the python side, which can
+                // take a while.
                 //
                 // Note that we'll definitely hit this code on a panic, as
                 // `py_lock` is called when `CursorGuard` drops.
-                p.into_inner().client = None;
+                *p.into_inner() = None;
 
-                Err(PyRuntimeError::new_err("cursor client mutex poisoned"))
+                Err(PyRuntimeError::new_err("cursor mutex poisoned"))
             }
             Err(TryLockError::WouldBlock) => Err(PyRuntimeError::new_err(
                 "cursor is being used in another thread and cannot be used concurrently",
@@ -206,33 +211,32 @@ impl Cursor {
         }
     }
 
-    /// Move the [`Client`] out of the cursor, leaving it closed, along with the
-    /// connection it should be handed back to.
-    ///
-    /// Returns `None` if the cursor was already finished/closed. Grabbing both
-    /// under one lock means `finish` doesn't need to re-lock to find the
-    /// connection.
-    fn take_client(&self) -> PyResult<Option<(Client, Connection)>> {
-        let mut inner = self.py_lock()?;
-        Ok(inner
-            .client
-            .take()
-            .map(|client| (client, inner.connection.clone())))
+    /// Run `f` against the live cursor state, or error if the cursor has
+    /// already been finished/closed (its state taken out, leaving `None`).
+    fn with_inner<R>(&self, f: impl FnOnce(&mut CursorInner) -> PyResult<R>) -> PyResult<R> {
+        let mut guard = self.py_lock()?;
+        let inner = guard
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("cursor already closed"))?;
+        f(inner)
     }
 
     /// Finish the transaction — `COMMIT` if `commit` is set, otherwise
     /// `ROLLBACK` — and hand the client back to the connection.
     ///
-    /// Taking the client out marks the cursor as finished, so a second call
+    /// Taking the cursor's state out marks it as finished, so a second call
     /// (from Python, or from the [`CursorGuard`] once the explicit `finish` has
     /// already run) finds nothing to do and returns `Ok(())`. If the statement
     /// itself fails the client is dropped rather than returned, closing the
     /// connection (see the module docs).
     fn finish(&self, commit: bool) -> PyResult<()> {
-        // One lock takes the client and the connection to return it to. If the
-        // cursor was already finished there's no client and nothing to do, so
-        // we don't even need the GIL.
-        let Some((client, connection)) = self.take_client()? else {
+        // Take the whole cursor state out under one lock, closing the cursor
+        // (and dropping any in-flight result set with it). If it's already
+        // gone there's nothing to do, so we don't even need the GIL.
+        let Some(CursorInner {
+            client, connection, ..
+        }) = self.py_lock()?.take()
+        else {
             return Ok(());
         };
 
@@ -264,14 +268,12 @@ impl Cursor {
         query: &str,
         params: Option<Vec<PgValue>>,
     ) -> PyResult<()> {
-        let mut inner = self.py_lock()?;
-        inner.execute(py, query, params)
+        self.with_inner(|inner| inner.execute(py, query, params))
     }
 
     /// Return the next row of the current result set, or `None` if exhausted.
     fn fetch_one<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
-        let mut inner = self.py_lock()?;
-        let Some(row) = inner.query_state.fetch_one(py)? else {
+        let Some(row) = self.with_inner(|inner| inner.query_state.fetch_one(py))? else {
             return Ok(None);
         };
 
@@ -281,8 +283,7 @@ impl Cursor {
 
     /// Drain and return all remaining rows of the current result set.
     fn fetch_all<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyTuple>>> {
-        let mut inner = self.py_lock()?;
-        let rows = inner.query_state.fetch_all(py)?;
+        let rows = self.with_inner(|inner| inner.query_state.fetch_all(py))?;
 
         rows.into_iter().map(|row| pg_row_to_py(py, &row)).collect()
     }
@@ -292,8 +293,7 @@ impl Cursor {
     /// This is the number of rows affected by a DML statement; for queries
     /// where it isn't (yet) known it follows PEP-249 and returns `-1`.
     fn rowcount<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
-        let mut inner = self.py_lock()?;
-        let Some(rowcount) = inner.query_state.rowcount(py)? else {
+        let Some(rowcount) = self.with_inner(|inner| inner.query_state.rowcount(py))? else {
             // If we don't have a rowcount yet, PEP-249 says we should return
             // -1.
             return Ok((-1i64).into_pyobject(py)?);
@@ -312,16 +312,13 @@ impl CursorInner {
         query: &str,
         params: Option<Vec<PgValue>>,
     ) -> PyResult<()> {
-        let Some(client) = &mut self.client else {
-            return Err(PyRuntimeError::new_err("cursor already closed"));
-        };
-
         // Drop any previous result set before starting the new query.
         self.query_state.new_query();
 
-        let statement = &client.prepare(query).block_on_result(py)?;
+        let statement = &self.client.prepare(query).block_on_result(py)?;
 
-        let row_stream = client
+        let row_stream = self
+            .client
             .query_raw(statement, params.unwrap_or_default())
             .block_on_result(py)?;
 
