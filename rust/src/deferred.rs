@@ -293,20 +293,23 @@ where
     }
 }
 
-/// Convert a Twisted `Failure` (as passed to an errback) into a [`PyErr`].
+/// Convert a Twisted `Failure` (as passed to an Deferred errback) into a [`PyErr`].
 ///
-/// A `Failure` carries the original exception instance in its `.value`
-/// attribute, which we re-raise so callers see the real error. If that can't be
-/// reached, fall back to the `Failure`'s textual representation.
+/// A Twisted `Failure` carries the original exception instance in its `.value`
+/// attribute, which we re-raise so callers see the real error. If the `Failure` is
+/// mangled, we fallback to raising a generic [`PyRuntimeError`] explaining what we saw
+/// instead.
 fn failure_to_pyerr(failure: &Bound<'_, PyAny>) -> PyErr {
     match failure.getattr(intern!(failure.py(), "value")) {
         Ok(value) => PyErr::from_value(value),
-        Err(_) => PyRuntimeError::new_err(
+        Err(_) => PyRuntimeError::new_err(format!(
+            "Expected Python object passed here to be a Twisted `Failure` with a `value` attribute \
+            but saw something else: {}",
             failure
                 .str()
                 .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| "<unknown failure>".to_owned()),
-        ),
+                .unwrap_or_else(|_| "<failed to stringify Python object>".to_owned()),
+        )),
     }
 }
 
