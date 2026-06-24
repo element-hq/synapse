@@ -64,7 +64,22 @@ pub struct RoomConfig {
 
 #[derive(FromPyObject, Clone)]
 pub struct ExperimentalConfig {
+    pub msc3026_enabled: bool,
+    pub msc3773_enabled: bool,
+    pub msc2815_enabled: bool,
     pub msc3881_enabled: bool,
+    pub msc3874_enabled: bool,
+    pub msc3912_enabled: bool,
+    pub msc3391_enabled: bool,
+    pub msc4069_profile_inhibit_propagation: bool,
+    pub msc4028_push_encrypted_events: bool,
+    pub msc4108_enabled: bool,
+    pub msc4108_delegation_endpoint: Option<String>,
     pub msc3575_enabled: bool,
+    pub msc4133_enabled: bool,
+    pub msc4155_enabled: bool,
+    pub msc4306_enabled: bool,
+    pub msc4169_enabled: bool,
+    pub msc4354_enabled: bool,
     pub msc4222_enabled: bool,
 }

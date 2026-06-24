@@ -236,10 +236,10 @@ pub struct UnstableFeatureMap {
     #[serde(rename = "org.matrix.msc4028")]
     msc4028: bool,
     /// MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
-    #[serde(rename =  "org.matrix.msc4108")]
+    #[serde(rename = "org.matrix.msc4108")]
     msc4108: bool,
     /// MSC4140: Delayed events
-    #[serde(rename =  "org.matrix.msc4140")]
+    #[serde(rename = "org.matrix.msc4140")]
     msc4140: bool,
     /// Simplified sliding sync
     #[serde(rename = "org.matrix.simplified_msc3575")]
@@ -268,7 +268,6 @@ pub struct UnstableFeatureMap {
     // MSC4445: Sync timeline order
     #[serde(rename = "org.matrix.msc4445.initial_sync_timeline_topological_ordering")]
     msc4445_initial_sync_timeline_topological_ordering: bool,
-
 
     // Whether new rooms will be set to encrypted or not (based on presets).
     #[serde(rename = "io.element.e2ee_forced.public")]
@@ -303,10 +302,8 @@ pub fn synapse_config_to_global_unstable_feature_map(config: &SynapseConfig) -> 
         msc3391: config.experimental.msc3391_enabled,
         msc4069: config.experimental.msc4069_profile_inhibit_propagation,
         msc4028: config.experimental.msc4028_push_encrypted_events,
-        msc4108: config.experimental.msc4108_enabled || (
-            config.experimental.msc4108_delegation_endpoint
-            is not None
-        ),
+        msc4108: config.experimental.msc4108_enabled
+            || (config.experimental.msc4108_delegation_endpoint.is_some()),
         msc4140: bool(config.server.max_event_delay_ms),
         msc3575: config.experimental.msc3575_enabled,
         msc4133: config.experimental.msc4133_enabled,
