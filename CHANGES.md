@@ -1,3 +1,14 @@
+# Synapse 1.155.0 (2026-06-16)
+
+## End of Life of Debian 12 Bookworm
+
+The next version of Synapse will not include Debian packages for Debian 12 Bookworm
+as it reached end of life on the 10th of June 2026.
+
+## Internal Changes
+
+- When building releases, don't cancel Debian package builds when one of them fails. ([\#19842](https://github.com/element-hq/synapse/issues/19842))
+
 # Synapse 1.155.0rc1 (2026-06-09)
 
 ## Bugfixes

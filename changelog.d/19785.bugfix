@@ -1,0 +1,1 @@
+Fix a long-standing bug where the badge notification count for a room could become permanently inflated if a read receipt was sent before the room's notification counts were first summarised.

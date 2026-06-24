@@ -287,7 +287,6 @@ class SlidingSyncHandler:
 
         lists = interested_rooms.lists
         relevant_room_map = interested_rooms.relevant_room_map
-        all_rooms = interested_rooms.all_rooms
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
@@ -328,6 +327,7 @@ class SlidingSyncHandler:
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
+            all_interested_room_ids=interested_rooms.all_rooms,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -350,7 +350,7 @@ class SlidingSyncHandler:
             if from_token:
                 # The set of rooms that the client (may) care about, but aren't
                 # in any list range (or subscribed to).
-                missing_rooms = all_rooms - relevant_room_map.keys()
+                missing_rooms = interested_rooms.all_rooms - relevant_room_map.keys()
 
                 # We now just go and try fetching any events in the above rooms
                 # to see if anything has happened since the `from_token`.

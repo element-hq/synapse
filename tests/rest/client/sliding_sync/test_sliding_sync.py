@@ -374,7 +374,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             user_id: The user ID to wake up the notifier for
             wake_stream_key: The stream key to wake up. This will create an actual new
                 entity in that stream so it's best to choose one that won't affect the
-                Sliding Sync results you're testing for. In other words, if your testing
+                Sliding Sync results you're testing for. In other words, if you're testing
                 account data, choose `StreamKeyType.PRESENCE` instead. We support two
                 possible stream keys because you're probably testing one or the other so
                 one is always a "safe" option.
