@@ -5,6 +5,7 @@
 //! methods are kept `pub` so that future Rust callers can drive them
 //! directly without going through the PyO3 wrappers.
 
+use anyhow::Error;
 use log::warn;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -42,8 +43,10 @@ fn pg_err_to_py(e: tokio_postgres::Error) -> PyErr {
 
 #[pyfunction]
 fn connect<'py>(py: Python<'py>, dsn: &str) -> PyResult<Bound<'py, connection::Connection>> {
-    let (client, connection) =
-        tokio_postgres::connect(dsn, tokio_postgres::NoTls).block_on_result(py)?;
+    let config = fixup_default_host(dsn)
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to parse DSN: {e}")))?;
+
+    let (client, connection) = config.connect(tokio_postgres::NoTls).block_on_result(py)?;
 
     // Spawn the connection task on the runtime.
     runtime().spawn(async move {
@@ -55,4 +58,28 @@ fn connect<'py>(py: Python<'py>, dsn: &str) -> PyResult<Bound<'py, connection::C
     let conn = connection::Connection::new(client);
 
     Bound::new(py, conn)
+}
+
+/// Fix up a DSN to ensure it has a host, using libpq's default host if
+/// necessary.
+///
+/// [`tokio-postgres`] has a different default host than [`libpq`], which is
+/// what Synapse previously used (and is what e.g. `psql` uses). The default
+/// host in `libpq` is configurable, and so we need to pull it out and runtime.
+fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
+    let mut config = dsn.parse::<tokio_postgres::Config>()?;
+
+    if !config.get_hosts().is_empty() {
+        return Ok(config);
+    }
+
+    // Get the default host from libpq. This will *not* do any network I/O, it
+    // just parses the DSN. The connection will get closed automatically on
+    // Drop.
+    let pq_conn = libpq::Connection::new("")?;
+    let host = pq_conn.host()?;
+
+    config.host(host);
+
+    Ok(config)
 }
