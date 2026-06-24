@@ -632,16 +632,14 @@ fn object_entry_mut<'a>(
     let entry = map
         .entry(key.to_owned())
         .or_insert_with(|| Value::Object(Map::new()));
-    // The key may have already held a non-object value; replace it so the
-    // caller always gets an object back.
-    if !entry.is_object() {
+
+    let Some(obj) = entry.as_object_mut() else {
         return Err(PyTypeError::new_err(format!(
             "Expected an object for key '{key}'"
         )));
-    }
-    Ok(entry
-        .as_object_mut()
-        .expect("just ensured the entry is an object"))
+    };
+
+    Ok(obj)
 }
 
 /// Return a new map containing only the given (possibly dotted) field paths,
