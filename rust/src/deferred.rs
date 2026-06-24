@@ -111,10 +111,9 @@ where
     let deferred_callback = deferred.getattr("callback")?.unbind();
     let deferred_errback = deferred.getattr("errback")?.unbind();
 
-    // Capture the logcontext active on the reactor thread now, while we're still
-    // on it, so the spawned task can re-apply it when it hops back to drive
-    // Python work. If there's no real context this is the sentinel, and
-    // re-applying it later is a no-op.
+    // Capture the logcontext active on the reactor thread now, while we're still on it,
+    // so the spawned task can keep track of what logcontext its associated with and can
+    // re-apply it when it hops back to drive Python work.
     let logging_context = logging_context_module(py)?
         .call_method0(intern!(py, "current_context"))?
         .unbind();
@@ -167,30 +166,12 @@ where
 /// This is the inverse of [`create_deferred`]: where that turns a Rust future
 /// into a Twisted `Deferred`, this turns a Python awaitable into a Rust future.
 ///
-/// `make_awaitable` is invoked on the reactor thread to produce the awaitable.
-/// In Synapse that's typically a coroutine (e.g. from calling an `async def`
-/// like `runInteraction`), though a `Deferred` works too — both are awaitable,
-/// but a coroutine is not itself a `Deferred`.
+/// Despite returning a future, the awaitable is kicked off in the background running in
+/// the Twisted reactor and runs to completion regardless of whether the returned Rust
+/// future is ever polled; awaiting it only observes the result.
 ///
-/// Despite returning a future, the awaitable is kicked off in the background and
-/// runs to completion regardless of whether the returned Rust future is ever
-/// polled; awaiting it only observes the result.
-///
-/// We're called on a Tokio worker thread, but Python awaitables and Synapse's
-/// logcontext (thread-local) are not thread-safe, so the awaitable must be both
-/// started and driven on the reactor thread. The `callFromThread` hop is what
-/// gets us there for the kickoff; the resulting deferred's callbacks then fire
-/// on the reactor thread too. (Note this is unrelated to offloading the DB work
-/// onto a thread — that's handled internally by whatever `make_awaitable`
-/// produces, e.g. `runInteraction`.)
-///
-/// If a logcontext was captured when the task was created (see
-/// [`create_deferred`]), it is re-activated while the awaitable is kicked off so
-/// that its resource usage (e.g. database time) is attributed to the originating
-/// request. We drive it with `run_in_background` so this follows the Synapse
-/// logcontext rules (see `docs/log_contexts.md`): the awaitable runs in the
-/// request context but the logcontext is reset back to the sentinel once the
-/// work completes, so the request context doesn't leak into the reactor.
+/// Calls `make_awaitable` with the current logcontext associated with this async Rust
+/// task. Follows the Synapse logcontext rules.
 pub(crate) async fn run_python_awaitable<F>(
     reactor: Py<PyAny>,
     make_awaitable: F,
