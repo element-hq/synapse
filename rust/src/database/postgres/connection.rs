@@ -142,21 +142,21 @@ impl Cursor {
         inner.execute(py, query, params)
     }
 
-    fn fetch_one<'py>(&self, py: Python<'py>) -> PyResult<Option<Vec<Option<Py<PyAny>>>>> {
+    fn fetch_one<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
         let mut inner = self.py_lock()?;
         let Some(row) = inner.query_state.fetch_one(py)? else {
             return Ok(None);
         };
 
-        let py_row = pg_row_to_py(&row)?;
+        let py_row = pg_row_to_py(py, &row)?;
         Ok(Some(py_row))
     }
 
-    fn fetch_all<'py>(&self, py: Python<'py>) -> PyResult<Vec<Vec<Option<Py<PyAny>>>>> {
+    fn fetch_all<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyTuple>>> {
         let mut inner = self.py_lock()?;
         let rows = inner.query_state.fetch_all(py)?;
 
-        rows.into_iter().map(|row| pg_row_to_py(&row)).collect()
+        rows.into_iter().map(|row| pg_row_to_py(py, &row)).collect()
     }
 
     fn rowcount<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {

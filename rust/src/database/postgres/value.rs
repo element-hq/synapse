@@ -16,7 +16,7 @@ use postgres_protocol::types::{
     text_to_sql,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString};
+use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString, PyTuple};
 use pyo3::{prelude::*, BoundObject};
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type, WrongType};
 
@@ -150,8 +150,11 @@ impl ToSql for PgValue {
     to_sql_checked!();
 }
 
-pub fn pg_row_to_py(row: &tokio_postgres::Row) -> PyResult<Vec<Option<Py<PyAny>>>> {
-    let mut result = Vec::with_capacity(row.len());
+pub fn pg_row_to_py<'py>(
+    py: Python<'py>,
+    row: &tokio_postgres::Row,
+) -> PyResult<Bound<'py, PyTuple>> {
+    let mut output_row = Vec::with_capacity(row.len());
     for idx in 0..row.len() {
         let obj: PythonPgFromSql = row.try_get(idx).map_err(|e| {
             PyValueError::new_err(format!(
@@ -159,9 +162,10 @@ pub fn pg_row_to_py(row: &tokio_postgres::Row) -> PyResult<Vec<Option<Py<PyAny>>
                 row.columns()[idx].type_()
             ))
         })?;
-        result.push(obj.0);
+        output_row.push(obj.0);
     }
-    Ok(result)
+
+    Ok(PyTuple::new(py, output_row)?)
 }
 
 pub struct PythonPgFromSql(pub Option<Py<PyAny>>);
