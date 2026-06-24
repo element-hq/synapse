@@ -174,6 +174,7 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
@@ -962,6 +963,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_set_password_handler(self) -> SetPasswordHandler:
         return SetPasswordHandler(self)
+
+    @cache_in_self
+    def get_rust_handlers(self) -> RustHandlers:
+        return RustHandlers(self)
 
     @cache_in_self
     def get_event_sources(self) -> EventSources:
