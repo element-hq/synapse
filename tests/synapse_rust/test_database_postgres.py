@@ -1,0 +1,387 @@
+# This file is licensed under the Affero General Public License (AGPL) version 3.
+#
+# Copyright (C) 2026 Element Creations Ltd
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+"""Tests for the Rust-implemented, DBAPI2-shaped Postgres ``Connection`` /
+``Cursor`` pair exposed as ``synapse.synapse_rust.database.postgres``.
+
+These exercise the real ``tokio-postgres`` backend, so they require a live
+Postgres server and are skipped unless the test suite is configured to run
+against Postgres (i.e. ``SYNAPSE_POSTGRES`` is set, the same switch used by the
+rest of the suite).
+"""
+
+from typing import Any, Optional
+
+# The Rust `database` submodule does not yet ship type stubs.
+from synapse.synapse_rust.database import postgres  # type: ignore[import-not-found]
+
+from tests import unittest
+from tests.utils import (
+    POSTGRES_BASE_DB,
+    POSTGRES_HOST,
+    POSTGRES_PASSWORD,
+    POSTGRES_PORT,
+    POSTGRES_USER,
+    USE_POSTGRES_FOR_TESTS,
+)
+
+
+def _build_dsn() -> str:
+    """Build a libpq keyword/value connection string from the test config.
+    """
+
+    parts = [f"dbname={POSTGRES_BASE_DB}"]
+    if POSTGRES_USER is not None:
+        parts.append(f"user={POSTGRES_USER}")
+    if POSTGRES_HOST is not None:
+        parts.append(f"host={POSTGRES_HOST}")
+    if POSTGRES_PORT is not None:
+        parts.append(f"port={POSTGRES_PORT}")
+    if POSTGRES_PASSWORD is not None:
+        parts.append(f"password={POSTGRES_PASSWORD}")
+    return " ".join(parts)
+
+
+@unittest.skip_unless(
+    bool(USE_POSTGRES_FOR_TESTS), "requires a Postgres server (set SYNAPSE_POSTGRES)"
+)
+class PostgresConnectionTestCase(unittest.TestCase):
+    """Tests for the Rust Postgres ``Connection`` / ``Cursor``."""
+
+    def setUp(self) -> None:
+        self.conn = postgres.connect(_build_dsn())
+
+    def tearDown(self) -> None:
+        # Explicitly drop the connection to ensure that the underlying Rust
+        # object is dropped before the Python interpreter shuts down. Otherwise,
+        # the open connection will block us tearing down the test database.
+        del self.conn
+
+    # ------------------------------------------------------------------
+    # connect()
+    # ------------------------------------------------------------------
+
+    def test_connect_bad_dsn_raises(self) -> None:
+        # A syntactically valid but unconnectable DSN should raise rather than
+        # return a half-open connection.
+        with self.assertRaises(RuntimeError):
+            postgres.connect("host=127.0.0.1 port=1 dbname=does_not_exist")
+
+    # ------------------------------------------------------------------
+    # run_interaction()
+    # ------------------------------------------------------------------
+
+    def test_run_interaction_returns_func_result(self) -> None:
+        """The return value of the callback is propagated back to the caller."""
+
+        def interaction(cursor: Any) -> str:
+            return "the-result"
+
+        self.assertEqual(self.conn.run_interaction(interaction), "the-result")
+
+    def test_run_interaction_forwards_args_and_kwargs(self) -> None:
+        """Extra positional and keyword arguments are forwarded after the cursor."""
+
+        def interaction(cursor: Any, a: int, b: int, c: int = 0) -> int:
+            cursor.execute("SELECT $1::int + $2::int + $3::int", [a, b, c])
+            row = cursor.fetch_one()
+            assert row is not None
+            return row
+
+        row = self.conn.run_interaction(interaction, 1, 2, c=3)
+        self.assertEqual(row, (6,))
+
+    def test_run_interaction_propagates_exception(self) -> None:
+        """An exception raised in the callback propagates out of run_interaction."""
+
+        class MarkerError(Exception):
+            pass
+
+        def interaction(cursor: Any) -> None:
+            raise MarkerError("boom")
+
+        with self.assertRaises(MarkerError):
+            self.conn.run_interaction(interaction)
+
+    # ------------------------------------------------------------------
+    # execute() / fetch_one() / fetch_all()
+    # ------------------------------------------------------------------
+
+    def test_fetch_one(self) -> None:
+        def interaction(cursor: Any) -> Optional[list[Any]]:
+            cursor.execute("SELECT 42::int, 'hello'::text")
+            return cursor.fetch_one()
+
+        self.assertEqual(self.conn.run_interaction(interaction), (42, "hello"))
+
+    def test_fetch_one_returns_none_when_exhausted(self) -> None:
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute("SELECT 1 WHERE true")
+            first = cursor.fetch_one()
+            second = cursor.fetch_one()
+            return [first, second]
+
+        self.assertEqual(self.conn.run_interaction(interaction), [(1,), None])
+
+    def test_fetch_all(self) -> None:
+        def interaction(cursor: Any) -> list[list[Any]]:
+            cursor.execute(
+                """
+                SELECT * FROM (VALUES (1, 'a'), (2, 'b'), (3, 'c'))
+                AS v(id, name) ORDER BY id
+                """
+            )
+            return cursor.fetch_all()
+
+        self.assertEqual(
+            self.conn.run_interaction(interaction),
+            [(1, "a"), (2, "b"), (3, "c")],
+        )
+
+    def test_fetch_all_empty(self) -> None:
+        def interaction(cursor: Any) -> list[list[Any]]:
+            cursor.execute("SELECT 1 WHERE false")
+            return cursor.fetch_all()
+
+        self.assertEqual(self.conn.run_interaction(interaction), [])
+
+    def test_fetch_without_query_raises(self) -> None:
+        """Calling fetch before execute is an error, not a silent empty result."""
+
+        def interaction(cursor: Any) -> None:
+            cursor.fetch_one()
+
+        with self.assertRaises(RuntimeError):
+            self.conn.run_interaction(interaction)
+
+    def test_reuse_cursor_for_multiple_queries(self) -> None:
+        """A single cursor can run several queries in sequence."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            results = []
+            for n in (1, 2, 3):
+                cursor.execute("SELECT $1::int", [n])
+                row = cursor.fetch_one()
+                assert row is not None
+                results.append(row[0])
+            return results
+
+        self.assertEqual(self.conn.run_interaction(interaction), [1, 2, 3])
+
+    # ------------------------------------------------------------------
+    # Value round-tripping (ToSql + FromSql for each supported type)
+    # ------------------------------------------------------------------
+
+    def test_value_roundtrip_all_types(self) -> None:
+        """Each supported type survives a param -> column -> row round trip."""
+
+        def interaction(cursor: Any) -> Optional[list[Any]]:
+            cursor.execute(
+                """
+                CREATE TEMP TABLE types_roundtrip (
+                  c_bool bool,
+                  c_int2 smallint,
+                  c_int4 int,
+                  c_int8 bigint,
+                  c_float4 float4,
+                  c_float8 float8,
+                  c_text text,
+                  c_varchar varchar,
+                  c_bytea bytea
+                )
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO types_roundtrip VALUES
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                [
+                    True,
+                    7,
+                    1234,
+                    10**15,
+                    1.5,  # exactly representable as float4
+                    3.5,
+                    "hello",
+                    "world",
+                    b"\x00\x01\x02bytes",
+                ],
+            )
+            cursor.execute(
+                """
+                SELECT c_bool, c_int2, c_int4, c_int8, c_float4, c_float8,
+                c_text, c_varchar, c_bytea FROM types_roundtrip
+                """
+            )
+            return cursor.fetch_one()
+
+        self.assertEqual(
+            self.conn.run_interaction(interaction),
+            (
+                True,
+                7,
+                1234,
+                10**15,
+                1.5,
+                3.5,
+                "hello",
+                "world",
+                b"\x00\x01\x02bytes",
+            ),
+        )
+
+    def test_null_values_become_none(self) -> None:
+        def interaction(cursor: Any) -> Optional[list[Any]]:
+            cursor.execute("SELECT NULL::int, NULL::text, NULL::bool")
+            return cursor.fetch_one()
+
+        self.assertEqual(self.conn.run_interaction(interaction), (None, None, None))
+
+    def test_null_param(self) -> None:
+        def interaction(cursor: Any) -> Optional[list[Any]]:
+            cursor.execute("SELECT $1::text", [None])
+            return cursor.fetch_one()
+
+        self.assertEqual(self.conn.run_interaction(interaction), (None,))
+
+    def test_float4_precision_is_lossy(self) -> None:
+        """float4 params are narrowed to f32; document the resulting precision."""
+
+        def interaction(cursor: Any) -> Optional[list[Any]]:
+            cursor.execute("SELECT $1::float4", [0.1])
+            return cursor.fetch_one()
+
+        row = self.conn.run_interaction(interaction)
+        assert row is not None
+        # 0.1 is not exactly representable in f32, so it comes back widened.
+        self.assertAlmostEqual(row[0], 0.1, places=6)
+        self.assertNotEqual(row[0], 0.1)
+
+    def test_unsupported_param_type_raises_type_error(self) -> None:
+        def interaction(cursor: Any) -> None:
+            cursor.execute("SELECT $1", [object()])
+
+        with self.assertRaises(TypeError):
+            self.conn.run_interaction(interaction)
+
+    def test_int_out_of_range_for_column_raises(self) -> None:
+        def interaction(cursor: Any) -> None:
+            # Value far too large for an int4 column.
+            cursor.execute("SELECT $1::int4", [10**12])
+            cursor.fetch_one()
+
+        with self.assertRaises(RuntimeError):
+            self.conn.run_interaction(interaction)
+
+    # ------------------------------------------------------------------
+    # rowcount()
+    # ------------------------------------------------------------------
+
+    def test_rowcount_minus_one_before_query(self) -> None:
+        def interaction(cursor: Any) -> int:
+            return cursor.rowcount()
+
+        self.assertEqual(self.conn.run_interaction(interaction), -1)
+
+    def test_rowcount_for_dml(self) -> None:
+        def interaction(cursor: Any) -> list[int]:
+            cursor.execute("CREATE TEMP TABLE rc (id int)")
+            cursor.execute("INSERT INTO rc VALUES (1), (2), (3)")
+            inserted = cursor.rowcount()
+            cursor.execute("UPDATE rc SET id = id WHERE id > 1")
+            updated = cursor.rowcount()
+            cursor.execute("DELETE FROM rc")
+            deleted = cursor.rowcount()
+            return [inserted, updated, deleted]
+
+        self.assertEqual(self.conn.run_interaction(interaction), [3, 2, 3])
+
+    # ------------------------------------------------------------------
+    # Transaction handling (COMMIT on success, ROLLBACK on error)
+    # ------------------------------------------------------------------
+
+    def test_commit_persists_changes(self) -> None:
+        """A successful interaction commits; changes are visible afterwards."""
+
+        table = "rust_pg_test_commit"
+        try:
+
+            def create(cursor: Any) -> None:
+                cursor.execute(f"CREATE TABLE {table} (id int)")
+                cursor.execute(f"INSERT INTO {table} VALUES (1), (2)")
+
+            self.conn.run_interaction(create)
+
+            def read(cursor: Any) -> list[list[Any]]:
+                cursor.execute(f"SELECT id FROM {table} ORDER BY id")
+                return cursor.fetch_all()
+
+            self.assertEqual(self.conn.run_interaction(read), [(1,), (2,)])
+        finally:
+            self.conn.run_interaction(
+                lambda cursor: cursor.execute(f"DROP TABLE IF EXISTS {table}")
+            )
+
+    def test_rollback_on_exception(self) -> None:
+        """If the interaction raises, its changes are rolled back."""
+
+        table = "rust_pg_test_rollback"
+        try:
+
+            class MarkerError(Exception):
+                pass
+
+            def create_then_fail(cursor: Any) -> None:
+                cursor.execute(f"CREATE TABLE {table} (id int)")
+                raise MarkerError()
+
+            with self.assertRaises(MarkerError):
+                self.conn.run_interaction(create_then_fail)
+
+            # The table creation should have been rolled back, so the table
+            # must not exist.
+            def exists(cursor: Any) -> Optional[list[Any]]:
+                cursor.execute(
+                    """
+                    SELECT count(*)::int FROM information_schema.tables
+                    WHERE table_name = $1
+                    """,
+                    [table],
+                )
+                return cursor.fetch_one()
+
+            self.assertEqual(self.conn.run_interaction(exists), (0,))
+        finally:
+            self.conn.run_interaction(
+                lambda cursor: cursor.execute(f"DROP TABLE IF EXISTS {table}")
+            )
+
+    def test_connection_reusable_after_rolled_back_interaction(self) -> None:
+        """A failed interaction returns the connection to a clean, usable state."""
+
+        class MarkerError(Exception):
+            pass
+
+        def fail(cursor: Any) -> None:
+            cursor.execute("SELECT 1")
+            raise MarkerError()
+
+        with self.assertRaises(MarkerError):
+            self.conn.run_interaction(fail)
+
+        # The connection should still work for a subsequent interaction.
+        def ok(cursor: Any) -> Optional[list[Any]]:
+            cursor.execute("SELECT 99::int")
+            return cursor.fetch_one()
+
+        self.assertEqual(self.conn.run_interaction(ok), (99,))
