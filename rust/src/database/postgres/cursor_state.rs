@@ -8,10 +8,17 @@
 use std::pin::Pin;
 
 use futures::{StreamExt, TryStreamExt};
-use pyo3::{exceptions::PyRuntimeError, PyResult, Python};
+use pyo3::{
+    exceptions::PyRuntimeError,
+    types::{PyInt, PyTuple},
+    Bound, PyResult, Python,
+};
 use tokio_postgres::{Column, RowStream};
 
-use crate::database::postgres::helpers::{BlockingPostgres, BlockingPostgresResult};
+use crate::database::postgres::{
+    helpers::{BlockingPostgres, BlockingPostgresResult},
+    value::pg_row_to_py,
+};
 
 /// The state carried over from the cursor's most recent query.
 #[derive(Default)]
@@ -57,7 +64,7 @@ impl CursorQueryState {
     ///
     /// On exhaustion the rowcount is captured and the stream dropped; on a
     /// stream error the state is cleared and the error surfaced to Python.
-    pub fn fetch_one<'py>(&mut self, py: Python<'py>) -> PyResult<Option<tokio_postgres::Row>> {
+    pub fn fetch_one<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
         let Some(stream) = self.stream.as_mut() else {
             return Err(PyRuntimeError::new_err("no active query"));
         };
@@ -65,7 +72,10 @@ impl CursorQueryState {
         let next = stream.as_mut().next().block_on(py);
 
         match next {
-            Some(Ok(row)) => Ok(Some(row)),
+            Some(Ok(row)) => {
+                let pg_row = pg_row_to_py(py, &row)?;
+                Ok(Some(pg_row))
+            }
             Some(Err(err)) => {
                 self.stream = None;
                 self.description = None;
@@ -82,12 +92,16 @@ impl CursorQueryState {
     }
 
     /// Collect every remaining row into a `Vec`, draining the stream.
-    pub fn fetch_all<'py>(&mut self, py: Python<'py>) -> PyResult<Vec<tokio_postgres::Row>> {
+    pub fn fetch_all<'py>(&mut self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyTuple>>> {
         let Some(stream) = self.stream.as_mut() else {
             return Err(PyRuntimeError::new_err("no active query"));
         };
 
         let rows = stream.try_collect::<Vec<_>>().block_on_result(py)?;
+        let rows = rows
+            .into_iter()
+            .map(|row| pg_row_to_py(py, &row))
+            .collect::<PyResult<Vec<_>>>()?;
 
         self.rowcount = stream.rows_affected();
         self.stream = None;
@@ -96,7 +110,7 @@ impl CursorQueryState {
     }
 
     /// Return the affected-row count, draining the stream first if needed.
-    pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Option<u64>> {
+    pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
         // `stream.rows_affected()` is only valid after the stream is
         // drained, so we need to drain it here. This is OK as in Python the
         // rowcount should only be accessed for queries that DO NOT return
@@ -106,7 +120,13 @@ impl CursorQueryState {
             self.rowcount = stream.rows_affected();
         }
 
-        Ok(self.rowcount)
+        let Some(rowcount) = self.rowcount else {
+            // If we don't have a rowcount yet, PEP-249 says we should return
+            // -1
+            return Ok(PyInt::new(py, -1));
+        };
+
+        Ok(PyInt::new(py, rowcount))
     }
 }
 

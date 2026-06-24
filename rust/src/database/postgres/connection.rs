@@ -53,9 +53,7 @@ use pyo3::{
 use tokio_postgres::Client;
 
 use crate::database::postgres::{
-    cursor_state::CursorQueryState,
-    helpers::BlockingPostgresResult,
-    value::{pg_row_to_py, PgValue},
+    cursor_state::CursorQueryState, helpers::BlockingPostgresResult, value::PgValue,
 };
 
 /// A single Postgres connection exposed to Python.
@@ -221,6 +219,15 @@ impl Cursor {
         f(inner)
     }
 
+    /// Run `f` against the live query state, or error if the cursor has
+    /// already been finished/closed (its state taken out, leaving `None`).
+    pub fn with_cursor_state<R>(
+        &self,
+        f: impl FnOnce(&mut CursorQueryState) -> PyResult<R>,
+    ) -> PyResult<R> {
+        self.with_inner(|inner| f(&mut inner.query_state))
+    }
+
     /// Finish the transaction — `COMMIT` if `commit` is set, otherwise
     /// `ROLLBACK` — and hand the client back to the connection.
     ///
@@ -273,19 +280,12 @@ impl Cursor {
 
     /// Return the next row of the current result set, or `None` if exhausted.
     fn fetch_one<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
-        let Some(row) = self.with_inner(|inner| inner.query_state.fetch_one(py))? else {
-            return Ok(None);
-        };
-
-        let py_row = pg_row_to_py(py, &row)?;
-        Ok(Some(py_row))
+        self.with_cursor_state(|state| state.fetch_one(py))
     }
 
     /// Drain and return all remaining rows of the current result set.
     fn fetch_all<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyTuple>>> {
-        let rows = self.with_inner(|inner| inner.query_state.fetch_all(py))?;
-
-        rows.into_iter().map(|row| pg_row_to_py(py, &row)).collect()
+        self.with_cursor_state(|state| state.fetch_all(py))
     }
 
     /// Return the PEP-249 `rowcount` for the last statement.
@@ -293,13 +293,7 @@ impl Cursor {
     /// This is the number of rows affected by a DML statement; for queries
     /// where it isn't (yet) known it follows PEP-249 and returns `-1`.
     fn rowcount<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
-        let Some(rowcount) = self.with_inner(|inner| inner.query_state.rowcount(py))? else {
-            // If we don't have a rowcount yet, PEP-249 says we should return
-            // -1.
-            return Ok((-1i64).into_pyobject(py)?);
-        };
-
-        Ok(rowcount.into_pyobject(py)?)
+        self.with_cursor_state(|state| state.rowcount(py))
     }
 }
 
