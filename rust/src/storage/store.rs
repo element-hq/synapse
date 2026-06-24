@@ -72,6 +72,9 @@ impl<P: DatabasePool> Store<P> {
                 let user_id = user_id.clone();
                 let feature = feature.clone();
                 async move {
+                    // TODO: Remove
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+
                     let rows = txn
                         .query(
                             "SELECT enabled \
@@ -90,6 +93,9 @@ impl<P: DatabasePool> Store<P> {
                             panic!("Programming error")
                         }
                     };
+
+                    // TODO: Remove
+                    log::info!("asdf feature={:?} enabled={:?}", feature, enabled);
 
                     Ok(enabled)
                 }

@@ -70,7 +70,7 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 
 /// Set the Synapse logcontext active on the current (reactor) thread, returning
 /// the context that was previously active so it can be restored afterwards.
-fn set_current_logcontext<'py>(
+fn set_current_logging_context<'py>(
     py: Python<'py>,
     context: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
@@ -85,7 +85,7 @@ tokio::task_local! {
     /// `LoggingContext`, but our work runs on a Tokio worker thread that is
     /// detached from it. We stash the originating context here so that whenever
     /// we hop back onto the reactor thread to drive Python work (see
-    /// [`run_awaitable`]) we can re-activate it; otherwise that work runs in
+    /// [`run_python_awaitable`]) we can re-activate it; otherwise that work runs in
     /// the sentinel context and its resource usage (e.g. database time) is lost
     /// instead of being charged to the request.
     static LOGGING_CONTEXT: Py<PyAny>;
@@ -187,11 +187,14 @@ where
 /// If a logcontext was captured when the task was created (see
 /// [`create_deferred`]), it is re-activated while the awaitable is kicked off so
 /// that its resource usage (e.g. database time) is attributed to the originating
-/// request. We drive it with `run_coroutine_in_background` so this follows the
-/// Synapse logcontext rules (see `docs/log_contexts.md`): the awaitable runs in
-/// the request context but the logcontext is reset back to the sentinel once the
+/// request. We drive it with `run_in_background` so this follows the Synapse
+/// logcontext rules (see `docs/log_contexts.md`): the awaitable runs in the
+/// request context but the logcontext is reset back to the sentinel once the
 /// work completes, so the request context doesn't leak into the reactor.
-pub(crate) async fn run_awaitable<F>(reactor: Py<PyAny>, make_awaitable: F) -> PyResult<Py<PyAny>>
+pub(crate) async fn run_python_awaitable<F>(
+    reactor: Py<PyAny>,
+    make_awaitable: F,
+) -> PyResult<Py<PyAny>>
 where
     F: for<'py> Fn(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
 {
@@ -200,8 +203,8 @@ where
     // Shared between the success and error callbacks (only one ever fires).
     let sender = Arc::new(Mutex::new(Some(tx)));
 
-    // The logcontext that is active for this thread
-    let calling_logging_context = LOGGING_CONTEXT
+    // The logcontext that is active for this async task
+    let current_rust_task_logging_context = LOGGING_CONTEXT
         .try_with(|ctx| Python::attach(|py| ctx.clone_ref(py)))
         .ok();
 
@@ -238,6 +241,20 @@ where
         )?
         .unbind();
 
+        // Wrap `make_awaitable` as a Python callable so we can hand it to
+        // `run_in_background`, which calls it (in the active logcontext) to produce
+        // the awaitable it then drives.
+        let awaitable_factory = PyCFunction::new_closure(
+            py,
+            None,
+            None,
+            move |args, _kwargs| -> PyResult<Py<PyAny>> {
+                let py = args.py();
+                Ok(make_awaitable(py)?.unbind())
+            },
+        )?
+        .unbind();
+
         // Create a function that we will run with the Twisted reactor that will drive
         // the Python awaitable.
         let starter = PyCFunction::new_closure(
@@ -247,20 +264,29 @@ where
             move |args, _kwargs| -> PyResult<Py<PyAny>> {
                 let py = args.py();
 
-                // Re-activate the logcontext while we kick the awaitable off.
-                let previous_context = calling_logging_context
+                // Activate the captured Rust task-local logging context. This way we
+                // properly record metrics/logging for the thing being run.
+                let calling_logging_context = current_rust_task_logging_context
                     .as_ref()
-                    .map(|ctx| set_current_logcontext(py, ctx.bind(py)))
-                    .transpose()?;
+                    .map(|ctx| set_current_logging_context(py, ctx.bind(py)))
+                    .transpose()?
+                    .expect("No `LoggingContext` returned from `set_current_logging_context(...)`. This is a Synapse programming error.");
 
-                // We use `run_in_background` to ensure the logcontext rules are being followed
-                let deferred = logging_context_module(py)?
-                    .call_method1(intern!(py, "run_in_background"), (make_awaitable,));
+                // We fire-and-forget using `run_in_background`. Re-using
+                // `run_in_background` also makes sure the awaitable gets run with the
+                // current logcontext (the one we just activated) while following the
+                // logcontext rules.
+                let deferred = logging_context_module(py)?.call_method1(
+                    intern!(py, "run_in_background"),
+                    (awaitable_factory.bind(py),),
+                );
 
-                // Put the reactor thread back to the logcontext we found it in
-                if let Some(previous_context) = previous_context {
-                    set_current_logcontext(py, &previous_context)?;
-                }
+                // Restore the `calling_logging_context` after we kick off the
+                // background task.
+                //
+                // Our goal is to have the caller logcontext unchanged after firing off
+                // the background task and returning.
+                set_current_logging_context(py, &calling_logging_context)?;
 
                 let deferred = deferred?;
                 deferred.call_method1(
@@ -281,7 +307,7 @@ where
     match rx.await {
         Ok(result) => result,
         Err(_) => Err(PyRuntimeError::new_err(
-            "run_awaitable channel closed before the awaitable completed",
+            "run_python_awaitable channel closed before the awaitable completed",
         )),
     }
 }

@@ -121,6 +121,7 @@ async fn build_versions_response(
         None => global_unstable_feature_map.msc3575,
     };
 
+    // TODO: Remove
     log::info!(
         "asdf msc3881_enabled={:?} msc3575_enabled={:?}",
         msc3881_enabled,
