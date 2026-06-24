@@ -15,7 +15,7 @@
 
 use std::{
     future::Future,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 
 use once_cell::sync::OnceCell;
@@ -310,18 +310,18 @@ fn failure_to_pyerr(failure: &Bound<'_, PyAny>) -> PyErr {
     }
 }
 
-static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();
+static MAKE_DEFERRED_YIELDABLE: OnceCell<Py<PyAny>> = OnceCell::new();
 
 /// Given a deferred, make it follow the Synapse logcontext rules
 fn make_deferred_yieldable<'py>(
     py: Python<'py>,
     deferred: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_init(|| {
-        let sys = PyModule::import(py, "synapse.logging.context").unwrap();
-        let func = sys.getattr("make_deferred_yieldable").unwrap().unbind();
-        func
-    });
+    let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_try_init(|| {
+        logging_context_module(py)?
+            .getattr("make_deferred_yieldable")
+            .map(Into::into)
+    })?;
 
     make_deferred_yieldable
         .call1(py, (deferred,))?
@@ -333,6 +333,7 @@ fn make_deferred_yieldable<'py>(
 pub fn register_module(py: Python<'_>, _m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Make sure we fail early if we can't load some modules
     defer(py)?;
+    logging_context_module(py)?;
 
     Ok(())
 }
