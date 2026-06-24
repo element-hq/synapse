@@ -1157,8 +1157,8 @@ class SlidingSyncRestServlet(RestServlet):
         time_now = self.clock.time_msec()
         # Same as SSS timelines.
         #
-        serialize_options = SerializeEventConfig(
-            event_format=format_event_for_client_v2_without_room_id,
+        serialize_options = await self.event_serializer.create_config(
+            event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
 
