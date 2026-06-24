@@ -304,7 +304,10 @@ pub fn synapse_config_to_global_unstable_feature_map(config: &SynapseConfig) -> 
         msc4028: config.experimental.msc4028_push_encrypted_events,
         msc4108: config.experimental.msc4108_enabled
             || (config.experimental.msc4108_delegation_endpoint.is_some()),
-        msc4140: bool(config.server.max_event_delay_ms),
+        msc4140: config
+            .server
+            .max_event_delay_ms
+            .is_some_and(|max_event_delay_ms| max_event_delay_ms > 0),
         msc3575: config.experimental.msc3575_enabled,
         msc4133: config.experimental.msc4133_enabled,
         msc4133_stable: true,

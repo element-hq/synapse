@@ -21,6 +21,8 @@ use pyo3::{exceptions::PyRuntimeError, prelude::*};
 #[derive(FromPyObject, Clone)]
 pub struct SynapseConfig {
     pub room: RoomConfig,
+    pub auth: AuthConfig,
+    pub server: ServerConfig,
     pub experimental: ExperimentalConfig,
 }
 
@@ -60,6 +62,15 @@ impl<'a, 'py> FromPyObject<'a, 'py> for RoomCreationPreset {
 #[derive(FromPyObject, Clone)]
 pub struct RoomConfig {
     pub encryption_enabled_by_default_for_room_presets: BTreeSet<RoomCreationPreset>,
+}
+
+#[derive(FromPyObject, Clone)]
+pub struct AuthConfig {
+    pub login_via_existing_enabled: bool,
+}
+#[derive(FromPyObject, Clone)]
+pub struct ServerConfig {
+    pub max_event_delay_ms: Option<u64>,
 }
 
 #[derive(FromPyObject, Clone)]
