@@ -231,6 +231,9 @@ pub struct LoggingTransactionWrapper {
     logging_transaction_py: Py<PyAny>,
 
     /// Disambiguate which underlying database engine we're working with
+    ///
+    /// Some features are only available on Postgres vs SQLite and the queries need to
+    /// be differentiated (for compatibility or performance reasons).
     pub database_engine: DatabaseEngine,
 }
 

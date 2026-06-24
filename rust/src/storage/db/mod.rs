@@ -48,10 +48,9 @@ pub type ErasedResult = anyhow::Result<Box<dyn Any + Send>>;
 /// [`python_db_pool`]) or a native `tokio-postgres` pool (in `synapse-rust-apps`,
 /// see [`rust_db_pool`]).
 ///
-/// To keep the trait dyn-compatible, the only required method is the type-erased
-/// [`run_interaction_erased`](Self::run_interaction_erased); callers should
-/// prefer the ergonomic, generic
-/// [`run_interaction`](DatabasePoolExt::run_interaction).
+/// To keep the trait dyn-compatible, we have to specify a type-erased
+/// [`run_interaction_erased`](Self::run_interaction_erased) version; callers should
+/// prefer the ergonomic, generic [`run_interaction`](DatabasePoolExt::run_interaction).
 ///
 /// `Send + Sync` so it can be stored in a `#[pyclass]` and shared across threads.
 #[async_trait::async_trait]
@@ -140,6 +139,8 @@ pub trait DatabasePoolExt: DatabasePool {
     }
 }
 
+// Make [`run_interaction`](DatabasePoolExt::run_interaction) available on all
+// `DatabasePool`
 impl<T: DatabasePool + ?Sized> DatabasePoolExt for T {}
 
 /// A [`tokio_postgres::Transaction`] looking thing that we can use on the Rust side to
