@@ -19,8 +19,6 @@
 use anyhow::Context;
 use bb8_postgres::tokio_postgres::{self, types::ToSql, IsolationLevel};
 use bb8_postgres::PostgresConnectionManager;
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use postgres_native_tls::MakeTlsConnector;
 
 use crate::storage::db::{
@@ -32,53 +30,51 @@ pub struct RustDatabasePool {
     db_pool: bb8::Pool<PostgresConnectionManager<MakeTlsConnector>>,
 }
 
+#[async_trait::async_trait]
 impl DatabasePool for RustDatabasePool {
-    fn run_interaction_dyn<'a>(
-        &'a self,
+    async fn run_interaction_erased(
+        &self,
         _name: &'static str,
         func: ErasedInteraction,
-    ) -> BoxFuture<'a, ErasedResult> {
-        async move {
-            // Like Synapse's `runInteraction`, retry the whole transaction on
-            // serialization/deadlock errors (which can happen under repeatable-read).
-            loop {
-                let mut conn = self
-                    .db_pool
-                    .get()
-                    .await
-                    .context("Failed to acquire database connection")?;
+    ) -> ErasedResult {
+        // Like Synapse's `runInteraction`, retry the whole transaction on
+        // serialization/deadlock errors (which can happen under repeatable-read).
+        loop {
+            let mut conn = self
+                .db_pool
+                .get()
+                .await
+                .context("Failed to acquire database connection")?;
 
-                // Repeatable-read isolation level (like Synapse).
-                let txn = conn
-                    .build_transaction()
-                    .isolation_level(IsolationLevel::RepeatableRead)
-                    .start()
-                    .await
-                    .context("Failed to start transaction")?;
+            // Repeatable-read isolation level (like Synapse).
+            let txn = conn
+                .build_transaction()
+                .isolation_level(IsolationLevel::RepeatableRead)
+                .start()
+                .await
+                .context("Failed to start transaction")?;
 
-                let mut wrapper = TokioPostgresTransaction { txn };
-                match func(&mut wrapper).await {
-                    Ok(value) => {
-                        wrapper
-                            .txn
-                            .commit()
-                            .await
-                            .context("Failed to commit transaction")?;
-                        return Ok(value);
+            let mut wrapper = TokioPostgresTransaction { txn };
+            match func(&mut wrapper).await {
+                Ok(value) => {
+                    wrapper
+                        .txn
+                        .commit()
+                        .await
+                        .context("Failed to commit transaction")?;
+                    return Ok(value);
+                }
+                Err(err) => {
+                    // The transaction is rolled back implicitly when dropped, but
+                    // be explicit about it before deciding whether to retry.
+                    let _ = wrapper.txn.rollback().await;
+                    if is_retryable(&err) {
+                        continue;
                     }
-                    Err(err) => {
-                        // The transaction is rolled back implicitly when dropped, but
-                        // be explicit about it before deciding whether to retry.
-                        let _ = wrapper.txn.rollback().await;
-                        if is_retryable(&err) {
-                            continue;
-                        }
-                        return Err(err);
-                    }
+                    return Err(err);
                 }
             }
         }
-        .boxed()
     }
 }
 
