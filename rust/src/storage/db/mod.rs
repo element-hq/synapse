@@ -19,6 +19,8 @@ use std::future::Future;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 
+pub mod python_db_pool;
+
 /// A type-erased `run_interaction` callback.
 ///
 /// This is the dyn-compatible form of the `func` passed to
