@@ -13,9 +13,17 @@
  *
  */
 
+//! A database pool that calls into Python to re-use the same database pool used on the
+//! Python side. This is desirable because we want to avoid having two separate database
+//! pools (one for Rust, one for Python) to avoid database connection exhaustion
+//! problems. This is a stepping stone until all of our database interactions are in
+//! Rust.
+//!
 //! We have these main classes:
-//!  - Database pool [`PythonDatabasePoolWrapper`] which allows you to start a...
-//!  - transaction [`LoggingTransactionWrapper`] and query the database
+//!  - Database pool [`PythonDatabasePoolWrapper`] (implements [`DatabasePool`]) which
+//!    allows you to start a...
+//!  - transaction [`LoggingTransactionWrapper`] (implements [`Transaction`]) and query
+//!    the database.
 
 use std::future::Future;
 use std::pin::pin;
