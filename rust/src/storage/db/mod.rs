@@ -122,7 +122,6 @@ pub trait DatabasePoolExt: DatabasePool {
         R: Send + 'static,
         F: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, anyhow::Result<R>>
             + Send
-            + Sync
             + 'static,
     {
         // Erase the concrete return type `R` into `Box<dyn Any>` so we can call
