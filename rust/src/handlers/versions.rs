@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{RoomCreationPreset, SynapseConfig};
 use crate::deferred::create_deferred;
-use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
 /// `GET /_matrix/client/versions` response
@@ -45,7 +44,7 @@ impl<'py> IntoPyObject<'py> for VersionsResponse {
 #[pyclass]
 pub struct VersionsHandler {
     pub global_unstable_feature_map: Arc<UnstableFeatureMap>,
-    pub store: Arc<Store<PythonDatabasePoolWrapper>>,
+    pub store: Arc<Store>,
     /// The Twisted reactor, used to bridge our `async` response back into a
     /// Twisted deferred that Python can `await`.
     pub reactor: Py<PyAny>,
@@ -83,7 +82,7 @@ impl VersionsHandler {
 ///  * global_unstable_feature_map: The global values before any per-user overrides
 ///  * user_id: The user making the request
 async fn build_versions_response(
-    store: &Store<PythonDatabasePoolWrapper>,
+    store: &Store,
     global_unstable_feature_map: &UnstableFeatureMap,
     user_id: Option<&str>,
 ) -> Result<VersionsResponse, anyhow::Error> {

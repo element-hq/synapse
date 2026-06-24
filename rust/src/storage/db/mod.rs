@@ -13,23 +13,66 @@
  *
  */
 
+use std::any::Any;
 use std::future::Future;
 
 use futures::future::BoxFuture;
+use futures::FutureExt;
 
 pub mod python_db_pool;
 pub mod rust_db_pool;
+
+/// A type-erased transaction callback, as accepted by
+/// [`DatabasePool::run_interaction_dyn`].
+///
+/// This is the object-safe form of the `func` passed to
+/// [`DatabasePoolExt::run_interaction`]: the concrete result type `R` is boxed up
+/// as `Box<dyn Any + Send>` so the trait can stay dyn-compatible. The ergonomic
+/// [`DatabasePoolExt::run_interaction`] wrapper takes care of boxing the result
+/// and downcasting it back to `R`.
+pub type ErasedInteraction =
+    Box<dyn for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, ErasedResult> + Send + Sync>;
+
+/// The type-erased result of an [`ErasedInteraction`]: the concrete `R` boxed up
+/// as `Box<dyn Any + Send>` so it can pass through the object-safe
+/// [`DatabasePool::run_interaction_dyn`].
+pub type ErasedResult = anyhow::Result<Box<dyn Any + Send>>;
 
 /// A database connection pool.
 ///
 /// Code is written against this trait so the same store can run against either
 /// the Python-backed pool (in Synapse, see [`python_db_pool`]) or a native
 /// `tokio-postgres` pool (in `synapse-rust-apps`, see [`rust_db_pool`]). The pool
-/// type is fixed within any given binary, so callers are generic over the pool
-/// (e.g. `Store<P: DatabasePool>`) rather than using dynamic dispatch.
+/// is held behind a trait object (e.g. `Box<dyn DatabasePool>`), so a single
+/// `Store` type can wrap whichever pool the binary happens to use.
+///
+/// Callers don't use this trait directly; they go through the ergonomic,
+/// strongly-typed [`run_interaction`](DatabasePoolExt::run_interaction) on
+/// [`DatabasePoolExt`] (blanket-implemented for every `DatabasePool`, including
+/// `dyn DatabasePool`). This trait only carries the object-safe, type-erased
+/// [`run_interaction_dyn`](Self::run_interaction_dyn) that the wrapper dispatches
+/// to.
 ///
 /// `Send + Sync` so it can be stored in a `#[pyclass]` and shared across threads.
 pub trait DatabasePool: Send + Sync {
+    /// Object-safe, type-erased core of [`DatabasePoolExt::run_interaction`].
+    ///
+    /// Implementors implement this; callers should prefer
+    /// [`DatabasePoolExt::run_interaction`], which boxes up the result and
+    /// downcasts it back to the concrete type for you. See that method for the
+    /// semantics of `name` and `func`.
+    fn run_interaction_dyn<'a>(
+        &'a self,
+        name: &'static str,
+        func: ErasedInteraction,
+    ) -> BoxFuture<'a, ErasedResult>;
+}
+
+/// Ergonomic, strongly-typed access to a [`DatabasePool`].
+///
+/// Blanket-implemented for every `T: DatabasePool + ?Sized`, so it is available
+/// both on concrete pools and on `dyn DatabasePool` trait objects.
+pub trait DatabasePoolExt: DatabasePool {
     /// Starts a transaction on the database and runs the given function,
     /// returning its result.
     ///
@@ -79,7 +122,51 @@ pub trait DatabasePool: Send + Sync {
         F: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, anyhow::Result<R>>
             + Send
             + Sync
-            + 'static;
+            + 'static,
+    {
+        async move {
+            // Box the concrete result `R` up as `Box<dyn Any + Send>` so we can
+            // route through the object-safe `run_interaction_dyn`, then downcast
+            // back to `R` once it returns.
+            let erased = erase_interaction(func);
+
+            let result = self.run_interaction_dyn(name, erased).await?;
+            Ok(*result.downcast::<R>().expect(
+                "run_interaction_dyn returned a value of an unexpected type; \
+                 this is a programming error in the DatabasePool implementation",
+            ))
+        }
+    }
+}
+
+impl<T: DatabasePool + ?Sized> DatabasePoolExt for T {}
+
+/// Wrap a strongly-typed transaction callback so its result is boxed as
+/// `Box<dyn Any + Send>`, producing the type-erased [`ErasedInteraction`] that
+/// [`DatabasePool::run_interaction_dyn`] accepts.
+fn erase_interaction<R, F>(func: F) -> ErasedInteraction
+where
+    R: Send + 'static,
+    F: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, anyhow::Result<R>>
+        + Send
+        + Sync
+        + 'static,
+{
+    // Routing the closure through a generic fn parameter that carries the
+    // `for<'txn>` bound pins its higher-ranked signature; assigning a closure
+    // that borrows its argument straight into a `Box<dyn Fn..>` doesn't reliably
+    // infer that lifetime.
+    fn constrain<C>(c: C) -> C
+    where
+        C: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, ErasedResult>,
+    {
+        c
+    }
+
+    Box::new(constrain(move |txn| {
+        let fut = func(txn);
+        async move { Ok(Box::new(fut.await?) as Box<dyn Any + Send>) }.boxed()
+    }))
 }
 
 /// A [`tokio_postgres::Transaction`] looking thing that we can use on the Rust side to

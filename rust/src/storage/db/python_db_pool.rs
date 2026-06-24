@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use futures::future::BoxFuture;
+use futures::FutureExt;
 use pyo3::{
     exceptions::{PyRuntimeError, PyTypeError},
     intern,
@@ -31,7 +32,9 @@ use pyo3::{
 };
 
 use crate::deferred::run_python_awaitable;
-use crate::storage::db::{DatabasePool, DbValue, Row, Transaction};
+use crate::storage::db::{
+    DatabasePool, DbValue, ErasedInteraction, ErasedResult, Row, Transaction,
+};
 
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
@@ -73,103 +76,104 @@ impl PythonDatabasePoolWrapper {
 }
 
 impl DatabasePool for PythonDatabasePoolWrapper {
-    async fn run_interaction<R, F>(&self, name: &'static str, func: F) -> anyhow::Result<R>
-    where
-        R: Send + 'static,
-        F: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, anyhow::Result<R>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        // `runInteraction` calls `func` with a `LoggingTransaction` on a DB
-        // thread and expects a synchronous return value. Since we can't
-        // round-trip an arbitrary Rust `R` back out through Python, the callback
-        // stashes the result here and we pick it up once the deferred fires.
-        //
-        // Note the callback may run more than once (`runInteraction` retries on
-        // serialization/deadlock errors), so we only trust this slot once the
-        // deferred has fired, i.e. once the transaction has finally committed or
-        // failed.
-        let result_slot: Arc<Mutex<Option<anyhow::Result<R>>>> = Arc::new(Mutex::new(None));
+    fn run_interaction_dyn<'a>(
+        &'a self,
+        name: &'static str,
+        func: ErasedInteraction,
+    ) -> BoxFuture<'a, ErasedResult> {
+        async move {
+            // `runInteraction` calls `func` with a `LoggingTransaction` on a DB
+            // thread and expects a synchronous return value. Since we can't
+            // round-trip an arbitrary Rust result back out through Python, the
+            // callback stashes the result here and we pick it up once the deferred
+            // fires.
+            //
+            // Note the callback may run more than once (`runInteraction` retries on
+            // serialization/deadlock errors), so we only trust this slot once the
+            // deferred has fired, i.e. once the transaction has finally committed or
+            // failed.
+            let result_slot: Arc<Mutex<Option<ErasedResult>>> = Arc::new(Mutex::new(None));
 
-        // Build the callback that Python's `runInteraction` invokes on a DB
-        // thread with a `LoggingTransaction`, plus owned handles we can move onto
-        // the reactor thread. We drive `func` to completion in the callback; the
-        // Python query path is synchronous under the hood, so it's safe to block
-        // this dedicated DB thread until the future resolves.
-        let callback_slot = Arc::clone(&result_slot);
-        let (callback, database_pool_py, reactor) = Python::attach(|py| -> PyResult<_> {
-            let callback = PyCFunction::new_closure(
-                py,
-                None,
-                None,
-                move |args, _kwargs| -> PyResult<Py<PyAny>> {
-                    let py = args.py();
-                    let txn_py = args.get_item(0)?;
-                    let mut txn = txn_py.extract::<LoggingTransactionWrapper>()?;
+            // Build the callback that Python's `runInteraction` invokes on a DB
+            // thread with a `LoggingTransaction`, plus owned handles we can move onto
+            // the reactor thread. We drive `func` to completion in the callback; the
+            // Python query path is synchronous under the hood, so it's safe to block
+            // this dedicated DB thread until the future resolves.
+            let callback_slot = Arc::clone(&result_slot);
+            let (callback, database_pool_py, reactor) = Python::attach(|py| -> PyResult<_> {
+                let callback = PyCFunction::new_closure(
+                    py,
+                    None,
+                    None,
+                    move |args, _kwargs| -> PyResult<Py<PyAny>> {
+                        let py = args.py();
+                        let txn_py = args.get_item(0)?;
+                        let mut txn = txn_py.extract::<LoggingTransactionWrapper>()?;
 
-                    // Since we expect people to only call `.await` on [`Transaction`]
-                    // related methods (mentioned in the [`Transaction`] docstring) AND
-                    // because there is no async work to suspend on in the Python
-                    // [`Transaction`] synchronously, we can get away with polling once
-                    // as it should immediately resolve to [`Poll::Ready`]. Getting
-                    // [`Poll::Pending`] would be considered a programming error.
-                    //
-                    // Alternatively, we could just use `futures::executor::block_on`
-                    // which is probably cleaner but a single-shot poll is more
-                    // enforcing of the concept we want to represent.
-                    match poll_once(func(&mut txn)) {
-                        Poll::Ready(Ok(value)) => {
-                            *callback_slot.lock().unwrap() = Some(Ok(value));
-                            Ok(py.None())
+                        // Since we expect people to only call `.await` on [`Transaction`]
+                        // related methods (mentioned in the [`Transaction`] docstring) AND
+                        // because there is no async work to suspend on in the Python
+                        // [`Transaction`] synchronously, we can get away with polling once
+                        // as it should immediately resolve to [`Poll::Ready`]. Getting
+                        // [`Poll::Pending`] would be considered a programming error.
+                        //
+                        // Alternatively, we could just use `futures::executor::block_on`
+                        // which is probably cleaner but a single-shot poll is more
+                        // enforcing of the concept we want to represent.
+                        match poll_once(func(&mut txn)) {
+                            Poll::Ready(Ok(value)) => {
+                                *callback_slot.lock().unwrap() = Some(Ok(value));
+                                Ok(py.None())
+                            }
+                            Poll::Ready(Err(err)) => {
+                                // Re-raise into Python so `runInteraction` rolls the
+                                // transaction back (and can apply its retry logic for
+                                // serialization/deadlock errors).
+                                let py_err = anyhow_to_pyerr(&err);
+                                *callback_slot.lock().unwrap() = Some(Err(err));
+                                Err(py_err)
+                            }
+                            Poll::Pending => unreachable!(
+                                "The `run_interaction` transaction callback future returned `Poll::Pending`, \
+                                but we expect Synapse Python database work to resolve synchronously. \
+                                This is a Synapse programming error: genuine async work is \
+                                not supported here.",
+                            ),
                         }
-                        Poll::Ready(Err(err)) => {
-                            // Re-raise into Python so `runInteraction` rolls the
-                            // transaction back (and can apply its retry logic for
-                            // serialization/deadlock errors).
-                            let py_err = anyhow_to_pyerr(&err);
-                            *callback_slot.lock().unwrap() = Some(Err(err));
-                            Err(py_err)
-                        }
-                        Poll::Pending => unreachable!(
-                            "The `run_interaction` transaction callback future returned `Poll::Pending`, \
-                            but we expect Synapse Python database work to resolve synchronously. \
-                            This is a Synapse programming error: genuine async work is \
-                            not supported here.",
-                        ),
-                    }
+                    },
+                )?
+                .unbind();
+
+                Ok((
+                    callback,
+                    self.database_pool_py.clone_ref(py),
+                    self.reactor.clone_ref(py),
+                ))
+            })
+            .map_err(anyhow::Error::from)?;
+
+            // Use `runInteraction` directly
+            let outcome = run_python_awaitable(reactor, move |py| {
+                database_pool_py
+                    .bind(py)
+                    .call_method1(intern!(py, "runInteraction"), (name, callback.bind(py)))
+            })
+            .await;
+
+            // Prefer the result captured by the callback (it carries the Rust
+            // context). If the slot is empty, `runInteraction` failed before ever
+            // invoking the callback (e.g. it couldn't acquire a connection), so
+            // surface the deferred's outcome instead.
+            let captured = result_slot.lock().unwrap().take();
+            match captured {
+                Some(result) => result,
+                None => match outcome {
+                    Ok(_) => Err(anyhow::anyhow!("run_interaction produced no result")),
+                    Err(py_err) => Err(anyhow::Error::from(py_err)),
                 },
-            )?
-            .unbind();
-
-            Ok((
-                callback,
-                self.database_pool_py.clone_ref(py),
-                self.reactor.clone_ref(py),
-            ))
-        })
-        .map_err(anyhow::Error::from)?;
-
-        // Use `runInteraction` directly
-        let outcome = run_python_awaitable(reactor, move |py| {
-            database_pool_py
-                .bind(py)
-                .call_method1(intern!(py, "runInteraction"), (name, callback.bind(py)))
-        })
-        .await;
-
-        // Prefer the result captured by the callback (it carries the Rust
-        // context). If the slot is empty, `runInteraction` failed before ever
-        // invoking the callback (e.g. it couldn't acquire a connection), so
-        // surface the deferred's outcome instead.
-        let captured = result_slot.lock().unwrap().take();
-        match captured {
-            Some(result) => result,
-            None => match outcome {
-                Ok(_) => Err(anyhow::anyhow!("run_interaction produced no result")),
-                Err(py_err) => Err(anyhow::Error::from(py_err)),
-            },
+            }
         }
+        .boxed()
     }
 }
 

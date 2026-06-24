@@ -16,7 +16,7 @@
 use futures::FutureExt;
 use serde::Serialize;
 
-use crate::storage::db::{DatabasePool, RowExt};
+use crate::storage::db::{DatabasePool, DatabasePoolExt, RowExt};
 
 /// Currently supported per-user features
 #[derive(Serialize, Debug)]
@@ -46,11 +46,11 @@ impl std::fmt::Display for PerUserExperimentalFeature {
     }
 }
 
-pub struct Store<P: DatabasePool> {
-    pub db_pool: P,
+pub struct Store {
+    pub db_pool: Box<dyn DatabasePool>,
 }
 
-impl<P: DatabasePool> Store<P> {
+impl Store {
     /// Checks whether a given feature is enabled/disabled for this user
     ///
     /// If there is no entry, returns None
