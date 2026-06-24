@@ -1,17 +1,16 @@
 //! DBAPI2-shaped Connection / Cursor types implemented in Rust.
 //!
-//! The Python-facing surface is a single `Connection` / `Cursor` pair (see
-//! `unified`); two backends — Postgres (`tokio-postgres`) and SQLite
-//! (`rusqlite`) — sit behind that single shape and are picked via the
-//! `connect_postgres` / `connect_sqlite` factories.
+//! Currently this provides a single Postgres backend ([`tokio_postgres`]); see
+//! the [`postgres`] submodule.
 
-pub mod helpers;
 pub mod postgres;
 pub mod runtime;
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
+/// Register the `database` submodule (and its per-backend children) on the
+/// top-level `synapse_rust` module.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child = PyModule::new(py, "database")?;
 

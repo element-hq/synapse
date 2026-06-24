@@ -1,9 +1,7 @@
-//! `tokio-postgres`-backed `Connection` / `Cursor` types exposed to Python.
+//! [`tokio_postgres`]-backed `Connection` / `Cursor` types exposed to Python.
 //!
 //! The driver itself is async; we drive it from sync Python methods via a
-//! shared multi-thread tokio runtime (see `super::runtime`). The async helper
-//! methods are kept `pub` so that future Rust callers can drive them
-//! directly without going through the PyO3 wrappers.
+//! shared multi-thread tokio runtime (see `super::runtime`).
 
 use anyhow::Error;
 use log::warn;
@@ -19,6 +17,8 @@ mod cursor_state;
 mod helpers;
 mod value;
 
+/// Register the `postgres` submodule (the `Connection` / `Cursor` classes and
+/// the `connect` factory) under the parent `database` module.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child = PyModule::new(py, "postgres")?;
 
@@ -37,15 +37,24 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     Ok(())
 }
 
+/// Map a [`tokio_postgres`] error into a Python `RuntimeError`.
 fn pg_err_to_py(e: tokio_postgres::Error) -> PyErr {
     PyRuntimeError::new_err(format!("postgres error: {e}"))
 }
 
+/// Open a new Postgres connection from a libpq-style DSN.
+///
+/// Blocks until the connection is established, then spawns the long-lived
+/// connection task (which drives the socket) onto the shared runtime and
+/// hands back a `Connection` wrapping the client.
 #[pyfunction]
 fn connect<'py>(py: Python<'py>, dsn: &str) -> PyResult<Bound<'py, connection::Connection>> {
     let config = fixup_default_host(dsn)
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to parse DSN: {e}")))?;
 
+    // TLS is not yet supported: unlike libpq (whose default is
+    // `sslmode=prefer`), we never negotiate TLS regardless of the DSN's
+    // sslmode. See <tracking issue>.
     let (client, connection) = config.connect(tokio_postgres::NoTls).block_on_result(py)?;
 
     // Spawn the connection task on the runtime.
@@ -63,9 +72,10 @@ fn connect<'py>(py: Python<'py>, dsn: &str) -> PyResult<Bound<'py, connection::C
 /// Fix up a DSN to ensure it has a host, using libpq's default host if
 /// necessary.
 ///
-/// [`tokio-postgres`] has a different default host than [`libpq`], which is
+/// [`tokio_postgres`] has a different default host than [`libpq`], which is
 /// what Synapse previously used (and is what e.g. `psql` uses). The default
-/// host in `libpq` is configurable, and so we need to pull it out and runtime.
+/// host in `libpq` is configurable, so when the DSN omits a host we ask libpq
+/// what its default would be and use that instead.
 fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
     let mut config = dsn.parse::<tokio_postgres::Config>()?;
 

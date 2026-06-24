@@ -1,3 +1,10 @@
+//! Tracks the result of the cursor's most recent `execute`.
+//!
+//! [`tokio_postgres`] returns rows as a [`RowStream`] that is consumed lazily, so a
+//! cursor only ever holds onto the *current* query's stream plus the metadata
+//! (column names, rowcount) derived from it. Starting a new query replaces all
+//! of this state.
+
 use std::pin::Pin;
 
 use futures::{StreamExt, TryStreamExt};
@@ -6,37 +13,50 @@ use tokio_postgres::{Column, RowStream};
 
 use crate::database::postgres::helpers::{BlockingPostgres, BlockingPostgresResult};
 
+/// The state carried over from the cursor's most recent query.
 #[derive(Default)]
 pub struct CursorQueryState {
     /// Live row stream for SELECT-style queries. `None` once the stream is
     /// exhausted, or before the first execute.
     stream: Option<Pin<Box<RowStream>>>,
-    /// Column metadata for the current result set. Set when a stream is
-    /// started; cleared after DML.
+    /// Column names for the current result set, set by `on_query_start` (a
+    /// DML statement just gets an empty list). Reset on the next query.
+    ///
+    /// TODO: currently write-only; kept to back a future PEP-249
+    /// `Cursor.description` accessor.
     description: Option<Vec<String>>,
-    /// PEP-249 `rowcount`. For DML this is the affected count. For
-    /// SELECTs we stream and the total isn't known until the stream is
-    /// drained, so we leave this as `None` throughout.
+    /// PEP-249 `rowcount`: the number of rows affected, taken from the
+    /// command tag. `None` until the stream has been drained — we stream rows
+    /// lazily, so it isn't known before then — and populated by
+    /// `fetch_one`/`fetch_all`/`rowcount` once the stream completes.
     rowcount: Option<u64>,
 }
 
 impl CursorQueryState {
+    /// A fresh state with no query yet run.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Reset all state, discarding any previous result set. Called at the
+    /// start of every `execute`.
     pub fn new_query(&mut self) {
         self.stream = None;
         self.description = None;
         self.rowcount = None;
     }
 
+    /// Record the stream and column metadata for a newly-started query.
     pub fn on_query_start(&mut self, stream: RowStream, columns: &[Column]) {
         self.stream = Some(Box::pin(stream));
         self.description = Some(columns.iter().map(|c| c.name().to_string()).collect());
         self.rowcount = None;
     }
 
+    /// Pull the next row from the stream, or `None` once it's exhausted.
+    ///
+    /// On exhaustion the rowcount is captured and the stream dropped; on a
+    /// stream error the state is cleared and the error surfaced to Python.
     pub fn fetch_one<'py>(&mut self, py: Python<'py>) -> PyResult<Option<tokio_postgres::Row>> {
         let Some(stream) = self.stream.as_mut() else {
             return Err(PyRuntimeError::new_err("no active query"));
@@ -61,6 +81,7 @@ impl CursorQueryState {
         }
     }
 
+    /// Collect every remaining row into a `Vec`, draining the stream.
     pub fn fetch_all<'py>(&mut self, py: Python<'py>) -> PyResult<Vec<tokio_postgres::Row>> {
         let Some(stream) = self.stream.as_mut() else {
             return Err(PyRuntimeError::new_err("no active query"));
@@ -74,6 +95,7 @@ impl CursorQueryState {
         Ok(rows)
     }
 
+    /// Return the affected-row count, draining the stream first if needed.
     pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Option<u64>> {
         // `stream.rows_affected()` is only valid after the stream is
         // drained, so we need to drain it here. This is OK as in Python the
@@ -88,6 +110,8 @@ impl CursorQueryState {
     }
 }
 
+/// Consume and discard every row of a stream, propagating any error. Used to
+/// reach the trailing command-complete message that carries the rowcount.
 async fn drain_stream(mut stream: Pin<&mut RowStream>) -> Result<(), tokio_postgres::Error> {
     while let Some(row) = stream.next().await {
         row?;

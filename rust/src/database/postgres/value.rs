@@ -1,12 +1,12 @@
-//! Conversions between Python values and the SQL value representations used
-//! by our two backends.
+//! Conversions between Python values and the Postgres SQL value
+//! representations.
 //!
-//! Kept in its own module so the per-backend cursor code stays focused on
-//! the DBAPI shape rather than the type-mapping table.
+//! Kept in its own module so the cursor code stays focused on the DBAPI shape
+//! rather than the type-mapping table.
 //!
-//! First cut: int / float / bool / str / bytes / None for both backends. Lists
-//! (for `ANY($1)`-style PG queries) and richer types — json, decimal,
-//! timestamps — are deferred to a follow-up.
+//! First cut: int / float / bool / str / bytes / None. Lists (for
+//! `ANY($1)`-style queries) and richer types — json, decimal, timestamps —
+//! are deferred to a follow-up.
 
 use std::error::Error;
 
@@ -20,8 +20,8 @@ use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString, PyTuple};
 use pyo3::{prelude::*, BoundObject};
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type, WrongType};
 
-/// Owned representation of a Python value that we can hand to `tokio-postgres`
-/// as a `ToSql` parameter.
+/// Owned representation of a Python value that we can hand to [`tokio_postgres`]
+/// as a [`ToSql`] parameter.
 #[derive(Debug, Clone)]
 pub enum PgValue {
     Null,
@@ -33,10 +33,14 @@ pub enum PgValue {
 }
 
 impl PgValue {
+    /// Classify a Python object into a [`PgValue`], or error if its type isn't
+    /// one we know how to send to Postgres.
     pub fn from_py(obj: &Bound<PyAny>) -> PyResult<Self> {
         if obj.is_none() {
             return Ok(PgValue::Null);
         }
+        // `bool` must be checked before `int`, since in Python `bool` is a
+        // subclass of `int` and would otherwise be caught by the `PyInt` arm.
         if let Ok(b) = obj.cast::<PyBool>() {
             return Ok(PgValue::Bool(b.is_true()));
         }
@@ -59,6 +63,8 @@ impl PgValue {
     }
 }
 
+// Lets PyO3 extract a `PgValue` directly from a Python argument, e.g. when a
+// cursor method takes `Option<Vec<PgValue>>` for its parameters.
 impl<'a, 'py> FromPyObject<'a, 'py> for PgValue {
     type Error = PyErr;
 
@@ -67,6 +73,12 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PgValue {
     }
 }
 
+/// Serialises a [`PgValue`] into Postgres' binary wire format.
+///
+/// The target column type (`ty`) is supplied by [`tokio_postgres`] from the
+/// prepared statement, so the same `PgValue` (e.g. an `Int`) is encoded
+/// differently depending on whether the column is `INT2`/`INT4`/`INT8`. A
+/// value that doesn't match the column type yields a [`WrongType`] error.
 impl ToSql for PgValue {
     fn to_sql(
         &self,
@@ -99,12 +111,12 @@ impl ToSql for PgValue {
             }
             (&PgValue::Float(v), &Type::FLOAT4) => {
                 // The `as` cast here generates the closest f32 to the f64,
-                // with lost of precision. Since Python floats are variable
+                // with loss of precision. Since Python floats are variable
                 // precision anyway, this is the best we can do.
                 //
                 // (Crucially, there is no way of doing a "fallible" cast
                 // here, since unlike integers there is no notion of "out of
-                // range" for floats, just vary precision.)
+                // range" for floats, just varying precision.)
                 float4_to_sql(v as f32, buf);
                 Ok(IsNull::No)
             }
@@ -150,6 +162,10 @@ impl ToSql for PgValue {
     to_sql_checked!();
 }
 
+/// Convert a Postgres row into a Python tuple, one element per column.
+///
+/// Each column is decoded via [`PythonPgFromSql`], so `NULL` becomes `None` and
+/// every other supported type becomes its natural Python equivalent.
 pub fn pg_row_to_py<'py>(
     py: Python<'py>,
     row: &tokio_postgres::Row,
@@ -168,10 +184,14 @@ pub fn pg_row_to_py<'py>(
     Ok(PyTuple::new(py, output_row)?)
 }
 
+/// A decoded column value, ready to drop into a Python tuple. `None`
+/// represents SQL `NULL`; otherwise it holds the corresponding Python object.
 pub struct PythonPgFromSql(pub Option<Py<PyAny>>);
 
 impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
     fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        // Decoding builds Python objects, so we need the GIL. `try_get` (our
+        // only caller) already runs under it, so this attach is cheap.
         Python::attach(|py| Self::from_sql_with_py(py, ty, raw))
     }
 
@@ -198,6 +218,8 @@ impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
 }
 
 impl PythonPgFromSql {
+    /// Decode a non-NULL column value into the matching Python object, given
+    /// an already-held GIL token.
     fn from_sql_with_py(
         py: Python<'_>,
         ty: &Type,
