@@ -13,6 +13,8 @@
  *
  */
 
+use std::sync::Arc;
+
 use futures::FutureExt;
 use serde::Serialize;
 
@@ -61,10 +63,12 @@ impl Store {
     ) -> Result<Option<bool>, anyhow::Error> {
         // It's not enabled globally, so check whether it's enabled per-user.
         //
-        // Owned copies so the callback can be `'static` (it may be moved to
-        // another thread and called multiple times under retries).
-        let user_id = user_id.to_owned();
-        let feature = feature.to_string();
+        // We need owned copies to move into the callback because it is `'static` (it
+        // may be moved to another thread). We use `Arc<str>` rather than `String` so
+        // the per-call clone is just a cheap refcount bump rather than a fresh
+        // allocation.
+        let user_id: Arc<str> = user_id.into();
+        let feature: Arc<str> = feature.to_string().into();
 
         let is_feature_enabled_for_user = self
             .db_pool
@@ -80,7 +84,7 @@ impl Store {
                             "SELECT enabled \
                              FROM per_user_experimental_features \
                              WHERE user_id = ? AND feature = ?",
-                            &[user_id.as_str(), feature.as_str()],
+                            &[user_id.as_ref(), feature.as_ref()],
                         )
                         .await?;
 
