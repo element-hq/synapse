@@ -171,12 +171,104 @@ async fn build_versions_response(
 /// Experimental features the server supports
 #[derive(Serialize, Debug, Clone)]
 pub struct UnstableFeatureMap {
-    /// Simplified sliding sync
-    #[serde(rename = "org.matrix.simplified_msc3575")]
-    msc3575: bool,
+    /// Implements support for label-based filtering as described in
+    /// MSC2326.
+    #[serde(rename = "org.matrix.label_based_filtering")]
+    msc2326: bool,
+    /// Implements support for cross signing as described in MSC1756
+    #[serde(rename = "org.matrix.e2e_cross_signing")]
+    msc1756: bool,
+    /// Implements additional endpoints as described in MSC2432
+    #[serde(rename = "org.matrix.msc2432")]
+    msc2432: bool,
+    /// Implements additional endpoints as described in MSC2666
+    #[serde(rename = "uk.half-shot.msc2666.query_mutual_rooms.stable")]
+    msc2666: bool,
+    // Supports the busy presence state described in MSC3026.
+    #[serde(rename = "org.matrix.msc3026.busy_presence")]
+    msc3026: bool,
+    /// Supports receiving private read receipts as per MSC2285
+    // TODO: Remove when MSC2285 becomes a part of the spec
+    #[serde(rename = "org.matrix.msc2285.stable")]
+    msc2285: bool,
+    /// Supports filtering of /publicRooms by room type as per MSC3827
+    #[serde(rename = "org.matrix.msc3827.stable")]
+    msc3827: bool,
+    /// Adds support for thread relations, per MSC3440.
+    // TODO: remove when "v1.3" is added above
+    #[serde(rename = "org.matrix.msc3440.stable")]
+    msc3440: bool,
+    /// Support for thread read receipts & notification counts.
+    #[serde(rename = "org.matrix.msc3771")]
+    msc3771: bool,
+    #[serde(rename = "org.matrix.msc3773")]
+    msc3773: bool,
+    /// Allows moderators to fetch redacted event content as described in MSC2815
+    #[serde(rename = "fi.mau.msc2815")]
+    msc2815: bool,
+    /// Adds a ping endpoint for appservices to check HS->AS connection
+    // TODO: remove when "v1.7" is added above
+    #[serde(rename = "fi.mau.msc2659.stable")]
+    msc2659: bool,
+    // TODO: this is no longer needed once unstable MSC3882 does not need to be supported:
+    #[serde(rename = "org.matrix.msc3882")]
+    msc3882: bool,
     /// Adds support for remotely enabling/disabling pushers, as per MSC3881
     #[serde(rename = "org.matrix.msc3881")]
     msc3881: bool,
+    /// Adds support for filtering /messages by event relation.
+    #[serde(rename = "org.matrix.msc3874")]
+    msc3874: bool,
+    // Adds support for relation-based redactions as per MSC3912.
+    #[serde(rename = "org.matrix.msc3912")]
+    msc3912: bool,
+    /// Whether recursively provide relations is supported.
+    // TODO This is no longer needed once unstable MSC3981 does not need to be supported.
+    #[serde(rename = "org.matrix.msc3981")]
+    msc3981: bool,
+    /// Adds support for deleting account data.
+    #[serde(rename = "org.matrix.msc3391")]
+    msc3391: bool,
+    /// Allows clients to inhibit profile update propagation.
+    #[serde(rename = "org.matrix.msc4069")]
+    msc4069: bool,
+    // Allows clients to handle push for encrypted events.
+    #[serde(rename = "org.matrix.msc4028")]
+    msc4028: bool,
+    /// MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
+    #[serde(rename =  "org.matrix.msc4108")]
+    msc4108: bool,
+    /// MSC4140: Delayed events
+    #[serde(rename =  "org.matrix.msc4140")]
+    msc4140: bool,
+    /// Simplified sliding sync
+    #[serde(rename = "org.matrix.simplified_msc3575")]
+    msc3575: bool,
+    /// Arbitrary key-value profile fields.
+    #[serde(rename = "uk.tcpip.msc4133")]
+    msc4133: bool,
+    /// Arbitrary key-value profile fields (stable identifier)
+    #[serde(rename = "uk.tcpip.msc4133.stable")]
+    msc4133_stable: bool,
+    /// MSC4155: Invite filtering
+    #[serde(rename = "org.matrix.msc4155")]
+    msc4155: bool,
+    /// MSC4306: Support for thread subscriptions
+    #[serde(rename = "org.matrix.msc4306")]
+    msc4306: bool,
+    /// MSC4169: Backwards-compatible redaction sending using `/send`
+    #[serde(rename = "com.beeper.msc4169")]
+    msc4169: bool,
+    /// MSC4354: Sticky events
+    #[serde(rename = "org.matrix.msc4354")]
+    msc4354: bool,
+    /// MSC4380: Invite blocking
+    #[serde(rename = "org.matrix.msc4380.stable")]
+    msc4380: bool,
+    // MSC4445: Sync timeline order
+    #[serde(rename = "org.matrix.msc4445.initial_sync_timeline_topological_ordering")]
+    msc4445_initial_sync_timeline_topological_ordering: bool,
+
 
     // Whether new rooms will be set to encrypted or not (based on presets).
     #[serde(rename = "io.element.e2ee_forced.public")]
@@ -185,78 +277,46 @@ pub struct UnstableFeatureMap {
     e2ee_forced_private: bool,
     #[serde(rename = "io.element.e2ee_forced.trusted_private")]
     e2ee_forced_trusted_private: bool,
-    // // Implements support for label-based filtering as described in
-    // // MSC2326.
-    // ("org.matrix.label_based_filtering".to_string(), true),
-    // // Implements support for cross signing as described in MSC1756
-    // ("org.matrix.e2e_cross_signing".to_string(), true),
-    // // Implements additional endpoints as described in MSC2432
-    // ("org.matrix.msc2432".to_string(), true),
-    // // Implements additional endpoints as described in MSC2666
-    // ("uk.half-shot.msc2666.query_mutual_rooms.stable".to_string(), true),
-    // // Supports the busy presence state described in MSC3026.
-    // ("org.matrix.msc3026.busy_presence".to_string(), config.experimental.msc3026_enabled),
-    // // Supports receiving private read receipts as per MSC2285
-    // ("org.matrix.msc2285.stable".to_string(), true),  // TODO: Remove when MSC2285 becomes a part of the spec
-    // // Supports filtering of /publicRooms by room type as per MSC3827
-    // ("org.matrix.msc3827.stable".to_string(), true),
-    // // Adds support for thread relations, per MSC3440.
-    // ("org.matrix.msc3440.stable".to_string(), true),  // TODO: remove when "v1.3" is added above
-    // // Support for thread read receipts & notification counts.
-    // ("org.matrix.msc3771".to_string(), true),
-    // ("org.matrix.msc3773".to_string(), config.experimental.msc3773_enabled),
-    // // Allows moderators to fetch redacted event content as described in MSC2815
-    // ("fi.mau.msc2815".to_string(), config.experimental.msc2815_enabled),
-    // // Adds a ping endpoint for appservices to check HS->AS connection
-    // ("fi.mau.msc2659.stable".to_string(), true),  // TODO: remove when "v1.7" is added above
-    // // TODO: this is no longer needed once unstable MSC3882 does not need to be supported:
-    // ("org.matrix.msc3882".to_string(), config.auth.login_via_existing_enabled),
-    // // Adds support for filtering /messages by event relation.
-    // ("org.matrix.msc3874".to_string(), config.experimental.msc3874_enabled),
-    // // Adds support for relation-based redactions as per MSC3912.
-    // ("org.matrix.msc3912".to_string(), config.experimental.msc3912_enabled),
-    // // Whether recursively provide relations is supported.
-    // // TODO This is no longer needed once unstable MSC3981 does not need to be supported.
-    // ("org.matrix.msc3981".to_string(), true),
-    // // Adds support for deleting account data.
-    // ("org.matrix.msc3391".to_string(), config.experimental.msc3391_enabled),
-    // // Allows clients to inhibit profile update propagation.
-    // ("org.matrix.msc4069".to_string(), config.experimental.msc4069_profile_inhibit_propagation),
-    // // Allows clients to handle push for encrypted events.
-    // ("org.matrix.msc4028".to_string(), config.experimental.msc4028_push_encrypted_events),
-    // // MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code - 2024 version
-    // ("org.matrix.msc4108".to_string(), (
-    //     config.experimental.msc4108_enabled
-    //     or (
-    //         config.experimental.msc4108_delegation_endpoint
-    //         is not None
-    //     )
-    // )),
-    // // MSC4140: Delayed events
-    // ("org.matrix.msc4140".to_string(), bool(config.server.max_event_delay_ms)),
-    // // Arbitrary key-value profile fields.
-    // ("uk.tcpip.msc4133".to_string(), config.experimental.msc4133_enabled),
-    // ("uk.tcpip.msc4133.stable".to_string(), true),
-    // // MSC4155: Invite filtering
-    // ("org.matrix.msc4155".to_string(), config.experimental.msc4155_enabled),
-    // // MSC4306: Support for thread subscriptions
-    // ("org.matrix.msc4306".to_string(), config.experimental.msc4306_enabled),
-    // // MSC4169: Backwards-compatible redaction sending using `/send`
-    // ("com.beeper.msc4169".to_string(), config.experimental.msc4169_enabled),
-    // // MSC4354: Sticky events
-    // ("org.matrix.msc4354".to_string(), config.experimental.msc4354_enabled),
-    // // MSC4380: Invite blocking
-    // ("org.matrix.msc4380.stable".to_string(), true),
-    // // MSC4445: Sync timeline order
-    // ("org.matrix.msc4445.initial_sync_timeline_topological_ordering".to_string(), true),
 }
 
 /// Convert from [`SynapseConfig`] to the global defaults for unstable features that the
 /// server supports [`UnstableFeatureMap`]
 pub fn synapse_config_to_global_unstable_feature_map(config: &SynapseConfig) -> UnstableFeatureMap {
     UnstableFeatureMap {
-        msc3575: config.experimental.msc3575_enabled,
+        msc2326: true,
+        msc1756: true,
+        msc2432: true,
+        msc2666: true,
+        msc3026: config.experimental.msc3026_enabled,
+        msc2285: true,
+        msc3827: true,
+        msc3440: true,
+        msc3771: true,
+        msc3773: config.experimental.msc3773_enabled,
+        msc2815: config.experimental.msc2815_enabled,
+        msc2659: true,
+        msc3882: config.auth.login_via_existing_enabled,
         msc3881: config.experimental.msc3881_enabled,
+        msc3874: config.experimental.msc3874_enabled,
+        msc3912: config.experimental.msc3912_enabled,
+        msc3981: true,
+        msc3391: config.experimental.msc3391_enabled,
+        msc4069: config.experimental.msc4069_profile_inhibit_propagation,
+        msc4028: config.experimental.msc4028_push_encrypted_events,
+        msc4108: config.experimental.msc4108_enabled || (
+            config.experimental.msc4108_delegation_endpoint
+            is not None
+        ),
+        msc4140: bool(config.server.max_event_delay_ms),
+        msc3575: config.experimental.msc3575_enabled,
+        msc4133: config.experimental.msc4133_enabled,
+        msc4133_stable: true,
+        msc4155: config.experimental.msc4155_enabled,
+        msc4306: config.experimental.msc4306_enabled,
+        msc4169: config.experimental.msc4169_enabled,
+        msc4354: config.experimental.msc4354_enabled,
+        msc4380: true,
+        msc4445_initial_sync_timeline_topological_ordering: true,
         e2ee_forced_public: config
             .room
             .encryption_enabled_by_default_for_room_presets
