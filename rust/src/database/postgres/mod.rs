@@ -73,10 +73,10 @@ fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
         return Ok(config);
     }
 
-    // Get the default host from libpq. This will *not* do any network I/O, it
-    // just parses the DSN. The connection will get closed automatically on
-    // Drop.
-    let pq_conn = libpq::Connection::new("")?;
+    // Resolve libpq's default host without connecting: PQconnectStart parses
+    // the (empty) conninfo and applies libpq's defaults/env, but opens no
+    // socket because we never poll it. Closed on Drop.
+    let pq_conn = libpq::Connection::start("")?;
     let host = pq_conn.host()?;
 
     config.host(host);
