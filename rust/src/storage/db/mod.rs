@@ -24,10 +24,10 @@ pub mod rust_db_pool;
 
 /// A type-erased `run_interaction` callback.
 ///
-/// This is the object-safe form of the `func` passed to
+/// This is the dyn-compatible form of the `func` passed to
 /// [`DatabasePoolExt::run_interaction`]: the concrete result type `R` is boxed up
 /// as `Box<dyn Any + Send>` (see [`ErasedResult`]) so [`DatabasePool`] can stay
-/// object-safe (and usable as `Box<dyn DatabasePool>`). The ergonomic
+/// dyn-compatible (and usable as `Box<dyn DatabasePool>`). The ergonomic
 /// [`DatabasePoolExt::run_interaction`] handles the boxing and downcasts the
 /// result back to `R` for the caller.
 ///
@@ -37,7 +37,7 @@ pub type ErasedInteraction =
     Box<dyn for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, ErasedResult> + Send>;
 
 /// The type-erased result of an [`ErasedInteraction`]: the concrete `R` boxed up
-/// as `Box<dyn Any + Send>` so it can pass back through the object-safe
+/// as `Box<dyn Any + Send>` so it can pass back through the dyn-compatible
 /// [`DatabasePool::run_interaction_erased`].
 pub type ErasedResult = anyhow::Result<Box<dyn Any + Send>>;
 
@@ -48,7 +48,7 @@ pub type ErasedResult = anyhow::Result<Box<dyn Any + Send>>;
 /// [`python_db_pool`]) or a native `tokio-postgres` pool (in `synapse-rust-apps`,
 /// see [`rust_db_pool`]).
 ///
-/// To keep the trait object-safe, the only required method is the type-erased
+/// To keep the trait dyn-compatible, the only required method is the type-erased
 /// [`run_interaction_erased`](Self::run_interaction_erased); callers should
 /// prefer the ergonomic, generic
 /// [`run_interaction`](DatabasePoolExt::run_interaction).
@@ -125,7 +125,7 @@ pub trait DatabasePoolExt: DatabasePool {
             + 'static,
     {
         // Erase the concrete return type `R` into `Box<dyn Any>` so we can call
-        // through the object-safe `run_interaction_erased`.
+        // through the dyn-compatible `run_interaction_erased`.
         let erased: ErasedInteraction = Box::new(move |txn| {
             let fut = func(txn);
             async move { Ok(Box::new(fut.await?) as Box<dyn Any + Send>) }.boxed()
