@@ -350,13 +350,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=4,
+                    stream_id=3,
                     user_id="@millie:test",
                     action="joined_room",
                     field_name=None,
                 ),
                 ProfileUpdate(
-                    stream_id=5,
+                    stream_id=4,
                     user_id=self.frank.to_string(),
                     action="update",
                     field_name="m.status",
@@ -375,7 +375,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=5,
+                    stream_id=4,
                     user_id=self.frank.to_string(),
                     action="update",
                     field_name="m.status",
@@ -394,13 +394,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=3,
+                    stream_id=2,
                     user_id="@roger:test",
                     action="joined_room",
                     field_name=None,
                 ),
                 ProfileUpdate(
-                    stream_id=4,
+                    stream_id=3,
                     user_id="@millie:test",
                     action="joined_room",
                     field_name=None,

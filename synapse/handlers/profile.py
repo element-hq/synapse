@@ -443,11 +443,6 @@ class ProfileHandler:
         If that is the case,
         """
         user_id_str = user_id.to_string()
-        stream_id = await self.store.add_profile_updates(
-            user_id=user_id,
-            action=ProfileUpdateAction.LEFT_ROOM.value,
-            updated_fields=None,
-        )
 
         users_in_left_room = set(await self.store.get_local_users_in_room(room_id))
         users_in_left_room.discard(user_id_str)
@@ -460,6 +455,12 @@ class ProfileHandler:
 
         users_to_update = users_in_left_room - users_still_sharing_rooms
         if users_to_update:
+            stream_id = await self.store.add_profile_updates(
+                user_id=user_id,
+                action=ProfileUpdateAction.LEFT_ROOM.value,
+                updated_fields=None,
+            )
+
             await self.store.track_profile_updates_per_user(
                 stream_id=stream_id,
                 user_ids=users_to_update,
@@ -479,22 +480,22 @@ class ProfileHandler:
         If that is the case,
         """
         user_id_str = user_id.to_string()
-        stream_id = await self.store.add_profile_updates(
-            user_id=user_id,
-            action=ProfileUpdateAction.JOINED_ROOM.value,
-            updated_fields=None,
-        )
 
         users_in_room = set(await self.store.get_local_users_in_room(room_id))
         users_in_room.discard(user_id_str)
         if not users_in_room:
             return
 
-        if users_in_room:
-            await self.store.track_profile_updates_per_user(
-                stream_id=stream_id,
-                user_ids=users_in_room,
-            )
+        stream_id = await self.store.add_profile_updates(
+            user_id=user_id,
+            action=ProfileUpdateAction.JOINED_ROOM.value,
+            updated_fields=None,
+        )
+
+        await self.store.track_profile_updates_per_user(
+            stream_id=stream_id,
+            user_ids=users_in_room,
+        )
 
     async def delete_profile_upon_deactivation(
         self,
