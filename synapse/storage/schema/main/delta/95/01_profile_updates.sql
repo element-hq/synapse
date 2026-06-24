@@ -27,12 +27,14 @@ CREATE TABLE profile_updates (
   -- This is only required if "action" is "update"
   field_name TEXT NULL,
 
-  -- Unix timestamp for debugging purposes
+  -- Unix timestamp. Used to determine when to cull rows (to prevent the table
+  -- from growing indefinitely).
   inserted_ts BIGINT NOT NULL
 );
 
 CREATE INDEX profile_updates_by_user ON profile_updates (user_id, stream_id);
 CREATE INDEX profile_updates_by_field ON profile_updates (field_name, stream_id);
+CREATE INDEX profile_updates_inserted_ts ON profile_updates (inserted_ts);
 
 -- Track which local users should receive each profile update.
 CREATE TABLE profile_updates_per_user (
@@ -47,3 +49,4 @@ CREATE TABLE profile_updates_per_user (
 );
 
 CREATE INDEX profile_updates_per_user_by_user_stream ON profile_updates_per_user (user_id, stream_id);
+CREATE INDEX profile_updates_per_user_inserted_ts ON profile_updates_per_user (inserted_ts);
