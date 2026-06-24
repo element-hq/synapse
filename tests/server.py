@@ -334,9 +334,12 @@ class FakeChannel:
             # could be things spawned on the Twisted reactor threadpool or Tokio thread
             # pool (async Rust code).
             #
-            # We could also use `time.sleep(0)` here but this is more precise
-            os.sched_yield()
-            # time.sleep(0)
+            # Note: Since we're waiting real-time (`timeout` duration), the tests also
+            # pass with `time.sleep(0)` commented out because Python has a default
+            # thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`). We still want this here as we're able
+            # to preempt and cause the thread context swtich to happen faster.
+            time.sleep(0)
 
             # Advance the Twisted reactor and run any scheduled callbacks
             #
