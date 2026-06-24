@@ -28,8 +28,9 @@
 use std::future::Future;
 use std::pin::pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::task::Poll;
 
+use anyhow::Context;
 use pyo3::{
     exceptions::{PyRuntimeError, PyTypeError},
     intern,
@@ -88,11 +89,11 @@ impl DatabasePool for PythonDatabasePoolWrapper {
         name: &'static str,
         func: ErasedInteraction,
     ) -> ErasedResult {
-        // `runInteraction` calls `func` with a `LoggingTransaction` on a DB
-        // thread and expects a synchronous return value. Since we can't
-        // round-trip an arbitrary Rust result back out through Python, the
-        // callback stashes the result here and we pick it up once the deferred
-        // fires.
+        // `runInteraction` calls `func` with a `LoggingTransaction` on a DB thread and
+        // expects a synchronous return value. Since we can't round-trip an arbitrary
+        // Rust result back out through Python (remember, `func` returns an
+        // `ErasedResult`, not a `PyAny`), the callback stashes the result here and we
+        // pick it up once the deferred fires.
         //
         // Note the callback may run more than once (`runInteraction` retries on
         // serialization/deadlock errors), so we only trust this slot once the
@@ -160,24 +161,30 @@ impl DatabasePool for PythonDatabasePoolWrapper {
             .map_err(anyhow::Error::from)?;
 
         // Use `runInteraction` directly
-        let outcome = run_python_awaitable(reactor, move |py| {
+        let run_interaction_outcome = run_python_awaitable(reactor, move |py| {
             database_pool_py
                 .bind(py)
                 .call_method1(intern!(py, "runInteraction"), (name, callback.bind(py)))
         })
         .await;
 
-        // Prefer the result captured by the callback (it carries the Rust
-        // context). If the slot is empty, `runInteraction` failed before ever
-        // invoking the callback (e.g. it couldn't acquire a connection), so
-        // surface the deferred's outcome instead.
-        let captured = result_slot.lock().unwrap().take();
-        match captured {
-            Some(result) => result,
-            None => match outcome {
-                Ok(_) => Err(anyhow::anyhow!("run_interaction produced no result")),
-                Err(py_err) => Err(anyhow::Error::from(py_err)),
+        // Return the result we captured based on if `runInteraction` was successful
+        let captured_result = result_slot.lock().unwrap().take();
+        match run_interaction_outcome {
+            // Only return the `captured_result` if `runInteraction` succeeded. We don't
+            // want to accidentally return a successful result when the transaction
+            // actually failed to commit.
+            Ok(_) => match captured_result {
+                Some(result) => result,
+                // This is unexpected as we either expect `runInteraction` to have
+                // completed successfully and run the provided `callback` which runs the
+                // `func` and we capture a result or it fails.
+                None => Err(anyhow::anyhow!(
+                    "Expected to capture result after running `runInteraction` and seeing it succeed (but saw nothing). \
+                    This is a Synapse programming error."
+                )),
             },
+            Err(py_err) => Err(anyhow::Error::from(py_err)).with_context(|| format!("run_interaction(name={}) failed", name)),
         }
     }
 }
@@ -191,7 +198,7 @@ impl DatabasePool for PythonDatabasePoolWrapper {
 fn poll_once<F: Future>(future: F) -> Poll<F::Output> {
     let mut future = pin!(future);
     let waker = futures::task::noop_waker();
-    let mut cx = Context::from_waker(&waker);
+    let mut cx = std::task::Context::from_waker(&waker);
     future.as_mut().poll(&mut cx)
 }
 
