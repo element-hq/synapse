@@ -16,7 +16,7 @@
 use futures::FutureExt;
 use serde::Serialize;
 
-use crate::storage::db::{DatabasePool, DatabasePoolExt, RowExt};
+use crate::storage::db::{DatabasePool, DatabasePoolExt, DbRowExt};
 
 /// Currently supported per-user features
 #[derive(Serialize, Debug)]

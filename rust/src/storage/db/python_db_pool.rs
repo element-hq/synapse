@@ -31,7 +31,7 @@ use pyo3::{
 
 use crate::deferred::run_python_awaitable;
 use crate::storage::db::{
-    DatabasePool, DbValue, ErasedInteraction, ErasedResult, Row, Transaction,
+    DatabasePool, DbRow, DbValue, ErasedInteraction, ErasedResult, Transaction,
 };
 
 /// The database engines we support in the Python side of Synapse
@@ -268,8 +268,8 @@ impl LoggingTransactionWrapper {
 
 #[async_trait::async_trait]
 impl Transaction for LoggingTransactionWrapper {
-    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
-        Python::attach(|py| -> PyResult<Vec<Row>> {
+    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<DbRow>, anyhow::Error> {
+        Python::attach(|py| -> PyResult<Vec<DbRow>> {
             // Convert the Rust `&[&str]` of SQL parameters into a Python sequence
             // so it can be passed through to the Python-side `execute`. Note that
             // `LoggingTransaction.execute` converts `?` placeholders into the
@@ -285,10 +285,10 @@ impl Transaction for LoggingTransactionWrapper {
                 .bind(py)
                 .call_method0(intern!(py, "fetchall"))?;
 
-            let mut rows: Vec<Row> = Vec::new();
+            let mut rows: Vec<DbRow> = Vec::new();
             for row_py in rows_py.try_iter()? {
                 let row_py = row_py?;
-                let mut row: Row = Vec::new();
+                let mut row: DbRow = Vec::new();
                 for cell in row_py.try_iter()? {
                     row.push(py_cell_to_value(&cell?)?);
                 }

@@ -143,10 +143,10 @@ impl<T: DatabasePool + ?Sized> DatabasePoolExt for T {}
 #[async_trait::async_trait]
 pub trait Transaction: Send {
     // `async` as this  is representing a round-trip between the app and database
-    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error>;
+    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<DbRow>, anyhow::Error>;
 }
 
-/// A single backend-agnostic value within a [`Row`].
+/// A single backend-agnostic value within a [`DbRow`].
 ///
 /// Each pool maps the values its database driver hands back into this common
 /// set, so callers can work with one representation regardless of engine.
@@ -164,22 +164,22 @@ pub enum DbValue {
 ///
 /// Each pool converts the cells its database driver hands back into the
 /// engine-agnostic [`DbValue`] representation, so a row is simply a list of them.
-/// Values are pulled out by their numeric index with [`RowExt::try_get`].
-pub type Row = Vec<DbValue>;
+/// Values are pulled out by their numeric index with [`DbRowExt::try_get`].
+pub type DbRow = Vec<DbValue>;
 
-/// Extension methods for reading typed values out of a [`Row`].
+/// Extension methods for reading typed values out of a [`DbRow`].
 ///
-/// Modelled after [`tokio_postgres::Row`]'s `try_get`: [`try_get`](Self::try_get)
+/// Based on [`tokio_postgres::Row`]'s `try_get`: [`try_get`](Self::try_get)
 /// converts the [`DbValue`] at a given index into the requested type via
 /// [`FromDbValue`] (our analogue of `tokio-postgres`'s `FromSql`).
-pub trait RowExt {
+pub trait DbRowExt {
     /// Deserializes a value from the row, specified by its numeric index,
     /// returning an error if the index is out of bounds or the value cannot be
     /// converted into `T`.
     fn try_get<T: FromDbValue>(&self, index: usize) -> Result<T, anyhow::Error>;
 }
 
-impl RowExt for Row {
+impl DbRowExt for DbRow {
     fn try_get<T: FromDbValue>(&self, index: usize) -> Result<T, anyhow::Error> {
         let value = self.get(index).cloned().ok_or_else(|| {
             anyhow::anyhow!(

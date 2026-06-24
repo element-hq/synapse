@@ -22,7 +22,7 @@ use bb8_postgres::PostgresConnectionManager;
 use postgres_native_tls::MakeTlsConnector;
 
 use crate::storage::db::{
-    DatabasePool, DbValue, ErasedInteraction, ErasedResult, Row, Transaction,
+    DatabasePool, DbRow, DbValue, ErasedInteraction, ErasedResult, Transaction,
 };
 
 /// Native Rust database access backed by `tokio-postgres` (for use in synapse-rust-apps)
@@ -95,7 +95,7 @@ struct TokioPostgresTransaction<'a> {
 
 #[async_trait::async_trait]
 impl Transaction for TokioPostgresTransaction<'_> {
-    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<Row>, anyhow::Error> {
+    async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<DbRow>, anyhow::Error> {
         // Synapse SQL uses `?` placeholders; `tokio-postgres` uses `$1`, `$2`, ...
         let sql = convert_param_style(sql);
 
@@ -112,7 +112,7 @@ impl Transaction for TokioPostgresTransaction<'_> {
 }
 
 /// Convert a native [`tokio_postgres::Row`] into our engine-agnostic [`Row`].
-fn tokio_row_to_row(row: &tokio_postgres::Row) -> Result<Row, anyhow::Error> {
+fn tokio_row_to_row(row: &tokio_postgres::Row) -> Result<DbRow, anyhow::Error> {
     (0..row.len())
         .map(|index| tokio_cell_to_value(row, index))
         .collect()
