@@ -22,7 +22,7 @@ use bb8_postgres::PostgresConnectionManager;
 use futures::future::BoxFuture;
 use postgres_native_tls::MakeTlsConnector;
 
-use crate::storage::db::{DatabasePool, Row, Transaction, Value};
+use crate::storage::db::{DatabasePool, DbValue, Row, Transaction};
 
 /// Native Rust database access backed by `tokio-postgres` (for use in synapse-rust-apps)
 pub struct RustDatabasePool {
@@ -119,25 +119,25 @@ fn tokio_row_to_row(row: &tokio_postgres::Row) -> Result<Row, anyhow::Error> {
         .collect()
 }
 
-/// Convert a single cell of a [`tokio_postgres::Row`] into a [`Value`].
+/// Convert a single cell of a [`tokio_postgres::Row`] into a [`DbValue`].
 ///
 /// Dispatch on the column's Postgres type, leaning on `tokio-postgres`'s own
 /// `FromSql` impls to read the cell. Everything is read as `Option<_>` so a SQL
-/// `NULL` becomes `Value::Null`.
-fn tokio_cell_to_value(row: &tokio_postgres::Row, index: usize) -> Result<Value, anyhow::Error> {
+/// `NULL` becomes `DbValue::Null`.
+fn tokio_cell_to_value(row: &tokio_postgres::Row, index: usize) -> Result<DbValue, anyhow::Error> {
     if let Ok(value) = row.try_get::<_, Option<bool>>(index) {
-        Ok(value.map_or(Value::Null, Value::Bool))
+        Ok(value.map_or(DbValue::Null, DbValue::Bool))
     } else if let Ok(value) = row.try_get::<_, Option<i64>>(index) {
-        Ok(value.map_or(Value::Null, Value::Int))
+        Ok(value.map_or(DbValue::Null, DbValue::Int))
     } else if let Ok(value) = row.try_get::<_, Option<f64>>(index) {
-        Ok(value.map_or(Value::Null, Value::Float))
+        Ok(value.map_or(DbValue::Null, DbValue::Float))
     } else if let Ok(value) = row.try_get::<_, Option<String>>(index) {
-        Ok(value.map_or(Value::Null, Value::Text))
+        Ok(value.map_or(DbValue::Null, DbValue::Text))
     } else {
         let ty = row.columns()[index].type_();
         anyhow::bail!(
             "Unsupported `tokio-postgres` type {} encountered when trying to convert it \
-            to our generic database `Value` type. You probably just need to implement it in `tokio_cell_to_value(...)`.",
+            to our generic database `DbValue` type. You probably just need to implement it in `tokio_cell_to_value(...)`.",
             ty
         )
     }

@@ -31,7 +31,7 @@ use pyo3::{
 };
 
 use crate::deferred::run_python_awaitable;
-use crate::storage::db::{DatabasePool, Row, Transaction, Value};
+use crate::storage::db::{DatabasePool, DbValue, Row, Transaction};
 
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
@@ -276,7 +276,7 @@ impl Transaction for LoggingTransactionWrapper {
             self.execute(py, sql, args.as_any())?;
 
             // Pull the rows back out, converting each cell from its Python type
-            // into the engine-agnostic `Value` representation as we go.
+            // into the engine-agnostic `DbValue` representation as we go.
             let rows_py = self
                 .logging_transaction_py
                 .bind(py)
@@ -298,23 +298,23 @@ impl Transaction for LoggingTransactionWrapper {
     }
 }
 
-/// Convert a single cell from a Python row into a backend-agnostic [`Value`] by
+/// Convert a single cell from a Python row into a backend-agnostic [`DbValue`] by
 /// inspecting its Python type (the pyo3 equivalent of `isinstance` checks).
-fn py_cell_to_value(cell: &Bound<'_, PyAny>) -> PyResult<Value> {
+fn py_cell_to_value(cell: &Bound<'_, PyAny>) -> PyResult<DbValue> {
     // `None` maps to SQL `NULL`.
     if cell.is_none() {
-        return Ok(Value::Null);
+        return Ok(DbValue::Null);
     }
 
     // A `bool` *is* an `int` in SQLite, so ensure we try `bool` first.
     if let Ok(b) = cell.cast::<PyBool>() {
-        Ok(Value::Bool(b.extract()?))
+        Ok(DbValue::Bool(b.extract()?))
     } else if let Ok(i) = cell.cast::<PyInt>() {
-        Ok(Value::Int(i.extract()?))
+        Ok(DbValue::Int(i.extract()?))
     } else if let Ok(f) = cell.cast::<PyFloat>() {
-        Ok(Value::Float(f.extract()?))
+        Ok(DbValue::Float(f.extract()?))
     } else if let Ok(s) = cell.cast::<PyString>() {
-        Ok(Value::Text(s.to_string()))
+        Ok(DbValue::Text(s.to_string()))
     } else {
         Err(PyTypeError::new_err(format!(
             "unsupported column type {} returned from the database",

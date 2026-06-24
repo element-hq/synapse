@@ -95,7 +95,7 @@ pub trait Transaction: Send {
 /// Each pool maps the values its database driver hands back into this common
 /// set, so callers can work with one representation regardless of engine.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value {
+pub enum DbValue {
     /// A SQL `NULL`.
     Null,
     Bool(bool),
@@ -107,24 +107,24 @@ pub enum Value {
 /// A row of data returned from the database by a query.
 ///
 /// Each pool converts the cells its database driver hands back into the
-/// engine-agnostic [`Value`] representation, so a row is simply a list of them.
+/// engine-agnostic [`DbValue`] representation, so a row is simply a list of them.
 /// Values are pulled out by their numeric index with [`RowExt::try_get`].
-pub type Row = Vec<Value>;
+pub type Row = Vec<DbValue>;
 
 /// Extension methods for reading typed values out of a [`Row`].
 ///
 /// Modelled after [`tokio_postgres::Row`]'s `try_get`: [`try_get`](Self::try_get)
-/// converts the [`Value`] at a given index into the requested type via
-/// [`FromValue`] (our analogue of `tokio-postgres`'s `FromSql`).
+/// converts the [`DbValue`] at a given index into the requested type via
+/// [`FromDbValue`] (our analogue of `tokio-postgres`'s `FromSql`).
 pub trait RowExt {
     /// Deserializes a value from the row, specified by its numeric index,
     /// returning an error if the index is out of bounds or the value cannot be
     /// converted into `T`.
-    fn try_get<T: FromValue>(&self, index: usize) -> Result<T, anyhow::Error>;
+    fn try_get<T: FromDbValue>(&self, index: usize) -> Result<T, anyhow::Error>;
 }
 
 impl RowExt for Row {
-    fn try_get<T: FromValue>(&self, index: usize) -> Result<T, anyhow::Error> {
+    fn try_get<T: FromDbValue>(&self, index: usize) -> Result<T, anyhow::Error> {
         let value = self.get(index).cloned().ok_or_else(|| {
             anyhow::anyhow!(
                 "tried to get column {index} but the row only has {} column(s)",
@@ -136,56 +136,56 @@ impl RowExt for Row {
     }
 }
 
-/// Converts a backend-agnostic [`Value`] into a concrete Rust type, analogous to
+/// Converts a backend-agnostic [`DbValue`] into a concrete Rust type, analogous to
 /// `tokio-postgres`'s `FromSql`.
-pub trait FromValue: Sized {
-    fn from_value(value: Value) -> Result<Self, anyhow::Error>;
+pub trait FromDbValue: Sized {
+    fn from_value(value: DbValue) -> Result<Self, anyhow::Error>;
 }
 
-impl FromValue for bool {
-    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+impl FromDbValue for bool {
+    fn from_value(value: DbValue) -> Result<Self, anyhow::Error> {
         match value {
-            Value::Bool(b) => Ok(b),
+            DbValue::Bool(b) => Ok(b),
             // SQLite has no native boolean type and stores them as integers.
-            Value::Int(i) => Ok(i != 0),
+            DbValue::Int(i) => Ok(i != 0),
             other => anyhow::bail!("cannot read {other:?} as bool"),
         }
     }
 }
 
-impl FromValue for i64 {
-    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+impl FromDbValue for i64 {
+    fn from_value(value: DbValue) -> Result<Self, anyhow::Error> {
         match value {
-            Value::Int(i) => Ok(i),
-            Value::Bool(b) => Ok(b as i64),
+            DbValue::Int(i) => Ok(i),
+            DbValue::Bool(b) => Ok(b as i64),
             other => anyhow::bail!("cannot read {other:?} as i64"),
         }
     }
 }
 
-impl FromValue for f64 {
-    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+impl FromDbValue for f64 {
+    fn from_value(value: DbValue) -> Result<Self, anyhow::Error> {
         match value {
-            Value::Float(f) => Ok(f),
-            Value::Int(i) => Ok(i as f64),
+            DbValue::Float(f) => Ok(f),
+            DbValue::Int(i) => Ok(i as f64),
             other => anyhow::bail!("cannot read {other:?} as f64"),
         }
     }
 }
 
-impl FromValue for String {
-    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+impl FromDbValue for String {
+    fn from_value(value: DbValue) -> Result<Self, anyhow::Error> {
         match value {
-            Value::Text(s) => Ok(s),
+            DbValue::Text(s) => Ok(s),
             other => anyhow::bail!("cannot read {other:?} as String"),
         }
     }
 }
 
-impl<T: FromValue> FromValue for Option<T> {
-    fn from_value(value: Value) -> Result<Self, anyhow::Error> {
+impl<T: FromDbValue> FromDbValue for Option<T> {
+    fn from_value(value: DbValue) -> Result<Self, anyhow::Error> {
         match value {
-            Value::Null => Ok(None),
+            DbValue::Null => Ok(None),
             other => Ok(Some(T::from_value(other)?)),
         }
     }
