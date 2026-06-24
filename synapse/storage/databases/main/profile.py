@@ -672,40 +672,6 @@ class ProfileWorkerStore(SQLBaseStore):
             _track_profile_updates_per_user_txn,
         )
 
-    async def get_profile_updates_per_user_for_user(
-        self, *, from_id: int, to_id: int, user_id: str
-    ) -> list[int]:
-        """
-        Get profile updates per user stream ID's for a particular user.
-
-        Args:
-            from_id: The starting stream ID (exclusive)
-            to_id: The ending stream ID (inclusive)
-            user_id: The full user ID to filter on
-
-        Returns:
-            List of stream ID's.
-        """
-
-        def _get_profile_updates_per_user_for_user_txn(
-            txn: LoggingTransaction,
-        ) -> list[int]:
-            sql = """
-            SELECT
-                stream_id
-            FROM profile_updates_per_user
-            WHERE
-                ? < stream_id AND stream_id <= ? AND user_id = ?
-            """
-            txn.execute(sql, (from_id, to_id, user_id))
-            rows = cast(list[tuple[int]], txn.fetchall())
-            return [row[0] for row in rows]
-
-        return await self.db_pool.runInteraction(
-            "get_profile_updates_per_user_for_user",
-            _get_profile_updates_per_user_for_user_txn,
-        )
-
     async def create_profile(self, user_id: UserID) -> None:
         """
         Create a blank profile for a user.

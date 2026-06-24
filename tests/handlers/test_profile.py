@@ -339,29 +339,74 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             )
         )
         per_user_updates = self.get_success(
-            self.store.get_profile_updates_per_user_for_user(
-                from_id=1,
-                to_id=2,
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
                 user_id="@roger:test",
+                field_names={"m.status"},
             )
         )
-        self.assertEqual(per_user_updates, [2])
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id="@millie:test",
+                    action="joined_room",
+                    field_name=None,
+                ),
+                ProfileUpdate(
+                    stream_id=5,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    field_name="m.status",
+                ),
+            ],
+        )
         per_user_updates = self.get_success(
-            self.store.get_profile_updates_per_user_for_user(
-                from_id=1,
-                to_id=2,
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
                 user_id="@millie:test",
+                field_names={"m.status"},
             )
         )
-        self.assertEqual(per_user_updates, [2])
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=5,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    field_name="m.status",
+                ),
+            ],
+        )
         per_user_updates = self.get_success(
-            self.store.get_profile_updates_per_user_for_user(
-                from_id=1,
-                to_id=2,
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
                 user_id=self.frank.to_string(),
+                field_names={"m.status"},
             )
         )
-        self.assertEqual(per_user_updates, [])
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=3,
+                    user_id="@roger:test",
+                    action="joined_room",
+                    field_name=None,
+                ),
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id="@millie:test",
+                    action="joined_room",
+                    field_name=None,
+                ),
+            ],
+        )
 
     @parameterized.expand(
         [
