@@ -142,6 +142,11 @@ impl<T: DatabasePool + ?Sized> DatabasePoolExt for T {}
 /// Based on the ergonomics of  [`tokio_postgres::Transaction`]
 #[async_trait::async_trait]
 pub trait Transaction: Send {
+    /// Run a database query, returning a list of resulting rows.
+    ///
+    /// We expect the `sql` query should use `?` placeholders for the `args`. Downstream
+    /// implementations should string-replace `?` as necessary.
+    //
     // `async` as this  is representing a round-trip between the app and database
     async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<DbRow>, anyhow::Error>;
 }

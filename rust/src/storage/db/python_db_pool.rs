@@ -116,11 +116,12 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                         let txn_py = args.get_item(0)?;
                         let mut txn = txn_py.extract::<LoggingTransactionWrapper>()?;
 
-                        // Since we expect people to only call `.await` on [`Transaction`]
-                        // related methods (mentioned in the [`Transaction`] docstring) AND
-                        // because there is no async work to suspend on in the Python
-                        // [`Transaction`] synchronously, we can get away with polling once
-                        // as it should immediately resolve to [`Poll::Ready`]. Getting
+                        // Since we expect people to only call `.await` on
+                        // [`Transaction`] related methods (mentioned in the
+                        // [`Transaction`] docstring) AND because there is no actual
+                        // async work to suspend on in the Python [`Transaction`]
+                        // (resolves synchonously), we can get away with polling once as
+                        // it should immediately resolve to [`Poll::Ready`]. Getting
                         // [`Poll::Pending`] would be considered a programming error.
                         //
                         // Alternatively, we could just use `futures::executor::block_on`
@@ -183,10 +184,9 @@ impl DatabasePool for PythonDatabasePoolWrapper {
 
 /// Poll a future exactly once.
 ///
-/// Returns [`Poll::Ready`] if the future resolves immediately, or
-/// [`Poll::Pending`] if it would need to suspend. We use this where a future is
-/// expected to never genuinely suspend (e.g. Synapse's synchronous DB query
-/// path) and want to enforce that, rather than driving it to completion with a
+/// Returns [`Poll::Ready`] if the future resolves immediately, or [`Poll::Pending`] if
+/// it would need to suspend. We use this where a future is expected to never genuinely
+/// suspend and want to enforce/check that, rather than driving it to completion with a
 /// blocking executor like `futures::executor::block_on`.
 fn poll_once<F: Future>(future: F) -> Poll<F::Output> {
     let mut future = pin!(future);
@@ -208,6 +208,7 @@ fn anyhow_to_pyerr(err: &anyhow::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{err:#}"))
 }
 
+/// Given a Python `LoggingTransaction`, figures out the database engine that backs it
 fn detect_engine(txn_py: &Bound<'_, PyAny>) -> PyResult<DatabaseEngine> {
     let name = txn_py
         .getattr("database_engine")
@@ -279,10 +280,10 @@ impl Transaction for LoggingTransactionWrapper {
     async fn query(&mut self, sql: &str, args: &[&str]) -> Result<Vec<DbRow>, anyhow::Error> {
         Python::attach(|py| -> PyResult<Vec<DbRow>> {
             // Convert the Rust `&[&str]` of SQL parameters into a Python sequence
-            // so it can be passed through to the Python-side `execute`. Note that
-            // `LoggingTransaction.execute` converts `?` placeholders into the
-            // appropriate param style for the underlying engine, so we pass
-            // `?`-style SQL.
+            // so it can be passed through to the Python-side `execute`.
+            //
+            // We don't need to do anything to the SQL as the `?`-style arg placeholders
+            // already align with what `LoggingTransaction` expects.
             let args = PyList::new(py, args)?;
             self.execute(py, sql, args.as_any())?;
 
