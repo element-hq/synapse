@@ -25,28 +25,25 @@ pub mod rust_db_pool;
 /// A type-erased `run_interaction` callback.
 ///
 /// This is the dyn-compatible form of the `func` passed to
-/// [`DatabasePoolExt::run_interaction`]: the concrete result type `R` is boxed up
-/// as `Box<dyn Any + Send>` (see [`ErasedResult`]) so [`DatabasePool`] can stay
-/// dyn-compatible (and usable as `Box<dyn DatabasePool>`). The ergonomic
-/// [`DatabasePoolExt::run_interaction`] handles the boxing and downcasts the
-/// result back to `R` for the caller.
+/// [`DatabasePoolExt::run_interaction`].
+///
+/// The ergonomic [`DatabasePoolExt::run_interaction`] handles the boxing and downcasts
+/// the result back to `R` for the caller.
 ///
 /// It may be invoked multiple times under certain failure modes (serialization
 /// and deadlock errors), so it is `Fn` rather than `FnOnce`.
 pub type ErasedInteraction =
     Box<dyn for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, ErasedResult> + Send>;
 
-/// The type-erased result of an [`ErasedInteraction`]: the concrete `R` boxed up
-/// as `Box<dyn Any + Send>` so it can pass back through the dyn-compatible
+/// The type-erased *result* of an [`ErasedInteraction`]
 /// [`DatabasePool::run_interaction_erased`].
 pub type ErasedResult = anyhow::Result<Box<dyn Any + Send>>;
 
 /// A database connection pool.
 ///
-/// Held behind a trait object (e.g. `Box<dyn DatabasePool>`) so a single `Store`
-/// can run against either the Python-backed pool (in Synapse, see
-/// [`python_db_pool`]) or a native `tokio-postgres` pool (in `synapse-rust-apps`,
-/// see [`rust_db_pool`]).
+/// Held behind a trait object (e.g. `Box<dyn DatabasePool>`) as it can be backed by
+/// either the Python-backed pool (in Synapse, see [`python_db_pool`]) or a Rust native
+/// `tokio-postgres` pool (expected to be used in `synapse-rust-apps`).
 ///
 /// To keep the trait dyn-compatible, we have to specify a type-erased
 /// [`run_interaction_erased`](Self::run_interaction_erased) version; callers should
@@ -69,9 +66,6 @@ pub trait DatabasePool: Send + Sync {
 }
 
 /// Ergonomic, strongly-typed access to a [`DatabasePool`].
-///
-/// Blanket-implemented for every `T: DatabasePool + ?Sized`, so it is available
-/// both on concrete pools and on `dyn DatabasePool` trait objects.
 pub trait DatabasePoolExt: DatabasePool {
     /// Starts a transaction on the database and runs the given function,
     /// returning its result.
@@ -139,12 +133,13 @@ pub trait DatabasePoolExt: DatabasePool {
     }
 }
 
-// Make [`run_interaction`](DatabasePoolExt::run_interaction) available on all
-// `DatabasePool`
+/// Blanket-implemented for every [`DatabasePool`] so
+/// [`run_interaction`](DatabasePoolExt::run_interaction) is always available
 impl<T: DatabasePool + ?Sized> DatabasePoolExt for T {}
 
-/// A [`tokio_postgres::Transaction`] looking thing that we can use on the Rust side to
-/// interact with the database
+/// A transaction to interact with the database
+///
+/// Based on the ergonomics of  [`tokio_postgres::Transaction`]
 #[async_trait::async_trait]
 pub trait Transaction: Send {
     // `async` as this  is representing a round-trip between the app and database
