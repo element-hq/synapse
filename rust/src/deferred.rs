@@ -333,7 +333,8 @@ fn make_deferred_yieldable<'py>(
 pub fn register_module(py: Python<'_>, _m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Make sure we fail early if we can't load some modules
     defer(py)?;
-    logging_context_module(py)?;
+    // We can't check this here because of circular import issues
+    // logging_context_module(py)?;
 
     Ok(())
 }
