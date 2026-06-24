@@ -45,7 +45,7 @@ dependencies = [
     "Twisted[tls]>=21.2.0",
     "treq>=21.5.0",
     # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
-    # pyOpenSSL 16.2.0 fixes compatibility with OpenSSL 1.1.0. 
+    # pyOpenSSL 16.2.0 fixes compatibility with OpenSSL 1.1.0.
     "pyOpenSSL>=16.2.0",
     "PyYAML>=5.3",
     "pyasn1>=0.1.9",
@@ -127,6 +127,18 @@ postgres = [
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
 ]
+# The "pure python" implementation of psycopg(v3+) does not play nicely with the
+# complement docker image because of differences in the required debian package `libpq`.
+# Using the "binary" extra to inject that correct lib prevented the debian packaging of
+# Synapse to fail(see test workflow 'poetry_lockfile' where all packages must have
+# sdists and not just wheels). The "c" extra is a source distribution, but requires a
+# compilation step during build.
+#
+# v3.2.8 was selected here as minimum to support the libpq5 shipped with debian
+# bookworm. This libpq5 includes support for postgres 18 and psycopg will fail to build
+# below this selected version.
+# See: https://github.com/psycopg/psycopg/pull/1084
+psycopg = ["psycopg[c]>=3.2.8"]
 saml2 = [
     "pysaml2>=4.5.0",
 
@@ -176,6 +188,8 @@ all = [
     "psycopg2>=2.8;platform_python_implementation != 'PyPy'",
     "psycopg2cffi>=2.8;platform_python_implementation == 'PyPy'",
     "psycopg2cffi-compat==1.1;platform_python_implementation == 'PyPy'",
+    # experimental psycopg for postgres
+    "psycopg[c]>=3.2.8",
     # saml2
     "pysaml2>=4.5.0",
     # oidc and jwt

@@ -160,7 +160,7 @@ main() {
   if [[ -z "$COMPLEMENT_DIR" ]]; then
     COMPLEMENT_REF=${COMPLEMENT_REF:-main}
     echo "COMPLEMENT_DIR not set. Fetching Complement checkout from ${COMPLEMENT_REF}..."
-    
+
     # Download the Complement checkout at the specified ref.
     wget -q https://github.com/matrix-org/complement/archive/${COMPLEMENT_REF}.tar.gz
 
@@ -263,7 +263,7 @@ main() {
       echo_if_github "::endgroup::"
 
     fi
-  
+
     echo "Docker images built."
   else
     echo "Skipping Docker image build as requested."
@@ -335,8 +335,12 @@ main() {
     export PASS_SYNAPSE_WORKER_TYPES="$WORKER_TYPES"
 
     # Workers can only use Postgres as a database.
-    export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
-
+    # A handy pattern for lower-casing all letters in a variable, `${variable,,}`
+    if [[ "${POSTGRES,,}" = "psycopg" ]]; then
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
+    else
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
+    fi
     # And provide some more configuration to complement.
 
     # It can take quite a while to spin up a worker-mode Synapse for the first
@@ -345,7 +349,10 @@ main() {
     export COMPLEMENT_SPAWN_HS_TIMEOUT_SECS=120
   else
     export PASS_SYNAPSE_COMPLEMENT_USE_WORKERS=
-    if [[ -n "$POSTGRES" ]]; then
+    # A handy pattern for lower-casing all letters in a variable, `${variable,,}`
+    if [[ "${POSTGRES,,}" = "psycopg" ]]; then
+      export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
+    elif [[ -n "$POSTGRES" ]]; then
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
     else
       export PASS_SYNAPSE_COMPLEMENT_DATABASE=sqlite
@@ -385,7 +392,7 @@ main() {
   # Print out the executed commands so it's more obvious what's happening at the end here.
   # Things are slightly ambiguous with the in-repo vs Complement tests.
   set -x
-  
+
   if [ -n "$use_in_repo_tests" ]; then
     # Run the suite of Complement tests in the `./complement` directory in this repo
     cd "./complement"

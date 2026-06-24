@@ -76,6 +76,12 @@ trial_postgres_tests = [
         "extras": "all",
     },
     {
+        "python-version": "3.10",
+        "database": "psycopg",
+        "postgres-version": "14",
+        "extras": "all",
+    },
+    {
         "python-version": "3.14",
         "database": "postgres",
         "postgres-version": "17",
