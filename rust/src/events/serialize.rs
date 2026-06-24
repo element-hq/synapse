@@ -101,6 +101,8 @@ pub enum EventFormat {
 pub struct SerializeEventConfig {
     /// Whether to apply the client event format transform (v1/v2/raw). When
     /// `false`, the federation-format PDU event is returned as-is.
+    ///
+    /// FIXME: Can we remove this and rely on [`Self::event_format`]?
     as_client_event: bool,
     /// Which client event format variant to apply (only used when
     /// `as_client_event` is `true`).
