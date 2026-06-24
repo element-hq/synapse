@@ -137,11 +137,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 /// metadata, rejection reason, and a reference to the room version that
 /// produced this event). See the module-level docs for the high-level
 /// design.
-///
-/// `Clone` is shallow (see [`FormattedEvent`]) and lets an `Event` be held by
-/// value, e.g. inside [`BundledAggregations`](crate::events::relations::BundledAggregations).
 #[pyclass(frozen, weakref, skip_from_py_object)]
-#[derive(Clone)]
 pub struct Event {
     /// The parsed event JSON.
     parsed_event: FormattedEvent,
@@ -391,6 +387,21 @@ impl Event {
             room_id: self.room_id.clone(),
         };
         Ok(new_event)
+    }
+
+    /// Returns a shallow copy of this object, sharing the mutable
+    /// `signatures`/`unsigned`/`internal_metadata` with the original. This
+    /// mimics the behaviour python references (which share the underlying
+    /// object).
+    pub fn shallow_copy(&self) -> Event {
+        Event {
+            parsed_event: self.parsed_event.shallow_copy(),
+            internal_metadata: self.internal_metadata.clone(),
+            room_version: self.room_version,
+            rejected_reason: self.rejected_reason.clone(),
+            event_id: self.event_id.clone(),
+            room_id: self.room_id.clone(),
+        }
     }
 
     /// If this event has the `msc4354_sticky` top-level field, returns a
