@@ -30,7 +30,7 @@ use pyo3::{
     types::{PyBool, PyCFunction, PyFloat, PyInt, PyList, PyString},
 };
 
-use crate::deferred::await_deferred;
+use crate::deferred::run_awaitable;
 use crate::storage::db::{DatabasePool, Row, Transaction, Value};
 
 /// The database engines we support in the Python side of Synapse
@@ -151,10 +151,10 @@ impl DatabasePool for PythonDatabasePoolWrapper {
         .map_err(anyhow::Error::from)?;
 
         // Await `runInteraction` directly. `runInteraction` offloads the actual
-        // DB work onto a thread itself, so we don't; `await_deferred` only has to
-        // start the coroutine on the reactor thread and bridge its deferred back
+        // DB work onto a thread itself, so we don't; `run_awaitable` only has to
+        // start the coroutine on the reactor thread and bridge its result back
         // into our `async` world.
-        let outcome = await_deferred(reactor, move |py| {
+        let outcome = run_awaitable(reactor, move |py| {
             database_pool_py
                 .bind(py)
                 .call_method1(intern!(py, "runInteraction"), (name, callback.bind(py)))

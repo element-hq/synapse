@@ -121,6 +121,12 @@ async fn build_versions_response(
         None => global_unstable_feature_map.msc3575,
     };
 
+    log::info!(
+        "asdf msc3881_enabled={:?} msc3575_enabled={:?}",
+        msc3881_enabled,
+        msc3575_enabled
+    );
+
     let unstable_feature_map = UnstableFeatureMap {
         msc3575: msc3575_enabled,
         msc3881: msc3881_enabled,
