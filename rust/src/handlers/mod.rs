@@ -21,7 +21,7 @@ use pyo3::{
     Bound, PyResult, Python,
 };
 
-use crate::config::SynapseConfig;
+use crate::config::SynapseHomeServerConfig;
 use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
 use crate::storage::store::Store;
 
@@ -37,7 +37,7 @@ impl RustHandlers {
     #[new]
     #[pyo3(signature = (homeserver))]
     pub fn py_new(py: Python<'_>, homeserver: &Bound<'_, PyAny>) -> PyResult<RustHandlers> {
-        let config: SynapseConfig = homeserver.getattr("config")?.extract()?;
+        let config: SynapseHomeServerConfig = homeserver.getattr("config")?.extract()?;
 
         // The Twisted reactor, used both to drive our Tokio runtime and to
         // marshal database work back onto the reactor thread.

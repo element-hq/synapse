@@ -19,7 +19,7 @@ use pyo3::prelude::*;
 use pythonize::{pythonize, PythonizeError};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{RoomCreationPreset, SynapseConfig};
+use crate::config::{RoomCreationPreset, SynapseHomeServerConfig};
 use crate::deferred::create_deferred;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
@@ -278,9 +278,11 @@ pub struct UnstableFeatureMap {
     e2ee_forced_trusted_private: bool,
 }
 
-/// Convert from [`SynapseConfig`] to the global defaults for unstable features that the
+/// Convert from [`SynapseHomeServerConfig`] to the global defaults for unstable features that the
 /// server supports [`UnstableFeatureMap`]
-pub fn synapse_config_to_global_unstable_feature_map(config: &SynapseConfig) -> UnstableFeatureMap {
+pub fn synapse_config_to_global_unstable_feature_map(
+    config: &SynapseHomeServerConfig,
+) -> UnstableFeatureMap {
     UnstableFeatureMap {
         msc2326: true,
         msc1756: true,

@@ -18,8 +18,15 @@ use std::str::FromStr;
 
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 
+/// A Rust-side view of Synapse's Python `HomeServerConfig`.
+///
+/// This only mirrors the subset of config that the Rust handlers need, rather
+/// than the whole thing. Thanks to `#[derive(FromPyObject)]`, each field is
+/// pulled directly off the corresponding attribute of the Python `config`
+/// object, so you can populate it in one shot with
+/// `homeserver.getattr("config")?.extract()?`.
 #[derive(FromPyObject, Clone)]
-pub struct SynapseConfig {
+pub struct SynapseHomeServerConfig {
     pub room: RoomConfig,
     pub auth: AuthConfig,
     pub server: ServerConfig,
