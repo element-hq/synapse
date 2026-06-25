@@ -324,9 +324,13 @@ class FakeChannel:
         while not self.is_finished():
             if (
                 # Exceeded the Twisted reactor time timeout
-                start_time_seconds + timeout.as_secs() < self._reactor.seconds()
+                #
+                # We use `>=` for the reactor time condition as it's possible we advance
+                # exactly the `timeout` amount and we don't want to get stuck in an
+                # infinite loop
+                self._reactor.seconds() >= start_time_seconds + timeout.as_secs()
                 # And exceeded the real-time timeout
-                and start_real_time_seconds + timeout.as_secs() < time.time()
+                and time.time() > start_real_time_seconds + timeout.as_secs()
             ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
@@ -346,7 +350,7 @@ class FakeChannel:
             # Don't advance the Twisted reactor clock further than the timeout duration
             # as someone should increase the timeout if they expect things to take
             # longer.
-            if start_time_seconds + timeout.as_secs() > self._reactor.seconds():
+            if self._reactor.seconds() < start_time_seconds + timeout.as_secs():
                 self._reactor.advance(0.1)
             else:
                 # But we want to still keep running whatever might be getting scheduled
