@@ -411,9 +411,22 @@ class ProfileFields:
 
 
 class ProfileUpdateAction(enum.Enum):
+    """
+    Enum representing the action of a row in the profile updates stream tables.
+    """
+
     JOINED_ROOM = "joined_room"
+    """
+    User joined a room.
+    """
     LEFT_ROOM = "left_room"
+    """
+    User left a room.
+    """
     UPDATE = "update"
+    """
+    User updated a profile field.
+    """
 
 
 class StickyEventField(TypedDict):
