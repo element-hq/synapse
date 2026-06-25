@@ -50,7 +50,8 @@ Phone home stats are sent every 3 hours
 
 COUNT_USERS_INTERVAL = Duration(minutes=5)
 """
-We recalculate synapse_non_deactivated_user_count every 5 minutes.
+We recalculate synapse_non_deactivated_user_count every 5 minutes, which allows
+for a reasonable level of accuracy without consuming too much database time.
 """
 
 # Contains the list of processes we will be monitoring
