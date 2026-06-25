@@ -2377,14 +2377,6 @@ class EventCreationHandler:
             )
             self.validator.validate_builder(builder)
 
-            # The room_id should only be None for creation events using msc4291
-            # rooms(version "12" and newer)
-            if not (
-                builder.room_version.msc4291_room_ids_as_hashes
-                and builder.type == EventTypes.Create
-            ):
-                assert builder.room_id is not None
-
         except SynapseError as e:
             raise Exception(
                 "Third party rules module created an invalid event: " + e.msg,
@@ -2420,20 +2412,19 @@ class EventCreationHandler:
             setattr(builder.internal_metadata, k, v)
 
         # Creation events using msc4291 rooms will not have a room_id, and will
-        # also not have prev_events nor prev_state_events.
-        # This was asserted above, so makes an acceptable sign that room_id can not be
-        # None here(which makes mypy happy) but if it is then the lists should be empty.
+        # also not have prev_events nor prev_state_events(below). This makes mypy happy.
         prev_event_ids = []
         if builder.room_id is not None:
-            # modules can send new state events, so we re-calculate the auth events just
-            # in case.
             prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
 
         prev_state_events = None
         if (
             original_event.room_version.msc4242_state_dags
+            and builder.type != EventTypes.Create
             and builder.room_id is not None
         ):
+            # modules can send new state events, so we re-calculate the auth events just
+            # in case.
             prev_state_events = list(
                 await self.store.get_state_dag_extremities(builder.room_id)
             )
