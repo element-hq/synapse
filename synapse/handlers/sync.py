@@ -252,7 +252,7 @@ class SyncResult:
     presence: list[UserPresenceState]
     account_data: list[JsonDict]
     # user ID -> {profile field -> value | null if unset }
-    profile_updates: dict[str, dict[str, JsonValue | None] | None]
+    profile_updates: dict[str, dict[str, JsonValue | dict[str, JsonValue]] | None]
     joined: list[JoinedSyncResult]
     invited: list[InvitedSyncResult]
     knocked: list[KnockedSyncResult]
@@ -2213,7 +2213,9 @@ class SyncHandler:
         profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
 
         # Serialise the profile updates into the sync response format.
-        profile_updates: dict[str, dict[str, JsonValue | None] | None] = {}
+        profile_updates: dict[
+            str, dict[str, JsonValue | dict[str, JsonValue]] | None
+        ] = {}
         for other_user_id in user_ids:
             profile_data = profile_data_by_user.get(other_user_id)
             if profile_data is None:
@@ -2221,12 +2223,10 @@ class SyncHandler:
                 # in initial sync.
                 continue
 
-            per_user_updates: dict[str, JsonValue] = {}
+            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
             for field_name in profile_fields:
                 if profile_data.get(field_name):
-                    per_user_updates[field_name] = cast(
-                        JsonValue, profile_data[field_name]
-                    )
+                    per_user_updates[field_name] = profile_data[field_name]
 
             if per_user_updates:
                 profile_updates[other_user_id] = per_user_updates
@@ -2321,7 +2321,9 @@ class SyncHandler:
 
         # Serialise the profile updates into the sync response format.
         # user ID -> {profile field -> value | null if unset }
-        profile_updates: dict[str, dict[str, JsonValue | None] | None] = {}
+        profile_updates: dict[
+            str, dict[str, JsonValue | dict[str, JsonValue]] | None
+        ] = {}
 
         # Process field updates and users who have events in the sync response
         if users:
@@ -2351,7 +2353,7 @@ class SyncHandler:
                     profile_updates[other_user_id] = None
                     continue
 
-                per_user_updates: dict[str, JsonValue] = {}
+                per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
                 if include_users and other_user_id in include_users:
                     # Include the full profile as this user has events in
                     # a lazy loaded sync response, except for fields we've recently
@@ -3443,7 +3445,9 @@ class SyncResultBuilder:
 
     presence: list[UserPresenceState] = attr.Factory(list)
     account_data: list[JsonDict] = attr.Factory(list)
-    profile_updates: dict[str, dict[str, JsonValue | None] | None] = attr.Factory(dict)
+    profile_updates: dict[str, dict[str, JsonValue | dict[str, JsonValue]] | None] = (
+        attr.Factory(dict)
+    )
     joined: list[JoinedSyncResult] = attr.Factory(list)
     invited: list[InvitedSyncResult] = attr.Factory(list)
     knocked: list[KnockedSyncResult] = attr.Factory(list)

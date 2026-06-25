@@ -21,7 +21,7 @@ from twisted.web.server import Request
 from synapse.api.constants import Membership
 from synapse.http.server import HttpServer
 from synapse.replication.http._base import ReplicationEndpoint
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict, JsonValue, UserID, create_requester
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -65,7 +65,7 @@ class ReplicationProfileSetFieldValue(ReplicationEndpoint):
         user_id: str,
         requester_id: str,
         field_name: str,
-        new_value: str,
+        new_value: JsonValue | dict[str, JsonValue],
         by_admin: bool = False,
         propagate: bool = False,
         authenticated_entity: str | None = None,

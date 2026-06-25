@@ -150,7 +150,9 @@ class ProfileFieldRestServlet(RestServlet):
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
         if field_name == ProfileFields.DISPLAYNAME:
-            field_value: JsonValue = await self.profile_handler.get_displayname(user)
+            field_value: (
+                JsonValue | dict[str, JsonValue]
+            ) = await self.profile_handler.get_displayname(user)
         elif field_name == ProfileFields.AVATAR_URL:
             field_value = await self.profile_handler.get_avatar_url(user)
         else:

@@ -265,7 +265,9 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="get_profile_avatar_url",
         )
 
-    async def get_profile_field(self, user_id: UserID, field_name: str) -> JsonValue:
+    async def get_profile_field(
+        self, user_id: UserID, field_name: str
+    ) -> JsonValue | dict[str, JsonValue]:
         """
         Get a custom profile field for a user.
 
@@ -277,7 +279,9 @@ class ProfileWorkerStore(SQLBaseStore):
             The string value if the field exists, otherwise raises 404.
         """
 
-        def get_profile_field(txn: LoggingTransaction) -> JsonValue:
+        def get_profile_field(
+            txn: LoggingTransaction,
+        ) -> JsonValue | dict[str, JsonValue]:
             # This will error if field_name has double quotes in it, but that's not
             # possible due to the grammar.
             field_path = f'$."{field_name}"'
@@ -295,7 +299,9 @@ class ProfileWorkerStore(SQLBaseStore):
 
                 # Test exists first since value being None is used for both
                 # missing and a null JSON value.
-                exists, value = cast(tuple[bool, JsonValue], txn.fetchone())
+                exists, value = cast(
+                    tuple[bool, JsonValue | dict[str, JsonValue]], txn.fetchone()
+                )
                 if not exists:
                     raise StoreError(404, "No row found")
                 return value
@@ -312,7 +318,9 @@ class ProfileWorkerStore(SQLBaseStore):
                 )
 
                 # If value_type is None, then the value did not exist.
-                value_type, value = cast(tuple[str | None, JsonValue], txn.fetchone())
+                value_type, value = cast(
+                    tuple[str | None, JsonValue | dict[str, JsonValue]], txn.fetchone()
+                )
                 if not value_type:
                     raise StoreError(404, "No row found")
                 # If value_type is object or array, then need to deserialize the JSON.
@@ -548,7 +556,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
     async def get_profile_data_for_users(
         self, user_ids: Collection[str]
-    ) -> dict[str, dict[str, str | JsonDict | None]]:
+    ) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
         """Fetch displayname/avatar_url/custom fields for a list of users.
 
         Currently, this returns only local users as the `profiles` table only
@@ -571,7 +579,7 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="get_profile_data_for_users",
         )
 
-        results: dict[str, dict[str, str | JsonDict | None]] = {}
+        results: dict[str, dict[str, JsonValue | dict[str, JsonValue]]] = {}
         for full_user_id, displayname, avatar_url, fields in rows:
             user_fields = fields or {}
             # The SQLite driver doesn't automatically convert JSON to
@@ -708,7 +716,7 @@ class ProfileWorkerStore(SQLBaseStore):
         txn: LoggingTransaction,
         user_id: UserID,
         new_field_name: str,
-        new_value: JsonValue,
+        new_value: JsonValue | dict[str, JsonValue],
     ) -> None:
         # For each entry there are 4 quotes (2 each for key and value), 1 colon,
         # and 1 comma.
@@ -835,7 +843,10 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def set_profile_field(
-        self, user_id: UserID, field_name: str, new_value: JsonValue
+        self,
+        user_id: UserID,
+        field_name: str,
+        new_value: JsonValue | dict[str, JsonValue],
     ) -> None:
         """
         Set a custom profile field for a user.

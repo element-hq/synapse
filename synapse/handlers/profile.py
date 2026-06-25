@@ -632,7 +632,7 @@ class ProfileHandler:
 
     async def get_profile_field(
         self, target_user: UserID, field_name: str
-    ) -> JsonValue:
+    ) -> JsonValue | dict[str, JsonValue]:
         """
         Fetch a user's profile from the database for local users and over federation
         for remote users.
@@ -676,12 +676,16 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         field_name: str,
-        new_value: str,
+        new_value: JsonValue | dict[str, JsonValue],
         by_admin: bool = False,
         propagate: bool = False,
     ) -> None:
         """Wrapper function for setting any profile field for a user."""
         if field_name == ProfileFields.DISPLAYNAME:
+            if not isinstance(new_value, str):
+                raise SynapseError(
+                    400, "'displayname' must be a string", errcode=Codes.INVALID_PARAM
+                )
             await self.set_displayname(
                 target_user=target_user,
                 requester=requester,
@@ -690,6 +694,10 @@ class ProfileHandler:
                 propagate=propagate,
             )
         elif field_name == ProfileFields.AVATAR_URL:
+            if not isinstance(new_value, str):
+                raise SynapseError(
+                    400, "'avatar_url' must be a string", errcode=Codes.INVALID_PARAM
+                )
             await self.set_avatar_url(
                 target_user=target_user,
                 requester=requester,
@@ -721,7 +729,7 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         field_name: str,
-        new_value: JsonValue,
+        new_value: JsonValue | dict[str, JsonValue],
         *,
         by_admin: bool = False,
     ) -> None:
