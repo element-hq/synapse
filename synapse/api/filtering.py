@@ -233,8 +233,6 @@ class FilterCollection:
 
             if isinstance(profile_fields_filter, Mapping):
                 ids = profile_fields_filter.get("ids", [])
-                if ids is None:
-                    ids = []
                 self.profile_fields = set(ids)
 
     def __repr__(self) -> str:
