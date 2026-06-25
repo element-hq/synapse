@@ -321,6 +321,7 @@ class FakeChannel:
         # TODO: Why?
         self._reactor.run()
 
+        loop_count = 0
         while not self.is_finished():
             if (
                 # Exceeded the Twisted reactor time timeout
@@ -343,7 +344,16 @@ class FakeChannel:
             # thread switch interval (5ms for cpython) (see
             # `sys.setswitchinterval(interval)`). We still want this here as we're able
             # to preempt and cause the thread context swtich to happen faster.
-            time.sleep(0)
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # posssible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
 
             # Advance the Twisted reactor and run any scheduled callbacks
             #
@@ -359,6 +369,8 @@ class FakeChannel:
                 # For example from other threads, they may have scheduled something on
                 # the reactor to run (like `reactor.callFromThread(...)`)
                 self._reactor.advance(0)
+
+            loop_count += 1
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
