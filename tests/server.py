@@ -306,7 +306,7 @@ class FakeChannel:
         Advances the Twisted reactor clock by 0.1s and suspending execution of the
         Python thread (to allow other threads to do work) in a loop until we see a
         result. We timeout when both the Twisted reactor clock has been advanced enough
-        AND we've waited the same amount of in real-time for the specified timeout
+        AND we've waited the same amount of real-time for the specified timeout
         before giving up.
 
         The loop 1) allows `clock.call_later` scheduled callbacks to run if they are
