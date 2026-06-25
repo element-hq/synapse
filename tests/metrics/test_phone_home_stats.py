@@ -307,18 +307,16 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
 
         # Always register the first user as an admin so we can
         # deactivate.
-        self.register_user("user_1", "password", admin=True)
-        self._admin_token = self.login("user_1", "password")
+        self.register_user("admin", "password", admin=True)
+        self._admin_token = self.login("admin", "password")
 
     def _deactivate_user(self, user_id: str, access_token: str) -> None:
         """
-        Helper to deactivate a user using the /account/deactivate endpoint, optionally
-        with erasure
+        Helper to deactivate a user using the /account/deactivate endpoint
 
         Args:
             user_id: the string formatted mxid(not a UserID)
             access_token: the user's access token
-            erase: bool of if this should be a full erasure request
         """
         request_data = {
             "auth": {
@@ -344,7 +342,8 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
     def _get_user_count_metrics(self) -> dict[str, str]:
-        # Ensure we have the latest stats by advancing the timer.
+        # Ensure we have the latest stats by waiting enough time for the
+        # counting loop to run again
         self.reactor.advance(COUNT_USERS_INTERVAL.as_secs())
         return get_latest_metrics()
 
@@ -365,12 +364,15 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
     def test_deactivated_native_user_excluded(self) -> None:
         """A deactivated native user is not counted."""
         user_2 = self.register_user("user_2", "password")
+        
+        # Sanity check that all users are counted before deactivation
         metrics = self._get_user_count_metrics()
         self.assertEqual(metrics.get(self._native_key()), "2.0")
+        
         self._deactivate_user(user_2, self.login("user_2", "password"))
 
+        # The deactivated user should not be counted
         metrics = self._get_user_count_metrics()
-
         self.assertEqual(metrics.get(self._native_key()), "1.0")
 
     def test_native_and_appservice_users(self) -> None:
