@@ -101,6 +101,7 @@ from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 from tests.utils import (
@@ -301,15 +302,59 @@ class FakeChannel:
     def await_result(self, timeout_ms: int = 1000) -> None:
         """
         Wait until the request is finished.
+
+        Advances the Twisted reactor clock by 0.1s and suspending execution of the
+        Python thread (to allow other threads to do work) in a loop until we see a
+        result. We timeout when both the Twisted reactor clock has been advanced enough
+        AND we've waited the same amount of in real-time for the specified timeout
+        before giving up.
+
+        The loop 1) allows `clock.call_later` scheduled callbacks to run if they are
+        scheduled to run now and 2) will also allow other threads to make progress. This
+        could be things spawned on the Twisted reactor threadpool or Tokio runtime
+        (async Rust code).
         """
-        end_time = self._reactor.seconds() + timeout_ms / 1000.0
+        timeout = Duration(milliseconds=timeout_ms)
+        start_time_seconds = self._reactor.seconds()
+        start_real_time_seconds = time.time()
+
+        # TODO: Why?
         self._reactor.run()
 
         while not self.is_finished():
-            if self._reactor.seconds() > end_time:
+            if (
+                # Exceeded the Twisted reactor time timeout
+                start_time_seconds + timeout.as_secs() < self._reactor.seconds()
+                # And exceeded the real-time timeout
+                and start_real_time_seconds + timeout.as_secs() < time.time()
+            ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
-            self._reactor.advance(0.1)
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # Note: Since we're waiting real-time (`timeout` duration), the tests also
+            # pass with `time.sleep(0)` commented out because Python has a default
+            # thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`). We still want this here as we're able
+            # to preempt and cause the thread context swtich to happen faster.
+            time.sleep(0)
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # Don't advance the Twisted reactor clock further than the timeout duration
+            # as someone should increase the timeout if they expect things to take
+            # longer.
+            if start_time_seconds + timeout.as_secs() > self._reactor.seconds():
+                self._reactor.advance(0.1)
+            else:
+                # But we want to still keep running whatever might be getting scheduled
+                # to run now.
+                #
+                # For example from other threads, they may have scheduled something on
+                # the reactor to run (like `reactor.callFromThread(...)`)
+                self._reactor.advance(0)
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
