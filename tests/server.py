@@ -306,27 +306,42 @@ class FakeChannel:
         Advances the Twisted reactor clock by 0.1s and suspending execution of the
         Python thread (to allow other threads to do work) in a loop until we see a
         result. We timeout when both the Twisted reactor clock has been advanced enough
-        AND we've waited the same amount of in real-time for the specified timeout
-        before giving up.
+        AND we've waited the 1s of real-time before giving up.
 
         The loop 1) allows `clock.call_later` scheduled callbacks to run if they are
         scheduled to run now and 2) will also allow other threads to make progress. This
         could be things spawned on the Twisted reactor threadpool or Tokio runtime
         (async Rust code).
+
+        Args:
+            timeout_ms: The Twisted reactor time we wait until we raise a `TimedOutException`
         """
         timeout = Duration(milliseconds=timeout_ms)
         start_time_seconds = self._reactor.seconds()
+
+        # 1s is an arbitrary small number so we don't have to wait that long when
+        # something is stuck and because we assume any task on another thread will be
+        # fast enough.
+        #
+        # We don't use the same `timeout_ms` passed in because some tests specify 20s
+        # and we don't want to be waiting that long unnecessarily.
+        real_time_timeout = Duration(seconds=1)
         start_real_time_seconds = time.time()
 
         # TODO: Why?
         self._reactor.run()
 
+        loop_count = 0
         while not self.is_finished():
             if (
                 # Exceeded the Twisted reactor time timeout
-                start_time_seconds + timeout.as_secs() < self._reactor.seconds()
+                #
+                # We use `>=` for the reactor time condition as it's possible we advance
+                # exactly the `timeout` amount and we don't want to get stuck in an
+                # infinite loop
+                self._reactor.seconds() >= start_time_seconds + timeout.as_secs()
                 # And exceeded the real-time timeout
-                and start_real_time_seconds + timeout.as_secs() < time.time()
+                and time.time() > start_real_time_seconds + real_time_timeout.as_secs()
             ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
@@ -339,14 +354,23 @@ class FakeChannel:
             # thread switch interval (5ms for cpython) (see
             # `sys.setswitchinterval(interval)`). We still want this here as we're able
             # to preempt and cause the thread context swtich to happen faster.
-            time.sleep(0)
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # posssible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
 
             # Advance the Twisted reactor and run any scheduled callbacks
             #
             # Don't advance the Twisted reactor clock further than the timeout duration
             # as someone should increase the timeout if they expect things to take
             # longer.
-            if start_time_seconds + timeout.as_secs() > self._reactor.seconds():
+            if self._reactor.seconds() < start_time_seconds + timeout.as_secs():
                 self._reactor.advance(0.1)
             else:
                 # But we want to still keep running whatever might be getting scheduled
@@ -355,6 +379,8 @@ class FakeChannel:
                 # For example from other threads, they may have scheduled something on
                 # the reactor to run (like `reactor.callFromThread(...)`)
                 self._reactor.advance(0)
+
+            loop_count += 1
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
