@@ -761,6 +761,7 @@ class HomeserverTestCase(TestCase):
         # So, `D1` might have `called=True` (as in, it has started running its
         # callbacks), but any new callbacks added to `D1` won't get run until `D2`
         # completes. Fortunately, we can detect this by checking `d.paused`.
+        loop_count = 0
         while not d.called or d.paused:
             if start_time_seconds + timeout.as_secs() < time.time():
                 raise defer.TimeoutError(
@@ -772,17 +773,28 @@ class HomeserverTestCase(TestCase):
             # pool (async Rust code).
             #
             # Note: Since we're waiting real-time (`timeout` duration), the tests also
-            # pass with `time.sleep(0)` commented out because Python has a default
+            # pass with `time.sleep(...)` commented out because Python has a default
             # thread switch interval (5ms for cpython) (see
             # `sys.setswitchinterval(interval)`). We still want this here as we're able
             # to preempt and cause the thread context swtich to happen faster.
-            time.sleep(0)
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # posssible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
 
             # Advance the Twisted reactor and run any scheduled callbacks
             #
             # In terms of other threads, they may have scheduled something on the
             # reactor to run (like `reactor.callFromThread(...)`)
             self.reactor.advance(0)
+
+            loop_count += 1
 
     def get_success(
         self,
