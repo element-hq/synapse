@@ -256,8 +256,7 @@ class RelationsHandler:
                 "sender": requester.user.to_string(),
             }
             # Depending on the room version involved, the "redacts" key can go in one of
-            # two places. If we only use what was provided in the initial event, it will
-            # only target an event that was already redacted and nothing will happen.
+            # two places.
             #
             # The Matrix Spec page for changes in Room Version 11 asks that we maintain
             # a backward and forwards compatibility for clients over that API. That
