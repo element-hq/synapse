@@ -362,7 +362,7 @@ fn inject_bundled_aggregations(
         // sender, but per MSC3925 we include the full edit.
         // https://spec.matrix.org/v1.5/client-server-api/#server-side-aggregation-of-mreplace-relationships
         let serialized = serialize_event(
-            replace,
+            replace.get(),
             time_now_ms,
             config,
             None,
@@ -375,10 +375,11 @@ fn inject_bundled_aggregations(
     }
 
     if let Some(thread) = &aggregation.thread {
+        let thread = thread.get();
         // The thread's latest event is serialized with the same bundle map, so
         // it may recurse further.
         let serialized_latest = serialize_event(
-            &thread.latest_event,
+            thread.latest_event.get(),
             time_now_ms,
             config,
             None,

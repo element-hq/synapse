@@ -23,17 +23,16 @@
 //! Python handles; cloning an `Event` is cheap (it shares the underlying data
 //! behind `Arc`s) and the events are only ever read here.
 
-use pyo3::{pyclass, pymethods};
+use pyo3::{pyclass, pymethods, Py, PyTraverseError, PyVisit};
 
 use crate::events::{json_object::JsonObject, Event};
 
 /// A thread's bundled summary: its latest event, the number of events in the
 /// thread, and whether the requesting user has participated.
 #[pyclass(frozen, skip_from_py_object, get_all)]
-#[derive(Clone)]
 pub struct ThreadAggregation {
     /// The latest event in the thread.
-    pub latest_event: Event,
+    pub latest_event: Py<Event>,
     /// The total number of events in the thread.
     pub count: i64,
     /// Whether the requesting user has sent an event to the thread.
@@ -43,12 +42,34 @@ pub struct ThreadAggregation {
 #[pymethods]
 impl ThreadAggregation {
     #[new]
-    fn new(latest_event: &Event, count: i64, current_user_participated: bool) -> Self {
+    fn new(latest_event: Py<Event>, count: i64, current_user_participated: bool) -> Self {
         Self {
-            latest_event: latest_event.clone(),
+            latest_event,
             count,
             current_user_participated,
         }
+    }
+
+    #[getter]
+    fn latest_event(&self) -> &Py<Event> {
+        &self.latest_event
+    }
+
+    #[getter]
+    fn count(&self) -> i64 {
+        self.count
+    }
+
+    #[getter]
+    fn current_user_participated(&self) -> bool {
+        self.current_user_participated
+    }
+
+    /// The Python GC needs to know that this object references the latest
+    /// event.
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        visit.call(&self.latest_event)?;
+        Ok(())
     }
 }
 
@@ -57,14 +78,13 @@ impl ThreadAggregation {
 /// Some values require additional processing during serialization (the edit
 /// and the thread's latest event are themselves serialized).
 #[pyclass(frozen, skip_from_py_object, get_all)]
-#[derive(Clone)]
 pub struct BundledAggregations {
     /// The `m.reference` aggregation (e.g. `{"chunk": [{"event_id": ...}]}`).
     pub references: Option<JsonObject>,
     /// The edit (`m.replace`) event that applies to this event.
-    pub replace: Option<Event>,
+    pub replace: Option<Py<Event>>,
     /// The thread (`m.thread`) summary for this event.
-    pub thread: Option<ThreadAggregation>,
+    pub thread: Option<Py<ThreadAggregation>>,
 }
 
 #[pymethods]
@@ -73,14 +93,29 @@ impl BundledAggregations {
     #[pyo3(signature = (references = None, replace = None, thread = None))]
     fn new(
         references: Option<JsonObject>,
-        replace: Option<&Event>,
-        thread: Option<&ThreadAggregation>,
+        replace: Option<Py<Event>>,
+        thread: Option<Py<ThreadAggregation>>,
     ) -> Self {
         Self {
             references,
-            replace: replace.cloned(),
-            thread: thread.cloned(),
+            replace,
+            thread,
         }
+    }
+
+    #[getter]
+    fn references(&self) -> Option<JsonObject> {
+        self.references.clone()
+    }
+
+    #[getter]
+    fn replace(&self) -> Option<&Py<Event>> {
+        self.replace.as_ref()
+    }
+
+    #[getter]
+    fn thread(&self) -> Option<&Py<ThreadAggregation>> {
+        self.thread.as_ref()
     }
 
     /// Whether there are any aggregations to bundle.
@@ -91,5 +126,13 @@ impl BundledAggregations {
         self.references.as_ref().is_some_and(|r| !r.is_empty())
             || self.replace.is_some()
             || self.thread.is_some()
+    }
+
+    /// The Python GC needs to know that this object references the latest
+    /// event.
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        visit.call(&self.replace)?;
+        visit.call(&self.thread)?;
+        Ok(())
     }
 }
