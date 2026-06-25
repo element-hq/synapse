@@ -174,7 +174,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
             stream_id = self.get_success(
                 self.store.add_profile_updates(
                     user_id=UserID.from_string("@user:test"),
-                    updated_fields=[next(field_name_gen)],
+                    updated_fields={next(field_name_gen)},
                     action=ProfileUpdateAction.UPDATE.value,
                 )
             )
@@ -202,7 +202,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
             stream_id = self.get_success(
                 self.store.add_profile_updates(
                     user_id=UserID.from_string("@user:test"),
-                    updated_fields=[next(field_name_gen)],
+                    updated_fields={next(field_name_gen)},
                     action=ProfileUpdateAction.UPDATE.value,
                 )
             )

@@ -592,7 +592,7 @@ class ProfileWorkerStore(SQLBaseStore):
         self,
         user_id: UserID,
         action: str,
-        updated_fields: list[str] | None,
+        updated_fields: set[str] | None,
     ) -> int:
         """Persist profile update markers and return the last stream ID."""
         assert self._can_write_to_profile_updates

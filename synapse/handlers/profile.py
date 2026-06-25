@@ -103,14 +103,14 @@ class ProfileHandler:
         self._worker_locks = hs.get_worker_locks_handler()
 
     async def _record_profile_updates(
-        self, user_id: UserID, updated_fields: list[str]
+        self, user_id: UserID, updated_fields: set[str]
     ) -> None:
         """
         Record user profile updates to our stream updates table.
 
         Args:
             user_id: The user whose profile has had updates.
-            updated_fields: A list of the names of the fields that were updated.
+            updated_fields: A set of the names of the fields that were updated.
 
         Returns:
             None
@@ -300,7 +300,7 @@ class ProfileHandler:
         await self.store.set_profile_displayname(target_user, displayname_to_set)
         await self._record_profile_updates(
             target_user,
-            [ProfileFields.DISPLAYNAME],
+            {ProfileFields.DISPLAYNAME},
         )
 
         profile = await self.store.get_profileinfo(target_user)
@@ -413,7 +413,7 @@ class ProfileHandler:
         await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
         await self._record_profile_updates(
             target_user,
-            [ProfileFields.AVATAR_URL],
+            {ProfileFields.AVATAR_URL},
         )
 
         profile = await self.store.get_profileinfo(target_user)
@@ -545,7 +545,7 @@ class ProfileHandler:
 
         await self.store.delete_profile(target_user)
         await self._record_profile_updates(
-            target_user, [field_name for field_name, _value in profile_updates]
+            target_user, {field_name for field_name, _value in profile_updates}
         )
 
         await self._third_party_rules.on_profile_update(
@@ -746,7 +746,7 @@ class ProfileHandler:
             raise AuthError(403, "Cannot set another user's profile")
 
         await self.store.set_profile_field(target_user, field_name, new_value)
-        await self._record_profile_updates(target_user, [field_name])
+        await self._record_profile_updates(target_user, {field_name})
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
@@ -782,7 +782,7 @@ class ProfileHandler:
             raise AuthError(400, "Cannot set another user's profile")
 
         await self.store.delete_profile_field(target_user, field_name)
-        await self._record_profile_updates(target_user, [field_name])
+        await self._record_profile_updates(target_user, {field_name})
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
