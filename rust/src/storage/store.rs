@@ -91,7 +91,7 @@ impl Store {
                         // Otherwise, we should only find a single row for this (user, feature)
                         [row] => Some(row.try_get(0)?),
                         _ => {
-                            panic!("Programming error (SQL query probably doens't match our expectations)")
+                            panic!("Programming error (SQL query probably doesn't match our expectations)")
                         }
                     };
 
