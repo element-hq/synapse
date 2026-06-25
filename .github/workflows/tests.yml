@@ -673,7 +673,6 @@ jobs:
     uses: ./.github/workflows/complement_tests.yml
     if: "${{ !failure() && !cancelled() && needs.changes.outputs.integration == 'true' }}"
     needs:
-      - linting-done
       - changes
 
   cargo-test:
