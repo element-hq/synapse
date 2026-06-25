@@ -2196,35 +2196,25 @@ class SyncHandler:
                 for when we have calculated a list of users in our lazy loading
                 sync and want to only return those.
         """
-        updates = await self.store.get_profile_updates_for_user_and_fields(
-            from_id=0,
-            to_id=sync_result_builder.now_token.profile_updates_key,
-            user_id=user_id,
-            field_names=profile_fields,
-            include_users=include_users,
-        )
+        # Currently, limited to only local profiles, so filter remote servers out
+        user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
+        if include_users:
+            # Filter down to selected included users
+            user_ids = {user_id for user_id in user_ids if user_id in include_users}
 
-        user_fields: dict[str, set[str]] = {}
-        for update in updates:
-            if (
-                update.action != ProfileUpdateAction.UPDATE.value
-                # TODO: When would field_name be None?
-                or update.field_name is None
-            ):
-                continue
+        # Remove ourselves
+        # FIXME?: Should `get_local_users_who_share_room_with_user` even return
+        # ourselves?
+        user_ids.discard(user_id)
 
-            user_fields.setdefault(update.user_id, set()).add(update.field_name)
-
-        if not user_fields:
+        if not user_ids:
             return
 
-        profile_data_by_user = await self.store.get_profile_data_for_users(
-            user_fields.keys()
-        )
+        profile_data_by_user = await self.store.get_profile_data_for_users(user_ids)
 
         # Serialise the profile updates into the sync response format.
         profile_updates: dict[str, dict[str, JsonValue | None] | None] = {}
-        for other_user_id, fields in user_fields.items():
+        for other_user_id in user_ids:
             profile_data = profile_data_by_user.get(other_user_id)
             if profile_data is None:
                 # Don't generate anything for users with no profile data
@@ -2232,7 +2222,7 @@ class SyncHandler:
                 continue
 
             per_user_updates: dict[str, JsonValue] = {}
-            for field_name in fields:
+            for field_name in profile_fields:
                 if profile_data.get(field_name):
                     per_user_updates[field_name] = cast(
                         JsonValue, profile_data[field_name]
