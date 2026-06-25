@@ -52,6 +52,7 @@ from synapse.storage.roommember import (
     RoomsForUserStateReset,
 )
 from synapse.types import (
+    Absent,
     MutableStateMap,
     RoomStreamToken,
     StateMap,
@@ -71,7 +72,6 @@ from synapse.types.handlers.sliding_sync import (
 from synapse.types.state import StateFilter
 from synapse.util import MutableOverlayMapping
 from synapse.util.duration import Duration
-from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -112,31 +112,55 @@ class SlidingSyncInterestedRooms:
     sliding sync request.
 
     Returned by `compute_interested_rooms`.
-
-    Attributes:
-        lists: A mapping from list name to the list result for the response
-        relevant_room_map: A map from rooms that match the sync request to
-            their room sync config.
-        relevant_rooms_to_send_map: Subset of `relevant_room_map` that
-            includes the rooms that *may* have relevant updates. Rooms not
-            in this map will definitely not have room updates (though
-            extensions may have updates in these rooms).
-        newly_joined_rooms: The set of rooms that were joined in the token range
-            and the user is still joined to at the end of this range.
-        newly_left_rooms: The set of rooms that we left in the token range
-            and are still "leave" at the end of this range.
-        dm_room_ids: The set of rooms the user consider as direct-message (DM) rooms
     """
 
     lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
+    """
+    A mapping from list name to the list result for the response
+    """
+
     relevant_room_map: Mapping[str, RoomSyncConfig]
+    """
+    A map from rooms that match the sync request to
+    their room sync config.
+    """
+
     relevant_rooms_to_send_map: Mapping[str, RoomSyncConfig]
+    """
+    Subset of `relevant_room_map` that
+    includes the rooms that *may* have relevant updates. Rooms not
+    in this map will definitely not have room updates (though
+    extensions may have updates in these rooms).
+    """
+
     all_rooms: set[str]
+    """
+    The set of room IDs of all rooms that could appear in any list.
+    This set includes rooms that are outside the list ranges.
+    In other words, this is the set of all rooms that the client is
+    _interested_ in (in a pure sense),
+    even if these rooms are omitted from the current window (which
+    is, in a sense, just a computational optimisation).
+    """
+
     room_membership_for_user_map: Mapping[str, RoomsForUserType]
 
     newly_joined_rooms: AbstractSet[str]
+    """
+    The set of rooms that were joined in the token range
+    and the user is still joined to at the end of this range.
+    """
+
     newly_left_rooms: AbstractSet[str]
+    """
+    The set of rooms that we left in the token range
+    and are still "leave" at the end of this range.
+    """
+
     dm_room_ids: AbstractSet[str]
+    """
+    The set of rooms the user consider as direct-message (DM) rooms
+    """
 
     @staticmethod
     def empty() -> "SlidingSyncInterestedRooms":
@@ -852,11 +876,15 @@ class SlidingSyncRoomLists:
                             previous_connection_state.room_configs.get(room_id)
                         )
                         if prev_room_sync_config is not None:
-                            # Always include rooms whose timeline limit has increased.
-                            # (see the "XXX: Odd behavior" described below)
+                            # Always include rooms whose effective config has
+                            # expanded. This covers timeline-limit increases and
+                            # required-state additions introduced by room
+                            # subscriptions overriding list-derived params.
                             if (
-                                prev_room_sync_config.timeline_limit
-                                < room_config.timeline_limit
+                                prev_room_sync_config.combine_room_sync_config(
+                                    room_config
+                                )
+                                != prev_room_sync_config
                             ):
                                 rooms_should_send.add(room_id)
                                 continue
@@ -1699,10 +1727,8 @@ class SlidingSyncRoomLists:
         # (applies to invite/knock rooms)
         rooms_ids_without_stripped_state: set[str] = set()
         for room_id in room_ids_without_results:
-            stripped_state_map = room_id_to_stripped_state_map.get(
-                room_id, Sentinel.UNSET_SENTINEL
-            )
-            assert stripped_state_map is not Sentinel.UNSET_SENTINEL, (
+            stripped_state_map = room_id_to_stripped_state_map.get(room_id, Absent)
+            assert stripped_state_map is not Absent, (
                 f"Stripped state left unset for room {room_id}. "
                 + "Make sure you're calling `_bulk_get_stripped_state_for_rooms_from_sync_room_map(...)` "
                 + "with that room_id. (this is a problem with Synapse itself)"

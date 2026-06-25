@@ -103,6 +103,7 @@ async def filter_and_transform_events_for_client(
     Returns:
         The filtered events, wrapped in FilteredEvent with the requesting user's
         membership at each event annotated for use during serialization (MSC4115).
+        The events are returned in the same order.
     """
     # Filter out events that have been soft failed so that we don't relay them
     # to clients, unless they're a server admin and want that to happen.
