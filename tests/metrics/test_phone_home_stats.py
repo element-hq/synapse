@@ -364,11 +364,11 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
     def test_deactivated_native_user_excluded(self) -> None:
         """A deactivated native user is not counted."""
         user_2 = self.register_user("user_2", "password")
-        
+
         # Sanity check that all users are counted before deactivation
         metrics = self._get_user_count_metrics()
         self.assertEqual(metrics.get(self._native_key()), "2.0")
-        
+
         self._deactivate_user(user_2, self.login("user_2", "password"))
 
         # The deactivated user should not be counted
@@ -387,11 +387,11 @@ class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
     def test_deactivated_appservice_user_excluded(self) -> None:
         """A deactivated appservice user is not counted."""
         as_user, _ = self.register_appservice_user("as_user_1", self.appservice.token)
-        
+
         # Sanity check that all users are counted before deactivation
         metrics = self._get_user_count_metrics()
         self.assertEqual(metrics.get(self._appservice_key()), "1.0")
-        
+
         self._deactivate_user(as_user, self.appservice.token)
 
         # The deactivated user should not be counted
