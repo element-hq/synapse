@@ -368,7 +368,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             list of tuples representing stream_id, user_id, action and field_name
         """
-        if from_id == to_id:
+        if from_id >= to_id:
             return []
 
         def _get_updated_profile_updates_txn(
@@ -408,7 +408,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             list of ProfileUpdates update rows
         """
-        if from_id == to_id:
+        if from_id >= to_id:
             return []
 
         field_names = list(field_names)
@@ -474,7 +474,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             A list of ProfileUpdates update rows.
         """
-        if from_id == to_id:
+        if from_id >= to_id:
             return []
 
         if len(field_names) == 0:
