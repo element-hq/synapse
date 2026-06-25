@@ -29,9 +29,8 @@ from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.metrics import get_latest_metrics
 from tests.server import ThreadedMemoryReactorClock
-
-from . import get_latest_metrics
 
 TEST_REPORT_STATS_ENDPOINT = "https://fake.endpoint/stats"
 TEST_SERVER_CONTEXT = "test-server-context"

@@ -41,8 +41,7 @@ from synapse.metrics import (
 from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
-
-from . import get_latest_metrics
+from tests.metrics import get_latest_metrics
 
 
 def get_sample_labels_value(sample: Sample) -> tuple[dict[str, str], float]:
