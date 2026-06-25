@@ -29,7 +29,8 @@ use crate::events::{json_object::JsonObject, Event};
 
 /// A thread's bundled summary: its latest event, the number of events in the
 /// thread, and whether the requesting user has participated.
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object, get_all)]
+#[derive(Clone)]
 pub struct ThreadAggregation {
     /// The latest event in the thread.
     pub latest_event: Event,
@@ -39,40 +40,15 @@ pub struct ThreadAggregation {
     pub current_user_participated: bool,
 }
 
-impl Clone for ThreadAggregation {
-    fn clone(&self) -> Self {
-        Self {
-            latest_event: self.latest_event.shallow_copy(),
-            count: self.count,
-            current_user_participated: self.current_user_participated,
-        }
-    }
-}
-
 #[pymethods]
 impl ThreadAggregation {
     #[new]
     fn new(latest_event: &Event, count: i64, current_user_participated: bool) -> Self {
         Self {
-            latest_event: latest_event.shallow_copy(),
+            latest_event: latest_event.clone(),
             count,
             current_user_participated,
         }
-    }
-
-    #[getter]
-    fn latest_event(&self) -> Event {
-        self.latest_event.shallow_copy()
-    }
-
-    #[getter]
-    fn count(&self) -> i64 {
-        self.count
-    }
-
-    #[getter]
-    fn current_user_participated(&self) -> bool {
-        self.current_user_participated
     }
 }
 
@@ -80,7 +56,8 @@ impl ThreadAggregation {
 ///
 /// Some values require additional processing during serialization (the edit
 /// and the thread's latest event are themselves serialized).
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object, get_all)]
+#[derive(Clone)]
 pub struct BundledAggregations {
     /// The `m.reference` aggregation (e.g. `{"chunk": [{"event_id": ...}]}`).
     pub references: Option<JsonObject>,
@@ -88,16 +65,6 @@ pub struct BundledAggregations {
     pub replace: Option<Event>,
     /// The thread (`m.thread`) summary for this event.
     pub thread: Option<ThreadAggregation>,
-}
-
-impl Clone for BundledAggregations {
-    fn clone(&self) -> Self {
-        Self {
-            references: self.references.clone(),
-            replace: self.replace.as_ref().map(Event::shallow_copy),
-            thread: self.thread.clone(),
-        }
-    }
 }
 
 #[pymethods]
@@ -111,24 +78,9 @@ impl BundledAggregations {
     ) -> Self {
         Self {
             references,
-            replace: replace.map(Event::shallow_copy),
+            replace: replace.cloned(),
             thread: thread.cloned(),
         }
-    }
-
-    #[getter]
-    fn references(&self) -> Option<JsonObject> {
-        self.references.clone()
-    }
-
-    #[getter]
-    fn replace(&self) -> Option<Event> {
-        self.replace.as_ref().map(Event::shallow_copy)
-    }
-
-    #[getter]
-    fn thread(&self) -> Option<ThreadAggregation> {
-        self.thread.clone()
     }
 
     /// Whether there are any aggregations to bundle.

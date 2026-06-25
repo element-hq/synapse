@@ -95,11 +95,11 @@ pub use vmsc4242::EventFormatVMSC4242;
 /// pyclass.
 ///
 /// The `signatures` and `unsigned` fields are kept separate from the other
-/// fields as they are mutable. Note [`FormattedEvent::shallow_copy`] is
-/// *shallow*: it shares the mutable `signatures`/`unsigned`/internal state
-/// behind their `Arc`s (cheap, and fine for read-only uses such as bundled
-/// aggregations). Use [`FormattedEvent::deep_copy`] when an independently-mutable
-/// copy is required. `common_fields` and `specific_fields` are both
+/// fields as they are mutable. Note the derived [`Clone`] is *shallow*: it
+/// shares the mutable `signatures`/`unsigned`/internal state behind their
+/// `Arc`s (cheap, and fine for read-only uses such as bundled aggregations).
+/// Use [`FormattedEvent::deep_copy`] when an independently-mutable copy is
+/// required. `common_fields` and `specific_fields` are both
 /// `#[serde(flatten)]`ed so that the serialised JSON is a single flat object
 /// matching the Matrix spec.
 ///
@@ -109,7 +109,7 @@ pub use vmsc4242::EventFormatVMSC4242;
 /// Instead, deserialize directly from a JSON string with
 /// `serde_json::from_str`. See https://github.com/serde-rs/serde/issues/2230
 /// for details.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct FormattedEvent<E = Arc<EventFormatEnum>> {
     /// The event's signatures.
     ///
@@ -149,19 +149,6 @@ impl FormattedEvent {
             // mutable reference and they have no interior mutability) and these
             // write protections extend into Python land as well (i.e. you can't
             // accidentally do the wrong thing and mutate)
-            specific_fields: Arc::clone(&self.specific_fields),
-            common_fields: Arc::clone(&self.common_fields),
-        }
-    }
-
-    /// Returns a shallow copy of this object, sharing the mutable
-    /// `signatures`/`unsigned`/`internal_metadata` with the original. This
-    /// mimics the behaviour python references (which share the underlying
-    /// object).
-    pub fn shallow_copy(&self) -> FormattedEvent {
-        FormattedEvent {
-            signatures: self.signatures.clone(),
-            unsigned: self.unsigned.clone(),
             specific_fields: Arc::clone(&self.specific_fields),
             common_fields: Arc::clone(&self.common_fields),
         }
