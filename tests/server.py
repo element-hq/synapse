@@ -306,16 +306,26 @@ class FakeChannel:
         Advances the Twisted reactor clock by 0.1s and suspending execution of the
         Python thread (to allow other threads to do work) in a loop until we see a
         result. We timeout when both the Twisted reactor clock has been advanced enough
-        AND we've waited the same amount of real-time for the specified timeout
-        before giving up.
+        AND we've waited the 1s of real-time before giving up.
 
         The loop 1) allows `clock.call_later` scheduled callbacks to run if they are
         scheduled to run now and 2) will also allow other threads to make progress. This
         could be things spawned on the Twisted reactor threadpool or Tokio runtime
         (async Rust code).
+
+        Args:
+            timeout_ms: The Twisted reactor time we wait until we raise a `TimedOutException`
         """
         timeout = Duration(milliseconds=timeout_ms)
         start_time_seconds = self._reactor.seconds()
+
+        # 1s is an arbitrary small number so we don't have to wait that long when
+        # something is stuck and because we assume any task on another thread will be
+        # fast enough.
+        #
+        # We don't use the same `timeout_ms` passed in because some tests specify 20s
+        # and we don't want to be waiting that long unnecessarily.
+        real_time_timeout = Duration(seconds=1)
         start_real_time_seconds = time.time()
 
         # TODO: Why?
@@ -331,7 +341,7 @@ class FakeChannel:
                 # infinite loop
                 self._reactor.seconds() >= start_time_seconds + timeout.as_secs()
                 # And exceeded the real-time timeout
-                and time.time() > start_real_time_seconds + timeout.as_secs()
+                and time.time() > start_real_time_seconds + real_time_timeout.as_secs()
             ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
