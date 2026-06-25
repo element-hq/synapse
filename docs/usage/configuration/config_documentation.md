@@ -1971,7 +1971,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2869,6 +2869,8 @@ enable_3pid_changes: false
 *(array)* Users who register on this homeserver will automatically be joined to the rooms listed under this option.
 
 By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to `public`. You can find more options relating to auto-joining rooms below.
+
+Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart` to a user who's part of the invite-only rooms.
 
 As Spaces are just rooms under the hood, Space aliases may also be used.
 

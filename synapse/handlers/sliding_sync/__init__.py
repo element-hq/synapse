@@ -184,34 +184,45 @@ class SlidingSyncHandler:
                 timeout_ms -= after_wait_ts - before_wait_ts
                 timeout_ms = max(timeout_ms, 0)
 
-        # We're going to respond immediately if the timeout is 0 or if this is an
-        # initial sync (without a `from_token`) so we can avoid calling
-        # `notifier.wait_for_events()`.
-        if timeout_ms == 0 or from_token is None:
-            now_token = self.event_sources.get_current_token()
-            result = await self.current_sync_for_user(
+        # Compute a response immediately. We always need to do this before
+        # waiting for new data (unlike in /v3/sync), as the request config might
+        # have changed (e.g. new room subscriptions, etc).
+        now_token = self.event_sources.get_current_token()
+        result = await self.current_sync_for_user(
+            sync_config,
+            from_token=from_token,
+            to_token=now_token,
+        )
+
+        # Return immediately if we have a result, the timeout is 0, or this is
+        # an initial sync.
+        if result or timeout_ms == 0 or from_token is None:
+            return result, did_wait
+
+        # Otherwise, we wait for something to happen and report it to the user.
+        async def current_sync_callback(
+            before_token: StreamToken, after_token: StreamToken
+        ) -> SlidingSyncResult:
+            return await self.current_sync_for_user(
                 sync_config,
                 from_token=from_token,
-                to_token=now_token,
+                to_token=after_token,
             )
-        else:
-            # Otherwise, we wait for something to happen and report it to the user.
-            async def current_sync_callback(
-                before_token: StreamToken, after_token: StreamToken
-            ) -> SlidingSyncResult:
-                return await self.current_sync_for_user(
-                    sync_config,
-                    from_token=from_token,
-                    to_token=after_token,
-                )
 
-            result = await self.notifier.wait_for_events(
-                sync_config.user.to_string(),
-                timeout_ms,
-                current_sync_callback,
-                from_token=from_token.stream_token,
-            )
-            did_wait = True
+        result = await self.notifier.wait_for_events(
+            sync_config.user.to_string(),
+            timeout_ms,
+            current_sync_callback,
+            # We *wait* from `now_token` as we have already computed the sync
+            # response up to `now_token` above, so as a minor optimization, we
+            # can wait for something new to arrive after `now_token`.
+            #
+            # We still generate the sync response using `from_token` in the
+            # callback above though, as to generate the correct response it
+            # needs to know the "real" `from_token`.
+            from_token=now_token,
+        )
+        did_wait = True
 
         return result, did_wait
 
@@ -276,7 +287,6 @@ class SlidingSyncHandler:
 
         lists = interested_rooms.lists
         relevant_room_map = interested_rooms.relevant_room_map
-        all_rooms = interested_rooms.all_rooms
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
@@ -317,6 +327,7 @@ class SlidingSyncHandler:
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
+            all_interested_room_ids=interested_rooms.all_rooms,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -339,7 +350,7 @@ class SlidingSyncHandler:
             if from_token:
                 # The set of rooms that the client (may) care about, but aren't
                 # in any list range (or subscribed to).
-                missing_rooms = all_rooms - relevant_room_map.keys()
+                missing_rooms = interested_rooms.all_rooms - relevant_room_map.keys()
 
                 # We now just go and try fetching any events in the above rooms
                 # to see if anything has happened since the `from_token`.
