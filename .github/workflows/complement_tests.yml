@@ -107,7 +107,7 @@ jobs:
         # them and the filter never aborts the pipeline.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 2 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 \
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 3 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 \
             | tee /tmp/gotest-sanity-check-complement.log \
             | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
@@ -139,7 +139,7 @@ jobs:
         # filter.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 2 -json 2>&1 \
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 3 -json 2>&1 \
             | tee /tmp/gotest-complement.log \
             | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
@@ -172,7 +172,7 @@ jobs:
         # the jq filter.
         run: |
           set -o pipefail
-          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 2 -json 2>&1 \
+          COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 3 -json 2>&1 \
             | tee /tmp/gotest-in-repo-complement.log \
             | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
