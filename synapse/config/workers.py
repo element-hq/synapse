@@ -23,7 +23,6 @@
 import argparse
 import logging
 from typing import Any
-from os import environ
 
 import attr
 from pydantic import (
@@ -267,9 +266,7 @@ class WorkerConfig(Config):
                 )
             self.worker_replication_secret = worker_replication_secret
 
-        self.worker_name = self.worker_app
-        if self.worker_app:
-            self.worker_name = config.get("worker_name", environ.get("HOSTNAME"))
+        self.worker_name = config.get("worker_name", self.worker_app)
         self.instance_name = self.worker_name or MAIN_PROCESS_INSTANCE_NAME
 
         # FIXME: Remove this check after a suitable amount of time.
