@@ -601,21 +601,22 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if not affect_presence or not self._track_presence:
             return _NullContextManager()
 
-        # Note that this causes last_active_ts to be incremented which is not
-        # what the spec wants.
-        await self.set_state(
-            UserID.from_string(user_id),
-            device_id,
-            state={"presence": presence_state},
-            is_sync=True,
-        )
-
         curr_sync = self._user_device_to_num_current_syncs.get((user_id, device_id), 0)
         self._user_device_to_num_current_syncs[(user_id, device_id)] = curr_sync + 1
 
         # If this is the first in-flight sync, notify replication
         if self._user_device_to_num_current_syncs[(user_id, device_id)] == 1:
             self.mark_as_coming_online(user_id, device_id)
+
+        # Note that this causes last_active_ts to be incremented which is not
+        # what the spec wants. Run in background to avoid blocking sync start.
+        run_in_background(
+            self.set_state,
+            UserID.from_string(user_id),
+            device_id,
+            {"presence": presence_state},
+            is_sync=True,
+        )
 
         def _end() -> None:
             # We check that the user_id is in user_to_num_current_syncs because
@@ -1178,11 +1179,12 @@ class PresenceHandler(BasePresenceHandler):
         self._user_device_to_num_current_syncs[(user_id, device_id)] = curr_sync + 1
 
         # Note that this causes last_active_ts to be incremented which is not
-        # what the spec wants.
-        await self.set_state(
+        # what the spec wants. Run in background to avoid blocking sync start.
+        run_in_background(
+            self.set_state,
             UserID.from_string(user_id),
             device_id,
-            state={"presence": presence_state},
+            {"presence": presence_state},
             is_sync=True,
         )
 
