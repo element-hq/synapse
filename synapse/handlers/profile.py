@@ -34,6 +34,7 @@ from synapse.api.errors import (
     StoreError,
     SynapseError,
 )
+from synapse.replication.http.profile import ReplicationProfileRecordFieldUpdates
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import (
@@ -101,8 +102,17 @@ class ProfileHandler:
             self._update_join_states_task, UPDATE_JOIN_STATES_ACTION_NAME
         )
         self._worker_locks = hs.get_worker_locks_handler()
+        self._is_profile_worker = (
+            hs.get_instance_name() in hs.config.worker.writers.profile_updates
+        )
+        self._record_profile_updates_client = (
+            ReplicationProfileRecordFieldUpdates.make_client(self.hs)
+        )
+        self._profile_updates_writer_instance = (
+            self.hs.config.worker.writers.profile_updates[0]
+        )
 
-    async def _record_profile_updates(
+    async def record_profile_updates(
         self, user_id: UserID, updated_fields: set[str]
     ) -> None:
         """
@@ -298,7 +308,7 @@ class ProfileHandler:
             )
 
         await self.store.set_profile_displayname(target_user, displayname_to_set)
-        await self._record_profile_updates(
+        await self._dispatch_record_profile_updates(
             target_user,
             {ProfileFields.DISPLAYNAME},
         )
@@ -411,7 +421,7 @@ class ProfileHandler:
             )
 
         await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
-        await self._record_profile_updates(
+        await self._dispatch_record_profile_updates(
             target_user,
             {ProfileFields.AVATAR_URL},
         )
@@ -544,7 +554,9 @@ class ProfileHandler:
                 profile_updates.append((field_name, None))
 
         await self.store.delete_profile(target_user)
-        await self._record_profile_updates(
+
+        # Record profile updates for the profile update stream
+        await self._dispatch_record_profile_updates(
             target_user, {field_name for field_name, _value in profile_updates}
         )
 
@@ -554,6 +566,33 @@ class ProfileHandler:
             by_admin,
             deactivation=True,
         )
+
+    async def _dispatch_record_profile_updates(
+        self, user_id: UserID, updated_fields: set[str]
+    ) -> None:
+        """
+        Dispatch the recording of profile updates, either directly via the current
+        instance, if we're a profile worker, otherwise push via replication.
+
+        Args:
+            user_id: The user whose profile has had updates.
+            updated_fields: A set of the names of the fields that were updated.
+
+        Returns:
+            None
+        """
+        if self._is_profile_worker:
+            await self.record_profile_updates(
+                user_id,
+                updated_fields,
+            )
+        else:
+            # Offload to the right worker via http replication
+            await self._record_profile_updates_client(
+                instance_name=self._profile_updates_writer_instance,
+                user_id=user_id.to_string(),
+                updated_fields=updated_fields,
+            )
 
     @cached()
     async def check_avatar_size_and_mime_type(self, mxc: str) -> bool:
@@ -754,7 +793,7 @@ class ProfileHandler:
             raise AuthError(403, "Cannot set another user's profile")
 
         await self.store.set_profile_field(target_user, field_name, new_value)
-        await self._record_profile_updates(target_user, {field_name})
+        await self._dispatch_record_profile_updates(target_user, {field_name})
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
@@ -790,7 +829,7 @@ class ProfileHandler:
             raise AuthError(400, "Cannot set another user's profile")
 
         await self.store.delete_profile_field(target_user, field_name)
-        await self._record_profile_updates(target_user, {field_name})
+        await self._dispatch_record_profile_updates(target_user, {field_name})
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)

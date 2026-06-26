@@ -21,85 +21,12 @@ from twisted.web.server import Request
 from synapse.api.constants import Membership
 from synapse.http.server import HttpServer
 from synapse.replication.http._base import ReplicationEndpoint
-from synapse.types import JsonDict, JsonValue, UserID, create_requester
+from synapse.types import JsonDict, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
-
-class ReplicationProfileSetFieldValue(ReplicationEndpoint):
-    """Set profile field for a user.
-
-    The POST looks like:
-
-        POST /_synapse/replication/profile_set_field_value/<user_id>
-
-        {
-            "requester_id": "@user:domain.tld",
-            "field_name": "displayname",
-            "new_value": "User Display Name",
-            "by_admin": False,
-            "propagate": False,
-            "authenticated_entity": "@admin:domain.tld",
-        }
-
-        200 OK
-
-        {}
-    """
-
-    NAME = "profile_set_field_value"
-    PATH_ARGS = ("user_id",)
-    METHOD = "POST"
-    CACHE = False
-
-    def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
-
-        self._profile_handler = hs.get_profile_handler()
-
-    @staticmethod
-    async def _serialize_payload(  # type: ignore[override]
-        user_id: str,
-        requester_id: str,
-        field_name: str,
-        new_value: JsonValue | dict[str, JsonValue],
-        by_admin: bool = False,
-        propagate: bool = False,
-        authenticated_entity: str | None = None,
-    ) -> JsonDict:
-        return {
-            "requester_id": requester_id,
-            "field_name": field_name,
-            "new_value": new_value,
-            "by_admin": by_admin,
-            "propagate": propagate,
-            "authenticated_entity": authenticated_entity,
-        }
-
-    async def _handle_request(  # type: ignore[override]
-        self, request: Request, content: JsonDict, user_id: str
-    ) -> tuple[int, JsonDict]:
-        # Create a requester object with potentially an authenticated_entity,
-        # ie an admin who has done the request on behalf of the user.
-        requester = create_requester(
-            user_id=user_id,
-            authenticated_entity=content["authenticated_entity"]
-            if content["by_admin"]
-            else None,
-        )
-        await self._profile_handler.set_field(
-            target_user=UserID.from_string(user_id),
-            requester=requester,
-            field_name=content["field_name"],
-            new_value=content["new_value"],
-            by_admin=content["by_admin"],
-            propagate=content["propagate"],
-        )
-
-        return (200, {})
 
 
 class ReplicationProfileUserRoomMembershipChange(ReplicationEndpoint):
@@ -159,6 +86,54 @@ class ReplicationProfileUserRoomMembershipChange(ReplicationEndpoint):
         return (200, {})
 
 
+class ReplicationProfileRecordFieldUpdates(ReplicationEndpoint):
+    """Record user profile field updates for the profile updates stream.
+
+    The POST looks like:
+
+        POST /_synapse/replication/profile_record_field_updates/<user_id>
+
+        {
+            "updated_fields": ["list", "of", "fields"]
+        }
+
+        200 OK
+
+        {}
+    """
+
+    NAME = "profile_record_field_updates"
+    PATH_ARGS = ("user_id",)
+    METHOD = "POST"
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self._profile_handler = hs.get_profile_handler()
+
+    @staticmethod
+    async def _serialize_payload(  # type: ignore[override]
+        user_id: str,
+        updated_fields: set[str],
+    ) -> JsonDict:
+        assert len(updated_fields) > 0
+        return {
+            "updated_fields": list(updated_fields),
+        }
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, user_id: str
+    ) -> tuple[int, JsonDict]:
+        assert len(content["updated_fields"]) > 0
+        await self._profile_handler.record_profile_updates(
+            user_id=UserID.from_string(user_id),
+            updated_fields=set(content["updated_fields"]),
+        )
+
+        return (200, {})
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    ReplicationProfileSetFieldValue(hs).register(http_server)
     ReplicationProfileUserRoomMembershipChange(hs).register(http_server)
+    ReplicationProfileRecordFieldUpdates(hs).register(http_server)
