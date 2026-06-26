@@ -2597,12 +2597,12 @@ class RoomDelayedEventTestCase(RoomBase):
         # without exceeding the limit
         retry_after_headers = channel.headers.getRawHeaders("Retry-After")
         assert retry_after_headers
-        retry_after_ms = int(retry_after_headers[0])
-        self.assertGreater(retry_after_ms, 0)
+        retry_after_sec = int(retry_after_headers[0])
+        self.assertGreater(retry_after_sec, 0)
         # Confirm that there is only a single value to the Retry-After header, as per RFC9110
         self.assertEqual(1, len(retry_after_headers))
 
-        self.reactor.advance(retry_after_ms)
+        self.reactor.advance(retry_after_sec)
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
@@ -2700,10 +2700,10 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         retry_after_header = channel.headers.getRawHeaders("Retry-After")
         assert retry_after_header
-        retry_after_ms = int(retry_after_header[0])
-        assert retry_after_ms > 0
+        retry_after_sec = int(retry_after_header[0])
+        assert retry_after_sec > 0
 
-        self.reactor.advance(retry_after_ms)
+        self.reactor.advance(retry_after_sec)
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
