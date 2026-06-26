@@ -727,28 +727,22 @@ class HomeserverTestCase(TestCase):
     def _wait_for_deferred(
         self,
         d: "Deferred[Any]",
-        # 1 second default timeout as tests should be fast
-        timeout: Duration = Duration(seconds=1),
     ) -> None:
         """
         Wait for the deferred to finish or raise (with real-time timeout).
 
-        Does not advance time in the Twisted reactor clock but will loop until the
-        real-time `timeout` waiting for a result. The loop 1) allows `clock.call_later`
-        scheduled callbacks to run if they are scheduled to run now and 2) will also
-        allow other threads to make progress. This could be things spawned on the
-        Twisted reactor threadpool or Tokio runtime (async Rust code).
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
 
         Args:
             d: Twisted Deferred
-            timeout: Real-time time to wait for the deferred to have a result.
-                We use real-time as we may have to wait for work on other threads.
 
         Raises:
             defer.TimeoutError: If the timeout expires before the deferred completes.
         """
-        start_time_seconds = time.time()
-
         # Wait until the deferred has a result
         #
         # Checking `d.called` by itself is not sufficient by itself as this is possible:
@@ -763,20 +757,22 @@ class HomeserverTestCase(TestCase):
         # completes. Fortunately, we can detect this by checking `d.paused`.
         loop_count = 0
         while not d.called or d.paused:
-            if start_time_seconds + timeout.as_secs() < time.time():
-                raise defer.TimeoutError(
-                    "Timed out waiting for work happening on a thread to finish"
-                )
+            # 100 loops is arbitrary but based on previous code which used to "pump" and
+            # advance the reactor 100 times. This also makes the assumption that any
+            # work on other threads will finish before we give up after sleeping ~0.1s
+            # of real-time (100 * 0.001).
+            if loop_count > 100:
+                raise defer.TimeoutError("Timed out waiting for deferred to finish")
 
             # Suspend execution of this thread to allow other threads to do work. This
             # could be things spawned on the Twisted reactor threadpool or Tokio thread
             # pool (async Rust code).
             #
-            # Note: Since we're waiting real-time (`timeout` duration), the tests also
-            # pass with `time.sleep(...)` commented out because Python has a default
-            # thread switch interval (5ms for cpython) (see
-            # `sys.setswitchinterval(interval)`). We still want this here as we're able
-            # to preempt and cause the thread context swtich to happen faster.
+            # Note: Python has a default thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`) but we still want this here as we're
+            # able to preempt and cause the thread context swtich to happen faster.
+            # Also, without any real-time sleeping, this function would complete before
+            # the 5ms switch ever happened.
             #
             # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
             # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
@@ -799,17 +795,15 @@ class HomeserverTestCase(TestCase):
     def get_success(
         self,
         d: Awaitable[TV],
-        # 1 second default timeout as tests should be fast
-        timeout: Duration = Duration(seconds=1),
     ) -> TV:
         """
         Get the success result of an awaitable.
 
-        Does not advance time in the Twisted reactor clock but will loop until the
-        real-time `timeout` waiting for a result. The loop 1) allows `clock.call_later`
-        scheduled callbacks to run if they are scheduled to run now and 2) will also
-        allow other threads to make progress. This could be things spawned on the
-        Twisted reactor threadpool or Tokio runtime (async Rust code).
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
 
         If you need to advance the Twisted reactor by an actual time increment, you can
         use the following pattern:
@@ -823,8 +817,6 @@ class HomeserverTestCase(TestCase):
 
         Args:
             d: awaitable
-            timeout: Real-time time to wait for the awaitable to have a result.
-                We use real-time as we may have to wait for work on other threads.
 
         Raises:
             defer.TimeoutError: If the timeout expires before the awaitable completes.
@@ -832,7 +824,7 @@ class HomeserverTestCase(TestCase):
                 (although you would probably run into `defer.TimeoutError` in that case).
         """
         deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-        self._wait_for_deferred(deferred, timeout)
+        self._wait_for_deferred(deferred)
 
         return self.successResultOf(deferred)
 
@@ -840,17 +832,15 @@ class HomeserverTestCase(TestCase):
         self,
         d: Awaitable[Any],
         exc: type[_ExcType],
-        # 1 second default timeout as tests should be fast
-        timeout: Duration = Duration(seconds=1),
     ) -> _TypedFailure[_ExcType]:
         """
         Get the failure result of an awaitable. The failure must be of the type `exc`.
 
-        Does not advance time in the Twisted reactor clock but will loop until the
-        real-time `timeout` waiting for a result. The loop 1) allows `clock.call_later`
-        scheduled callbacks to run if they are scheduled to run now and 2) will also
-        allow other threads to make progress. This could be things spawned on the
-        Twisted reactor threadpool or Tokio runtime (async Rust code).
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
 
         If you need to advance the Twisted reactor by an actual time increment, you can
         use the following pattern:
@@ -865,8 +855,6 @@ class HomeserverTestCase(TestCase):
         Args:
             d: awaitable
             exc: Exception type to expect
-            timeout: Real-time time to wait for the awaitable to have a result.
-                We use real-time as we may have to wait for work on other threads.
 
         Raises:
             defer.TimeoutError: If the timeout expires before the awaitable completes.
@@ -875,7 +863,7 @@ class HomeserverTestCase(TestCase):
                 probably run into `defer.TimeoutError` in that case).
         """
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        self._wait_for_deferred(deferred, timeout)
+        self._wait_for_deferred(deferred)
 
         return self.failureResultOf(deferred, exc)
 
