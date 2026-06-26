@@ -197,7 +197,7 @@ class VersionsRestServlet(RestServlet):
                     "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
                     "uk.tcpip.msc4133.stable": True,
                     # MSC4429: Profile updates for legacy /sync.
-                    "org.matrix.msc4429": self.config.experimental.msc4429_enabled,
+                    "org.matrix.msc4429": self.config.server.include_profile_updates_in_sync,
                     # MSC4155: Invite filtering
                     "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
                     # MSC4306: Support for thread subscriptions

@@ -228,7 +228,7 @@ class FilterCollection:
         self.event_format = filter_json.get("event_format", "client")
 
         self.profile_fields: set[str] = set()
-        if hs.config.experimental.msc4429_enabled:
+        if hs.config.server.include_profile_updates_in_sync:
             profile_fields_filter = filter_json.get("org.matrix.msc4429.profile_fields")
 
             if isinstance(profile_fields_filter, Mapping):

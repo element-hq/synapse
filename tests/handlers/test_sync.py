@@ -1199,7 +1199,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         self.assertEqual(initial_result.profile_updates, {})
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_no_profile_updates_if_not_filtered_for(self) -> None:
         requester = create_requester(self.user)
         initial_result = self.get_success(
@@ -1216,7 +1216,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             {},
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_responds_with_tracked_profile_updates(self) -> None:
         self.get_success(
             self.profile_handler.set_field(
@@ -1257,7 +1257,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             ],
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_lazy_loading_responds_with_only_profiles_with_events(
         self,
     ) -> None:
@@ -1332,7 +1332,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             ],
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_sends_down_profile_updates(
         self,
     ) -> None:
@@ -1390,7 +1390,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@other_user:test"].get("displayname"),
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_does_not_filter_profile_updates_when_lazy_loading(
         self,
     ) -> None:
@@ -1496,7 +1496,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             "third_user",
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_lazy_loading_cache_filters_recently_sent_profiles(
         self,
     ) -> None:
@@ -1587,7 +1587,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             [],
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_sends_down_null_profile_if_user_no_longer_sharing_rooms(
         self,
     ) -> None:
@@ -1634,7 +1634,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@other_user:test"],
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_sends_down_full_profile_for_users_who_have_joined(
         self,
     ) -> None:

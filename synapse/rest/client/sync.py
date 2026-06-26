@@ -124,7 +124,7 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
-        self._msc4429_enabled = hs.config.experimental.msc4429_enabled
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,

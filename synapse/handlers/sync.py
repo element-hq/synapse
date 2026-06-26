@@ -1899,10 +1899,11 @@ class SyncHandler:
             }
         )
 
-        # Note, this needs to be after we collect `joined` sync results
-        # since we want to utilize the work we did to collect users into the
-        # lazy loading members cache
-        if self.hs_config.experimental.msc4429_enabled:
+        # Note, this needs to be after we collect `joined`, `invited`, `knocked` and
+        # `archived` sync results since we want to utilize the work we did to collect
+        # events in those responses as a basis for which users to include profiles
+        # for when lazy loading.
+        if self.hs_config.server.include_profile_updates_in_sync:
             await self._generate_sync_entry_for_profile_updates(sync_result_builder)
 
         logger.debug("Sync response calculation complete")

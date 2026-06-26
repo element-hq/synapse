@@ -78,7 +78,7 @@ class ProfileHandler:
         self.store = hs.get_datastores().main
         self.hs = hs
         self._notifier = hs.get_notifier()
-        self._msc4429_enabled = hs.config.experimental.msc4429_enabled
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
 
         self.federation = hs.get_federation_client()
         hs.get_federation_registry().register_query_handler(

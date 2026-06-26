@@ -545,6 +545,11 @@ class ServerConfig(Config):
                 " 'allow_public_rooms_over_federation' is set."
             )
 
+        # Whether to support MSC4299 profile updates down legacy /sync
+        self.include_profile_updates_in_sync = config.get(
+            "include_profile_updates_in_sync", False,
+        )
+
         # Check if the legacy "restrict_public_rooms_to_local_users" flag is set. This
         # flag is now obsolete but we need to check it for backward-compatibility.
         if config.get("restrict_public_rooms_to_local_users", False):

@@ -229,7 +229,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
         ]
     )
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_update_profile_does_not_notify_notifier_on_set_field_if_user_not_in_rooms(
         self, field_name: str, new_value: str
     ) -> None:
@@ -255,7 +255,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
         ]
     )
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_update_profile_updates_stream_on_set_field(
         self, field_name: str, new_value: str
     ) -> None:
@@ -316,7 +316,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             (3, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, field_name),
         )
 
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_update_profile_set_field_writes_to_per_user_profile_tracking_table(
         self,
     ) -> None:
@@ -415,7 +415,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
         ]
     )
-    @override_config({"experimental_features": {"msc4429_enabled": True}})
+    @override_config({"include_profile_updates_in_sync": True})
     def test_update_profile_notifies_notifier_on_set_field(
         self,
         field_name: str,
