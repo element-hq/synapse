@@ -255,7 +255,7 @@ class FakeChannel:
         def _produce() -> None:
             if self._producer:
                 self._producer.resumeProducing()
-                self._reactor.callLater(0.1, _produce)
+                self._reactor.callLater(0.0, _produce)
 
         if not streaming:
             self._reactor.callLater(0.0, _produce)
