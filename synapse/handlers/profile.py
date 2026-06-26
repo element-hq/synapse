@@ -452,6 +452,8 @@ class ProfileHandler:
 
         If that is the case,
         """
+        if not self._msc4429_enabled:
+            return
         user_id_str = user_id.to_string()
 
         users_in_left_room = set(await self.store.get_local_users_in_room(room_id))
@@ -489,6 +491,8 @@ class ProfileHandler:
 
         If that is the case,
         """
+        if not self._msc4429_enabled:
+            return
         user_id_str = user_id.to_string()
 
         users_in_room = set(await self.store.get_local_users_in_room(room_id))
@@ -582,6 +586,9 @@ class ProfileHandler:
         Returns:
             None
         """
+        if not self._msc4429_enabled:
+            return
+
         if self._is_profile_worker:
             await self.record_profile_updates(
                 user_id,

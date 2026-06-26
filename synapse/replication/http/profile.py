@@ -135,5 +135,6 @@ class ReplicationProfileRecordFieldUpdates(ReplicationEndpoint):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    ReplicationProfileUserRoomMembershipChange(hs).register(http_server)
-    ReplicationProfileRecordFieldUpdates(hs).register(http_server)
+    if hs.config.server.include_profile_updates_in_sync:
+        ReplicationProfileUserRoomMembershipChange(hs).register(http_server)
+        ReplicationProfileRecordFieldUpdates(hs).register(http_server)
