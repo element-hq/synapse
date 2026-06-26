@@ -556,9 +556,10 @@ class ProfileHandler:
         await self.store.delete_profile(target_user)
 
         # Record profile updates for the profile update stream
-        await self._dispatch_record_profile_updates(
-            target_user, {field_name for field_name, _value in profile_updates}
-        )
+        if len(profile_updates):
+            await self._dispatch_record_profile_updates(
+                target_user, {field_name for field_name, _value in profile_updates}
+            )
 
         await self._third_party_rules.on_profile_update(
             target_user.to_string(),
