@@ -211,7 +211,7 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(
-            capabilities["org.matrix.msc4140.delayed_events"]["max_delay"], 0
+            capabilities["org.matrix.msc4140.delayed_events"]["max_delay_ms"], 0
         )
         self.assertEqual(
             capabilities["org.matrix.msc4140.delayed_events"]["max_scheduled"], 100
@@ -233,7 +233,7 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(
-            capabilities["org.matrix.msc4140.delayed_events"]["max_delay"], 86400000
+            capabilities["org.matrix.msc4140.delayed_events"]["max_delay_ms"], 86400000
         )
         self.assertEqual(
             capabilities["org.matrix.msc4140.delayed_events"]["max_scheduled"], 50
