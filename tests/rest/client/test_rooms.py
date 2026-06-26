@@ -2568,22 +2568,21 @@ class RoomDelayedEventTestCase(RoomBase):
     )
     def test_delayed_event_user_limit_exceeded(self) -> None:
         """Test that users cannot have more delayed events scheduled at once than allowed."""
-        send_after_ms = 15000
+        # Confirm that lifting temporal ratelimits doesn't lift this storage-based limit
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
+        )
+
         args = (
             "POST",
             (
-                f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after_ms}"
+                "rooms/%s/send/m.room.message?org.matrix.msc4140.delay=15000"
                 % self.room_id
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-
-        # Confirm that lifting temporal ratelimits doesn't lift this storage-based limit
-        self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
-        )
 
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
