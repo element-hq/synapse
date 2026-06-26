@@ -1,0 +1,1 @@
+Add experimental support for [MSC4491: Invite reasons in room creation](https://github.com/matrix-org/matrix-spec-proposals/pull/4491).
