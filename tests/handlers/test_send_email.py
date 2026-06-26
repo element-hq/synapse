@@ -145,9 +145,8 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
             )
         )
 
-        # This matches the two `callLater` delays in `FakeTransport.registerProducer`
+        # This matches the `callLater` delays in `FakeTransport.registerProducer`
         self.reactor.advance(0)
-        self.reactor.advance(0.1)
 
         # the message should now get delivered
         self.get_success(d)
@@ -216,9 +215,8 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
             )
         )
 
-        # This matches the two `callLater` delays in `FakeTransport.registerProducer`
+        # This matches the `callLater` delays in `FakeTransport.registerProducer`
         self.reactor.advance(0)
-        self.reactor.advance(0.1)
 
         # the message should now get delivered
         self.get_success(d)
