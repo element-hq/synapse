@@ -2377,8 +2377,8 @@ class SyncHandler:
                                 profile_data.get(field_name) is not None
                                 or other_user_id in updated_users
                             ):
-                                per_user_updates[field_name] = cast(
-                                    JsonValue, profile_data.get(field_name)
+                                per_user_updates[field_name] = profile_data.get(
+                                    field_name
                                 )
                                 # Update our cache
                                 cache.set(
@@ -2394,9 +2394,7 @@ class SyncHandler:
                         else user_fields.get(other_user_id, [])
                     )
                     for field_name in fields:
-                        per_user_updates[field_name] = cast(
-                            JsonValue, profile_data.get(field_name)
-                        )
+                        per_user_updates[field_name] = profile_data.get(field_name)
 
                 if per_user_updates:
                     profile_updates[other_user_id] = per_user_updates
