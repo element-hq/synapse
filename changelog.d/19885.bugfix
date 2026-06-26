@@ -1,0 +1,1 @@
+Fix `/sync` being blocked by presence state updates when presence is enabled.
