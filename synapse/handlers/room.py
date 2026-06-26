@@ -1345,6 +1345,11 @@ class RoomCreationHandler:
             if is_direct:
                 content["is_direct"] = is_direct
 
+            if self.config.experimental.msc4491_enabled:
+                reason = config.get("uk.timedout.msc4491.invite_reason")
+                if reason and isinstance(reason, str):
+                    content["reason"] = reason
+
             for invitee in invite_list:
                 (
                     member_event_id,
