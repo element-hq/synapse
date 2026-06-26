@@ -585,14 +585,6 @@ configured as stream writer for the `quarantined_media_changes` stream:
 
     ^/_synapse/admin/v1/quarantine_media/.*$
 
-#### The `profile_updates` stream
-
-The `profile_updates` stream supports multiple writers. The following endpoints
-can be handled by any worker, but PUT and DELETE should be routed directly to one of the 
-workers configured as stream writer for the `profile_updates` stream:
-
-    ^/_matrix/client/(api/v1|r0|v3|unstable)/profile/.*/[^/]+$
-
 
 #### Restrict outbound federation traffic to a specific set of workers
 
