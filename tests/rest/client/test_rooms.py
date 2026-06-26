@@ -61,6 +61,7 @@ from synapse.rest.client import (
 from synapse.server import HomeServer
 from synapse.types import JsonDict, JsonMapping, RoomAlias, UserID, create_requester
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 from tests import unittest
@@ -2604,6 +2605,59 @@ class RoomDelayedEventTestCase(RoomBase):
         self.reactor.advance(retry_after_ms)
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 1,
+            },
+        }
+    )
+    def test_delayed_event_processed_user_limit_exceeded(self) -> None:
+        """
+        Test that delayed events in the midst of being sent still count towards the limit of
+        how many delayed events a user may have scheduled at once.
+        """
+        send_after_ms = 1000
+        args = (
+            "POST",
+            (
+                f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after_ms}"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        # Simulate the server taking a long time to persist delayed events
+        simulated_send_lag_ms = 5000
+        event_creation_handler = self.hs.get_event_creation_handler()
+        orig_send_fn = event_creation_handler.create_and_send_nonmember_event
+
+        async def slow_send_fn(*args: Any, **kwargs: Any) -> Any:
+            await self.clock.sleep(Duration(milliseconds=simulated_send_lag_ms))
+            return await orig_send_fn(*args, **kwargs)
+
+        with patch.object(event_creation_handler, orig_send_fn.__name__, slow_send_fn):
+            self.reactor.advance(send_after_ms / 1000)
+            channel = self.make_request(*args)
+            self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+            self.assertEqual(
+                Codes.LIMIT_EXCEEDED,
+                channel.json_body["errcode"],
+                channel.json_body,
+            )
+            # Confirm that the response lacks a Retry-After header, because the reason for this limit
+            # is the server taking an indeterminitely long time to process a delayed event, and the
+            # server doesn't know how much longer the client should wait before sending more requests
+            retry_after_headers = channel.headers.getRawHeaders("Retry-After")
+            assert not retry_after_headers
+
+            self.reactor.advance(simulated_send_lag_ms / 1000)
+            channel = self.make_request(*args)
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @unittest.override_config(
         {
