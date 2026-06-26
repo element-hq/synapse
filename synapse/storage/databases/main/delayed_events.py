@@ -168,6 +168,9 @@ class DelayedEventsStore(SQLBaseStore):
                 retcol="COUNT(*)",
             )
             if num_existing >= limit:
+                # Cover case of num_existing > limit, which can happen by reducing
+                # the configured limit after delayed events have already been added
+                # (or by calling this method with a limit lower than the configured one)
                 #
                 # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
                 txn.execute(
