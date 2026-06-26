@@ -547,7 +547,8 @@ class ServerConfig(Config):
 
         # Whether to support MSC4299 profile updates down legacy /sync
         self.include_profile_updates_in_sync = config.get(
-            "include_profile_updates_in_sync", False,
+            "include_profile_updates_in_sync",
+            False,
         )
 
         # Check if the legacy "restrict_public_rooms_to_local_users" flag is set. This
