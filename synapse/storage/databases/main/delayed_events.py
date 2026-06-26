@@ -123,21 +123,40 @@ class DelayedEventsStore(SQLBaseStore):
         origin_server_ts: int | None,
         content: JsonDict,
         delay: int,
-        limit: int,
         sticky_duration_ms: int | None,
+        limit: int,
     ) -> tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
 
+        Args:
+            user_localpart: The localpart of the requester of the delayed event, who will be its owner.
+            device_id: The device ID of the requester.
+            creation_ts: The timestamp of when the request to add the delayed event was made.
+            room_id: The ID of the room where the event should be sent to.
+            event_type: The type of event to be sent.
+            state_key: The state key of the event to be sent, or None if it is not a state event.
+            origin_server_ts: The custom timestamp to send the event with.
+                If None, the timestamp will be the actual time when the event is sent.
+            content: The content of the event to be sent.
+            delay: How long (in milliseconds) to wait before automatically sending the event.
+            sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
+                The event will be attempted to be reliably delivered to clients and remote servers
+                during its sticky period.
+            limit: The maximum number of delayed events the DB may store for the given requester.
+                Must be greater than 0.
         Returns: The generated ID assigned to the added delayed event,
             and the send time of the next delayed event to be sent,
             which is either the event just added or one added earlier.
 
         Raises:
-            LimitExceededError: if the user has reached the limit of
-                how many delayed events they may have scheduled at once.
-            SynapseError: if the user is not allowed to schedule any delayed events.
+            LimitExceededError: if the DB has reached the limit of
+                how many delayed events it may store for the given requester.
+            ValueError: if the limit is not greater than 0.
         """
+        if limit <= 0:
+            raise ValueError("limit must be greater than 0")
+
         delay_id = _generate_delay_id()
         send_ts = Timestamp(creation_ts + delay)
 

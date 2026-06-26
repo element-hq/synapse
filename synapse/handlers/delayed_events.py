@@ -405,8 +405,8 @@ class DelayedEventsHandler:
             origin_server_ts=origin_server_ts,
             content=content,
             delay=delay,
-            limit=limit,
             sticky_duration_ms=sticky_duration_ms,
+            limit=limit,
         )
 
         if self._repl_client is not None:
