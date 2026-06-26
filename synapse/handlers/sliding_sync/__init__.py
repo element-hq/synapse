@@ -1356,7 +1356,9 @@ class SlidingSyncHandler:
         room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
         if avatar_event is not None:
-            room_avatar = avatar_event.content.get("url")
+            avatar_content = avatar_event.content.get("url")
+            if isinstance(avatar_content, str):
+                room_avatar = avatar_content
 
         # Assemble heroes: extract the info from the state we just fetched
         heroes: list[SlidingSyncResult.RoomResult.StrippedHero] = []

@@ -1,0 +1,4 @@
+Make sure room avatars in sliding sync responses are strings: don't blindly trust the contents of the room avatar
+state event and assign it to sliding sync rooms, instead check it's a string like
+[the MSC](https://github.com/matrix-org/matrix-spec-proposals/blob/erikj/sss/proposals/4186-simplified-sliding-sync.md)
+expects. Contributed by @jmartinesp.
