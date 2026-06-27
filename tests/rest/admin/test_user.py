@@ -5350,7 +5350,9 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                     rm, "m.room.message", event, tok=self.bad_user_tok, expect_code=200
                 )
                 event_id = res["event_id"]
-                event_ts = self.get_success(self.store.get_event(event_id))["origin_server_ts"]
+                event_ts = self.get_success(self.store.get_event(event_id))[
+                    "origin_server_ts"
+                ]
                 originals.append([event_id, event_ts])
 
         expected_saved_message_ids = [m[0] for m in originals[:5] + originals[10:]]
@@ -5380,7 +5382,9 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
 
             for event in channel.json_body["chunk"]:
                 # gather information for all messages
-                for event_id in expected_saved_message_ids+expected_redacted_message_ids:
+                for event_id in (
+                    expected_saved_message_ids + expected_redacted_message_ids
+                ):
                     if (
                         event["type"] == "m.room.redaction"
                         and event["redacts"] == event_id
@@ -5390,9 +5394,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(matched), len(expected_redacted_message_ids))
         matched = sorted(matched)
         expected_redacted_message_ids = sorted(expected_redacted_message_ids)
-        for i in range(0,len(matched)):
+        for i in range(len(matched)):
             self.assertEqual(matched[i], expected_redacted_message_ids[i])
-
 
     def test_redact_messages_specific_rooms(self) -> None:
         """
