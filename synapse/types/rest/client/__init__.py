@@ -18,9 +18,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import re
+from typing import ClassVar
+
+import pydantic_core.core_schema
 from pydantic import (
     ConfigDict,
     Field,
+    GetCoreSchemaHandler,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -28,9 +33,10 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import PydanticCustomError
+from pydantic_core import CoreSchema, PydanticCustomError
 from typing_extensions import Annotated, Self
 
+from synapse.types import Absent, AbsentType, NonNegativeStrictInt
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
 
@@ -105,6 +111,82 @@ ISO3116_1_Alpha_2 = Annotated[str, StringConstraints(pattern="[A-Z]{2}", strict=
 class MsisdnRequestTokenBody(ThreepidRequestTokenBody):
     country: ISO3116_1_Alpha_2
     phone_number: StrictStr
+
+
+class SlidingSyncStickyEventsToken:
+    """
+    A token returned by `next_batch` of the MSC4354 Sticky Events extension to Sliding Sync
+    and then accepted as the `since` parameter in the requests of the same extension.
+
+    Current format:
+        SlidingSyncStickyEventsToken ::= 'sticky_' DIGIT+
+        DIGIT ::= '0'-'9'
+
+    The `sticky_` prefix allows us to make sure it's not swapped for another token
+    or to evolve the type of token accepted with backwards compatibility in the future.
+    """
+
+    PATTERN = re.compile(r"^sticky_([0-9]+)$")
+    START: ClassVar["SlidingSyncStickyEventsToken"]
+
+    def __init__(self, *, sticky_events_stream_id: int) -> None:
+        # FIXME: We should use MultiWriterStreamToken here
+        # Track: https://github.com/element-hq/synapse/issues/19661
+        self.sticky_events_stream_id = sticky_events_stream_id
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: object, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """
+        This function is checked for and used by Pydantic when
+        attempting to deserialise/validate a field of this type.
+
+        This returns a schema that will parse a string into an
+        instance of `SlidingSyncStickyEventsToken`.
+        """
+
+        return pydantic_core.core_schema.no_info_plain_validator_function(
+            cls._validate,
+            serialization=pydantic_core.core_schema.plain_serializer_function_ser_schema(
+                cls.serialise,
+                info_arg=False,
+            ),
+        )
+
+    @classmethod
+    def _validate(cls, v: object) -> Self:
+        """
+        Create an instance from serialised string form.
+
+        The inverse of `serialise`.
+        """
+        if isinstance(v, cls):
+            return v
+        if isinstance(v, str):
+            match = cls.PATTERN.match(v)
+            if match is None:
+                raise ValueError(f"Invalid SlidingSyncStickyEventsToken format: {v!r}")
+            return cls(sticky_events_stream_id=int(match.group(1)))
+        raise ValueError(f"Cannot parse SlidingSyncStickyEventsToken from {type(v)}")
+
+    def serialise(self) -> str:
+        """
+        Convert this instance to string.
+
+        The inverse of `_validate`.
+        """
+        return f"sticky_{self.sticky_events_stream_id}"
+
+    def __repr__(self) -> str:
+        # Use the serialised form as debug output.
+        return self.serialise()
+
+
+# Starting reading a stream at 0 ensures all stream fact rows will be read
+SlidingSyncStickyEventsToken.START = SlidingSyncStickyEventsToken(
+    sticky_events_stream_id=0
+)
 
 
 class SlidingSyncBody(RequestBodyModel):
@@ -383,6 +465,19 @@ class SlidingSyncBody(RequestBodyModel):
             enabled: StrictBool | None = False
             limit: StrictInt = 100
 
+        class StickyEventsExtension(RequestBodyModel):
+            """The Sticky Events extension (MSC4354)
+
+            Attributes:
+                enabled
+                limit: maximum number of sticky events to return in the extension (default 100)
+                since: either a string with the Sticky Events since token or absent
+            """
+
+            enabled: StrictBool = False
+            limit: NonNegativeStrictInt = 100
+            since: SlidingSyncStickyEventsToken | AbsentType = Absent
+
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
         account_data: AccountDataExtension | None = None
@@ -390,6 +485,9 @@ class SlidingSyncBody(RequestBodyModel):
         typing: TypingExtension | None = None
         thread_subscriptions: ThreadSubscriptionsExtension | None = Field(
             None, alias="io.element.msc4308.thread_subscriptions"
+        )
+        sticky_events: StickyEventsExtension | AbsentType = Field(
+            Absent, alias="org.matrix.msc4354.sticky_events"
         )
 
     conn_id: StrictStr | None = None
