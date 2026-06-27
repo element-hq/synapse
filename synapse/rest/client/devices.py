@@ -33,6 +33,7 @@ from synapse.http.servlet import (
     RestServlet,
     parse_and_validate_json_object_from_request,
     parse_integer,
+    parse_string,
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
@@ -249,17 +250,12 @@ class DehydratedDeviceEventsServlet(RestServlet):
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
 
-    class PostBody(RequestBodyModel):
-        next_batch: StrictStr | None = None
-
-    async def on_POST(
+    async def on_GET(
         self, request: SynapseRequest, device_id: str
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
-        next_batch = parse_and_validate_json_object_from_request(
-            request, self.PostBody
-        ).next_batch
+        next_batch = parse_string(request, "next_batch")
         limit = parse_integer(request, "limit", 100)
 
         msgs = await self.message_handler.get_events_for_dehydrated_device(
