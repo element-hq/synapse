@@ -1500,7 +1500,7 @@ class RedactUser(RestServlet):
     progress of the redaction progress.
     If empty rooms dict is provided then all events in all rooms user is member of will
     be affected.
-    Parameters before_ts and after_ts are millisecond timestamps in server timezone.
+    Parameters before_ts and after_ts are millisecond timestamps.
     If both are omitted, then messages will be redacted regardless the time they were sent.
     If only one parameter is sent, then all messages before or after given time will be redacted.
     """

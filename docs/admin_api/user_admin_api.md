@@ -1562,8 +1562,8 @@ The following JSON body parameters are optional:
 - `use_admin` - If set to `true`, the admin user is used to issue the redactions, rather than puppeting the user. Useful
  when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
  where the admin does not have the sufficient power level to issue the redactions.
-- `after_ts` - Redact only events that happened at this time or after. Format: milliseconds timestamp in the server timezone.
-- `before_ts` - Redact only events that happened at this time or before. Format: milliseconds timestamp in the server timezone.  
+- `after_ts` - Redact only events that happened at this time or after. Format: milliseconds timestamp.
+- `before_ts` - Redact only events that happened at this time or before. Format: milliseconds timestamp.
 
 _Added in Synapse 1.116.0._
 
