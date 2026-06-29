@@ -5350,9 +5350,9 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                     rm, "m.room.message", event, tok=self.bad_user_tok, expect_code=200
                 )
                 event_id = res["event_id"]
-                event_ts = self.get_success(self.store.get_event(event_id))[
-                    "origin_server_ts"
-                ]
+                event_ts = self.get_success(
+                    self.store.get_event(event_id)
+                ).origin_server_ts
                 originals.append([event_id, event_ts])
 
         expected_saved_message_ids = [m[0] for m in originals[:5] + originals[10:]]
