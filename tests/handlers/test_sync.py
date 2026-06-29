@@ -1187,6 +1187,17 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
 
     def test_initial_sync_no_profile_updates_if_not_enabled(self) -> None:
+        """Test that without MSC4429 enabled the initial sync response does not
+        contain any profile updates."""
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -1201,6 +1212,17 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_no_profile_updates_if_not_filtered_for(self) -> None:
+        """Test that with MSC4429 enabled the initial sync response does not
+        contain any profile updates, if fields are not filtered for."""
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -1218,6 +1240,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_responds_with_tracked_profile_updates(self) -> None:
+        """Test that with MSC4429 enabled the initial sync response does
+        contain profile updates for users who share rooms."""
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.other_user),
@@ -1267,6 +1291,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_initial_sync_does_not_include_untracked_users_profile_updates(
         self, is_lazy: bool
     ) -> None:
+        """Test that with MSC4429 enabled the initial sync response does not
+        contain profile updates for users who do not share rooms."""
         third_user = self.register_user("third_user", "password")
         self.get_success(
             self.profile_handler.set_field(
@@ -1308,7 +1334,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_initial_sync_lazy_loading_responds_with_only_profiles_with_events(
         self,
     ) -> None:
-        """
+        """Test that with MSC4429 enabled the initial sync lazy loading response does
+        contain profile updates for events in the timeline.
+
         This test ensures lazy loading sync only returns profiles that we also have
         events for in the sync response. The second room in this test has the most
         recent events from "third_user" and thus we don't get the profile of
@@ -1383,6 +1411,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_sends_down_profile_updates(
         self,
     ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response does
+        contain profile updates."""
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -1441,6 +1471,10 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_does_not_filter_profile_updates_when_lazy_loading(
         self,
     ) -> None:
+        """Test that with MSC4429 enabled the incremental sync lazy loading response
+        does contain profile updates even if the user would be filtered out by lazy
+        loading.
+        """
         third_user = self.register_user("third_user", "password")
         third_tok = self.login("third_user", "password")
         self.helper.join(
@@ -1547,6 +1581,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_lazy_loading_cache_filters_recently_sent_profiles(
         self,
     ) -> None:
+        """Test that with MSC4429 enabled the incremental sync lazy loading response
+        filters out unchanged profiles we have recently sent to the client.
+        """
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -1638,6 +1675,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_sends_down_null_profile_if_user_no_longer_sharing_rooms(
         self,
     ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response
+        includes a 'null' for users who are no longer sharing rooms.
+        """
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -1685,6 +1725,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_sends_down_full_profile_for_users_who_have_joined(
         self,
     ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response
+        includes the full profile of a user who has joined a room with the syncing user.
+        """
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(

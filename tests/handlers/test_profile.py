@@ -177,6 +177,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         field_name: str,
         new_value: str,
     ) -> None:
+        """Test that profile updates don't get recorded in the profile updates stream
+        if MSC4429 is not enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -206,6 +208,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         field_name: str,
         new_value: str,
     ) -> None:
+        """Test that profile updates do not cause the profile updates stream notifier
+        to wake up if MSC4429 is not enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -233,6 +237,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     def test_update_profile_does_not_notify_notifier_on_set_field_if_user_not_in_rooms(
         self, field_name: str, new_value: str
     ) -> None:
+        """Test that profile updates do not cause the profile updates stream notifier
+        to wake up if the user is not in any rooms, if MSC4429 is enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -259,6 +265,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     def test_update_profile_updates_stream_on_set_field(
         self, field_name: str, new_value: str
     ) -> None:
+        """Test that profile updates get recorded in the profile updates stream if
+        MSC4429 is enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -320,6 +328,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     def test_update_profile_set_field_writes_to_per_user_profile_tracking_table(
         self,
     ) -> None:
+        """Test that profiles updates get recorded in the 'per user' profile updates
+        stream tracking table, if MSC4429 is enabled."""
         self.register_user("roger", "password")
         roger_token = self.login("roger", "password")
         self.register_user("millie", "password")
@@ -412,6 +422,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     def test_previous_profile_updates_stream_rows_cleared_if_no_longer_sharing_a_room(
         self,
     ) -> None:
+        """Test that previous profile update stream rows are removed for a user if
+        the user no longer shares rooms with another user, if MSC4429 is enabled.
+
+        This test ensures that when a user leaves a room, we clear all old profile
+        update rows of users who the user no longer shares rooms with, to avoid
+        leaking any further profile field updates from those users.
+        """
         self.register_user("roger", "password")
         roger_token = self.login("roger", "password")
         self.register_user("millie", "password")
@@ -529,6 +546,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         field_name: str,
         new_value: str,
     ) -> None:
+        """Test that profile updates wake up the profile updates stream on profile
+        field updates, if MSC4429 is enabled."""
         self.helper.create_room_as(
             room_creator=self.frank.to_string(),
             tok=self.frank_token,
