@@ -62,9 +62,11 @@ from synapse.api.room_versions import (
     RoomVersion,
 )
 from synapse.events import is_creator
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
+    JsonMapping,
     MutableStateMap,
     StateKey,
     StateMap,
@@ -128,7 +130,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
     )
 
     # Check the sender's domain has signed the event
-    if not event.signatures.get(sender_domain):
+    if sender_domain not in event.signatures:
         # We allow invites via 3pid to have a sender from a different
         # HS, as the sender must match the sender of the original
         # 3pid invite. This is checked further down with the
@@ -141,7 +143,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
         event_id_domain = get_domain_from_id(event.event_id)
 
         # Check the origin domain has signed the event
-        if not event.signatures.get(event_id_domain):
+        if event_id_domain not in event.signatures:
             raise AuthError(403, "Event not signed by sending server")
 
     is_invite_via_allow_rule = (
@@ -154,7 +156,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
         authoriser_domain = get_domain_from_id(
             event.content[EventContentFields.AUTHORISING_USER]
         )
-        if not event.signatures.get(authoriser_domain):
+        if authoriser_domain not in event.signatures:
             raise AuthError(403, "Event not signed by authorising server")
 
 
@@ -185,6 +187,70 @@ async def check_state_independent_auth_rules(
 
         # 1.5 Otherwise, allow
         return
+
+    # State DAGs 2. Considering the event's prev_state_events:
+    if supports_msc4242_state_dag(event):
+        prev_state_events_ids = set(event.prev_state_events)
+        # Fetch all of the `prev_state_events`
+        prev_state_events = {}
+        # Try to load the `prev_state_events` from `batched_auth_events` initially as
+        # that can save us a database hit.
+        if batched_auth_events is not None:
+            prev_state_events = {
+                event_id: value
+                for event_id in prev_state_events_ids
+                if (value := batched_auth_events.get(event_id)) is not None
+            }
+        # Fetch the rest of the `prev_state_events`
+        missing_prev_state_events_ids = prev_state_events_ids - set(
+            prev_state_events.keys()
+        )
+        fetched_prev_state_events = await store.get_events(
+            missing_prev_state_events_ids,
+            redact_behaviour=EventRedactBehaviour.as_is,
+            allow_rejected=True,
+        )
+        prev_state_events.update(fetched_prev_state_events)
+        if len(prev_state_events) != len(prev_state_events_ids):
+            # we should have all the `prev_state_events` by now, so if we do not, that suggests
+            # a Synapse programming error
+            known_prev_state_event_ids = set(prev_state_events)
+            raise AssertionError(
+                f"Event {event.event_id} has unknown prev_state_events "
+                + f"({len(prev_state_events)}/{len(prev_state_events_ids)} known)"
+                + f"{prev_state_events_ids - known_prev_state_event_ids} missing "
+                + f"out of {prev_state_events_ids}"
+            )
+        for prev_state_event in prev_state_events.values():
+            # 2.1 If there are entries which do not belong in the same room, reject.
+            if prev_state_event.room_id != event.room_id:
+                raise AuthError(
+                    403,
+                    "During auth for event %s in room %s, found event %s in prev_state_events "
+                    "which belongs to a different room %s"
+                    % (
+                        event.event_id,
+                        event.room_id,
+                        prev_state_event.event_id,
+                        prev_state_event.room_id,
+                    ),
+                )
+            # 2.2 If there are entries which do not have a state_key, reject.
+            if not prev_state_event.is_state():
+                raise AuthError(
+                    403,
+                    f"During auth for event {event.event_id} in room {event.room_id}, event has a "
+                    + f"prev_state_event which is not state: {prev_state_event.event_id}",
+                )
+            # 2.3 If there are entries which were themselves rejected under the checks performed on
+            # receipt of a PDU, reject.
+            if prev_state_event.rejected_reason is not None:
+                raise AuthError(
+                    403,
+                    f"During auth for event {event.event_id} in room {event.room_id}, event has a "
+                    + f"prev_state_event which is rejected ({prev_state_event.rejected_reason}): "
+                    + f"{prev_state_event.event_id}",
+                )
 
     # 2. Reject if event has auth_events that: ...
     auth_events: ChainMap[str, EventBase] = ChainMap()
@@ -449,6 +515,11 @@ def _check_create(event: "EventBase") -> None:
     #  1.1 If it has any previous events, reject.
     if event.prev_event_ids():
         raise AuthError(403, "Create event has prev events")
+
+    # State DAGs 1.2 If it has any prev_state_events, reject.
+    if supports_msc4242_state_dag(event):
+        if len(event.prev_state_events) > 0:
+            raise AuthError(403, "Create event has prev state events")
 
     if event.room_version.msc4291_room_ids_as_hashes:
         # 1.2 If the create event has a room_id, reject
@@ -786,6 +857,7 @@ def get_send_level(
         power level required to send this event.
     """
 
+    power_levels_content: JsonMapping
     if power_levels_event:
         power_levels_content = power_levels_event.content
     else:

@@ -27,7 +27,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
+from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
@@ -46,6 +46,7 @@ from synapse.types.storage import _BackgroundUpdates
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import create_event
 
 logger = logging.getLogger(__name__)
@@ -240,7 +241,7 @@ class SlidingSyncTablesTestCaseBase(SlidingSyncBase):
             "prev_events": [],
         }
 
-        kick_event = make_event_from_dict(
+        kick_event = make_test_event(
             kick_event_dict,
             room_version=RoomVersions.V10,
         )

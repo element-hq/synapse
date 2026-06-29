@@ -62,12 +62,12 @@ from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
 from synapse.types import (
     JsonDict,
+    MultiWriterStreamToken,
     RetentionPolicy,
     StrCollection,
     ThirdPartyInstanceID,
 )
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import MXC_REGEX
 
@@ -1302,7 +1302,15 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return local_media_ids
 
-    async def get_current_quarantined_media_stream_id(self) -> int:
+    def get_quarantined_media_stream_token(self) -> MultiWriterStreamToken:
+        return MultiWriterStreamToken.from_generator(
+            self._quarantined_media_changes_id_gen
+        )
+
+    def get_quarantined_media_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._quarantined_media_changes_id_gen
+
+    def get_current_quarantined_media_stream_id(self) -> int:
         """Gets the position of the quarantined media changes stream.
 
         Returns:
@@ -1317,74 +1325,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             int - the maximum stream ID
         """
         return await self._quarantined_media_changes_id_gen.get_max_allocated_token()
-
-    async def wait_for_quarantined_media_stream_id(self, target_id: int) -> bool:
-        """Waits until the quarantined media changes stream reaches the given stream ID.
-
-        See https://github.com/element-hq/synapse/pull/19644 for more details.
-
-        TODO: Replace function and call sites with https://github.com/element-hq/synapse/pull/19644
-
-        Args:
-            target_id: The stream ID to wait for.
-
-        Returns:
-            True when caught up to the target stream ID.
-            False when timing out while waiting.
-        """
-        # We ideally would use something like `wait_for_stream_position` in the meantime,
-        # but that short circuits if the instance name matches the current instance name.
-        # Doing so means that if *another* writer is actually leading the to_id, then we'll
-        # assume that we're caught up when we aren't.
-        #
-        # NOTE: Because this is implemented to wait for stream positions by integer ID,
-        # we're technically waiting for *all* workers to catch up rather than just waiting
-        # for *our* worker to catch up. This is okay for now because the quarantined media
-        # stream should be pretty fast to update, and if it's not then the only thing we're
-        # affecting is an admin API that probably has a tool automatically retrying requests
-        # anyway. https://github.com/element-hq/synapse/pull/19644 does the waiting properly
-        # so this should be replaced by that (or similar).
-
-        # Get the minimum shared position/ID across all workers
-        current_id = self._quarantined_media_changes_id_gen.get_current_token()
-        if current_id >= target_id:
-            return True  # nothing to wait for: we're already caught up.
-
-        # "This should never happen". Tokens we hand out via the API should exist. If they
-        # don't, then we're in a bad state and need to explode.
-        max_persisted_position = (
-            await self._quarantined_media_changes_id_gen.get_max_allocated_token()
-        )
-        assert max_persisted_position >= target_id, (
-            f"Unable to wait for invalid future token (token={target_id} has positions "
-            f"ahead of our max persisted position={max_persisted_position})"
-        )
-
-        # Start waiting until we've caught up to the `stream_token`
-        start = self.clock.time_msec()
-        logged = False
-        while True:
-            # Like above, get the minimum shared ID across all workers
-            current_id = self._quarantined_media_changes_id_gen.get_current_token()
-            if current_id >= target_id:
-                return True
-
-            now = self.clock.time_msec()
-
-            # Timed out
-            if now - start > 10_000:
-                return False
-
-            if not logged:
-                logger.info(
-                    "Waiting for current token to reach %s; currently at %s",
-                    target_id,
-                    current_id,
-                )
-                logged = True
-
-            # TODO: be better
-            await self.clock.sleep(Duration(milliseconds=500))
 
     async def get_quarantined_media_changes(
         self, *, from_id: int, to_id: int, limit: int
@@ -2270,6 +2210,132 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 table="event_reports",
                 keyvalues={"id": report_id},
                 desc="delete_event_report",
+            )
+        except StoreError:
+            # Deletion failed because report does not exist
+            return False
+
+        return True
+
+    async def get_user_report(
+        self, report_id: int
+    ) -> tuple[int, int, str, str, str] | None:
+        """Retrieve a user report
+
+        Args:
+            report_id: ID of user report in database
+        Returns:
+            JSON dict of information from a user report or None if the
+            report does not exist.
+        """
+
+        return await self.db_pool.simple_select_one(
+            table="user_reports",
+            keyvalues={"id": report_id},
+            retcols=("id", "received_ts", "target_user_id", "user_id", "reason"),
+            allow_none=True,
+            desc="get_user_report",
+        )
+
+    async def get_user_reports_paginate(
+        self,
+        start: int,
+        limit: int,
+        direction: Direction = Direction.BACKWARDS,
+        user_id: str | None = None,
+        target_user_id: str | None = None,
+    ) -> tuple[list[JsonDict], int]:
+        """Retrieve a paginated list of user reports
+
+        Args:
+            start: event offset to begin the query from
+            limit: number of rows to retrieve
+            direction: Whether to fetch the most recent first (backwards) or the
+                oldest first (forwards)
+            user_id: search for user_id of the reporter. Ignored if user_id is None
+            target_user_id: search for user_id of the target. Ignored if target_user_id is None
+        Returns:
+            Tuple of:
+                json list of user reports
+                total number of user reports matching the filter criteria
+        """
+
+        def _get_user_reports_paginate_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[list[dict[str, Any]], int]:
+            filters = []
+            args: list[object] = []
+
+            if user_id:
+                filters.append("user_id LIKE ?")
+                args.extend(["%" + user_id + "%"])
+            if target_user_id:
+                filters.append("target_user_id LIKE ?")
+                args.extend(["%" + target_user_id + "%"])
+
+            if direction == Direction.BACKWARDS:
+                order = "DESC"
+            else:
+                order = "ASC"
+
+            where_clause = "WHERE " + " AND ".join(filters) if len(filters) > 0 else ""
+
+            sql = f"""
+                SELECT COUNT(*) as total_user_reports
+                FROM user_reports {where_clause}
+            """
+            txn.execute(sql, args)
+            count = cast(tuple[int], txn.fetchone())[0]
+
+            sql = f"""
+                SELECT
+                    id,
+                    received_ts,
+                    target_user_id,
+                    user_id,
+                    reason
+                FROM user_reports
+                {where_clause}
+                ORDER BY received_ts {order}
+                LIMIT ?
+                OFFSET ?
+            """
+
+            args += [limit, start]
+            txn.execute(sql, args)
+
+            user_reports = []
+            for row in txn:
+                user_reports.append(
+                    {
+                        "id": row[0],
+                        "received_ts": row[1],
+                        "target_user_id": row[2],
+                        "user_id": row[3],
+                        "reason": row[4],
+                    }
+                )
+
+            return user_reports, count
+
+        return await self.db_pool.runInteraction(
+            "get_user_reports_paginate", _get_user_reports_paginate_txn
+        )
+
+    async def delete_user_report(self, report_id: int) -> bool:
+        """Remove a user report from database.
+
+        Args:
+            report_id: Report to delete
+
+        Returns:
+            Whether the report was successfully deleted or not.
+        """
+        try:
+            await self.db_pool.simple_delete_one(
+                table="user_reports",
+                keyvalues={"id": report_id},
+                desc="delete_user_report",
             )
         except StoreError:
             # Deletion failed because report does not exist

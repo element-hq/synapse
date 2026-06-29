@@ -535,7 +535,7 @@ class SigningKeyUploadServlet(RestServlet):
         # setup, and that is allowed without UIA, per MSC3967.
         # If yes, then we need to authenticate the change.
         # MSC4190 can skip UIA for replacing cross-signing keys as well.
-        if is_cross_signing_setup and not requester.app_service:
+        if is_cross_signing_setup and not requester.app_service_id:
             # With MSC3861, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
             if self.hs.config.mas.enabled:

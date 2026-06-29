@@ -20,6 +20,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import copy
 import logging
 import random
 from typing import (
@@ -450,16 +451,6 @@ class FederationServer(FederationBase):
         newest_pdu_ts = 0
 
         for p in transaction.pdus:
-            # FIXME (richardv): I don't think this works:
-            #  https://github.com/matrix-org/synapse/issues/8429
-            if "unsigned" in p:
-                unsigned = p["unsigned"]
-                if "age" in unsigned:
-                    p["age"] = unsigned["age"]
-            if "age" in p:
-                p["age_ts"] = request_time - int(p["age"])
-                del p["age"]
-
             # We try and pull out an event ID so that if later checks fail we
             # can log something sensible. We don't mandate an event ID here in
             # case future event formats get rid of the key.
@@ -487,9 +478,14 @@ class FederationServer(FederationBase):
                 continue
 
             try:
-                event = event_from_pdu_json(p, room_version)
+                event = event_from_pdu_json(p, room_version, received_time=request_time)
             except SynapseError as e:
                 logger.info("Ignoring PDU for failing to deserialize: %s", e)
+                continue
+            except Exception as e:
+                # We catch all exceptions here as we don't want a single bad
+                # event to cause us to fail the whole transaction.
+                logger.exception("Error deserializing PDU: %s", e)
                 continue
 
             pdus_by_room.setdefault(room_id, []).append(event)
@@ -568,9 +564,58 @@ class FederationServer(FederationBase):
                 origin=origin,
                 destination=self.server_name,
                 edu_type=edu_dict["edu_type"],
-                content=edu_dict["content"],
+                # Make a deep-copy as we mutate the content down below
+                content=copy.deepcopy(edu_dict["content"]),
             )
+
             try:
+                # Server ACL's apply to `EduTypes.TYPING` per MSC4163:
+                #
+                # > For typing notifications (m.typing), the room_id field inside
+                # > content should be checked, with the typing notification ignored if
+                # > the origin of the request is a server which is forbidden by the
+                # > room's ACL. Ignoring the typing notification means that the EDU
+                # > MUST be dropped upon receipt.
+                if edu.edu_type == EduTypes.TYPING:
+                    origin_host, _ = parse_server_name(origin)
+                    room_id = edu.content["room_id"]
+                    try:
+                        await self.check_server_matches_acl(origin_host, room_id)
+                    except AuthError:
+                        logger.warning(
+                            "Ignoring typing EDU for room %s from banned server because of ACL's",
+                            room_id,
+                        )
+                        return
+
+                # Server ACL's apply to `EduTypes.RECEIPT` per MSC4163:
+                #
+                # > For read receipts (m.receipt), all receipts inside a room_id
+                # > inside content should be ignored if the origin of the request is
+                # > forbidden by the room's ACL.
+                if edu.edu_type == EduTypes.RECEIPT:
+                    origin_host, _ = parse_server_name(origin)
+                    to_remove_room_ids = set()
+                    for room_id in edu.content.keys():
+                        try:
+                            await self.check_server_matches_acl(origin_host, room_id)
+                        except AuthError:
+                            to_remove_room_ids.add(room_id)
+
+                    if to_remove_room_ids:
+                        logger.warning(
+                            "Ignoring receipts in EDU for rooms %s from banned server %s because of ACL's",
+                            to_remove_room_ids,
+                            origin_host,
+                        )
+
+                        for room_id in to_remove_room_ids:
+                            edu.content.pop(room_id)
+
+                        if not edu.content:
+                            # If we've removed all the rooms, we can just ignore the whole EDU
+                            return
+
                 await self.registry.on_edu(edu.edu_type, origin, edu.content)
             except Exception:
                 # If there was an error handling the EDU, we must reject the
@@ -771,6 +816,15 @@ class FederationServer(FederationBase):
         event, context = await self._on_send_membership_event(
             origin, content, Membership.JOIN, room_id
         )
+        # Use the join event's own stream ordering as the upper bound when fetching
+        # forward extremities (below), so we only consider extremities that existed at
+        # or before the join rather than those introduced by concurrent writes that
+        # occur while we prepare the response.
+        # Note: in workers mode the event is persisted on a separate worker, so
+        # event.internal_metadata.stream_ordering is not populated here; query the DB.
+        stream_ordering_of_join = (
+            await self.store.get_position_for_event(event.event_id)
+        ).stream
 
         prev_state_ids = await context.get_prev_state_ids()
 
@@ -810,6 +864,30 @@ class FederationServer(FederationBase):
             "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
             "members_omitted": caller_supports_partial_state,
         }
+
+        # Check the forward extremities for the room here. If there is more than one, it
+        # is likely that another event was created in the room during the
+        # make_join/send_join handshake. The joining server is likely to thus miss this event
+        # until a second event is created that references it - which could be some time.
+        # In that case, we proactively send a dummy extensible event that ties these
+        # forward extremities together. The remote server will then attempt to backfill
+        # the missing event on its own.
+        #
+        # By not sending the 'missing event' directly, but instead having the joining
+        # homeserver backfill it, the stream ordering for the missing event will be
+        # "before" the join (which is what we expect).
+
+        forward_extremities = (
+            await self.store.get_forward_extremities_for_room_at_stream_ordering(
+                room_id, stream_ordering_of_join
+            )
+        )
+
+        if len(forward_extremities) > 1:
+            # The likelihood of this being used is extremely low, thus only build the handler
+            # when necessary.
+            _creation_handler = self.hs.get_event_creation_handler()
+            await _creation_handler._send_dummy_event_after_room_join(room_id)
 
         if servers_in_room is not None:
             resp["servers_in_room"] = list(servers_in_room)

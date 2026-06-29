@@ -31,6 +31,8 @@ class EventFormatVersions:
     """MSC1884-style  format: introduced for room v4"""
     ROOM_V11_HYDRA_PLUS: int
     """MSC4291 room IDs as hashes: introduced for room HydraV11"""
+    ROOM_VMSC4242: int
+    """MSC4242 state DAGs: adds prev_state_events, removes auth_events"""
 
 KNOWN_EVENT_FORMAT_VERSIONS: frozenset[int]
 
@@ -113,6 +115,14 @@ class RoomVersion:
     rather than in codepoints.
 
     If true, this room version uses stricter event size validation."""
+    msc4242_state_dags: bool
+    """MSC4242: State DAGs. Creates events with prev_state_events instead of auth_events and derives
+    state from it. Events are always processed in causal order without any gaps in the DAG
+    (prev_state_events are always known), guaranteeing that processed events have a path to the
+    create event. This is an emergent property of state DAGs as asserting that there is a path
+    to the create event every time we insert an event would be prohibitively expensive.
+    This is similar to how doubly-linked lists can potentially not refer to previous items correctly
+    without verifying the list's integrity, but doing it on every insert is too expensive."""
 
 class RoomVersions:
     V1: RoomVersion
@@ -132,6 +142,7 @@ class RoomVersions:
     MSC3757v11: RoomVersion
     HydraV11: RoomVersion
     V12: RoomVersion
+    MSC4242v12: RoomVersion
 
 class KnownRoomVersionsMapping(Mapping[str, RoomVersion]):
     def add_room_version(self, room_version: RoomVersion) -> None: ...

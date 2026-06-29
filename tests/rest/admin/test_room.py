@@ -2311,10 +2311,14 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertIn("state_events", channel.json_body)
         self.assertIn("room_type", channel.json_body)
         self.assertIn("forgotten", channel.json_body)
+        self.assertIn("tombstoned", channel.json_body)
+        self.assertIn("replacement_room", channel.json_body)
 
         self.assertEqual(room_id_1, channel.json_body["room_id"])
         self.assertIs(True, channel.json_body["federatable"])
         self.assertIs(True, channel.json_body["public"])
+        self.assertIs(False, channel.json_body["tombstoned"])
+        self.assertIs(None, channel.json_body["replacement_room"])
 
     def test_single_room_devices(self) -> None:
         """Test that `joined_local_devices` can be requested correctly"""
@@ -2545,7 +2549,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_topo_token_is_accepted(self) -> None:
         """Test Topo Token is accepted."""
-        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2559,7 +2563,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
         """Test that stream token is accepted for forward pagination."""
-        token = "s0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),

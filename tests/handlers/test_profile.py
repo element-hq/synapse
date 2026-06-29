@@ -38,6 +38,7 @@ from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskStatus
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class ProfileTestCase(unittest.HomeserverTestCase):
@@ -314,9 +315,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 membership[state_tuple].content["displayname"], "Frank Jr."
             )
 
+    @override_config({"enable_set_displayname": False})
     def test_set_my_name_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_displayname = False
-
         # Setting displayname for the first time is allowed
         self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
 
@@ -435,9 +435,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             (self.get_success(self.store.get_profile_avatar_url(self.frank))),
         )
 
+    @override_config({"enable_set_avatar_url": False})
     def test_set_my_avatar_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_avatar_url = False
-
         # Setting displayname for the first time is allowed
         self.get_success(
             self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
