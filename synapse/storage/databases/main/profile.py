@@ -955,6 +955,70 @@ class ProfileWorkerStore(SQLBaseStore):
             keyvalues={"full_user_id": user_id.to_string()},
         )
 
+    async def clear_profile_updates_for_user(
+        self, user_id: UserID, users_to_remove: set[str]
+    ) -> None:
+        """
+        Clear all the ProfileUpdateAction.UPDATE rows from the
+        `profile_updates_per_user` table from a particular user for
+        a list of target users.
+
+        This does not remove the stream ID row from `profile_updates` as it is
+        likely other per user rows may refer to it. Our automatic pruning of old
+        stream ID's will kick in later and clean up potential orphan `profile_updates`
+        table rows.
+
+        Args:
+            user_id: The user's ID.
+            users_to_remove: List of users to remove per user rows for.
+
+        Returns:
+            None
+        """
+        assert self._can_write_to_profile_updates
+        if not users_to_remove:
+            return
+
+        def _clear_profile_updates_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> None:
+            # Delete profile updates where there's a corresponding row in
+            # `profile_updates_per_user`.
+            sql = """
+                SELECT stream_id FROM profile_updates
+                    WHERE user_id = ? AND action = ?
+            """
+
+            txn.execute(sql, (user_id.to_string(), ProfileUpdateAction.UPDATE.value))
+            res = txn.fetchall()
+            if not res:
+                return
+
+            stream_ids = [row[0] for row in res]
+
+            user_clause, user_args = make_in_list_sql_clause(
+                txn.database_engine,
+                "user_id",
+                users_to_remove,
+            )
+            stream_id_clause, stream_id_args = make_in_list_sql_clause(
+                txn.database_engine,
+                "stream_id",
+                stream_ids,
+            )
+            sql = f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {user_clause}
+                    AND {stream_id_clause}
+            """
+            params = user_args + stream_id_args
+            txn.execute(sql, (*params,))
+
+        await self.db_pool.runInteraction(
+            "clear_profile_updates_for_user",
+            _clear_profile_updates_for_user_txn,
+        )
+
     @wrap_as_background_process("prune_profile_updates")
     async def _prune_profile_updates(self) -> None:
         """Delete old entries out of the `profile_updates` and

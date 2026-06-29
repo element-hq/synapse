@@ -408,6 +408,114 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ],
         )
 
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_previous_profile_updates_stream_rows_cleared_if_no_longer_sharing_a_room(
+        self,
+    ) -> None:
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        self.register_user("millie", "password")
+        millie_token = self.login("millie", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        room_with_millie_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+        self.helper.join(room_with_millie_id, "@millie:test", tok=millie_token)
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="m.status",
+                new_value='{"text": "Holiday"}',
+            )
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@roger:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    field_name="m.status",
+                ),
+            ],
+        )
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@millie:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    field_name="m.status",
+                ),
+            ],
+        )
+
+        # Leave room and verify only the "left room" exists for roger
+        self.helper.leave(room_id, self.frank.to_string(), tok=self.frank_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@roger:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=5,
+                    user_id=self.frank.to_string(),
+                    action="left_room",
+                    field_name=None,
+                ),
+            ],
+        )
+
+        # Sanity check we didn't clear any rows for millie
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@millie:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    field_name="m.status",
+                ),
+            ],
+        )
+
     @parameterized.expand(
         [
             ["displayname", "Frank"],

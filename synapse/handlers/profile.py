@@ -446,6 +446,9 @@ class ProfileHandler:
         * Add a row to `profile_updates` stating that the user left a room.
         * Check if this user no longer shares any rooms with certain users.
         * Insert a row for each of those users into `profile_updates_per_user`.
+        * Remove any previous profile update stream rows concerning
+          this user. This is done to stop leaking any updates to users who no longer
+          share a room.
         * Now, when any of those users sync, the sync code will check
           `profile_updates` and see that the user left a room. And thus a "clear
           this user's profile" instruction will be sent down to the client.
@@ -467,12 +470,18 @@ class ProfileHandler:
 
         users_to_update = users_in_left_room - users_still_sharing_rooms
         if users_to_update:
+            # First clear any old profile updates for these users
+            await self.store.clear_profile_updates_for_user(
+                user_id=user_id,
+                users_to_remove=users_to_update,
+            )
+
+            # Record our leave
             stream_id = await self.store.add_profile_updates(
                 user_id=user_id,
                 action=ProfileUpdateAction.LEFT_ROOM.value,
                 updated_fields=None,
             )
-
             await self.store.track_profile_updates_per_user(
                 stream_id=stream_id,
                 user_ids=users_to_update,
