@@ -3,6 +3,7 @@
 //! The driver itself is async; we drive it from sync Python methods via a
 //! shared multi-thread tokio runtime (see `super::runtime`).
 
+use anyhow::Error;
 use log::warn;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -48,9 +49,8 @@ fn pg_err_to_py(e: tokio_postgres::Error) -> PyErr {
 /// hands back a `Connection` wrapping the client.
 #[pyfunction]
 fn connect<'py>(py: Python<'py>, dsn: &str) -> PyResult<Bound<'py, connection::Connection>> {
-    let config = dsn
-        .parse::<tokio_postgres::Config>()
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to parse DSN: {e}")))?;
+    let config = fixup_default_host(dsn)
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to prepare DSN: {e}")))?;
 
     // TLS is not yet supported: unlike libpq (whose default is
     // `sslmode=prefer`), we never negotiate TLS regardless of the DSN's
@@ -67,4 +67,34 @@ fn connect<'py>(py: Python<'py>, dsn: &str) -> PyResult<Bound<'py, connection::C
     let conn = connection::Connection::new(client);
 
     Bound::new(py, conn)
+}
+
+/// Fix up a DSN to ensure it has a host, using libpq's default host if
+/// necessary.
+///
+/// [`tokio_postgres`] has a different default host than [`libpq`], which is
+/// what Synapse previously used (and is what e.g. `psql` uses). The default
+/// host in `libpq` is configurable, so when the DSN omits a host we ask libpq
+/// what its default would be and use that instead.
+fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
+    let mut config = dsn.parse::<tokio_postgres::Config>()?;
+
+    // `tokio_postgres` parses only the DSN string (it does not consult `PGHOST`
+    // or the compiled-in default), so an empty host list means the DSN really
+    // omitted the host. A DSN that gives a `hostaddr` instead of a `host` is
+    // still connectable as-is, so leave it alone too — injecting a default host
+    // there would just confuse TLS/SNI.
+    if !config.get_hosts().is_empty() || !config.get_hostaddrs().is_empty() {
+        return Ok(config);
+    }
+
+    // Resolve libpq's default host without connecting: PQconnectStart parses
+    // the (empty) conninfo and applies libpq's defaults *and* env (e.g.
+    // `PGHOST`), but opens no socket because we never poll it. Closed on Drop.
+    let pq_conn = libpq::Connection::start("")?;
+    let host = pq_conn.host()?;
+
+    config.host(host);
+
+    Ok(config)
 }
