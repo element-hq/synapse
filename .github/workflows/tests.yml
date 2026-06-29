@@ -677,7 +677,12 @@ jobs:
       - changes
 
   cargo-test:
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    # We need to explicitly specify `!cancelled() && !failure()` as otherwise
+    # GitHub will implicitly add `success()`, which will be `false` when any job
+    # in `needs`, or its dependents, is skipped. Most notably, jobs like
+    # `lint-readme`, a dependency of `linting-done`, are unlikely to run very
+    # often - and would result in this job being skipped.
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     needs:
       - linting-done
@@ -697,7 +702,8 @@ jobs:
   # We want to ensure that the cargo benchmarks still compile, which requires a
   # nightly compiler.
   cargo-bench:
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    # See `cargo-test` above for why we need to specify `!cancelled() && !failure()`.
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     needs:
       - linting-done
