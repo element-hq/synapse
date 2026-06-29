@@ -54,10 +54,11 @@
 
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
+use log::warn;
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
-    types::{PyInt, PyTuple},
+    types::{PyDict, PyInt, PyTuple},
 };
 use tokio_postgres::Client;
 
@@ -296,6 +297,47 @@ impl Connection {
             self.commit(py)?;
         }
         Ok(false)
+    }
+
+    /// Run `func` inside a transaction, passing it a fresh cursor.
+    ///
+    /// A thin convenience wrapper over `cursor`/`commit`/`rollback` (Synapse's
+    /// own `new_transaction` is the primary entry point and drives those
+    /// directly). The cursor is prepended to `args` (so the callback is invoked
+    /// as `func(cursor, *args, **kwargs)`); the transaction is committed if the
+    /// callback returns normally and rolled back if it raises, and the
+    /// callback's return value is propagated back to Python.
+    #[pyo3(signature = (func, *args, **kwargs))]
+    fn run_interaction<'py>(
+        &self,
+        py: Python<'py>,
+        func: Bound<'py, PyAny>,
+        args: Bound<'py, PyTuple>,
+        kwargs: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let cursor = Bound::new(py, Cursor::new(self.clone()))?;
+
+        // Build a new argument list with the cursor prepended, then call the
+        // provided function with it.
+        let args = args.to_list();
+        args.insert(0, &cursor)?;
+
+        let result = func.call(args.to_tuple(), kwargs);
+
+        match &result {
+            // Commit on success; a commit failure replaces the (successful)
+            // result with the error.
+            Ok(_) => self.commit(py)?,
+            // Roll back on failure. The original exception is what we want to
+            // propagate, so a rollback failure here is only logged.
+            Err(_) => {
+                if let Err(err) = self.rollback(py) {
+                    warn!("failed to roll back failed interaction: {err}");
+                }
+            }
+        }
+
+        result
     }
 }
 
