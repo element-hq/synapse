@@ -20,10 +20,11 @@
 from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
-from synapse.rest.client import login, matrixrtc, register, room
+from synapse.rest.client import login, matrixrtc, register, room, versions
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
+from tests import unittest
 from tests.unittest import HomeserverTestCase, override_config
 
 PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4143"
@@ -103,3 +104,20 @@ class MatrixRtcTestCase(HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, channel.json_body)
         self.assert_dict({"rtc_transports": [LIVEKIT_ENDPOINT]}, channel.json_body)
+
+
+class MatrixRtcVersionsTestCase(HomeserverTestCase):
+    """Tests that org.matrix.msc4143 is correctly advertised in /versions."""
+
+    servlets = [versions.register_servlets]
+
+    def test_msc4143_false_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertFalse(channel.json_body["unstable_features"]["org.matrix.msc4143"])
+
+    @unittest.override_config({"experimental_features": {"msc4143_enabled": True}})
+    def test_msc4143_true_if_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc4143"])
