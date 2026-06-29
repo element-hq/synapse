@@ -294,20 +294,19 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         Ok(rows)
     }
 
-    /// Return the affected-row count, draining the stream first if needed.
+    /// Drive a non-row-returning statement's stream to completion, surfacing
+    /// any execution error and capturing the affected-row count. A no-op unless
+    /// the cursor is `Active`.
     ///
-    /// Unlike the `fetch_*` methods this is always valid: reading the rowcount
-    /// of an already-exhausted (`Closed`) cursor returns the captured count
-    /// rather than erroring, per PEP-249.
-    pub fn rowcount<'py>(
-        &mut self,
-        py: Python<'py>,
-        handle: &Handle,
-    ) -> PyResult<Bound<'py, PyInt>> {
-        // `rows_affected()` is only valid after the stream is drained, so we
-        // drain it here. This is OK as in Python the rowcount should only be
-        // accessed for queries that DO NOT return rows, e.g. INSERT, UPDATE,
-        // DELETE.
+    /// `execute` calls this for statements with no result columns
+    /// (INSERT/UPDATE/DELETE/DDL without RETURNING). Their `query_raw` stream is
+    /// never fetched, but a `query_raw` stream only reports the server's
+    /// response — including an error such as a constraint violation, and the
+    /// affected-row count — once it is polled. Draining here makes such an error
+    /// surface at `execute` time, as psycopg2 does, instead of being silently
+    /// lost when the result is never fetched (most visibly under autocommit,
+    /// where there is no later `commit` to surface it).
+    pub fn finish_no_rows(&mut self, py: Python<'_>, handle: &Handle) -> PyResult<()> {
         if let Self::Active {
             stream,
             description,
@@ -323,6 +322,23 @@ impl<S: CursorRowStream> CursorQueryState<S> {
                 rowcount,
             };
         }
+        Ok(())
+    }
+
+    /// Return the affected-row count, draining the stream first if needed.
+    ///
+    /// Unlike the `fetch_*` methods this is always valid: reading the rowcount
+    /// of an already-exhausted (`Closed`) cursor returns the captured count
+    /// rather than erroring, per PEP-249.
+    pub fn rowcount<'py>(
+        &mut self,
+        py: Python<'py>,
+        handle: &Handle,
+    ) -> PyResult<Bound<'py, PyInt>> {
+        // `rows_affected()` is only valid after the stream is drained, so drain
+        // it here. This is OK as in Python the rowcount should only be accessed
+        // for queries that DO NOT return rows, e.g. INSERT, UPDATE, DELETE.
+        self.finish_no_rows(py, handle)?;
 
         match self {
             Self::Closed {
@@ -540,6 +556,65 @@ mod tests {
             let mut state = CursorQueryState::<FakeStream>::new();
             let err = state.fetch_one(py, handle()).unwrap_err();
             assert!(err.to_string().contains("no active query"), "{err}");
+        });
+    }
+
+    #[test]
+    fn finish_no_rows_drains_and_captures_rowcount() {
+        Python::initialize();
+        Python::attach(|py| {
+            // A non-row-returning statement: no rows to yield, a command-tag
+            // rowcount, and an empty column list.
+            let mut state = CursorQueryState::<FakeStream>::new();
+            state.on_query_start(
+                FakeStream {
+                    items: VecDeque::new(),
+                    rows_affected: Some(3),
+                },
+                vec![],
+            );
+
+            state.finish_no_rows(py, handle()).unwrap();
+            assert!(matches!(
+                state,
+                CursorQueryState::Closed {
+                    rowcount: Some(3),
+                    ..
+                }
+            ));
+        });
+    }
+
+    #[test]
+    fn finish_no_rows_surfaces_execution_error() {
+        Python::initialize();
+        Python::attach(|py| {
+            // The statement fails server-side (e.g. a constraint violation),
+            // surfaced only when the stream is polled — which `finish_no_rows`
+            // does, so the error is raised rather than silently swallowed.
+            let mut state = CursorQueryState::<FakeStream>::new();
+            state.on_query_start(
+                FakeStream {
+                    items: VecDeque::from([Err(FakeError("boom"))]),
+                    rows_affected: None,
+                },
+                vec![],
+            );
+
+            let err = state.finish_no_rows(py, handle()).unwrap_err();
+            assert!(err.to_string().contains("boom"), "{err}");
+            // A stream error resets the cursor to `Idle`.
+            assert!(matches!(state, CursorQueryState::Idle));
+        });
+    }
+
+    #[test]
+    fn finish_no_rows_on_idle_is_a_noop() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = CursorQueryState::<FakeStream>::new();
+            state.finish_no_rows(py, handle()).unwrap();
+            assert!(matches!(state, CursorQueryState::Idle));
         });
     }
 
