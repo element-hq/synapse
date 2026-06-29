@@ -67,6 +67,9 @@ impl ThreadAggregation {
 
     /// The Python GC needs to know that this object references the latest
     /// event.
+    ///
+    /// Note that we don't need to implement `__clear__` because we cannot have
+    /// reference cycles.
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
         visit.call(&self.latest_event)?;
         Ok(())
@@ -130,6 +133,9 @@ impl BundledAggregations {
 
     /// The Python GC needs to know that this object references the latest
     /// event.
+    ///
+    /// Note that we don't need to implement `__clear__` because we cannot have
+    /// reference cycles.
     fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
         visit.call(&self.replace)?;
         visit.call(&self.thread)?;
