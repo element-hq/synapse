@@ -1257,6 +1257,53 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             ],
         )
 
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_initial_sync_does_not_include_untracked_users_profile_updates(
+        self, is_lazy: bool
+    ) -> None:
+        third_user = self.register_user("third_user", "password")
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+
+        requester = create_requester(self.user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {
+                "ids": ["m.status", "displayname", "avatar_url"]
+            }
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertIsNone(initial_result.profile_updates.get(third_user))
+
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_lazy_loading_responds_with_only_profiles_with_events(
         self,
