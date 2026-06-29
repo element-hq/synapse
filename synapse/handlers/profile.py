@@ -762,23 +762,13 @@ class ProfileHandler:
                 propagate=propagate,
             )
         else:
-            # For custom fields, we need to call a separate delete method
-            # for empty strings.
-            if new_value == "":
-                await self.delete_profile_field(
-                    target_user=target_user,
-                    requester=requester,
-                    field_name=field_name,
-                    by_admin=by_admin,
-                )
-            else:
-                await self.set_profile_field(
-                    target_user=target_user,
-                    requester=requester,
-                    field_name=field_name,
-                    new_value=new_value,
-                    by_admin=by_admin,
-                )
+            await self.set_profile_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=by_admin,
+            )
 
     async def set_profile_field(
         self,
