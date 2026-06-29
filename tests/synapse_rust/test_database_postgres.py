@@ -226,8 +226,9 @@ class PostgresConnectionTestCase(unittest.TestCase):
             [(n,) for n in range(1, 1001)],
         )
 
-    def test_fetch_next_batch_empty_after_exhaustion(self) -> None:
-        """Once the result set is drained, further batches are empty."""
+    def test_fetch_next_batch_reports_exhaustion_with_empty_batch(self) -> None:
+        """After the last rows, one further call returns an empty batch to
+        report exhaustion."""
 
         def interaction(cursor: Any) -> list[Any]:
             cursor.execute("SELECT 1")
@@ -287,6 +288,75 @@ class PostgresConnectionTestCase(unittest.TestCase):
             self.conn.run_interaction(interaction),
             [(n,) for n in range(1, 11)],
         )
+
+    # ------------------------------------------------------------------
+    # Fetching after exhaustion is a programming error
+    # ------------------------------------------------------------------
+    #
+    # Once a fetch has *reported* exhaustion (fetch_one -> None,
+    # fetch_next_batch -> [], or fetch_all returning), the result set is spent.
+    # Fetching again indicates a bug in the caller, so it raises rather than
+    # silently returning nothing.
+
+    def test_fetch_one_after_exhaustion_raises(self) -> None:
+        """A fetch_one after the one that returned None is an error."""
+
+        def interaction(cursor: Any) -> None:
+            cursor.execute("SELECT 1")
+            self.assertEqual(cursor.fetch_one(), (1,))
+            self.assertIsNone(cursor.fetch_one())  # reports exhaustion
+            cursor.fetch_one()  # over-fetch
+
+        with self.assertRaises(RuntimeError):
+            self.conn.run_interaction(interaction)
+
+    def test_fetch_next_batch_after_exhaustion_raises(self) -> None:
+        """A fetch_next_batch after the one that returned [] is an error."""
+
+        def interaction(cursor: Any) -> None:
+            cursor.execute("SELECT 1")
+            self.assertEqual(cursor.fetch_next_batch(), [(1,)])
+            self.assertEqual(cursor.fetch_next_batch(), [])  # reports exhaustion
+            cursor.fetch_next_batch()  # over-fetch
+
+        with self.assertRaises(RuntimeError):
+            self.conn.run_interaction(interaction)
+
+    def test_fetch_all_twice_raises(self) -> None:
+        """fetch_all exhausts the result set, so a second fetch_all is an
+        error."""
+
+        def interaction(cursor: Any) -> None:
+            cursor.execute("SELECT 1")
+            self.assertEqual(cursor.fetch_all(), [(1,)])
+            cursor.fetch_all()  # over-fetch
+
+        with self.assertRaises(RuntimeError):
+            self.conn.run_interaction(interaction)
+
+    def test_fetch_one_after_fetch_all_raises(self) -> None:
+        """fetch_all reports exhaustion, so a following fetch_one is an
+        error rather than None."""
+
+        def interaction(cursor: Any) -> None:
+            cursor.execute("SELECT 1")
+            cursor.fetch_all()
+            cursor.fetch_one()  # over-fetch
+
+        with self.assertRaises(RuntimeError):
+            self.conn.run_interaction(interaction)
+
+    def test_exhausted_error_is_distinct_from_no_query(self) -> None:
+        """The exhausted-result error names exhaustion, not a missing query, so
+        the two programming errors are distinguishable."""
+
+        def interaction(cursor: Any) -> None:
+            cursor.execute("SELECT 1")
+            cursor.fetch_all()
+            cursor.fetch_one()
+
+        with self.assertRaisesRegex(RuntimeError, "exhausted"):
+            self.conn.run_interaction(interaction)
 
     # ------------------------------------------------------------------
     # Value round-tripping (ToSql + FromSql for each supported type)

@@ -8,7 +8,7 @@
 
 use std::{future::Future, pin::Pin};
 
-use futures::{FutureExt, StreamExt};
+use futures::{stream::Fuse, FutureExt, StreamExt};
 use pyo3::{marker::Ungil, PyResult, Python};
 
 use crate::database::{postgres::pg_err_to_py, runtime::runtime};
@@ -82,4 +82,4 @@ where
     }
 }
 
-impl BlockingPostgresStream for Pin<&mut tokio_postgres::RowStream> {}
+impl BlockingPostgresStream for Pin<&mut Fuse<tokio_postgres::RowStream>> {}
