@@ -4,6 +4,7 @@
 //! the [`postgres`] submodule.
 
 pub mod postgres;
+pub mod runtime;
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
