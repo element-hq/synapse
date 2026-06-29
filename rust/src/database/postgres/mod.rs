@@ -1,8 +1,11 @@
 //! [`tokio_postgres`]-backed `Connection` / `Cursor` types exposed to Python.
 //!
-//! The driver itself is async; we drive it from sync Python methods via a
-//! shared multi-thread tokio runtime (see `super::runtime`).
+//! The driver itself is async; we drive it from sync Python methods via the
+//! extension's shared multi-thread tokio runtime (see [`crate::tokio_runtime`]).
+//! [`connect`] takes the runtime's handle from the reactor once and hands it to
+//! the [`Connection`], which carries it for the life of the connection.
 
+use anyhow::Error;
 use log::warn;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -14,6 +17,7 @@ use crate::tokio_runtime::runtime_handle;
 mod connection;
 mod cursor_state;
 mod helpers;
+mod libpq;
 mod value;
 
 /// Register the `postgres` submodule (the `Connection` / `Cursor` classes and
@@ -59,9 +63,8 @@ fn connect<'py>(
 ) -> PyResult<Bound<'py, connection::Connection>> {
     let handle = runtime_handle(reactor)?;
 
-    let config = dsn
-        .parse::<tokio_postgres::Config>()
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to parse DSN: {e}")))?;
+    let config = fixup_default_host(dsn)
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to prepare DSN: {e}")))?;
 
     // TLS is not yet supported: unlike libpq (whose default is
     // `sslmode=prefer`), we never negotiate TLS regardless of the DSN's
@@ -80,4 +83,30 @@ fn connect<'py>(
     let conn = connection::Connection::new(client, handle);
 
     Bound::new(py, conn)
+}
+
+/// Fix up a DSN to ensure it has a host, using libpq's default host if
+/// necessary.
+///
+/// [`tokio_postgres`] has a different default host than libpq, which is what
+/// Synapse previously used (and is what e.g. `psql` uses). libpq's default host
+/// is configurable, so when the DSN omits a host we ask libpq what its default
+/// would be and use that instead (see [`libpq::default_host`]).
+fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
+    let mut config = dsn.parse::<tokio_postgres::Config>()?;
+
+    // `tokio_postgres` parses only the DSN string (it does not consult `PGHOST`
+    // or the compiled-in default), so an empty host list means the DSN really
+    // omitted the host. A DSN that gives a `hostaddr` instead of a `host` is
+    // still connectable as-is, so leave it alone too — injecting a default host
+    // there would just confuse TLS/SNI.
+    if !config.get_hosts().is_empty() || !config.get_hostaddrs().is_empty() {
+        return Ok(config);
+    }
+
+    // Resolve libpq's default host without connecting (see `libpq::default_host`).
+    let host = libpq::default_host()?;
+    config.host(&host);
+
+    Ok(config)
 }
