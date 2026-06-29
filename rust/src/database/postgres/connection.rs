@@ -5,11 +5,6 @@
 //! `run_interaction` hands the interaction function a [`Cursor`] wrapped in an
 //! explicit transaction (`BEGIN` ... `COMMIT`/`ROLLBACK`).
 //!
-//! `run_interaction` itself is added in a follow-up change; this one provides
-//! the connection/cursor types, the client-ownership handshake, the cursor
-//! query methods, and the transaction lifecycle (`cursor` + `finish` +
-//! [`CursorGuard`]) that it will drive.
-//!
 //! The driver is async but the Python API is sync, so every database call is
 //! driven to completion on the shared tokio runtime via the `block_on` helpers
 //! (see [`super::helpers::BlockingPostgresResult`]).
@@ -53,7 +48,7 @@ use log::warn;
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
-    types::{PyInt, PyTuple},
+    types::{PyDict, PyInt, PyTuple},
 };
 use tokio_postgres::Client;
 
@@ -121,11 +116,6 @@ impl Connection {
     /// Returns both the Python-visible [`Cursor`] and a [`CursorGuard`] whose
     /// [`Drop`] impl rolls back and returns the client if the cursor is never
     /// explicitly finished (e.g. the interaction panics before `finish`).
-    //
-    // `allow(dead_code)`: `cursor` (and the `finish`/`CursorGuard` machinery it
-    // drives) only has a caller once `run_interaction` is added in the next
-    // change. The allow is removed then.
-    #[allow(dead_code)]
     fn cursor<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, Cursor>, CursorGuard)> {
         // Take the client out for the duration of the transaction; the
         // connection's slot stays empty until the cursor hands it back, so the
@@ -181,10 +171,6 @@ struct CursorInner {
 /// the time this drops, so the guard is a no-op. If instead the interaction
 /// bailed out before `finish` ran, the guard rolls back the open transaction
 /// and returns the client to the connection.
-//
-// `allow(dead_code)`: constructed only by `Connection::cursor`, which is itself
-// unused until `run_interaction` lands in the next change.
-#[allow(dead_code)]
 struct CursorGuard {
     cursor: Cursor,
 }
@@ -256,10 +242,6 @@ impl Cursor {
     /// itself fails — or `put_client` rejects the hand-back — the client is
     /// dropped rather than returned, closing the connection (see the module
     /// docs).
-    //
-    // `allow(dead_code)`: called by `run_interaction` and `CursorGuard::drop`,
-    // both of which only become reachable once `run_interaction` is added.
-    #[allow(dead_code)]
     fn finish(&self, commit: bool) -> PyResult<()> {
         // Take the whole cursor state out under one lock, closing the cursor
         // (and dropping any in-flight result set with it). If it's already
@@ -381,5 +363,43 @@ impl Drop for CursorGuard {
         if let Err(err) = self.cursor.finish(false) {
             warn!("failed to roll back abandoned transaction on drop: {err}");
         }
+    }
+}
+
+#[pymethods]
+impl Connection {
+    /// Run `func` inside a transaction, passing it a fresh cursor.
+    ///
+    /// The cursor is prepended to `args` (so the callback is invoked as
+    /// `func(cursor, *args, **kwargs)`), mirroring Synapse's existing
+    /// `run_interaction` API. The transaction is committed if the callback
+    /// returns normally and rolled back if it raises, and the callback's
+    /// return value is propagated back to Python.
+    #[pyo3(signature = (func, *args, **kwargs))]
+    fn run_interaction<'py>(
+        &self,
+        py: Python<'py>,
+        func: Bound<'py, PyAny>,
+        args: Bound<'py, PyTuple>,
+        kwargs: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        // `_guard` (not `_`) is deliberate: binding it keeps the `CursorGuard`
+        // alive until the end of the function, so if `func.call` below unwinds
+        // (a Rust panic), its `Drop` rolls the transaction back. A `_` binding
+        // would drop it immediately and lose that protection.
+        let (cursor, _guard) = self.cursor(py)?;
+
+        // Build a new argument list with the cursor prepended, then call the
+        // provided function with that new argument list.
+        let args = args.to_list();
+        args.insert(0, &cursor)?;
+
+        let result = func.call(args.to_tuple(), kwargs);
+
+        // Commit on success, rollback on failure. (If `finish` itself errors,
+        // that error takes precedence over the callback's result.)
+        cursor.get().finish(result.is_ok())?;
+
+        result
     }
 }
