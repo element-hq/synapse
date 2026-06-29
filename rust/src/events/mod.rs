@@ -141,7 +141,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 /// `Clone` is shallow (see [`FormattedEvent`]) and lets an `Event` be held by
 /// value, e.g. inside [`BundledAggregations`](crate::events::relations::BundledAggregations).
 #[pyclass(frozen, weakref, skip_from_py_object)]
-#[derive(Clone)]
 pub struct Event {
     /// The parsed event JSON.
     parsed_event: FormattedEvent,
