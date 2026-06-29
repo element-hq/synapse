@@ -6,8 +6,9 @@
 //! runtime's own connection task can run) while we wait. The [`Ungil`] bounds
 //! are what let us hand the future across the `detach` boundary.
 
-use std::future::Future;
+use std::{future::Future, pin::Pin};
 
+use futures::{FutureExt, StreamExt};
 use pyo3::{marker::Ungil, PyResult, Python};
 
 use crate::database::{postgres::pg_err_to_py, runtime::runtime};
@@ -52,3 +53,33 @@ where
     F::Output: Ungil + Send,
 {
 }
+
+pub trait BlockingPostgresStream
+where
+    Self: futures::Stream + Sized + Send + Ungil + Unpin,
+    Self::Item: Ungil + Send,
+{
+    /// Get the next item from the stream, blocking on the shared runtime if
+    /// necessary.
+    ///
+    /// If the stream is not ready to yield an item, this will release the GIL
+    /// and block until the next item is available.
+    ///
+    /// This method will return `None` if the stream is exhausted.
+    fn block_on_next(&mut self, py: Python<'_>) -> Option<Self::Item> {
+        match self.get_next_if_ready() {
+            Some(row) => row,
+            None => self.next().block_on(py),
+        }
+    }
+
+    /// Get the next item from the stream if it's ready, without blocking.
+    ///
+    /// Returns `None` if the stream is not ready to yield an item. Returns
+    /// `Some(None)` if the stream is exhausted.
+    fn get_next_if_ready(&mut self) -> Option<Option<Self::Item>> {
+        self.next().now_or_never()
+    }
+}
+
+impl BlockingPostgresStream for Pin<&mut tokio_postgres::RowStream> {}

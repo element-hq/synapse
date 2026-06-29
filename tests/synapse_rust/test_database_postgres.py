@@ -36,8 +36,7 @@ from tests.utils import (
 
 
 def _build_dsn() -> str:
-    """Build a libpq keyword/value connection string from the test config.
-    """
+    """Build a libpq keyword/value connection string from the test config."""
 
     parts = [f"dbname={POSTGRES_BASE_DB}"]
     if POSTGRES_USER is not None:
@@ -176,6 +175,118 @@ class PostgresConnectionTestCase(unittest.TestCase):
             return results
 
         self.assertEqual(self.conn.run_interaction(interaction), [1, 2, 3])
+
+    # ------------------------------------------------------------------
+    # fetch_next_batch()
+    # ------------------------------------------------------------------
+
+    def test_fetch_next_batch_returns_first_row(self) -> None:
+        """A non-empty result set yields a batch containing at least the first
+        row, which blocks until available."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute("SELECT 42::int, 'hello'::text")
+            return cursor.fetch_next_batch()
+
+        # The batch must be non-empty and start with the first row. We don't
+        # assert the exact length: how many further rows are already buffered
+        # (and so returned without blocking) is timing-dependent.
+        batch = self.conn.run_interaction(interaction)
+        self.assertEqual(batch[0], (42, "hello"))
+
+    def test_fetch_next_batch_empty_when_no_rows(self) -> None:
+        """An empty result set yields an empty batch."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute("SELECT 1 WHERE false")
+            return cursor.fetch_next_batch()
+
+        self.assertEqual(self.conn.run_interaction(interaction), [])
+
+    def test_fetch_next_batch_collects_all_rows_across_batches(self) -> None:
+        """Looping until an empty batch is returned yields every row exactly
+        once, in order, regardless of how the rows are split across batches."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute(
+                """
+                SELECT id FROM generate_series(1, 1000) AS s(id) ORDER BY id
+                """
+            )
+            rows = []
+            while True:
+                batch = cursor.fetch_next_batch()
+                if not batch:
+                    break
+                rows.extend(batch)
+            return rows
+
+        self.assertEqual(
+            self.conn.run_interaction(interaction),
+            [(n,) for n in range(1, 1001)],
+        )
+
+    def test_fetch_next_batch_empty_after_exhaustion(self) -> None:
+        """Once the result set is drained, further batches are empty."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute("SELECT 1")
+            first = cursor.fetch_next_batch()
+            second = cursor.fetch_next_batch()
+            return [first, second]
+
+        first, second = self.conn.run_interaction(interaction)
+        self.assertEqual(first, [(1,)])
+        self.assertEqual(second, [])
+
+    def test_fetch_next_batch_capacity_is_not_a_limit(self) -> None:
+        """`capacity` is only a buffer hint; a batch may exceed it."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute(
+                "SELECT id FROM generate_series(1, 100) AS s(id) ORDER BY id"
+            )
+            rows = []
+            while True:
+                batch = cursor.fetch_next_batch(1)
+                if not batch:
+                    break
+                rows.extend(batch)
+            return rows
+
+        self.assertEqual(
+            self.conn.run_interaction(interaction),
+            [(n,) for n in range(1, 101)],
+        )
+
+    def test_fetch_next_batch_without_query_raises(self) -> None:
+        """Calling fetch_next_batch before execute is an error."""
+
+        def interaction(cursor: Any) -> None:
+            cursor.fetch_next_batch()
+
+        with self.assertRaises(RuntimeError):
+            self.conn.run_interaction(interaction)
+
+    def test_fetch_next_batch_interleaves_with_fetch_one(self) -> None:
+        """fetch_one and fetch_next_batch share the same underlying stream, so
+        rows already consumed by one are not seen by the other."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute("SELECT id FROM generate_series(1, 10) AS s(id) ORDER BY id")
+            first = cursor.fetch_one()
+            rows = [first]
+            while True:
+                batch = cursor.fetch_next_batch()
+                if not batch:
+                    break
+                rows.extend(batch)
+            return rows
+
+        self.assertEqual(
+            self.conn.run_interaction(interaction),
+            [(n,) for n in range(1, 11)],
+        )
 
     # ------------------------------------------------------------------
     # Value round-tripping (ToSql + FromSql for each supported type)

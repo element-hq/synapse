@@ -288,6 +288,21 @@ impl Cursor {
         self.with_cursor_state(|state| state.fetch_all(py))
     }
 
+    /// Fetch the next batch of rows from the current result set.
+    ///
+    /// Blocks for the first row, then returns any further rows that are already
+    /// available without blocking. Returns an empty list only once the result
+    /// set is exhausted. `capacity` is a hint for the size of the returned
+    /// buffer, not a limit on the number of rows returned.
+    #[pyo3(signature = (capacity = 100))]
+    fn fetch_next_batch<'py>(
+        &self,
+        py: Python<'py>,
+        capacity: usize,
+    ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
+        self.with_cursor_state(|state| state.fetch_next_batch(py, capacity))
+    }
+
     /// Return the PEP-249 `rowcount` for the last statement.
     ///
     /// This is the number of rows affected by a DML statement; for queries

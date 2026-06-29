@@ -16,7 +16,7 @@ use pyo3::{
 use tokio_postgres::{Column, RowStream};
 
 use crate::database::postgres::{
-    helpers::{BlockingPostgres, BlockingPostgresResult},
+    helpers::{BlockingPostgres, BlockingPostgresResult, BlockingPostgresStream as _},
     value::pg_row_to_py,
 };
 
@@ -71,24 +71,75 @@ impl CursorQueryState {
 
         let next = stream.as_mut().next().block_on(py);
 
-        match next {
-            Some(Ok(row)) => {
-                let pg_row = pg_row_to_py(py, &row)?;
-                Ok(Some(pg_row))
-            }
-            Some(Err(err)) => {
-                self.stream = None;
-                self.description = None;
-                Err(PyRuntimeError::new_err(format!(
-                    "error fetching row from postgres: {err}"
-                )))
-            }
-            None => {
-                self.rowcount = stream.rows_affected();
-                self.stream = None;
-                Ok(None)
+        self.parse_stream_row(py, next)
+    }
+
+    /// Fetch the next batch of rows.
+    ///
+    /// This method will block on the first row if it's not immediately
+    /// available, but will return any additional rows that are also ready
+    /// without blocking.
+    ///
+    /// This is a convenience for Python code that wants to avoid the overhead
+    /// of calling `fetch_one` repeatedly, but still wants to avoid blocking on
+    /// the entire result set.
+    ///
+    /// Will only return an empty batch if the stream is exhausted.
+    pub fn fetch_next_batch<'py>(
+        &mut self,
+        py: Python<'py>,
+        capacity: usize,
+    ) -> PyResult<Vec<Bound<'py, PyTuple>>> {
+        // If there's no live stream, either the previous result set has already
+        // been fully drained — in which case we return an empty batch, per the
+        // contract — or nothing has been executed yet, which is an error. We
+        // tell the two apart by `description`, which is set for the duration of
+        // a query and only cleared by the next `execute`.
+        if self.stream.is_none() {
+            return if self.description.is_some() {
+                Ok(Vec::new())
+            } else {
+                Err(PyRuntimeError::new_err("no active query"))
+            };
+        }
+
+        let mut stream = self.get_stream_mut()?;
+
+        // Wait for at least one row.
+        let first_row = stream.block_on_next(py);
+
+        let first_pg_row = self.parse_stream_row(py, first_row)?;
+        let Some(first_pg_row) = first_pg_row else {
+            // The stream is exhausted, so we return an empty batch.
+            return Ok(Vec::new());
+        };
+
+        let mut buffer = Vec::with_capacity(capacity);
+        buffer.push(first_pg_row);
+
+        loop {
+            // `parse_stream_row` requires a mutable reference to self, and so
+            // we can't hold onto a mutable reference to the `stream` across the
+            // call (as it `stream` is a mutable reference of `self`). So we
+            // have to get a new mutable reference to the stream after each row
+            // is parsed. Hopefully the compiler can mostly optimise this away.
+            stream = self.get_stream_mut()?;
+
+            let Some(next) = stream.get_next_if_ready() else {
+                // The stream isn't ready yet, so we return what we have (which
+                // we know is non-empty because we pushed the first row above).
+                break;
+            };
+
+            let row = self.parse_stream_row(py, next)?;
+            match row {
+                Some(pg_row) => buffer.push(pg_row),
+                // End of stream, so we return what we have.
+                None => break,
             }
         }
+
+        Ok(buffer)
     }
 
     /// Collect every remaining row into a `Vec`, draining the stream.
@@ -127,6 +178,46 @@ impl CursorQueryState {
         };
 
         Ok(PyInt::new(py, rowcount))
+    }
+
+    /// Parse a row from the stream, handling errors and end-of-stream.
+    ///
+    /// On a stream error the state is cleared and the error surfaced to Python.
+    /// On end-of-stream the rowcount is captured and the stream dropped.
+    fn parse_stream_row<'py>(
+        &'_ mut self,
+        py: Python<'py>,
+        row: Option<Result<tokio_postgres::Row, tokio_postgres::Error>>,
+    ) -> PyResult<Option<Bound<'py, PyTuple>>> {
+        match row {
+            Some(Ok(row)) => {
+                let pg_row = pg_row_to_py(py, &row)?;
+                Ok(Some(pg_row))
+            }
+            Some(Err(err)) => {
+                self.stream = None;
+                Err(PyRuntimeError::new_err(format!(
+                    "error fetching row from postgres: {err}"
+                )))
+            }
+            None => {
+                // The stream is exhausted: capture the rowcount and drop the
+                // stream so we never poll a completed stream again (doing so
+                // surfaces as a spurious "connection closed" error).
+                self.rowcount = self.get_stream_mut()?.rows_affected();
+                self.stream = None;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Get a mutable reference to the row stream, or an error if there is no
+    /// active query.
+    fn get_stream_mut(&mut self) -> PyResult<Pin<&mut RowStream>> {
+        let Some(stream) = self.stream.as_mut() else {
+            return Err(PyRuntimeError::new_err("no active query"));
+        };
+        Ok(stream.as_mut())
     }
 }
 
