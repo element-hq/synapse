@@ -361,8 +361,9 @@ class DeviceMessageHandler:
             since_token: stream id to start from when fetching messages
             limit: the number of messages to fetch
         Returns:
-            A dict containing the to-device messages, as well as a token that the client
-            can provide in the next call to fetch the next batch of messages
+            A dict containing the to-device `messages`, as well as a `next_batch` token that the
+            client can provide in the next call to fetch the next batch of messages. If `next_batch`
+            is missing, there are no more messages to fetch.
         """
 
         user_id = requester.user.to_string()
@@ -426,10 +427,14 @@ class DeviceMessageHandler:
             user_id,
         )
 
-        return {
+        ret: JsonDict = {
             "events": messages,
-            "next_batch": f"d{stream_id}",
         }
+
+        if len(messages) > 0:
+            ret["next_batch"] = f"d{stream_id}"
+
+        return ret
 
 
 def split_device_messages_into_edus(

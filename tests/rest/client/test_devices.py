@@ -254,6 +254,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["events"], [])
+        self.assertNotIn("next_batch", channel.json_body)
 
         # make sure we can delete the dehydrated device
         channel = self.make_request(
