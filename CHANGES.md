@@ -42,7 +42,7 @@
 - Add `.ruff_cache/` directory to `.gitignore`. ([\#19854](https://github.com/element-hq/synapse/issues/19854))
 - Bump `poetry` in CI from `2.2.1` to `2.4.1`. ([\#19866](https://github.com/element-hq/synapse/issues/19866), [\#19877](https://github.com/element-hq/synapse/issues/19877))
 - Split out `deferred` and `tokio_runtime` to their own Rust modules. ([\#19868](https://github.com/element-hq/synapse/issues/19868))
-- Prevent the `cargo-deny` and `cargo-bench` CI jobs from being skipped, even on PRs that have Rust changes. ([\#19883](https://github.com/element-hq/synapse/issues/19883))
+- Prevent the `cargo-test` and `cargo-bench` CI jobs from being skipped, even on PRs that have Rust changes. ([\#19883](https://github.com/element-hq/synapse/issues/19883))
 
 
 # Synapse 1.155.0 (2026-06-16)
