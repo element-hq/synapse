@@ -25,7 +25,7 @@ import logging
 import re
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Awaitable
+from typing import TYPE_CHECKING, Awaitable, Mapping, Sequence
 from urllib import parse as urlparse
 
 import attr
@@ -69,6 +69,7 @@ from synapse.http.servlet import (
     parse_json,
     parse_json_object_from_request,
     parse_string,
+    parse_string_from_args,
     parse_strings_from_args,
 )
 from synapse.http.site import SynapseRequest
@@ -990,15 +991,25 @@ class RoomStateRestServlet(RestServlet):
         super().__init__()
         self.message_handler = hs.get_message_handler()
         self.auth = hs.get_auth()
+        self.experimental_config = hs.config.experimental
 
     @cancellable
     async def on_GET(
         self, request: SynapseRequest, room_id: str
     ) -> tuple[int, list[JsonDict]]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
+        type_filter = (
+            parse_strings_from_args(args, "cc.koja.types", required=False)
+            if self.experimental_config.msc4497_state_event_type_filter
+            else None
+        )
         # Get all the current state for this room
         events = await self.message_handler.get_state_events(
             room_id=room_id,
+            state_filter=StateFilter.from_types((x, None) for x in type_filter)
+            if type_filter is not None
+            else None,
             requester=requester,
         )
         return 200, events
