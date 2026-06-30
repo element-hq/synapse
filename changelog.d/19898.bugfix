@@ -1,0 +1,1 @@
+Fix third-party (3pid) invites over federation failing intermittently in version 12 rooms, whose room IDs no longer encode a server name.
