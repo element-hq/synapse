@@ -267,6 +267,43 @@ class DehydratedDeviceEventsServlet(RestServlet):
 
         return 200, msgs
 
+    class PostBody(RequestBodyModel):
+        """
+        This is deprecated: you should use GET instead.
+
+        The POST version is provided temporarily for backwards compatibility
+        with a previous unstable draft of MSC3814.
+        """
+
+        next_batch: StrictStr | None = None
+
+    async def on_POST(
+        self, request: SynapseRequest, device_id: str
+    ) -> tuple[int, JsonDict]:
+        """
+        This is deprecated: you should use GET instead.
+
+        The POST version is provided temporarily for backwards compatibility
+        with a previous unstable draft of MSC3814.
+        """
+
+        requester = await self.auth.get_user_by_req(request)
+
+        next_batch = parse_and_validate_json_object_from_request(
+            request, self.PostBody
+        ).next_batch
+
+        limit = parse_integer(request, "limit", 100)
+
+        msgs = await self.message_handler.get_events_for_dehydrated_device(
+            requester=requester,
+            device_id=device_id,
+            since_token=next_batch,
+            limit=limit,
+        )
+
+        return 200, msgs
+
 
 class DehydratedDeviceV2Servlet(RestServlet):
     """Upload, retrieve, or delete a dehydrated device.
