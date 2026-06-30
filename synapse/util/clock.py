@@ -15,10 +15,12 @@
 
 
 import logging
+from functools import wraps
 from typing import (
     Any,
     Callable,
 )
+from weakref import WeakSet
 
 from typing_extensions import ParamSpec
 from zope.interface import implementer
@@ -60,6 +62,16 @@ this setting won't inherit the log level from the parent logger.
 logging.setLoggerClass(original_logger_class)
 
 
+def _try_wakeup_deferred(d: Deferred) -> None:
+    """Try to wake up a deferred, but ignore any exceptions raised by the
+    callback. This is useful when we want to wake up a deferred that may have
+    already been cancelled, and we don't care about the result."""
+    try:
+        d.callback(None)
+    except Exception:
+        pass
+
+
 class Clock:
     """
     A Clock wraps a Twisted reactor and provides utilities on top of it.
@@ -86,7 +98,7 @@ class Clock:
         self._delayed_call_id: int = 0
         """Unique ID used to track delayed calls"""
 
-        self._looping_calls: list[LoopingCall] = []
+        self._looping_calls: WeakSet[LoopingCall] = WeakSet()
         """List of active looping calls"""
 
         self._call_id_to_delayed_call: dict[int, IDelayedCall] = {}
@@ -112,7 +124,11 @@ class Clock:
         with context.PreserveLoggingContext():
             # We can ignore the lint here since this class is the one location callLater should
             # be called.
-            self._reactor.callLater(duration.as_secs(), d.callback, duration.as_secs())  # type: ignore[call-later-not-tracked]
+            self._reactor.callLater(
+                duration.as_secs(),
+                lambda _: _try_wakeup_deferred(d),
+                duration.as_secs(),
+            )  # type: ignore[call-later-not-tracked]
             await d
 
     def time(self) -> float:
@@ -193,6 +209,7 @@ class Clock:
         if now:
             looping_call_context_string = "looping_call_now"
 
+        @wraps(f)
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
             clock_debug_logger.debug(
                 "%s(%s): Executing callback", looping_call_context_string, instance_id
@@ -240,7 +257,7 @@ class Clock:
         with context.PreserveLoggingContext():
             d = call.start(duration.as_secs(), now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
-        self._looping_calls.append(call)
+        self._looping_calls.add(call)
 
         clock_debug_logger.debug(
             "%s(%s): Scheduled looping call every %sms later",
@@ -302,6 +319,7 @@ class Clock:
         if self._is_shutdown:
             raise Exception("Cannot start delayed call. Clock has been shutdown")
 
+        @wraps(callback)
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             clock_debug_logger.debug("call_later(%s): Executing callback", call_id)
 

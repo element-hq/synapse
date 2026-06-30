@@ -305,7 +305,7 @@ class DeactivateAccountRestServlet(RestServlet):
 
         # allow ASes to deactivate their own users:
         # ASes don't need user-interactive auth
-        if not requester.app_service:
+        if not requester.app_service_id:
             await self.auth_handler.validate_user_via_ui_auth(
                 requester,
                 request,

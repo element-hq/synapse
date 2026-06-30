@@ -41,7 +41,12 @@ class ScheduledTasksRestServlet(RestServlet):
         # extract query params
         action_name = parse_string(request, "action_name")
         resource_id = parse_string(request, "resource_id")
-        status = parse_string(request, "job_status")
+        status = parse_string(request, "status")
+        # This parameter was historically called `job_status`, while the Admin API docs
+        # defined it as `status`. We now support both, as `status` is generally
+        # a nicer name. A v2 of this endpoint should keep only `status`.
+        if status is None:
+            status = parse_string(request, "job_status")
         max_timestamp = parse_integer(request, "max_timestamp")
 
         actions = [action_name] if action_name else None

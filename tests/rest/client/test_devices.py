@@ -18,8 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from http import HTTPStatus
-
 from twisted.internet.defer import ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
@@ -85,48 +83,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         self.registration = hs.get_registration_handler()
         self.message_handler = hs.get_device_message_handler()
 
-    def test_PUT(self) -> None:
-        """Sanity-check that we can PUT a dehydrated device.
-
-        Detects https://github.com/matrix-org/synapse/issues/14334.
-        """
-        alice = self.register_user("alice", "correcthorse")
-        token = self.login(alice, "correcthorse")
-
-        # Have alice update their device list
-        channel = self.make_request(
-            "PUT",
-            "_matrix/client/unstable/org.matrix.msc2697.v2/dehydrated_device",
-            {
-                "device_data": {
-                    "algorithm": "org.matrix.msc2697.v1.dehydration.v1.olm",
-                    "account": "dehydrated_device",
-                },
-                "device_keys": {
-                    "user_id": "@alice:test",
-                    "device_id": "device1",
-                    "valid_until_ts": "80",
-                    "algorithms": [
-                        "m.olm.curve25519-aes-sha2",
-                    ],
-                    "keys": {
-                        "<algorithm>:<device_id>": "<key_base64>",
-                    },
-                    "signatures": {
-                        "<user_id>": {"<algorithm>:<device_id>": "<signature_base64>"}
-                    },
-                },
-            },
-            access_token=token,
-            shorthand=False,
-        )
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-        device_id = channel.json_body.get("device_id")
-        self.assertIsInstance(device_id, str)
-
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_dehydrate_msc3814(self) -> None:
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")
@@ -320,9 +277,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 401)
 
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_msc3814_dehydrated_device_delete_works(self) -> None:
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")

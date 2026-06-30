@@ -247,6 +247,42 @@ Response:
 {}
 ```
 
+## Listing quarantined media changes
+
+When media is quarantined or unquarantined, a change record is created in the 
+database. This API returns those change records in the order they were created.
+
+**Note**: This API should be considered *best-effort* and expected to have missing or
+duplicate records. Currently, this only captures any media explicitly (un)quarantined by
+the media quarantine admin API, and the other cases are tracked by
+https://github.com/element-hq/synapse/issues/19672. Historical media uploaded before
+Synapse 1.152.0 is backfilled in a background update on a best-effort basis.
+
+Each page has a maximum of 100 records. The first page has the oldest records, 
+paginating forwards with each `next_batch` value.
+
+Request:
+
+```
+GET /_synapse/admin/v1/media/quarantine_changes?from=2
+```
+
+Where `from` is the `next_batch` value from a previous request. It is optional
+and defaults to the first page (the value `0`).
+
+Response:
+
+```json
+{
+  "next_batch": 4,
+  "changes": [
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": true },
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": false },
+    { "origin": "another.example.org", "media_id": "abcdefg12345...", "quarantined": true }
+  ]
+}
+```
+
 # Delete local media
 This API deletes the *local* media from the disk of your own server.
 This includes any local thumbnails and copies of media downloaded from

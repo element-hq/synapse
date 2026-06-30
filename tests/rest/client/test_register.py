@@ -22,7 +22,7 @@
 import datetime
 import importlib.resources as importlib_resources
 import os
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
@@ -65,6 +65,17 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         hs = super().make_homeserver(reactor, clock)
         hs.get_send_email_handler()._sendmail = AsyncMock()
         return hs
+
+    def _get_sendmail_mock(self) -> AsyncMock:
+        """
+        Cast the homeserver's `_sendmail` object as an `AsyncMock`.
+
+        `_sendmail` is an `AsyncMock` (see `make_homeserver`) but this type
+        information doesn't make it through the test harness. Thus we need to
+        cast the object again.
+        """
+        sendmail = self.hs.get_send_email_handler()._sendmail
+        return cast(AsyncMock, sendmail)
 
     def test_POST_appservice_registration_valid(self) -> None:
         user_id = "@as_user_kermit:test"
@@ -746,6 +757,33 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, channel.result)
 
         self.assertIsNotNone(channel.json_body.get("sid"))
+
+    @unittest.override_config(
+        {
+            "public_baseurl": "https://test_server",
+            "email": {
+                "smtp_host": "mail_server",
+                "smtp_port": 2525,
+                "notif_from": "sender@host",
+            },
+        }
+    )
+    def test_request_token_allowed_when_email_flow_is_advertised(self) -> None:
+        sendmail = self._get_sendmail_mock()
+        sendmail.reset_mock()
+
+        channel = self.make_request(
+            "POST",
+            b"register/email/requestToken",
+            {
+                "client_secret": "foobar",
+                "email": "test@example.com",
+                "send_attempt": 1,
+            },
+        )
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertIsNotNone(channel.json_body.get("sid"))
+        sendmail.assert_awaited_once()
 
     @unittest.override_config(
         {

@@ -31,14 +31,14 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import LoginType, Membership
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest import admin
 from synapse.rest.client import account, login, register, room
 from synapse.rest.synapse.client.password_reset import PasswordResetSubmitTokenResource
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -500,6 +500,123 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         channel = self.make_request("GET", "account/whoami", access_token=tok)
         self.assertEqual(channel.code, 401)
 
+    def test_deactivate_erase_account(self) -> None:
+        """
+        Test that a user account can be signaled for erasure on the Matrix spec endpoint
+        for client access, `/account/deactivate` and that profile data is erased as part
+        of the process
+        """
+        mxid = self.register_user("kermit", "test")
+        user_id = UserID.from_string(mxid)
+        tok = self.login("kermit", "test")
+
+        profile_handler = self.hs.get_profile_handler()
+
+        # Set some profile data that can be checked for after the user is erased
+        self.get_success(
+            profile_handler.set_displayname(
+                user_id, create_requester(user_id), "Kermit the Frog"
+            )
+        )
+        self.get_success(
+            profile_handler.set_avatar_url(
+                user_id, create_requester(user_id), "http://test/Kermit.jpg"
+            )
+        )
+        # Verify it is set
+        self.assertEqual(
+            self.get_success(profile_handler.get_displayname(user_id)),
+            "Kermit the Frog",
+        )
+        self.assertEqual(
+            self.get_success(profile_handler.get_avatar_url(user_id)),
+            "http://test/Kermit.jpg",
+        )
+
+        # Deactivate!
+        self.deactivate(mxid, tok, erase=True)
+
+        store = self.hs.get_datastores().main
+
+        # Check that the user has been marked as deactivated.
+        self.assertTrue(self.get_success(store.get_user_deactivated_status(mxid)))
+
+        # On deactivation with 'erase', the entire database row is erased. Both of these
+        # should raise a 404(Not Found) SynapseError
+        display_name_failure = self.get_failure(
+            profile_handler.get_displayname(user_id), SynapseError
+        )
+        assert display_name_failure.value.code == HTTPStatus.NOT_FOUND
+
+        avatar_url_failure = self.get_failure(
+            profile_handler.get_avatar_url(user_id), SynapseError
+        )
+        assert avatar_url_failure.value.code == HTTPStatus.NOT_FOUND
+
+        # Check that this access token has been invalidated.
+        channel = self.make_request("GET", "account/whoami", access_token=tok)
+        self.assertEqual(channel.code, 401)
+
+    @override_config({"enable_set_displayname": False, "enable_set_avatar_url": False})
+    def test_deactivate_erase_account_with_disabled_profile_changes(self) -> None:
+        """
+        Test that deactivating the user with the 'erase' option will remove existing
+        profile data, even with the Synapse configuration to forbid profile changes
+        """
+        mxid = self.register_user("kermit", "test")
+        user_id = UserID.from_string(mxid)
+        tok = self.login("kermit", "test")
+
+        profile_handler = self.hs.get_profile_handler()
+
+        # Can not use the profile handler to set a display name when it is disabled. Use
+        # the database directly
+        store = self.hs.get_datastores().main
+        self.get_success(store.set_profile_displayname(user_id, "Kermit the Frog"))
+        self.get_success(
+            store.set_profile_avatar_url(user_id, "http://test/Kermit.jpg")
+        )
+
+        # Verify it is set
+        self.assertEqual(
+            (self.get_success(store.get_profile_displayname(user_id))),
+            "Kermit the Frog",
+        )
+        self.assertEqual(
+            self.get_success(profile_handler.get_displayname(user_id)),
+            "Kermit the Frog",
+        )
+        self.assertEqual(
+            (self.get_success(store.get_profile_avatar_url(user_id))),
+            "http://test/Kermit.jpg",
+        )
+        self.assertEqual(
+            self.get_success(profile_handler.get_avatar_url(user_id)),
+            "http://test/Kermit.jpg",
+        )
+
+        # Deactivate!
+        self.deactivate(mxid, tok, erase=True)
+
+        # Check that the user has been marked as deactivated.
+        self.assertTrue(self.get_success(store.get_user_deactivated_status(mxid)))
+
+        # On deactivation with 'erase', the entire database row is erased. Both of these
+        # should raise a 404(Not Found) SynapseError
+        display_name_failure = self.get_failure(
+            profile_handler.get_displayname(user_id), SynapseError
+        )
+        assert display_name_failure.value.code == HTTPStatus.NOT_FOUND
+
+        avatar_url_failure = self.get_failure(
+            profile_handler.get_avatar_url(user_id), SynapseError
+        )
+        assert avatar_url_failure.value.code == HTTPStatus.NOT_FOUND
+
+        # Check that this access token has been invalidated.
+        channel = self.make_request("GET", "account/whoami", access_token=tok)
+        self.assertEqual(channel.code, 401)
+
     def test_pending_invites(self) -> None:
         """Tests that deactivating a user rejects every pending invite for them."""
         store = self.hs.get_datastores().main
@@ -698,14 +815,23 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(len(res2), 4)
 
-    def deactivate(self, user_id: str, tok: str) -> None:
+    def deactivate(self, user_id: str, tok: str, erase: bool = False) -> None:
+        """
+        Helper to deactivate a user using the /account/deactivate endpoint, optionally
+        with erasure
+
+        Args:
+            user_id: the string formatted mxid(not a UserID)
+            tok: the user's access token
+            erase: bool of if this should be a full erasure request
+        """
         request_data = {
             "auth": {
                 "type": "m.login.password",
                 "user": user_id,
                 "password": "test",
             },
-            "erase": False,
+            "erase": erase,
         }
         channel = self.make_request(
             "POST", "account/deactivate", request_data, access_token=tok

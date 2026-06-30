@@ -4288,6 +4288,17 @@ class UserTokenRestTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(403, channel.code, msg=channel.json_body)
 
+    def test_no_user(self) -> None:
+        """Try to log in as a user that doesn't exist."""
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/users/%s/login" % urllib.parse.quote("@ghost:test"),
+            b"{}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(404, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"])
+
     def test_send_event(self) -> None:
         """Test that sending event as a user works."""
         # Create a room.

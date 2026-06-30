@@ -94,6 +94,7 @@ class Builder:
         build_args = (
             (
                 "docker",
+                "buildx",
                 "build",
                 "--tag",
                 "dh-venv-builder:" + tag,

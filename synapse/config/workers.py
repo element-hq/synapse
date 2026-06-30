@@ -127,7 +127,9 @@ class WriterLocations:
     """Specifies the instances that write various streams.
 
     Attributes:
-        events: The instances that write to the event and backfill streams.
+        events: The instances that write to the event, backfill and `sticky_events` streams.
+            (`sticky_events` is written to during event persistence so must be handled by the
+            same stream writers.)
         typing: The instances that write to the typing stream. Currently
             can only be a single instance.
         to_device: The instances that write to the to_device stream. Currently
@@ -140,6 +142,8 @@ class WriterLocations:
         push_rules: The instances that write to the push stream. Currently
             can only be a single instance.
         device_lists: The instances that write to the device list stream.
+        quarantined_media_changes: The instances that write to the quarantined media
+             changes stream.
     """
 
     events: list[str] = attr.ib(
@@ -176,6 +180,10 @@ class WriterLocations:
     )
     thread_subscriptions: list[str] = attr.ib(
         default=["master"],
+        converter=_instance_to_list_converter,
+    )
+    quarantined_media_changes: list[str] = attr.ib(
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
 

@@ -23,6 +23,7 @@ from unittest.mock import patch
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
+from synapse.api.room_versions import RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.rest import admin
 from synapse.rest.client import login, room, room_upgrade_rest_servlet
@@ -58,6 +59,7 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
         token: str | None = None,
         room_id: str | None = None,
         expire_cache: bool = True,
+        new_version: str = DEFAULT_ROOM_VERSION,
     ) -> FakeChannel:
         if expire_cache:
             # We don't want a cached response.
@@ -70,7 +72,7 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
             "POST",
             f"/_matrix/client/r0/rooms/{room_id}/upgrade",
             # This will upgrade a room to the same version, but that's fine.
-            content={"new_version": DEFAULT_ROOM_VERSION},
+            content={"new_version": new_version},
             access_token=token or self.creator_token,
         )
 
@@ -431,3 +433,51 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
                 tok=self.creator_token,
             )
             self.assertEqual(content[EventContentFields.MEMBERSHIP], Membership.BAN)
+
+    def test_creator_removed_from_powerlevels_v12(self) -> None:
+        """
+        Test that the creator is removed from the power levels users map when
+        upgrading to a room version with MSC4289.
+        """
+        # Create a room on room version 11, which doesn't have MSC4289.
+        room_id = self.helper.create_room_as(
+            self.creator, tok=self.creator_token, room_version="11"
+        )
+        self.helper.join(room_id, self.other, tok=self.other_token)
+
+        # Retrieve the room's current power levels.
+        old_power_level_event = self.get_success(
+            self.hs.get_storage_controllers().state.get_current_state_event(
+                room_id, "m.room.power_levels", ""
+            )
+        )
+        assert old_power_level_event is not None
+
+        # The creator should be in the users map with power level 100.
+        self.assertEqual(old_power_level_event.content["users"][self.creator], 100)
+
+        # Upgrade the room to version 12, which has MSC4289.
+        channel = self._upgrade_room(
+            room_id=room_id, new_version=RoomVersions.V12.identifier
+        )
+        self.assertEqual(200, channel.code, channel.result)
+
+        # Extract the new room ID.
+        new_room_id = channel.json_body["replacement_room"]
+
+        # Fetch the new room's power level event.
+        new_power_levels = self.helper.get_state(
+            new_room_id,
+            "m.room.power_levels",
+            tok=self.creator_token,
+        )
+
+        # The creator should no longer be in the users map.
+        self.assertNotIn(self.creator, new_power_levels["users"])
+
+        # The creator should still be in the old power levels event with power
+        # level 100.
+        #
+        # This is a regression test where previously Synapse would accidentally
+        # mutate the old power levels event.
+        self.assertEqual(old_power_level_event.content["users"][self.creator], 100)

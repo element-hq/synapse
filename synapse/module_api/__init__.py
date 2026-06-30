@@ -142,6 +142,8 @@ from synapse.storage.background_updates import (
 from synapse.storage.database import DatabasePool, LoggingTransaction
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.types import (
+    Absent,
+    AbsentType,
     DomainSpecificString,
     JsonDict,
     JsonMapping,
@@ -1989,11 +1991,14 @@ class ModuleApi:
         self,
         user_id: UserID,
         new_displayname: str,
-        deactivation: bool = False,
+        deactivation: bool | AbsentType = Absent,
     ) -> None:
         """Sets a user's display name.
 
         Added in Synapse v1.76.0.
+
+        (Synapse Developer note: All future arguments should be kwargs-only
+        due to https://github.com/element-hq/synapse/issues/19546)
 
         Args:
             user_id:
@@ -2001,15 +2006,32 @@ class ModuleApi:
             new_displayname:
                 The new display name to give the user.
             deactivation:
+                **deprecated since v1.150.0**
+                Callers should NOT pass this argument. Instead, omit it and leave it to the default.
+                Will log an error if it is passed.
+                Remove after 2027-01-01
+                Tracked by https://github.com/element-hq/synapse/issues/19546
+
                 Whether this change was made while deactivating the user.
+
+                Should be omitted, will produce a logged error if set to True.
+                It's likely that this flag should have stayed internal-only and
+                was accidentally exposed to the Module API.
+                It no longer has any function.
         """
         requester = create_requester(user_id)
+
+        if deactivation is not Absent:
+            logger.error(
+                "Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: %r). This will break in 2027.",
+                deactivation,
+            )
+
         await self._hs.get_profile_handler().set_displayname(
             target_user=user_id,
             requester=requester,
             new_displayname=new_displayname,
             by_admin=True,
-            deactivation=deactivation,
         )
 
     def get_current_time_msec(self) -> int:

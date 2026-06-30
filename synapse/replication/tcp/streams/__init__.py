@@ -39,7 +39,9 @@ from synapse.replication.tcp.streams._base import (
     PresenceStream,
     PushersStream,
     PushRulesStream,
+    QuarantinedMediaStream,
     ReceiptsStream,
+    StickyEventsStream,
     Stream,
     ThreadSubscriptionsStream,
     ToDeviceStream,
@@ -68,9 +70,11 @@ STREAMS_MAP = {
         ToDeviceStream,
         FederationStream,
         AccountDataStream,
+        StickyEventsStream,
         ThreadSubscriptionsStream,
         UnPartialStatedRoomStream,
         UnPartialStatedEventStream,
+        QuarantinedMediaStream,
     )
 }
 
@@ -90,7 +94,9 @@ __all__ = [
     "ToDeviceStream",
     "FederationStream",
     "AccountDataStream",
+    "StickyEventsStream",
     "ThreadSubscriptionsStream",
     "UnPartialStatedRoomStream",
     "UnPartialStatedEventStream",
+    "QuarantinedMediaStream",
 ]

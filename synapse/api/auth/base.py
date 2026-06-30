@@ -371,7 +371,9 @@ class BaseAuth:
         """
         ip_addr = request.get_client_ip_if_available()
 
-        if ip_addr and (not requester.app_service or self._track_appservice_user_ips):
+        if ip_addr and (
+            not requester.app_service_id or self._track_appservice_user_ips
+        ):
             user_agent = get_request_user_agent(request)
             access_token = self.get_access_token_from_request(request)
 
@@ -381,7 +383,7 @@ class BaseAuth:
             # table during the transition
             recorded_device_id = (
                 "dummy-device"
-                if requester.device_id is None and requester.app_service is not None
+                if requester.device_id is None and requester.app_service_id is not None
                 else requester.device_id
             )
             await self.store.insert_client_ip(

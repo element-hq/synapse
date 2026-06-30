@@ -139,6 +139,10 @@ class ContentRepositoryConfig(Config):
     section = "media"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+        # We need to set this configuration flag even if this worker
+        # is not a media repo worker, as it's exposed in `/capabilities`
+        self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
+
         # Only enable the media repo if either the media repo is enabled or the
         # current worker app is the media repo.
         if (
@@ -242,7 +246,7 @@ class ContentRepositoryConfig(Config):
         self.thumbnail_requirements = parse_thumbnail_requirements(
             config.get("thumbnail_sizes", DEFAULT_THUMBNAIL_SIZES)
         )
-        self.url_preview_enabled = config.get("url_preview_enabled", False)
+
         if self.url_preview_enabled:
             check_requirements("url-preview")
 

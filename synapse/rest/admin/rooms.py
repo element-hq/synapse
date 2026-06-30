@@ -29,6 +29,7 @@ from synapse.api.constants import Direction, EventTypes, JoinRules, Membership
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
+    FilteredEvent,
     SerializeEventConfig,
 )
 from synapse.handlers.pagination import (
@@ -57,7 +58,14 @@ from synapse.rest.admin._base import (
 from synapse.rest.client.room import SerializeMessagesDeps, encode_messages_response
 from synapse.storage.databases.main.room import RoomSortOrder
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, RoomID, ScheduledTask, UserID, create_requester
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    RoomID,
+    ScheduledTask,
+    UserID,
+    create_requester,
+)
 from synapse.types.state import StateFilter
 
 if TYPE_CHECKING:
@@ -366,6 +374,7 @@ class RoomRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.room_shutdown_handler = hs.get_room_shutdown_handler()
         self.pagination_handler = hs.get_pagination_handler()
+        self._storage_controllers = hs.get_storage_controllers()
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
@@ -382,6 +391,15 @@ class RoomRestServlet(RestServlet):
             members
         )
         result["forgotten"] = await self.store.is_locally_forgotten_room(room_id)
+        tombstone_event = await self._storage_controllers.state.get_current_state_event(
+            room_id,
+            EventTypes.Tombstone,
+            "",
+        )
+        result["tombstoned"] = tombstone_event is not None
+        result["replacement_room"] = (
+            tombstone_event.content.get("replacement_room") if tombstone_event else None
+        )
 
         return HTTPStatus.OK, result
 
@@ -529,7 +547,9 @@ class RoomStateRestServlet(RestServlet):
         )
         events = await self.store.get_events(event_ids.values())
         now = self.clock.time_msec()
-        room_state = await self._event_serializer.serialize_events(events.values(), now)
+        room_state = await self._event_serializer.serialize_events(
+            [FilteredEvent.state(e) for e in events.values()], now
+        )
         ret = {"state": room_state}
 
         return HTTPStatus.OK, ret
@@ -669,6 +689,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
         create_event = filtered_room_state[(EventTypes.Create, "")]
         power_levels = filtered_room_state.get((EventTypes.PowerLevels, ""))
 
+        pl_content: JsonMapping
         if power_levels is not None:
             # We pick the local user with the highest power.
             user_power = power_levels.content.get("users", {})
@@ -897,7 +918,8 @@ class RoomEventContextServlet(RestServlet):
                 bundle_aggregations=event_context.aggregations,
             ),
             "state": await self._event_serializer.serialize_events(
-                event_context.state, time_now
+                [FilteredEvent.state(e) for e in event_context.state],
+                time_now,
             ),
             "start": event_context.start,
             "end": event_context.end,

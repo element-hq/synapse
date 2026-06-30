@@ -31,6 +31,7 @@ from synapse.storage.engines._base import (
     IsolationLevel,
 )
 from synapse.storage.types import Cursor
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.storage.database import LoggingDatabaseConnection
@@ -54,14 +55,15 @@ class PostgresEngine(
 
         psycopg2.extensions.register_adapter(bytes, _disable_bytes_adapter)
         self.synchronous_commit: bool = database_config.get("synchronous_commit", True)
-        # Set the statement timeout to 1 hour by default.
-        # Any query taking more than 1 hour should probably be considered a bug;
+        # Set the statement timeout to 10 minutes by default.
+        #
+        # Any query taking more than 10 minutes should probably be considered a bug;
         # most of the time this is a sign that work needs to be split up or that
         # some degenerate query plan has been created and the client has probably
         # timed out/walked off anyway.
         # This is in milliseconds.
         self.statement_timeout: int | None = database_config.get(
-            "statement_timeout", 60 * 60 * 1000
+            "statement_timeout", Duration(minutes=10).as_millis()
         )
         self._version: int | None = None  # unknown as yet
 

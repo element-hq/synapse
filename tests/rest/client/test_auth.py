@@ -30,7 +30,14 @@ import synapse.rest.admin
 from synapse.api.constants import ApprovalNoticeMedium, LoginType
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.ui_auth.checkers import UserInteractiveAuthChecker
-from synapse.rest.client import account, auth, devices, login, logout, register
+from synapse.rest.client import (
+    account,
+    auth,
+    devices,
+    login,
+    logout,
+    register,
+)
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
@@ -42,6 +49,62 @@ from tests.handlers.test_oidc import HAS_OIDC
 from tests.rest.client.utils import TEST_OIDC_CONFIG, TEST_OIDC_ISSUER
 from tests.server import FakeChannel
 from tests.unittest import override_config, skip_unless
+
+TEST_MULTIPLE_OIDC_IDP_ID1 = "friendface"
+TEST_MULTIPLE_OIDC_IDP_ID2 = "potatocloud"
+TEST_MULTIPLE_OIDC_IDP_ID3 = "svnswitch"
+
+TEST_MULTIPLE_OIDC_ISSUER1 = "https://friendface.invalid/"
+TEST_MULTIPLE_OIDC_ISSUER2 = "https://potato.invalid/"
+TEST_MULTIPLE_OIDC_ISSUER3 = "https://subversionswitch.invalid/"
+
+TEST_MULTIPLE_OIDC_PROVIDERS = [
+    {
+        "idp_id": TEST_MULTIPLE_OIDC_IDP_ID1,
+        "idp_name": "FriendFace",
+        "idp_icon": "mxc://example.invalid/friendface",
+        "idp_brand": "friendface",
+        "issuer": TEST_MULTIPLE_OIDC_ISSUER1,
+        "client_id": "id-for-friendface",
+        "client_secret": "secret-for-friendface",
+        "scopes": ["openid"],
+        "discover": False,
+        "authorization_endpoint": f"{TEST_MULTIPLE_OIDC_ISSUER1}oidc/auth",
+        "token_endpoint": f"{TEST_MULTIPLE_OIDC_ISSUER1}oidc/token",
+        "jwks_uri": f"{TEST_MULTIPLE_OIDC_ISSUER1}oidc/jwks",
+    },
+    {
+        "idp_id": TEST_MULTIPLE_OIDC_IDP_ID2,
+        "idp_name": "Potato Cloud",
+        "idp_icon": "mxc://example.invalid/potatocloud",
+        "idp_brand": "potato",
+        "issuer": TEST_MULTIPLE_OIDC_ISSUER2,
+        "client_id": "id-for-potato",
+        "client_secret": "secret-for-potato",
+        "scopes": ["openid"],
+        "discover": False,
+        "authorization_endpoint": f"{TEST_MULTIPLE_OIDC_ISSUER2}oidc/auth",
+        "token_endpoint": f"{TEST_MULTIPLE_OIDC_ISSUER2}oidc/token",
+        "jwks_uri": f"{TEST_MULTIPLE_OIDC_ISSUER2}oidc/jwks",
+    },
+    {
+        "idp_id": TEST_MULTIPLE_OIDC_IDP_ID3,
+        "idp_name": "SubversionSwitch",
+        "idp_icon": "mxc://example.invalid/svnswitch",
+        "idp_brand": "svnswitch",
+        "issuer": TEST_MULTIPLE_OIDC_ISSUER3,
+        "client_id": "id-for-svnswitch",
+        "client_secret": "secret-for-svnswitch",
+        "scopes": ["openid"],
+        "discover": False,
+        "authorization_endpoint": f"{TEST_MULTIPLE_OIDC_ISSUER3}oidc/auth",
+        "token_endpoint": f"{TEST_MULTIPLE_OIDC_ISSUER3}oidc/token",
+        "jwks_uri": f"{TEST_MULTIPLE_OIDC_ISSUER3}oidc/jwks",
+    },
+]
+"""
+`oidc_providers` config example for multiple OIDC providers.
+"""
 
 
 class DummyRecaptchaChecker(UserInteractiveAuthChecker):
@@ -507,6 +570,90 @@ class UIAuthTests(unittest.HomeserverTestCase):
         )
 
     @skip_unless(HAS_OIDC, "requires OIDC")
+    @override_config(
+        {
+            "oidc_providers": TEST_MULTIPLE_OIDC_PROVIDERS,
+            "experimental_features": {"msc4450_enabled": True},
+        }
+    )
+    def test_msc4450_select_idp_id(self) -> None:
+        """
+        Test for MSC4450: Identity Provider selection for
+        User-Interactive Authentication with Legacy Single Sign-On.
+
+        We configure 3 OIDC providers and then check that we can select
+        which one to redirect to for User-Interactive Authentication.
+        """
+
+        # Attach the user to the OIDC providers manually
+        for idp_id in (
+            TEST_MULTIPLE_OIDC_IDP_ID1,
+            TEST_MULTIPLE_OIDC_IDP_ID2,
+        ):
+            self.get_success(
+                self.hs.get_datastores().main.record_user_external_id(
+                    # `oidc-` is a magic prefix needed for OIDC providers
+                    f"oidc-{idp_id}",
+                    # arbitrary/opaque provider-specific external ID, doesn't really matter
+                    "some.ext.user.id",
+                    self.user,
+                )
+            )
+
+        # Start a user-interactive authentication session by
+        # calling the device deletion API
+        channel = self.delete_device(
+            self.user_tok, self.device_id, HTTPStatus.UNAUTHORIZED
+        )
+        auth_session = channel.json_body["session"]
+        flows = channel.json_body["flows"]
+        self.assertCountEqual(
+            flows, [{"stages": ["m.login.sso"]}, {"stages": ["m.login.password"]}]
+        )
+
+        # Try to start the User-Interactive Auth against both identity providers.
+        # Make sure we get the identity provider that we ask for.
+        #
+        # We need to try against both to be sure that Synapse doesn't just conveniently happen to
+        # arbitrarily select the identity provider we test.
+        for idp_id, provider_config in (
+            (
+                TEST_MULTIPLE_OIDC_IDP_ID1,
+                TEST_MULTIPLE_OIDC_PROVIDERS[0],
+            ),
+            (
+                TEST_MULTIPLE_OIDC_IDP_ID2,
+                TEST_MULTIPLE_OIDC_PROVIDERS[1],
+            ),
+        ):
+            endpoint = f"/_matrix/client/v3/auth/m.login.sso/fallback/web?session={auth_session}&io.element.idp_id=oidc-{idp_id}"
+            channel = self.make_request("GET", endpoint)
+            self.assertEqual(
+                channel.code,
+                HTTPStatus.OK,
+                f"Failed to use the {endpoint} endpoint as part of the UIA flow for idp_id={idp_id} : response_body={channel.text_body}",
+            )
+
+            # This 'Continue with ...' text is templated by `synapse/res/templates/sso_auth_confirm.html`
+            self.assertIn(
+                f"Continue with {provider_config['idp_name']}",
+                channel.text_body,
+            )
+
+            self.assertIn(provider_config["authorization_endpoint"], channel.text_body)
+
+        # Test that we can't use the 3rd OIDC provider as we're not
+        # registered with it
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/auth/m.login.sso/fallback/web?session={auth_session}&io.element.idp_id=oidc-{TEST_MULTIPLE_OIDC_IDP_ID3}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.INVALID_PARAM, channel.json_body
+        )
+
+    @skip_unless(HAS_OIDC, "requires OIDC")
     @override_config({"oidc_config": TEST_OIDC_CONFIG})
     def test_does_not_offer_password_for_sso_user(self) -> None:
         fake_oidc_server = self.helper.fake_oidc_server()
@@ -625,10 +772,11 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
     servlets = [
         auth.register_servlets,
         account.register_servlets,
+        devices.register_servlets,
         login.register_servlets,
         logout.register_servlets,
-        synapse.rest.admin.register_servlets_for_client_rest_resource,
         register.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
     ]
     hijack_auth = False
 
@@ -1168,6 +1316,84 @@ class RefreshAuthTests(unittest.HomeserverTestCase):
         # and no refresh token
         self.assertEqual(_table_length("access_tokens"), 0)
         self.assertEqual(_table_length("refresh_tokens"), 0)
+
+    def test_token_invalid_after_refresh_token_issued_and_device_removed(self) -> None:
+        """
+        Test that an access token is invalidated after the device (which had a
+        refresh token) is removed by another device.
+        The removal of a refresh token cascade deletes the associated access
+        token in the db, which can make cache invalidation fail, if not handled
+        properly. This test will catch such behavior if it ever happens again.
+        1. User logs in with device1
+        2. User logs in with device2 and requests a refresh token
+        3. Device2 calls /whoami (should work)
+        4. Device1 removes device2
+        5. Device2 calls /whoami (should fail)
+        """
+        # Login with device1
+        device1_tok = self.login("test", self.user_pass, device_id="device1")
+
+        # Login with device2 and request a refresh token
+        login_response = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            {
+                "type": "m.login.password",
+                "user": "test",
+                "password": self.user_pass,
+                "device_id": "device2",
+                "refresh_token": True,
+            },
+        )
+        self.assertEqual(login_response.code, HTTPStatus.OK, login_response.result)
+        device2_tok = login_response.json_body["access_token"]
+        device2_id = login_response.json_body["device_id"]
+        self.assertEqual(device2_id, "device2")
+
+        # Device2 calls /whoami (should work)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=device2_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # Device1 removes device2
+        # First, attempt to delete device2
+        delete_channel = self.make_request(
+            "DELETE",
+            f"devices/{device2_id}",
+            access_token=device1_tok,
+        )
+        self.assertEqual(
+            delete_channel.code, HTTPStatus.UNAUTHORIZED, delete_channel.result
+        )
+        session = delete_channel.json_body["session"]
+
+        # Complete the UI auth flow
+        delete_channel = self.make_request(
+            "DELETE",
+            f"devices/{device2_id}",
+            content={
+                "auth": {
+                    "type": "m.login.password",
+                    "user": "test",
+                    "password": self.user_pass,
+                    "session": session,
+                },
+            },
+            access_token=device1_tok,
+        )
+        self.assertEqual(delete_channel.code, HTTPStatus.OK, delete_channel.result)
+
+        # Device2 calls /whoami (should fail)
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/account/whoami",
+            access_token=device2_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN_TOKEN")
 
 
 def oidc_config(

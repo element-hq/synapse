@@ -29,8 +29,7 @@ from unpaddedbase64 import decode_base64, encode_base64
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.filtering import Filter
-from synapse.events import EventBase
-from synapse.events.utils import SerializeEventConfig
+from synapse.events.utils import FilteredEvent, SerializeEventConfig
 from synapse.types import JsonDict, Requester, StrCollection, StreamKeyType, UserID
 from synapse.types.state import StateFilter
 from synapse.visibility import filter_and_transform_events_for_client
@@ -48,7 +47,7 @@ class _SearchResult:
     # A mapping of event ID to the rank of that event.
     rank_map: dict[str, int]
     # A list of the resulting events.
-    allowed_events: list[EventBase]
+    allowed_events: list[FilteredEvent]
     # A map of room ID to results.
     room_groups: dict[str, JsonDict]
     # A set of event IDs to highlight.
@@ -355,12 +354,12 @@ class SearchHandler:
 
         state_results = {}
         if include_state:
-            for room_id in {e.room_id for e in search_result.allowed_events}:
+            for room_id in {e.event.room_id for e in search_result.allowed_events}:
                 state = await self._storage_controllers.state.get_current_state(room_id)
                 state_results[room_id] = list(state.values())
 
         aggregations = await self._relations_handler.get_bundled_aggregations(
-            # Generate an iterable of EventBase for all the events that will be
+            # Generate an iterable of FilteredEvent for all the events that will be
             # returned, including contextual events.
             itertools.chain(
                 # The events_before and events_after for each context.
@@ -396,14 +395,14 @@ class SearchHandler:
 
         results = [
             {
-                "rank": search_result.rank_map[e.event_id],
+                "rank": search_result.rank_map[e.event.event_id],
                 "result": await self._event_serializer.serialize_event(
                     e,
                     time_now,
                     bundle_aggregations=aggregations,
                     config=serialize_options,
                 ),
-                "context": contexts.get(e.event_id, {}),
+                "context": contexts.get(e.event.event_id, {}),
             }
             for e in search_result.allowed_events
         ]
@@ -417,7 +416,9 @@ class SearchHandler:
         if state_results:
             rooms_cat_res["state"] = {
                 room_id: await self._event_serializer.serialize_events(
-                    state_events, time_now, config=serialize_options
+                    [FilteredEvent.state(e) for e in state_events],
+                    time_now,
+                    config=serialize_options,
                 )
                 for room_id, state_events in state_results.items()
             }
@@ -485,19 +486,19 @@ class SearchHandler:
             filtered_events,
         )
 
-        events.sort(key=lambda e: -rank_map[e.event_id])
+        events.sort(key=lambda e: -rank_map[e.event.event_id])
         allowed_events = events[: search_filter.limit]
 
         for e in allowed_events:
             rm = room_groups.setdefault(
-                e.room_id, {"results": [], "order": rank_map[e.event_id]}
+                e.event.room_id, {"results": [], "order": rank_map[e.event.event_id]}
             )
-            rm["results"].append(e.event_id)
+            rm["results"].append(e.event.event_id)
 
             s = sender_group.setdefault(
-                e.sender, {"results": [], "order": rank_map[e.event_id]}
+                e.event.sender, {"results": [], "order": rank_map[e.event.event_id]}
             )
-            s["results"].append(e.event_id)
+            s["results"].append(e.event.event_id)
 
         return (
             _SearchResult(
@@ -549,7 +550,7 @@ class SearchHandler:
 
         highlights = set()
 
-        room_events: list[EventBase] = []
+        room_events: list[FilteredEvent] = []
         i = 0
 
         pagination_token = batch_token
@@ -595,11 +596,11 @@ class SearchHandler:
                 pagination_token = results[-1]["pagination_token"]
 
         for event in room_events:
-            group = room_groups.setdefault(event.room_id, {"results": []})
-            group["results"].append(event.event_id)
+            group = room_groups.setdefault(event.event.room_id, {"results": []})
+            group["results"].append(event.event.event_id)
 
         if room_events and len(room_events) >= search_filter.limit:
-            last_event_id = room_events[-1].event_id
+            last_event_id = room_events[-1].event.event_id
             pagination_token = results_map[last_event_id]["pagination_token"]
 
             # We want to respect the given batch group and group keys so
@@ -632,7 +633,7 @@ class SearchHandler:
     async def _calculate_event_contexts(
         self,
         user: UserID,
-        allowed_events: list[EventBase],
+        allowed_events: list[FilteredEvent],
         before_limit: int,
         after_limit: int,
         include_profile: bool,
@@ -658,7 +659,7 @@ class SearchHandler:
         contexts = {}
         for event in allowed_events:
             res = await self.store.get_events_around(
-                event.room_id, event.event_id, before_limit, after_limit
+                event.event.room_id, event.event.event_id, before_limit, after_limit
             )
 
             logger.info(
@@ -692,14 +693,14 @@ class SearchHandler:
 
             if include_profile:
                 senders = {
-                    ev.sender
+                    ev.event.sender
                     for ev in itertools.chain(events_before, [event], events_after)
                 }
 
                 if events_after:
-                    last_event_id = events_after[-1].event_id
+                    last_event_id = events_after[-1].event.event_id
                 else:
-                    last_event_id = event.event_id
+                    last_event_id = event.event.event_id
 
                 state_filter = StateFilter.from_types(
                     [(EventTypes.Member, sender) for sender in senders]
@@ -718,6 +719,6 @@ class SearchHandler:
                     if s.type == EventTypes.Member and s.state_key in senders
                 }
 
-            contexts[event.event_id] = context
+            contexts[event.event.event_id] = context
 
         return contexts

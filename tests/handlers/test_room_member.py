@@ -8,10 +8,7 @@ import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import FrozenEventV3
-from synapse.federation.federation_base import (
-    event_from_pdu_json,
-)
+from synapse.events import make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
@@ -19,6 +16,7 @@ from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -126,7 +124,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             create_event_source,
             self.hs.config.server.default_room_version,
         )
-        create_event = FrozenEventV3(
+        create_event = make_event_from_dict(
             create_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -150,7 +148,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = FrozenEventV3(
+        join_event = make_event_from_dict(
             join_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -503,7 +501,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
             SynapseError,
         ).value
         self.assertEqual(f.code, 403)
-        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+        self.assertEqual(f.errcode, "M_INVITE_BLOCKED")
 
     @override_config({"experimental_features": {"msc4155_enabled": False}})
     def test_msc4155_disabled_allow_invite_local(self) -> None:
@@ -549,7 +547,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -573,7 +571,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
             SynapseError,
         ).value
         self.assertEqual(f.code, 403)
-        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+        self.assertEqual(f.errcode, "M_INVITE_BLOCKED")
 
     @override_config({"experimental_features": {"msc4155_enabled": True}})
     def test_msc4155_block_invite_remote_server(self) -> None:
@@ -595,7 +593,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -619,7 +617,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
             SynapseError,
         ).value
         self.assertEqual(f.code, 403)
-        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+        self.assertEqual(f.errcode, "M_INVITE_BLOCKED")
 
 
 class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
@@ -642,7 +640,6 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         self.bob = self.register_user("bob", "pass")
         self.bob_token = self.login("bob", "pass")
 
-    @override_config({"experimental_features": {"msc4380_enabled": True}})
     def test_misc4380_block_invite_local(self) -> None:
         """Test that MSC4380 will block a user from being invited to a room"""
         room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
@@ -650,7 +647,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         self.get_success(
             self.store.add_account_data_for_user(
                 self.bob,
-                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
+                AccountDataTypes.INVITE_PERMISSION_CONFIG,
                 {
                     "default_action": "block",
                 },
@@ -667,9 +664,8 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
             SynapseError,
         ).value
         self.assertEqual(f.code, 403)
-        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+        self.assertEqual(f.errcode, "M_INVITE_BLOCKED")
 
-    @override_config({"experimental_features": {"msc4380_enabled": True}})
     def test_misc4380_non_string_setting(self) -> None:
         """Test that `default_action` being set to something non-stringy is the same as "accept"."""
         room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
@@ -677,7 +673,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         self.get_success(
             self.store.add_account_data_for_user(
                 self.bob,
-                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
+                AccountDataTypes.INVITE_PERMISSION_CONFIG,
                 {
                     "default_action": 1,
                 },
@@ -693,31 +689,6 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
             )
         )
 
-    @override_config({"experimental_features": {"msc4380_enabled": False}})
-    def test_msc4380_disabled_allow_invite_local(self) -> None:
-        """Test that, when MSC4380 is not enabled, invites are accepted as normal"""
-        room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
-
-        self.get_success(
-            self.store.add_account_data_for_user(
-                self.bob,
-                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
-                {
-                    "default_action": "block",
-                },
-            )
-        )
-
-        self.get_success(
-            self.handler.update_membership(
-                requester=create_requester(self.alice),
-                target=UserID.from_string(self.bob),
-                room_id=room_id,
-                action=Membership.INVITE,
-            ),
-        )
-
-    @override_config({"experimental_features": {"msc4380_enabled": True}})
     def test_msc4380_block_invite_remote(self) -> None:
         """Test that MSC4380 will block a user from being invited to a room by a remote user."""
         # A remote user who sends the invite
@@ -727,7 +698,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         self.get_success(
             self.store.add_account_data_for_user(
                 self.bob,
-                AccountDataTypes.MSC4380_INVITE_PERMISSION_CONFIG,
+                AccountDataTypes.INVITE_PERMISSION_CONFIG,
                 {"default_action": "block"},
             )
         )
@@ -737,7 +708,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -761,4 +732,4 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
             SynapseError,
         ).value
         self.assertEqual(f.code, 403)
-        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+        self.assertEqual(f.errcode, "M_INVITE_BLOCKED")

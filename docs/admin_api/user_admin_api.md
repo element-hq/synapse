@@ -34,11 +34,11 @@ It returns a JSON body like the following:
         }
     ],
     "avatar_url": "<avatar_url>",  // can be null if not set
-    "is_guest": 0,
-    "admin": 0,
-    "deactivated": 0,
+    "is_guest": false,
+    "admin": false,
+    "deactivated": false,
     "erased": false,
-    "shadow_banned": 0,
+    "shadow_banned": false,
     "creation_ts": 1560432506,
     "last_seen_ts": 1732919539393,
     "appservice_id": null,
@@ -183,24 +183,24 @@ A response body like the following is returned:
     "users": [
         {
             "name": "<user_id1>",
-            "is_guest": 0,
-            "admin": 0,
+            "is_guest": false,
+            "admin": false,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "<User One>",
             "avatar_url": null,
             "creation_ts": 1560432668000,
             "locked": false
         }, {
             "name": "<user_id2>",
-            "is_guest": 0,
-            "admin": 1,
+            "is_guest": false,
+            "admin": true,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "<User Two>",
             "avatar_url": "<avatar_url>",
             "creation_ts": 1561550621000,
@@ -403,6 +403,7 @@ is set to `true`:
 
 - Remove the user's display name
 - Remove the user's avatar URL
+- Remove the user's custom profile fields
 - Mark the user as erased
 
 The following actions are **NOT** performed. The list may be incomplete.
@@ -599,7 +600,7 @@ Fetches the number of invites sent by the provided user ID across all rooms
 after the given timestamp.
 
 ```
-GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+GET /_synapse/admin/v1/users/<user_id>/sent_invite_count
 ```
 
 **Parameters**
@@ -633,7 +634,7 @@ Fetches the number of rooms that the user joined after the given timestamp, even
 if they have subsequently left/been banned from those rooms.
 
 ```
-GET /_synapse/admin/v1/users/$<user_id/cumulative_joined_room_count
+GET /_synapse/admin/v1/users/<user_id>/cumulative_joined_room_count
 ```
 
 **Parameters**
@@ -1438,7 +1439,7 @@ The request and response format is the same as the
 The API is:
 
 ```
-GET /_synapse/admin/v1/auth_providers/$provider/users/$external_id
+GET /_synapse/admin/v1/auth_providers/<provider>/users/<external_id>
 ```
 
 When a user matched the given ID for the given provider, an HTTP code `200` with a response body like the following is returned:
@@ -1477,7 +1478,7 @@ _Added in Synapse 1.68.0._
 The API is:
 
 ```
-GET /_synapse/admin/v1/threepid/$medium/users/$address
+GET /_synapse/admin/v1/threepid/<medium>/users/<address>
 ```
 
 When a user matched the given address for the given medium, an HTTP code `200` with a response body like the following is returned:
@@ -1521,7 +1522,7 @@ is provided to override the default and allow the admin to issue the redactions 
 
 The API is 
 ```
-POST /_synapse/admin/v1/user/$user_id/redact
+POST /_synapse/admin/v1/user/<user_id>/redact
 
 {
   "rooms": ["!roomid1", "!roomid2"]
@@ -1570,7 +1571,7 @@ or until Synapse is restarted (whichever happens first).
 The API is:
 
 ```
-GET /_synapse/admin/v1/user/redact_status/$redact_id
+GET /_synapse/admin/v1/user/redact_status/<redact_id>
 ```
 
 A response body like the following is returned:

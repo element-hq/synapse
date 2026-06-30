@@ -194,7 +194,11 @@ user_agent_suffix: ' (I''m a teapot; Linux x86_64)'
 ---
 ### `use_frozen_dicts`
 
-*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive. Defaults to `false`.
+*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive.
+
+> ⚠️ **Warning** – This option is known to introduce a new class of [comparison bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.
+
+Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -653,6 +657,8 @@ This setting has the following sub-options:
 
 * `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
 
+* `force_http2` (boolean): Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports this natively, but a reverse proxy between Synapse and MAS may not. Defaults to `false`.
+
 * `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
 
 * `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
@@ -956,7 +962,7 @@ server_context: context
 ---
 ### `limit_remote_rooms`
 
-*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.
+*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. In Synapse, the complexity of a room is measured by the number of current state events in a room, divided by 500. "Current" here means the latest state, i.e. if a user joins, then leaves, then joins, that will count as 1 current `m.room.member` state event.
 
 This setting has the following sub-options:
 
@@ -1965,7 +1971,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2863,6 +2869,8 @@ enable_3pid_changes: false
 *(array)* Users who register on this homeserver will automatically be joined to the rooms listed under this option.
 
 By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to `public`. You can find more options relating to auto-joining rooms below.
+
+Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart` to a user who's part of the invite-only rooms.
 
 As Spaces are just rooms under the hood, Space aliases may also be used.
 
@@ -3782,7 +3790,10 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:
+    * displayname
+    * picture - only if Synapse media repository is running in the main
+       process (i.e. not workerized) and media is stored locally Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -4484,7 +4495,7 @@ stream_writers:
 ---
 ### `outbound_federation_restricted_to`
 
-*(array)* When using workers, you can restrict outbound federation traffic to only go through a specific subset of workers. Any worker specified here must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
+*(array)* You can restrict outbound federation traffic to only go through a specific subset of workers including the [Secure Border Gateway (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker specified here (including the SBG) must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.
 
 Also see the [worker documentation](../../workers.md#restrict-outbound-federation-traffic-to-a-specific-set-of-workers) for more info.
 

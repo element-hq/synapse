@@ -20,7 +20,7 @@
 #
 import time
 from typing import Any, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import attr
 import canonicaljson
@@ -237,6 +237,51 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         d = kr.verify_json_for_server("server9", json1, 500)
         # self.assertFalse(d.called)
         self.get_success(d)
+
+    def test_verify_json_for_server_using_banned_key(self) -> None:
+        """Ensure that JSON signed using a banned server_signing_key fails verification."""
+        kr = keyring.Keyring(self.hs)
+
+        banned_signing_key = signedjson.key.generate_signing_key("1")
+        r = self.hs.get_datastores().main.store_server_keys_response(
+            "server9",
+            from_server="test",
+            ts_added_ms=int(time.time() * 1000),
+            verify_keys={
+                get_key_id(banned_signing_key): FetchKeyResult(
+                    verify_key=get_verify_key(banned_signing_key), valid_until_ts=1000
+                )
+            },
+            # The entire response gets signed & stored, just include the bits we
+            # care about.
+            response_json={
+                "verify_keys": {
+                    get_key_id(banned_signing_key): {
+                        "key": encode_verify_key_base64(
+                            get_verify_key(banned_signing_key)
+                        )
+                    }
+                }
+            },
+        )
+        self.get_success(r)
+
+        json1: JsonDict = {}
+        signedjson.sign.sign_json(json1, "server9", banned_signing_key)
+
+        # Ensure the signatures check out normally
+        d = kr.verify_json_for_server("server9", json1, 500)
+        self.get_success(d)
+
+        # Patch the list of banned signing keys and ensure the signature check fails
+        with patch.object(
+            keyring,
+            "BANNED_SERVER_SIGNING_KEYS",
+            (encode_verify_key_base64(get_verify_key(banned_signing_key))),
+        ):
+            # should fail on a signed object signed by the banned key
+            d = kr.verify_json_for_server("server9", json1, 500)
+            self.get_failure(d, SynapseError)
 
     def test_verify_for_local_server(self) -> None:
         """Ensure that locally signed JSON can be verified without fetching keys

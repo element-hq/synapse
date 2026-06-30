@@ -53,6 +53,7 @@ __pycache__/
 !/.coveragerc
 /.coverage*
 /.mypy_cache/
+/.ruff_cache/
 /.tox
 /.tox-pg-container
 /build/

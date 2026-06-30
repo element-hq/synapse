@@ -20,24 +20,30 @@ from typing import (
 
 from immutabledict import immutabledict
 
+from synapse.synapse_rust.events import JsonObject
+
 
 def _reject_invalid_json(val: Any) -> None:
     """Do not allow Infinity, -Infinity, or NaN values in JSON."""
     raise ValueError("Invalid JSON value: '%s'" % val)
 
 
-def _handle_immutabledict(obj: Any) -> dict[Any, Any]:
-    """Helper for json_encoder. Makes immutabledicts serializable by returning
-    the underlying dict
+def _handle_extra_mappings(obj: Any) -> dict[Any, Any]:
+    """Helper for json_encoder. Makes immutabledicts and JsonObjects
+    serializable
     """
-    if type(obj) is immutabledict:
-        # fishing the protected dict out of the object is a bit nasty,
-        # but we don't really want the overhead of copying the dict.
-        try:
-            # Safety: we catch the AttributeError immediately below.
-            return obj._dict
-        except AttributeError:
-            # If all else fails, resort to making a copy of the immutabledict
+    match obj:
+        case immutabledict():
+            # fishing the protected dict out of the object is a bit nasty,
+            # but we don't really want the overhead of copying the dict.
+            try:
+                # Safety: we catch the AttributeError immediately below.
+                return obj._dict
+            except AttributeError:
+                # If all else fails, resort to making a copy of the immutabledict
+                return dict(obj)
+        case JsonObject():
+            # Just convert to a dict.
             return dict(obj)
     raise TypeError(
         "Object of type %s is not JSON serializable" % obj.__class__.__name__
@@ -49,7 +55,7 @@ def _handle_immutabledict(obj: Any) -> dict[Any, Any]:
 #   * produces valid JSON (no NaNs etc)
 #   * reduces redundant whitespace
 json_encoder = json.JSONEncoder(
-    allow_nan=False, separators=(",", ":"), default=_handle_immutabledict
+    allow_nan=False, separators=(",", ":"), default=_handle_extra_mappings
 )
 
 # Create a custom decoder to reject Python extensions to JSON.

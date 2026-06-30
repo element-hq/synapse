@@ -70,6 +70,15 @@ class MappingException(Exception):
     """
 
 
+class SsoSetupError(Exception):
+    """
+    Used to catch and tag errors relating to an SSO setup's.
+
+    Used as the superclass of specific error classes,
+    as note we can't e.g. import the OIDC module unless OIDC dependencies are installed.
+    """
+
+
 class SsoIdentityProvider(Protocol):
     """Abstract base class to be implemented by SSO Identity Providers
 
@@ -522,7 +531,10 @@ class SsoHandler:
                             authenticated_entity=user_id,
                         )
                         await self._profile_handler.set_displayname(
-                            user_id_obj, requester, attributes.display_name, True
+                            user_id_obj,
+                            requester,
+                            attributes.display_name,
+                            by_admin=True,
                         )
                 if attributes.picture:
                     await self.set_avatar(user_id, attributes.picture)

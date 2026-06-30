@@ -18,10 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import attr
 
@@ -31,6 +30,7 @@ from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
+    FilteredEvent,
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
     format_event_raw,
@@ -59,6 +59,7 @@ from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.cancellation import cancellable
 from synapse.util.json import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
@@ -138,6 +139,7 @@ class SyncRestServlet(RestServlet):
             cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
+    @cancellable
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
@@ -446,7 +448,9 @@ class SyncRestServlet(RestServlet):
         invited = {}
         for room in rooms:
             invite = await self._event_serializer.serialize_event(
-                room.invite, time_now, config=serialize_options
+                FilteredEvent.state(event=room.invite),
+                time_now,
+                config=serialize_options,
             )
             unsigned = dict(invite.get("unsigned", {}))
             invite["unsigned"] = unsigned
@@ -482,7 +486,9 @@ class SyncRestServlet(RestServlet):
         knocked = {}
         for room in rooms:
             knock = await self._event_serializer.serialize_event(
-                room.knock, time_now, config=serialize_options
+                FilteredEvent.state(event=room.knock),
+                time_now,
+                config=serialize_options,
             )
 
             # Extract the `unsigned` key from the knock event.
@@ -572,7 +578,7 @@ class SyncRestServlet(RestServlet):
 
         state_events = state_dict.values()
 
-        for event in itertools.chain(state_events, timeline_events):
+        for event in state_events:
             # We've had bug reports that events were coming down under the
             # wrong room.
             if event.room_id != room.room_id:
@@ -582,9 +588,21 @@ class SyncRestServlet(RestServlet):
                     room.room_id,
                     event.room_id,
                 )
+        for filtered_event in timeline_events:
+            # We've had bug reports that events were coming down under the
+            # wrong room.
+            if filtered_event.event.room_id != room.room_id:
+                logger.warning(
+                    "Event %r is under room %r instead of %r",
+                    filtered_event.event.event_id,
+                    room.room_id,
+                    filtered_event.event.room_id,
+                )
 
         serialized_state = await self._event_serializer.serialize_events(
-            state_events, time_now, config=serialize_options
+            [FilteredEvent.state(e) for e in state_events],
+            time_now,
+            config=serialize_options,
         )
         serialized_timeline = await self._event_serializer.serialize_events(
             timeline_events,
@@ -617,6 +635,14 @@ class SyncRestServlet(RestServlet):
             ephemeral_events = room.ephemeral
             result["ephemeral"] = {"events": ephemeral_events}
             result["unread_notifications"] = room.unread_notifications
+            if room.sticky:
+                # The sticky events have already been deduplicated so that events
+                # appearing in the timeline won't appear again here
+                result["msc4354_sticky"] = {
+                    "events": await self._event_serializer.serialize_events(
+                        room.sticky, time_now, config=serialize_options
+                    )
+                }
             if room.unread_thread_notifications:
                 result["unread_thread_notifications"] = room.unread_thread_notifications
                 if self._msc3773_enabled:
@@ -646,6 +672,7 @@ class SlidingSyncRestServlet(RestServlet):
         - receipts (MSC3960)
         - account data (MSC3959)
         - thread subscriptions (MSC4308)
+        - sticky events (MSC4354)
 
     Request query parameters:
         timeout: How long to wait for new events in milliseconds.
@@ -869,7 +896,7 @@ class SlidingSyncRestServlet(RestServlet):
             requester, sliding_sync_result.rooms
         )
         response["extensions"] = await self.encode_extensions(
-            requester, sliding_sync_result.extensions
+            requester, sliding_sync_result.extensions, sliding_sync_result.rooms
         )
 
         return response
@@ -964,7 +991,7 @@ class SlidingSyncRestServlet(RestServlet):
             ):
                 serialized_required_state = (
                     await self.event_serializer.serialize_events(
-                        room_result.required_state,
+                        [FilteredEvent.state(e) for e in room_result.required_state],
                         time_now,
                         config=serialize_options,
                     )
@@ -1019,8 +1046,18 @@ class SlidingSyncRestServlet(RestServlet):
 
     @trace_with_opname("sliding_sync.encode_extensions")
     async def encode_extensions(
-        self, requester: Requester, extensions: SlidingSyncResult.Extensions
+        self,
+        requester: Requester,
+        extensions: SlidingSyncResult.Extensions,
+        ref_rooms_results: Mapping[str, SlidingSyncResult.RoomResult],
     ) -> JsonDict:
+        """
+        Args:
+            ref_rooms_results:
+                Map of room ID -> RoomResult that was serialised as the `room` section
+                of the Sliding Sync response.
+                Will not be mutated, only used for reading.
+        """
         serialized_extensions: JsonDict = {}
 
         if extensions.to_device is not None:
@@ -1089,7 +1126,79 @@ class SlidingSyncRestServlet(RestServlet):
                 _serialise_thread_subscriptions(extensions.thread_subscriptions)
             )
 
+        if extensions.sticky_events:
+            serialized_extensions[
+                "org.matrix.msc4354.sticky_events"
+            ] = await self._serialise_sticky_events(
+                requester, extensions.sticky_events, ref_rooms_results
+            )
+
         return serialized_extensions
+
+    async def _serialise_sticky_events(
+        self,
+        requester: Requester,
+        sticky_events: SlidingSyncResult.Extensions.StickyEventsExtension,
+        ref_rooms_results: Mapping[str, SlidingSyncResult.RoomResult],
+    ) -> JsonDict:
+        """
+        Serialise the sticky events extension response.
+
+        This includes deduplicating by filtering out sticky events
+        from this extension that already appeared in the timeline
+        section.
+
+        Args:
+            ref_rooms_results:
+                Map of room ID -> RoomResult that was serialised as the `room` section
+                of the Sliding Sync response.
+                Will not be mutated, only used for reading.
+        """
+
+        time_now = self.clock.time_msec()
+        # Same as SSS timelines.
+        #
+        serialize_options = SerializeEventConfig(
+            event_format=format_event_for_client_v2_without_room_id,
+            requester=requester,
+        )
+
+        rooms_out: dict[str, dict[Literal["events"], list[JsonDict]]] = {}
+        for (
+            room_id,
+            possibly_duplicated_sticky_events,
+        ) in sticky_events.room_id_to_sticky_events.items():
+            # As per MSC4354:
+            # Remove sticky events that are already in the timeline, else we will needlessly duplicate
+            # events.
+            # There is no purpose in including sticky events in the sticky section if they're already in
+            # the timeline, as either way the client becomes aware of them.
+            # This is particularly important given the risk of sticky events spam since
+            # anyone can send sticky events, so halving the bandwidth on average for each sticky
+            # event is helpful.
+            room_result = ref_rooms_results.get(room_id)
+            if room_result is None:
+                # Nothing to deduplicate
+                sticky_events_to_write = possibly_duplicated_sticky_events
+            else:
+                sent_event_ids_in_room_section = {
+                    ev.event.event_id for ev in room_result.timeline_events
+                }
+                sticky_events_to_write = [
+                    ev
+                    for ev in possibly_duplicated_sticky_events
+                    if ev.event.event_id not in sent_event_ids_in_room_section
+                ]
+            rooms_out[room_id] = {
+                "events": await self.event_serializer.serialize_events(
+                    sticky_events_to_write, time_now, config=serialize_options
+                )
+            }
+
+        return {
+            "rooms": rooms_out,
+            "next_batch": sticky_events.next_batch.serialise(),
+        }
 
 
 def _serialise_thread_subscriptions(

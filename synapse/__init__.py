@@ -65,7 +65,8 @@ try:
 except ImportError:
     pass
 
-# Teach canonicaljson how to serialise immutabledicts.
+
+# Teach canonicaljson how to serialise immutabledicts and JsonObjects.
 try:
     from canonicaljson import register_preserialisation_callback
     from immutabledict import immutabledict
@@ -79,6 +80,12 @@ try:
             return dict(d)
 
     register_preserialisation_callback(immutabledict, _immutabledict_cb)
+
+    #  Teach canonicaljson how to serialise JsonObjects, which is just to
+    #  convert them to dicts.
+    from synapse.synapse_rust.events import JsonObject  # noqa: E402
+
+    register_preserialisation_callback(JsonObject, lambda obj: dict(obj))
 except ImportError:
     pass
 

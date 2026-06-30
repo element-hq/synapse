@@ -29,6 +29,7 @@ import synapse.rest.admin
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
+    JoinRules,
     ReceiptTypes,
     RelationTypes,
 )
@@ -41,6 +42,7 @@ from tests import unittest
 from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
+from tests.rest.client.test_rooms import make_request_with_cancellation_test
 from tests.server import TimedOutException
 
 logger = logging.getLogger(__name__)
@@ -391,6 +393,69 @@ class SyncKnockTestCase(KnockingStrippedStateEventHelperMixin):
         self.check_knock_room_state_against_room_state(
             room_state_events, self.expected_room_state
         )
+
+
+class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
+    """MSC4311: Tests that m.room.create is present in invite_state and knock_state"""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        knock.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        return config
+
+    def test_create_event_present_in_invite_state(self) -> None:
+        """m.room.create must appear in invite_state."""
+        inviter = self.register_user("inviter", "pass")
+        inviter_tok = self.login("inviter", "pass")
+        invitee = self.register_user("invitee", "pass")
+        invitee_tok = self.login("invitee", "pass")
+
+        room_id = self.helper.create_room_as(inviter, tok=inviter_tok)
+        self.helper.invite(room=room_id, src=inviter, targ=invitee, tok=inviter_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=invitee_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        invite_state_events = channel.json_body["rooms"]["invite"][room_id][
+            "invite_state"
+        ]["events"]
+        event_types = {stripped_event["type"] for stripped_event in invite_state_events}
+        self.assertIn(EventTypes.Create, event_types)
+
+    def test_create_event_present_in_knock_state(self) -> None:
+        """m.room.create must appear in knock_state."""
+        host = self.register_user("host", "pass")
+        host_tok = self.login("host", "pass")
+        knocker = self.register_user("knocker", "pass")
+        knocker_tok = self.login("knocker", "pass")
+
+        room_id = self.helper.create_room_as(
+            host, is_public=False, room_version="7", tok=host_tok
+        )
+        self.helper.send_state(
+            room_id,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=host_tok,
+        )
+
+        self.helper.knock(room_id, knocker, tok=knocker_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=knocker_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        knock_state_events = channel.json_body["rooms"]["knock"][room_id][
+            "knock_state"
+        ]["events"]
+        event_types = {stripped_event["type"] for stripped_event in knock_state_events}
+        self.assertIn(EventTypes.Create, event_types)
 
 
 class UnreadMessagesTestCase(unittest.HomeserverTestCase):
@@ -1145,3 +1210,65 @@ class ExcludeRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertNotIn(self.excluded_room_id, channel.json_body["rooms"]["join"])
         self.assertIn(self.included_room_id, channel.json_body["rooms"]["join"])
+
+
+class SyncCancellationTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        room.register_servlets,
+    ]
+
+    def test_initial_sync(self) -> None:
+        """Tests that an initial sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_initial_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            "/_matrix/client/v3/sync",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+    def test_incremental_sync(self) -> None:
+        """Tests that an incremental sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        room_ids = []
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+            room_ids.append(room_id)
+
+        # Do an initial sync to get a since token.
+        channel = self.make_request("GET", "/sync", access_token=tok)
+        self.assertEqual(200, channel.code, msg=channel.result)
+        since = channel.json_body["next_batch"]
+
+        # Send some more messages to generate activity in the rooms.
+        for room_id in room_ids:
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_incremental_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            f"/_matrix/client/v3/sync?since={since}&timeout=10000",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])

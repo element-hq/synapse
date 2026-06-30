@@ -133,6 +133,7 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, ArgLocation | None] = 
     "prometheus_client.metrics.Info": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Enum": ArgLocation("labelnames", 2),
     "synapse.metrics.LaterGauge": ArgLocation("labelnames", 2),
+    "synapse.metrics._InFlightGaugeRuntime": ArgLocation("labels", 2),
     "synapse.metrics.InFlightGauge": ArgLocation("labels", 2),
     "synapse.metrics.GaugeBucketCollector": ArgLocation("labelnames", 2),
     "prometheus_client.registry.Collector": None,
