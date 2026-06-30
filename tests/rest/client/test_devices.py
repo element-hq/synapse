@@ -248,7 +248,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         # messages so we should receive an empty array
         channel = self.make_request(
             "GET",
-            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events?next_batch={next_batch_token}",
+            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events?from={next_batch_token}",
             access_token=token,
             shorthand=False,
         )
