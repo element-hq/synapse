@@ -136,9 +136,7 @@ class DeviceRestServlet(RestServlet):
         handler = hs.get_device_handler()
         self.device_handler = handler
         self.auth_handler = hs.get_auth_handler()
-        self._auth_delegation_enabled = (
-            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
-        )
+        self._auth_delegation_enabled = hs.config.mas.enabled
 
     async def on_GET(
         self, request: SynapseRequest, device_id: str
@@ -179,7 +177,7 @@ class DeviceRestServlet(RestServlet):
 
         if requester.app_service_id:
             # MSC4190 allows appservices to delete devices through this endpoint without UIA
-            # It's also allowed with MSC3861 enabled
+            # It's also allowed when auth is delegated
             pass
 
         else:
@@ -432,7 +430,7 @@ class DehydratedDeviceV2Servlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+    auth_delegated = hs.config.mas.enabled
     if not auth_delegated:
         DeleteDevicesRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)

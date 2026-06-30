@@ -97,20 +97,6 @@ class AuthRestServlet(RestServlet):
                     url.encode(),
                 )
 
-            elif self.hs.config.experimental.msc3861.enabled:
-                # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
-                # We import lazily here because of the authlib requirement
-                from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-                assert isinstance(self.auth, MSC3861DelegatedAuth)
-
-                base = await self.auth.account_management_url()
-                if base is not None:
-                    url = f"{base}?action=org.matrix.cross_signing_reset"
-                else:
-                    url = await self.auth.issuer()
-                return respond_with_redirect(request, url.encode())
-
         if stagetype == LoginType.RECAPTCHA:
             html = self.recaptcha_template.render(
                 session=session,
