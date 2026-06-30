@@ -367,9 +367,14 @@ mod tests {
     }
 
     #[test]
-    /// Tests to ensure events with overly large values for `depth` are handled appropriately.
-    /// This was added in room version 6 <https://spec.matrix.org/v1.16/rooms/v6/#event-format>.
-    fn test_calculate_event_id_big_int_old_rooms() {
+    /// This is a bit funky, but we test that relaxed `depth` rules are in
+    /// place, even in room versions that enforce strict canonical JSON, as we
+    /// still need to load invalid events from the database even in newer room
+    /// versions. See https://github.com/element-hq/synapse/pull/19816.
+    ///
+    /// We still enforce canonicaljson when creating *new* events (see
+    /// `EventValidator` on the python side).
+    fn test_calculate_event_id_big_int_is_relaxed() {
         let original = json!(
             {
                 "auth_events":[
@@ -407,12 +412,10 @@ mod tests {
         );
 
         // These should succeed.
-        let _event_id = calculate_event_id(&original, &RoomVersion::V3).unwrap();
-        let _event_id = calculate_event_id(&original, &RoomVersion::V4).unwrap();
-        let _event_id = calculate_event_id(&original, &RoomVersion::V5).unwrap();
-
-        // These should not succeed.
         let versions = [
+            RoomVersion::V3,
+            RoomVersion::V4,
+            RoomVersion::V5,
             RoomVersion::V6,
             RoomVersion::V7,
             RoomVersion::V8,
@@ -422,7 +425,7 @@ mod tests {
             RoomVersion::V12,
         ];
         for version in versions {
-            let _event_id = calculate_event_id(&original, &version).unwrap_err();
+            let _event_id = calculate_event_id(&original, &version).unwrap();
         }
     }
 
