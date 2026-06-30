@@ -2519,7 +2519,12 @@ class RoomDelayedEventTestCase(RoomBase):
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN,
+            channel.json_body.get("errcode"),
+            channel.json_body,
+        )
 
     @unittest.override_config(
         {
@@ -2539,7 +2544,12 @@ class RoomDelayedEventTestCase(RoomBase):
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN,
+            channel.json_body.get("errcode"),
+            channel.json_body,
+        )
 
     @unittest.override_config({"max_event_delay_duration": "1000"})
     def test_delayed_event_exceeds_max_delay(self) -> None:
@@ -2552,9 +2562,9 @@ class RoomDelayedEventTestCase(RoomBase):
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
         self.assertEqual(
-            Codes.INVALID_PARAM,
+            Codes.FORBIDDEN,
             channel.json_body.get("errcode"),
             channel.json_body,
         )

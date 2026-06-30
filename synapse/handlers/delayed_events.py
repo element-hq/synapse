@@ -370,14 +370,15 @@ class DelayedEventsHandler:
             or (limit := self._config.server.max_delayed_events_per_user) <= 0
         ):
             raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
+                HTTPStatus.FORBIDDEN,
                 "Sending delayed events has been disallowed",
+                Codes.FORBIDDEN,
             )
         if delay > max_delay:
             raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
+                HTTPStatus.FORBIDDEN,
                 "The requested delay exceeds the allowed maximum",
-                Codes.INVALID_PARAM,
+                Codes.FORBIDDEN,
             )
 
         self._event_creation_handler.validator.validate_builder(
