@@ -1,1 +1,0 @@
-Upload Complement test logs as CI artifacts instead of printing the raw output to the build log.

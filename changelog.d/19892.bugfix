@@ -1,1 +1,0 @@
-Fix a bug where a user's dehydrated device (MSC3814) was deleted when their device list was synced from MAS (e.g. on logging out their last device), breaking offline key delivery.

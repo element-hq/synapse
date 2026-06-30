@@ -1,1 +1,0 @@
-Prevent the `cargo-deny` and `cargo-bench` CI jobs from being skipped, even on PRs that have Rust changes.

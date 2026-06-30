@@ -1,1 +1,0 @@
-Fixed the Admin API user endpoint documentation examples to use JSON booleans (true/false) instead of numeric (0/1) values.
