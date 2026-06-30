@@ -38,7 +38,6 @@ use crate::events::formats::EventCommonFields;
 use crate::events::Event;
 use crate::json::AllowMissing;
 
-// A change to the rust code.
 /// Version-specific fields for the MSC4242 event format.
 #[derive(Serialize, Deserialize)]
 pub struct EventFormatVMSC4242 {
