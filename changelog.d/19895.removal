@@ -1,0 +1,1 @@
+Remove support for experimental [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) auth delegation, in favour of the stable Matrix Authentication Service integration support. See [the upgrade notes](https://element-hq.github.io/synapse/v1.157/upgrade.html#upgrading-to-v11570).
