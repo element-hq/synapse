@@ -69,7 +69,6 @@ from synapse.http.servlet import (
     parse_json,
     parse_json_object_from_request,
     parse_string,
-    parse_string_from_args,
     parse_strings_from_args,
 )
 from synapse.http.site import SynapseRequest

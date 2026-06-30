@@ -626,4 +626,6 @@ class ExperimentalConfig(Config):
         self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
 
         # MSC4497: State event type filter
-        self.msc4497_state_event_type_filter: bool = experimental.get("msc4497_state_event_type_filter", False)
+        self.msc4497_state_event_type_filter: bool = experimental.get(
+            "msc4497_state_event_type_filter", False
+        )
