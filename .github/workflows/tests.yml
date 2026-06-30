@@ -13,6 +13,16 @@ concurrency:
 
 env:
   RUST_VERSION: 1.87.0
+  # This nightly is roughly the last to be branded 1.87.0.
+  #
+  # We know this, as 1.87.0 was branched from master on 2025-03-28. Shortly
+  # afterwards, nightlies were then branded as 1.88.0. See
+  # https://releases.rs/docs/1.87.0/ for where we get the dates.
+  #
+  # Technically the last 1.87.0 nightly was 2025-03-29, but that all depends on
+  # at which time of day they cut the release and when the nightly is built.
+  # It's safer for future releases to just do the day before.
+  RUST_NIGHTLY_VERSION: nightly-2025-03-27 # last nightly before 1.88.0
 
 jobs:
   # Job to detect what has changed so we don't run e.g. Rust checks on PRs that
@@ -240,7 +250,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-          toolchain: nightly-2026-02-01
+          toolchain: ${{ env.RUST_NIGHTLY_VERSION }}
           components: clippy
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
@@ -296,7 +306,7 @@ jobs:
         with:
           # We use nightly so that we can use some unstable options that we use in
           # `.rustfmt.toml`.
-          toolchain: nightly-2025-04-23
+          toolchain: ${{ env.RUST_NIGHTLY_VERSION }}
           components: rustfmt
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
@@ -677,7 +687,12 @@ jobs:
       - changes
 
   cargo-test:
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    # We need to explicitly specify `!cancelled() && !failure()` as otherwise
+    # GitHub will implicitly add `success()`, which will be `false` when any job
+    # in `needs`, or its dependents, is skipped. Most notably, jobs like
+    # `lint-readme`, a dependency of `linting-done`, are unlikely to run very
+    # often - and would result in this job being skipped.
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     needs:
       - linting-done
@@ -697,7 +712,8 @@ jobs:
   # We want to ensure that the cargo benchmarks still compile, which requires a
   # nightly compiler.
   cargo-bench:
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    # See `cargo-test` above for why we need to specify `!cancelled() && !failure()`.
+    if: ${{ !cancelled() && !failure() && needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     needs:
       - linting-done
@@ -709,7 +725,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-          toolchain: nightly-2022-12-01
+          toolchain: ${{ env.RUST_NIGHTLY_VERSION }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - run: cargo bench --no-run

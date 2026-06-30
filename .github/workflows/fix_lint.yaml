@@ -9,7 +9,9 @@ on:
 env:
   # We use nightly so that `fmt` correctly groups together imports, and
   # clippy correctly fixes up the benchmarks.
-  RUST_VERSION: nightly-2025-06-24
+  #
+  # Note: This should match the nightly rust version in `tests.yml`.
+  RUST_VERSION: nightly-2025-03-27
 
 jobs:
   fixup:
