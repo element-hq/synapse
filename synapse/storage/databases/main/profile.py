@@ -1003,13 +1003,14 @@ class ProfileWorkerStore(SQLBaseStore):
                 "stream_id",
                 stream_ids,
             )
-            sql = f"""
+            txn.execute(
+                f"""
                 DELETE FROM profile_updates_per_user
                     WHERE {user_clause}
                     AND {stream_id_clause}
-            """
-            params = user_args + stream_id_args
-            txn.execute(sql, (*params,))
+            """,
+                (*user_args, *stream_id_args),
+            )
 
         await self.db_pool.runInteraction(
             "clear_profile_updates_for_user",
@@ -1022,15 +1023,17 @@ class ProfileWorkerStore(SQLBaseStore):
         `profile_updates_per_user` tables, so that the tables don't grow indefinitely.
         """
         prune_before_ts = self.clock.time_msec() - PRUNE_PROFILE_UPDATES_AGE.as_millis()
-        cutoff_sql = """
-            SELECT stream_id FROM profile_updates
-            WHERE inserted_ts <= ?
-            ORDER BY inserted_ts DESC
-            LIMIT 1
-        """
 
         def get_prune_before_stream_id_txn(txn: LoggingTransaction) -> int | None:
-            txn.execute(cutoff_sql, (prune_before_ts,))
+            txn.execute(
+                """
+                SELECT stream_id FROM profile_updates
+                WHERE inserted_ts <= ?
+                ORDER BY inserted_ts DESC
+                LIMIT 1
+            """,
+                (prune_before_ts,),
+            )
             row = txn.fetchone()
             return row[0] if row else None
 
@@ -1077,18 +1080,17 @@ class ProfileWorkerStore(SQLBaseStore):
             nonlocal min_stream_id
 
             assert table in ("profile_updates", "profile_updates_per_user")
-            delete_sql = """
-                    DELETE FROM %s
-                    WHERE stream_id IN (
-                        SELECT stream_id FROM %s
-                        WHERE ? < stream_id AND stream_id <= ?
-                        ORDER BY stream_id ASC
-                        LIMIT ?
-                    )
-                    RETURNING stream_id
-                """ % (table, table)
             txn.execute(
-                delete_sql,
+                f"""
+                DELETE FROM {table}
+                WHERE stream_id IN (
+                    SELECT stream_id FROM {table}
+                    WHERE ? < stream_id AND stream_id <= ?
+                    ORDER BY stream_id ASC
+                    LIMIT ?
+                )
+                RETURNING stream_id
+                """,
                 (
                     min_stream_id,
                     prune_before_stream_id,
