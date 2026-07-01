@@ -119,7 +119,7 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.157.0
 
-## MSC3861 Auth Delegation must be migrated to stable Matrix Authenticationd Service integration
+## MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration
 
 Support for the deprecated MSC3861 Auth Delegation (`experimental_features.msc3861`)
 has been dropped in this version, in favour of the stable Matrix Authentication Service
