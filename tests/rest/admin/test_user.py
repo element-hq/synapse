@@ -5340,11 +5340,14 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         Test that request to redact user's events in all rooms within a specific timeframe is successful
         """
         # join rooms, send some messages
-        originals = []
+
+        # (event_id, timestamp) pairs
+        all_message_ids: list[tuple[str, int]] = []
         for rm in [self.rm1, self.rm2, self.rm3]:
-            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
-            originals.append(join["event_id"])
-            for i in range(15):
+            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+
+        for i in range(4):
+            for rm in [self.rm1, self.rm2, self.rm3]:
                 event = {"body": f"hello{i}", "msgtype": "m.text"}
                 res = self.helper.send_event(
                     rm, "m.room.message", event, tok=self.bad_user_tok, expect_code=200
@@ -5353,12 +5356,18 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                 event_ts = self.get_success(
                     self.store.get_event(event_id)
                 ).origin_server_ts
-                originals.append([event_id, event_ts])
+                all_message_ids.append((event_id, event_ts))
 
-        expected_saved_message_ids = [m[0] for m in originals[:5] + originals[10:]]
-        expected_redacted_message_ids = [m[0] for m in originals[5:10]]
-        after_ts = originals[5][1]
-        before_ts = originals[9][1]
+        expected_saved_message_ids = {
+            event_id for event_id, _ in all_message_ids[:5] + all_message_ids[10:]
+        }
+        expected_redacted_message_ids = {
+            event_id for event_id, _ in all_message_ids[5:10]
+        }
+
+        # Redact events 5 up to and including 9
+        _after_event_id, after_ts = all_message_ids[5]
+        _before_event_id, before_ts = all_message_ids[9]
 
         # redact events in all rooms within specific timeframe
         channel = self.make_request(
@@ -5369,8 +5378,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
 
-        # check that only expected messages were redacted
-        matched = []
+        # Get the set of all redacted event IDs
+        all_redacted_event_ids: set[str] = set()
         for rm in [self.rm1, self.rm2, self.rm3]:
             filter = json.dumps({"types": [EventTypes.Redaction]})
             channel = self.make_request(
@@ -5380,22 +5389,14 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, 200)
 
+            # Get the IDs of all redacted events
             for event in channel.json_body["chunk"]:
-                # gather information for all messages
-                for event_id in (
-                    expected_saved_message_ids + expected_redacted_message_ids
-                ):
-                    if (
-                        event["type"] == "m.room.redaction"
-                        and event["redacts"] == event_id
-                    ):
-                        matched.append(event_id)
+                assert event["type"] == EventTypes.Redaction
+                all_redacted_event_ids.add(event["redacts"])
+
         # check that only expected messages were redacted
-        self.assertEqual(len(matched), len(expected_redacted_message_ids))
-        matched = sorted(matched)
-        expected_redacted_message_ids = sorted(expected_redacted_message_ids)
-        for i in range(len(matched)):
-            self.assertEqual(matched[i], expected_redacted_message_ids[i])
+        self.assertSetEqual(expected_redacted_message_ids, all_redacted_event_ids)
+        self.assertSetEqual(expected_saved_message_ids & all_redacted_event_ids, set())
 
     def test_redact_messages_specific_rooms(self) -> None:
         """
