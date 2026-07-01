@@ -1241,7 +1241,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_responds_with_tracked_profile_updates(self) -> None:
         """Test that with MSC4429 enabled the initial sync response does
-        contain profile updates for users who share rooms."""
+        contain profile updates for users who share rooms, including our
+        syncing user."""
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.other_user),
@@ -1269,6 +1270,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        assert initial_result.profile_updates[self.user] is not None
         assert initial_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
             initial_result.profile_updates["@other_user:test"]["m.status"],
@@ -1277,6 +1279,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.assertCountEqual(
             initial_result.profile_updates.keys(),
             [
+                self.user,
                 "@other_user:test",
             ],
         )
@@ -1802,6 +1805,69 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         self.assertIsNone(
             incremental_result.profile_updates["@third_user:test"]["avatar_url"],
+        )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_includes_own_profile_updates(self, is_lazy: bool) -> None:
+        """Test that with MSC4429 enabled the incremental sync response includes
+        ones own profile updates."""
+        requester = create_requester(self.user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {
+                "ids": ["m.status", "displayname", "avatar_url"]
+            }
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.user),
+                requester=requester,
+                field_name="m.status",
+                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        assert incremental_result.profile_updates["@user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@user:test"]["m.status"],
+            '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
         )
 
 

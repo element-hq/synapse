@@ -142,13 +142,10 @@ class ProfileHandler:
                 user_id.to_string()
             )
         )
-        # Remove ourselves from the user ID list
-        users_who_share_rooms.remove(user_id.to_string())
-        if users_who_share_rooms:
-            await self.store.track_profile_updates_per_user(
-                stream_id=stream_id,
-                user_ids=users_who_share_rooms,
-            )
+        await self.store.track_profile_updates_per_user(
+            stream_id=stream_id,
+            user_ids=users_who_share_rooms,
+        )
 
         self._notifier.on_new_event(
             StreamKeyType.PROFILE_UPDATES, stream_id, rooms=room_ids

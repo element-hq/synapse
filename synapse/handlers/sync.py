@@ -2203,11 +2203,6 @@ class SyncHandler:
             # Filter down to selected included users
             user_ids = {user_id for user_id in user_ids if user_id in include_users}
 
-        # Remove ourselves
-        # FIXME?: Should `get_local_users_who_share_room_with_user` even return
-        # ourselves?
-        user_ids.discard(user_id)
-
         if not user_ids:
             return
 

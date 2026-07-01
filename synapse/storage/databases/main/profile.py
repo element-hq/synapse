@@ -670,7 +670,7 @@ class ProfileWorkerStore(SQLBaseStore):
     ) -> None:
         """
         Create tracking rows for profile updater per target user interested in profile
-        updates for the user triggering one.
+        updates for the user triggering one, including themselves.
 
         Args:
             stream_id: Stream ID referencing a `profile_updates` stream ID.

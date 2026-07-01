@@ -415,6 +415,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     action="joined_room",
                     field_name=None,
                 ),
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id=self.frank.to_string(),
+                    action="update",
+                    field_name="m.status",
+                ),
             ],
         )
 

@@ -983,7 +983,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return user_who_share_room
 
     async def get_local_users_who_share_room_with_user(self, user_id: str) -> set[str]:
-        """Returns the set of local users who share a room with `user_id`"""
+        """Returns the set of local users who share a room with `user_id`.
+
+        This also includes the `user_id` themselves.
+        """
         room_ids = await self.get_rooms_for_user(user_id)
 
         user_who_share_room: set[str] = set()
