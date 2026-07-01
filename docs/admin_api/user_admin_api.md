@@ -1512,24 +1512,28 @@ Returns a `404` HTTP status code if no user was found, with a response body like
 _Added in Synapse 1.72.0._
 
 
-## Redact all the events of a user
+## Redact events of a user
 
 This endpoint allows an admin to redact the events of a given user. There are no restrictions on
 redactions for a local user. By default, we puppet the user who sent the message to redact it themselves.
 Redactions for non-local users are issued using the admin user, and will fail in rooms where the
 admin user is not admin/does not have the specified power level to issue redactions. An option
-is provided to override the default and allow the admin to issue the redactions in all cases.  
+is provided to override the default and allow the admin to issue the redactions in all cases.
+There are optional parameters to filter for events that happened in the given time period. 
 
 The API is 
 ```
 POST /_synapse/admin/v1/user/<user_id>/redact
 
 {
-  "rooms": ["!roomid1", "!roomid2"]
+  "rooms": ["!roomid1", "!roomid2"],
+  "after_ts": 1779564103728,
+  "before_ts": 1779564103730
 }
 ```
 If an empty list is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted,
 otherwise all the events in the rooms provided in the request will be redacted. 
+If neither `after_ts` nor `before_ts` is provided, events will be redacted regardless of when they happened. If only one parameter is provided, all events occurring on or before/after given time will be redacted.
 
 The API starts redaction process running, and returns immediately with a JSON body with
 a redact id which can be used to query the status of the redaction process:
@@ -1557,7 +1561,9 @@ The following JSON body parameters are optional:
 - `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.
 - `use_admin` - If set to `true`, the admin user is used to issue the redactions, rather than puppeting the user. Useful
  when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
- where the admin does not have the sufficient power level to issue the redactions.  
+ where the admin does not have the sufficient power level to issue the redactions.
+- `after_ts` - Redact only events that were sent at this time or after. Format: milliseconds timestamp. _Added in Synapse 1.157.0._
+- `before_ts` - Redact only events that were sent at this time or before. Format: milliseconds timestamp. _Added in Synapse 1.157.0._
 
 _Added in Synapse 1.116.0._
 
@@ -1599,5 +1605,3 @@ The following fields are returned in the JSON response body:
   the corresponding error that caused the redaction to fail
 
 _Added in Synapse 1.116.0._
-
-
