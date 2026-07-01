@@ -1391,9 +1391,9 @@ class StreamToken:
             f"typing: {self.typing_key}, receipt: {self.receipt_key}, "
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
-            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
+            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key}, "
             f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}, "
-            f"quarantined_media: {self.quarantined_media_key})"
+            f"quarantined_media: {self.quarantined_media_key}), "
             f"profile_updates: {self.profile_updates_key})"
         )
 
