@@ -1,6 +1,6 @@
 # Registration Tokens
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+**Note:** This API is disabled when Matrix Authentication Service integration is enabled. Use the [MAS Admin API](https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html) or [the MAS CLI](https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-issue-user-registration-token) instead. An easy way to make use of this functionality is provided by [Element Admin](https://element.io/en/server-suite/admin) as part of [ESS](https://element.io/en/server-suite) Community and Pro.
 
 This API allows you to manage tokens which can be used to authenticate
 registration requests, as proposed in
