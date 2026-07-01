@@ -29,7 +29,7 @@ use std::{future::Future, pin::Pin};
 use futures::{stream::Fuse, FutureExt, StreamExt};
 use pyo3::{marker::Ungil, PyResult, Python};
 
-use crate::database::{postgres::pg_err_to_py, runtime::runtime};
+use crate::database::{postgres::errors::pg_err_to_py, runtime::runtime};
 
 /// Block on a future on the shared runtime, releasing the GIL while we wait.
 pub trait BlockingPostgres
@@ -53,7 +53,7 @@ where
 {
     /// Block on `self` and convert a Postgres error into a `PyErr`.
     fn block_on_result(self, py: Python<'_>) -> PyResult<T> {
-        self.block_on(py).map_err(pg_err_to_py)
+        self.block_on(py).map_err(|e| pg_err_to_py(&e))
     }
 }
 
