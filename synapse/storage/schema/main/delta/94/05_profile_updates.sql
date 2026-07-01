@@ -38,6 +38,9 @@ CREATE INDEX IF NOT EXISTS profile_updates_inserted_ts ON profile_updates (inser
 
 -- Track which local users should receive each profile update.
 CREATE TABLE IF NOT EXISTS profile_updates_per_user (
+  id $%AUTO_INCREMENT_PRIMARY_KEY%$,
+
+  -- Stream ID reference to `profile_updates`
   stream_id BIGINT NOT NULL REFERENCES profile_updates (stream_id),
 
   -- The full user ID of the local user that should receive the profile update.
