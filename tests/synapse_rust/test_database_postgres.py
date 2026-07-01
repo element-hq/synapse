@@ -97,9 +97,9 @@ class PostgresConnectionTestCase(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_connect_bad_dsn_raises(self) -> None:
-        # A syntactically valid but unconnectable DSN should raise rather than
-        # return a half-open connection.
-        with self.assertRaises(RuntimeError):
+        # A syntactically valid but unconnectable DSN should raise one of our
+        # DBAPI2 errors rather than return a half-open connection.
+        with self.assertRaises(postgres.Error):
             postgres.connect("host=127.0.0.1 port=1 dbname=does_not_exist")
 
     # ------------------------------------------------------------------
@@ -455,8 +455,12 @@ class PostgresConnectionTestCase(unittest.TestCase):
             cursor.execute("CREATE TEMP TABLE oor (x int4)")
             cursor.execute("INSERT INTO oor VALUES ($1)", [10**12])
 
-        with self.assertRaises(RuntimeError):
+        # This is a client-side encoding error (no SQLSTATE), so it surfaces as
+        # a plain DatabaseError -- not an OperationalError, since retrying a
+        # deterministic bad value would be pointless.
+        with self.assertRaises(postgres.DatabaseError) as ctx:
             run_interaction(self.conn, interaction)
+        self.assertNotIsInstance(ctx.exception, postgres.OperationalError)
 
     # ------------------------------------------------------------------
     # rowcount()
@@ -570,10 +574,10 @@ class PostgresConnectionTestCase(unittest.TestCase):
 
         def bad_sql(cursor: Any) -> None:
             # A syntax error: the server rejects this during prepare, which
-            # surfaces as a RuntimeError and rolls the transaction back.
+            # surfaces as a DatabaseError and rolls the transaction back.
             cursor.execute("SELECT FROM WHERE not valid sql")
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(postgres.DatabaseError):
             run_interaction(self.conn, bad_sql)
 
         # The transaction was rolled back and the connection handed back clean,
@@ -593,12 +597,15 @@ class PostgresConnectionTestCase(unittest.TestCase):
             cursor.execute("INSERT INTO uniq VALUES (1)")
             # Duplicate key. The error is reported by the server while the
             # statement's result stream is driven, so we drain it (via
-            # rowcount) to surface it as a RuntimeError.
+            # rowcount) to surface it -- as an IntegrityError, the same class
+            # (with the same 23505 pgcode) it would carry had it surfaced at
+            # execute time.
             cursor.execute("INSERT INTO uniq VALUES (1)")
             cursor.rowcount()
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(postgres.IntegrityError) as ctx:
             run_interaction(self.conn, violate)
+        self.assertEqual(ctx.exception.pgcode, "23505")
 
         # TEMP table lived only in the rolled-back transaction; the connection
         # itself is fine.
@@ -807,6 +814,71 @@ class PostgresConnectionDrivenTestCase(unittest.TestCase):
         cursor.execute("SELECT 1")  # opens an implicit transaction
         with self.assertRaises(RuntimeError):
             self.conn.set_autocommit(True)
+        self.conn.rollback()
+
+
+@unittest.skip_unless(
+    bool(USE_POSTGRES_FOR_TESTS), "requires a Postgres server (set SYNAPSE_POSTGRES)"
+)
+class PostgresErrorMappingTestCase(unittest.TestCase):
+    """The DBAPI2 exception hierarchy and the SQLSTATE→exception mapping.
+
+    Synapse's transaction driver branches on the *type* of the exception a
+    database call raises (``OperationalError`` → retry, ``IntegrityError`` →
+    retry upserts) and on its ``pgcode`` (``is_deadlock``). These tests check
+    the Rust backend raises the right class and carries a ``pgcode``, the way
+    psycopg2 does.
+    """
+
+    def setUp(self) -> None:
+        self.conn = postgres.connect(_build_dsn())
+
+    def tearDown(self) -> None:
+        del self.conn
+
+    def _exec_commit(self, sql: str) -> None:
+        """Run a single statement and commit it (its own transaction)."""
+        self.conn.cursor().execute(sql)
+        self.conn.commit()
+
+    # -- the hierarchy exposed on the module --------------------------------
+
+    def test_module_exposes_dbapi2_hierarchy(self) -> None:
+        """The exception attributes Synapse's engine code and DBAPI2Module
+        protocol rely on, with the expected subclass links."""
+        self.assertTrue(issubclass(postgres.DatabaseError, postgres.Error))
+        self.assertTrue(issubclass(postgres.OperationalError, postgres.DatabaseError))
+        self.assertTrue(issubclass(postgres.IntegrityError, postgres.DatabaseError))
+
+    # -- SQLSTATE → exception class -----------------------------------------
+
+    def test_unique_violation_is_integrity_error(self) -> None:
+        """A constraint violation raises ``IntegrityError`` with pgcode 23505."""
+        table = "rust_pg_err_integrity"
+        try:
+            self._exec_commit(f"CREATE TABLE {table} (id int PRIMARY KEY)")
+            self._exec_commit(f"INSERT INTO {table} VALUES (1)")
+
+            cursor = self.conn.cursor()
+            with self.assertRaises(postgres.IntegrityError) as ctx:
+                cursor.execute(f"INSERT INTO {table} VALUES (1)")
+                # The INSERT's error is reported while its result stream is
+                # driven, so drain it (via rowcount) to surface it.
+                cursor.rowcount()
+            self.assertEqual(ctx.exception.pgcode, "23505")
+            self.conn.rollback()
+        finally:
+            self._exec_commit(f"DROP TABLE IF EXISTS {table}")
+
+    def test_undefined_table_is_plain_database_error(self) -> None:
+        """An error we don't single out surfaces as a plain ``DatabaseError``
+        (not one of the specialised subclasses), still carrying its pgcode."""
+        cursor = self.conn.cursor()
+        with self.assertRaises(postgres.DatabaseError) as ctx:
+            cursor.execute("SELECT * FROM rust_pg_no_such_table")
+        self.assertNotIsInstance(ctx.exception, postgres.OperationalError)
+        self.assertNotIsInstance(ctx.exception, postgres.IntegrityError)
+        self.assertEqual(ctx.exception.pgcode, "42P01")  # undefined_table
         self.conn.rollback()
 
 

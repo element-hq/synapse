@@ -14,18 +14,21 @@ use crate::database::runtime::runtime;
 
 mod connection;
 mod cursor_state;
+mod errors;
 mod helpers;
 mod libpq;
 mod value;
 
-/// Register the `postgres` submodule (the `Connection` / `Cursor` classes and
-/// the `connect` factory) under the parent `database` module.
+/// Register the `postgres` submodule (the `Connection` / `Cursor` classes, the
+/// DBAPI2 exception hierarchy and the `connect` factory) under the parent
+/// `database` module.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child = PyModule::new(py, "postgres")?;
 
     child.add_class::<connection::Connection>()?;
     child.add_class::<connection::Cursor>()?;
     child.add_function(wrap_pyfunction!(connect, &child)?)?;
+    errors::register_exceptions(py, &child)?;
 
     m.add_submodule(&child)?;
 
@@ -36,11 +39,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
         .set_item("synapse.synapse_rust.database.postgres", child)?;
 
     Ok(())
-}
-
-/// Map a [`tokio_postgres`] error into a Python `RuntimeError`.
-fn pg_err_to_py(e: tokio_postgres::Error) -> PyErr {
-    PyRuntimeError::new_err(format!("postgres error: {e}"))
 }
 
 /// Open a new Postgres connection from a libpq-style DSN.
