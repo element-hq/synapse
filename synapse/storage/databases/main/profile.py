@@ -679,7 +679,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         def _track_profile_updates_per_user_txn(txn: LoggingTransaction) -> None:
             inserted_ts = self.clock.time_msec()
-            values = [[stream_id, user_id, inserted_ts] for user_id in user_ids]
+            values = [(stream_id, user_id, inserted_ts) for user_id in user_ids]
             self.db_pool.simple_insert_many_txn(
                 txn,
                 table="profile_updates_per_user",
