@@ -829,6 +829,71 @@ class PostgresConnectionDrivenTestCase(unittest.TestCase):
             self.conn.set_autocommit(True)
         self.conn.rollback()
 
+    # -- executescript (multi-statement) ------------------------------------
+
+    def test_executescript_runs_all_statements(self) -> None:
+        """A `;`-separated script runs every statement (unlike `execute`, which
+        prepares a single one)."""
+        table = "rust_pg_script"
+        try:
+            cursor = self.conn.cursor()
+            cursor.executescript(
+                f"CREATE TABLE {table} (id int); "
+                f"INSERT INTO {table} VALUES (1); "
+                f"INSERT INTO {table} VALUES (2), (3);"
+            )
+            self.conn.commit()
+
+            read = self.conn.cursor()
+            read.execute(f"SELECT id FROM {table} ORDER BY id")
+            self.assertEqual(read.fetch_all(), [(1,), (2,), (3,)])
+            self.conn.commit()
+        finally:
+            self._exec_commit(f"DROP TABLE IF EXISTS {table}")
+
+    def test_executescript_leaves_transaction_open_for_caller(self) -> None:
+        """The script runs in the connection's transaction, left open — so a
+        following `rollback()` undoes it (it was not autocommitted)."""
+        table = "rust_pg_script_open"
+        try:
+            self.conn.cursor().executescript(f"CREATE TABLE {table} (id int);")
+            self.conn.rollback()
+            self.assertFalse(self._table_exists(table))
+            self.conn.commit()
+        finally:
+            self._exec_commit(f"DROP TABLE IF EXISTS {table}")
+
+    def test_executescript_error_surfaces_as_database_error(self) -> None:
+        """A failing statement mid-script surfaces via the exception hierarchy;
+        the aborted transaction rolls back cleanly."""
+        cursor = self.conn.cursor()
+        with self.assertRaises(postgres.DatabaseError):
+            cursor.executescript("CREATE TABLE rust_pg_script_bad (id int); NOT SQL;")
+        self.conn.rollback()
+        # The CREATE was in the same aborted, rolled-back transaction, so it
+        # left nothing behind.
+        self.assertFalse(self._table_exists("rust_pg_script_bad"))
+        self.conn.commit()
+
+    def test_successive_scripts_share_one_transaction(self) -> None:
+        """Successive `executescript` calls accumulate in the same open
+        transaction -- there is no implicit commit between them (unlike
+        `sqlite3.executescript`) -- so a single rollback discards them all.
+        This is the atomicity `prepare_database` relies on."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.executescript("CREATE TABLE rust_pg_script_a (id int);")
+            cursor.executescript("CREATE TABLE rust_pg_script_b (id int);")
+            # Nothing was committed between the two calls, so one rollback
+            # undoes both.
+            self.conn.rollback()
+            self.assertFalse(self._table_exists("rust_pg_script_a"))
+            self.assertFalse(self._table_exists("rust_pg_script_b"))
+            self.conn.commit()
+        finally:
+            self._exec_commit("DROP TABLE IF EXISTS rust_pg_script_a")
+            self._exec_commit("DROP TABLE IF EXISTS rust_pg_script_b")
+
 
 @unittest.skip_unless(
     bool(USE_POSTGRES_FOR_TESTS), "requires a Postgres server (set SYNAPSE_POSTGRES)"
@@ -844,7 +909,7 @@ class PostgresErrorMappingTestCase(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.conn = postgres.connect(_build_dsn())
+        self.conn = _connect(_build_dsn())
 
     def tearDown(self) -> None:
         del self.conn
