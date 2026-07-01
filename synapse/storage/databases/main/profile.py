@@ -981,8 +981,6 @@ class ProfileWorkerStore(SQLBaseStore):
         def _clear_profile_updates_for_user_txn(
             txn: LoggingTransaction,
         ) -> None:
-            # Delete profile updates where there's a corresponding row in
-            # `profile_updates_per_user`.
             sql = """
                 SELECT stream_id FROM profile_updates
                     WHERE user_id = ? AND action = ?
