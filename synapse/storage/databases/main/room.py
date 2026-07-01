@@ -282,15 +282,17 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             if len(local_media_result) > 0:
                 self._insert_quarantine_changes_txn(txn, local_media_result, True)
 
-            # We use a >= ? on the media origin to avoid missing records when media IDs
-            # collide between origins (the table's unique constraint is on `(media_origin, media_id)`).
-            # Filtering by `(media_origin, media_id)` also makes sure we're using an index.
+            # We page through `remote_media_cache` with a tuple comparison on
+            # `(media_origin, media_id)` (matching the table's unique constraint and
+            # index). Comparing the columns independently (e.g.
+            # `media_origin >= ? AND media_id > ?`) would incorrectly skip rows in a
+            # newly-reached origin whose media_id is <= the last processed media_id.
             txn.execute(
                 """
                 SELECT media_origin, media_id
                 FROM remote_media_cache
                 WHERE quarantined_by IS NOT NULL
-                    AND media_origin >= ? AND media_id > ?
+                    AND (media_origin, media_id) > (?, ?)
                 ORDER BY media_origin, media_id
                 LIMIT ?
             """,
