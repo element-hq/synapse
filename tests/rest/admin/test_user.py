@@ -23,7 +23,6 @@ import hashlib
 import hmac
 import json
 import os
-import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
@@ -5788,21 +5787,19 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        timeout_s = 10
-        start_time = time.time()
-        redact_result = ""
-        while redact_result != "complete":
-            if start_time + timeout_s < time.time():
-                self.fail("Timed out waiting for redactions.")
+        # Need 1 tick as we send 1 replication request per original event
+        # and each wait must be >= `_EPSILON` from `http/client.py`
+        for _ in range(len(original_event_ids)):
+            self.reactor.advance(0.001)
 
-            channel2 = self.make_request(
-                "GET",
-                f"/_synapse/admin/v1/user/redact_status/{id}",
-                access_token=self.admin_tok,
-            )
-            redact_result = channel2.json_body["status"]
-            if redact_result == "failed":
-                self.fail("Redaction task failed.")
+        # Verify the HTTP `redact_status` endpoint reports completion.
+        channel2 = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel2.code, 200)
+        self.assertEqual(channel2.json_body["status"], "complete")
 
         redaction_ids = set()
         for rm in [self.rm1, self.rm2, self.rm3]:
