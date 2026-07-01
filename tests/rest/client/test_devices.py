@@ -245,7 +245,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         next_batch_token = channel.json_body.get("next_batch")
 
         # make sure fetching messages with next batch token works - there are no unfetched
-        # messages so we should receive an empty array
+        # messages so we should receive an empty array, and there should be no `next_batch` in the response.
         channel = self.make_request(
             "GET",
             f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events?from={next_batch_token}",
