@@ -394,6 +394,32 @@ impl Cursor {
         Ok(())
     }
 
+    /// Execute a multi-statement SQL script (statements separated by `;`).
+    ///
+    /// Unlike [`Cursor::execute`], which `prepare`s a single statement, this
+    /// runs the whole script on the simple-query protocol (`batch_execute`), so
+    /// it may contain many `;`-separated statements — as Synapse's schema files
+    /// do. It takes no parameters and produces no fetchable rows.
+    ///
+    /// This is a thin primitive: the script runs inside the connection's current
+    /// transaction, opening one lazily like `execute` and leaving it open for
+    /// the caller to commit. The higher-level engine `executescript` — which
+    /// also substitutes the auto-increment placeholder — is layered on top.
+    /// Note it does *not* commit any prior transaction first: unlike the
+    /// psycopg2 engine (which still prefixes `COMMIT; BEGIN TRANSACTION;`,
+    /// committing script-by-script), the Rust engine deliberately keeps a whole
+    /// sequence of schema/delta scripts in one transaction so it is applied
+    /// either completely or not at all — see
+    /// `BaseDatabaseEngine.executescript`'s docstring for the contract.
+    fn executescript(&self, py: Python<'_>, script: &str) -> PyResult<()> {
+        // A script yields no fetchable rows, so drop any previous result set.
+        self.lock_state()?.new_query();
+
+        self.connection.with_client(py, |client| {
+            client.batch_execute(script).block_on_result(py)
+        })
+    }
+
     /// Return the next row of the current result set, or `None` if exhausted.
     fn fetch_one<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
         self.lock_state()?.fetch_one(py)
