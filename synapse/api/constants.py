@@ -410,7 +410,7 @@ class ProfileFields:
     AVATAR_URL: Final = "avatar_url"
 
 
-class ProfileUpdateAction(enum.Enum):
+class ProfileUpdateAction(str, enum.Enum):
     """
     Enum representing the action of a row in the profile updates stream tables.
     """
