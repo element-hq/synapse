@@ -33,7 +33,7 @@ use futures::{stream::Fuse, FutureExt, StreamExt};
 use pyo3::{marker::Ungil, PyResult, Python};
 use tokio::runtime::Handle;
 
-use crate::database::postgres::pg_err_to_py;
+use crate::database::postgres::errors::pg_err_to_py;
 
 /// Block on a future on a given runtime, releasing the GIL while we wait.
 pub trait BlockingPostgres
@@ -67,7 +67,7 @@ where
     /// Block on `self` on the given runtime and convert a Postgres error into
     /// a `PyErr`.
     fn block_on_pg_result(self, py: Python<'_>, handle: &Handle) -> PyResult<T> {
-        self.block_on(py, handle).map_err(pg_err_to_py)
+        self.block_on(py, handle).map_err(|e| pg_err_to_py(&e))
     }
 }
 

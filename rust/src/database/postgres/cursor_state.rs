@@ -50,8 +50,8 @@ use tokio::runtime::Handle;
 use tokio_postgres::RowStream;
 
 use crate::database::postgres::{
+    errors::pg_err_to_py,
     helpers::{BlockingPostgres, BlockingPostgresStream as _},
-    pg_err_to_py,
     value::pg_row_to_py,
 };
 
@@ -95,7 +95,11 @@ impl CursorRowStream for RowStream {
     }
 
     fn stream_err(err: Self::Error) -> PyErr {
-        pg_err_to_py(err)
+        // Route through the shared mapping so a server error surfacing while
+        // the result stream is drained (e.g. a constraint violation on an
+        // `INSERT`) becomes the right DBAPI2 exception with its `pgcode`, just
+        // as it would if it surfaced at `execute` time.
+        pg_err_to_py(&err)
     }
 }
 
