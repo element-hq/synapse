@@ -131,7 +131,7 @@ class ProfileHandler:
         stream_id = await self.store.add_profile_updates(
             user_id=user_id,
             updated_fields=updated_fields,
-            action=ProfileUpdateAction.UPDATE.value,
+            action=ProfileUpdateAction.UPDATE,
         )
         room_ids = await self.store.get_rooms_for_user(user_id.to_string())
         if not room_ids:
@@ -476,7 +476,7 @@ class ProfileHandler:
             # Record our leave
             stream_id = await self.store.add_profile_updates(
                 user_id=user_id,
-                action=ProfileUpdateAction.LEFT_ROOM.value,
+                action=ProfileUpdateAction.LEFT_ROOM,
                 updated_fields=None,
             )
             await self.store.track_profile_updates_per_user(
@@ -508,7 +508,7 @@ class ProfileHandler:
 
         stream_id = await self.store.add_profile_updates(
             user_id=user_id,
-            action=ProfileUpdateAction.JOINED_ROOM.value,
+            action=ProfileUpdateAction.JOINED_ROOM,
             updated_fields=None,
         )
 

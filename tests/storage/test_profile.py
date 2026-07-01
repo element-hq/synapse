@@ -175,7 +175,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                 self.store.add_profile_updates(
                     user_id=UserID.from_string("@user:test"),
                     updated_fields={next(field_name_gen)},
-                    action=ProfileUpdateAction.UPDATE.value,
+                    action=ProfileUpdateAction.UPDATE,
                 )
             )
             self.get_success(
@@ -203,7 +203,7 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                 self.store.add_profile_updates(
                     user_id=UserID.from_string("@user:test"),
                     updated_fields={next(field_name_gen)},
-                    action=ProfileUpdateAction.UPDATE.value,
+                    action=ProfileUpdateAction.UPDATE,
                 )
             )
             self.get_success(

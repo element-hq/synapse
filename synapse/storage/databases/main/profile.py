@@ -599,16 +599,15 @@ class ProfileWorkerStore(SQLBaseStore):
     async def add_profile_updates(
         self,
         user_id: UserID,
-        action: str,
+        action: ProfileUpdateAction,
         updated_fields: set[str] | None,
     ) -> int:
         """Persist profile update markers and return the last stream ID."""
         assert self._can_write_to_profile_updates
-        assert action in [action.value for action in ProfileUpdateAction]
 
-        if action == ProfileUpdateAction.UPDATE.value and not updated_fields:
+        if action == ProfileUpdateAction.UPDATE and not updated_fields:
             return self._profile_updates_id_gen.get_current_token()
-        elif action == ProfileUpdateAction.LEFT_ROOM.value:
+        elif action == ProfileUpdateAction.LEFT_ROOM:
             assert not updated_fields
 
         user_id_str = user_id.to_string()
@@ -626,7 +625,7 @@ class ProfileWorkerStore(SQLBaseStore):
                             stream_id,
                             self._instance_name,
                             user_id_str,
-                            action,
+                            action.value,
                             field_name,
                             inserted_ts,
                         ]
@@ -638,7 +637,7 @@ class ProfileWorkerStore(SQLBaseStore):
                         stream_ids[0],
                         self._instance_name,
                         user_id_str,
-                        action,
+                        action.value,
                         None,
                         inserted_ts,
                     ]
