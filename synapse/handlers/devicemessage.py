@@ -431,7 +431,10 @@ class DeviceMessageHandler:
             "events": messages,
         }
 
-        if len(messages) > 0:
+        # If the stream_id returned from get_messages_for_device equals the to_token we
+        # provided, we've fetched all the available messages. Otherwise, return a
+        # 'next_batch' for the caller to use to request more.
+        if stream_id != to_token > 0:
             ret["next_batch"] = f"d{stream_id}"
 
         return ret

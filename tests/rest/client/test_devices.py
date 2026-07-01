@@ -212,17 +212,18 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         )
         requester = create_requester(user, device_id=new_device_id)
 
-        # Send a message to the dehydrated device
-        ensureDeferred(
-            self.message_handler.send_device_message(
-                requester=requester,
-                message_type="test.message",
-                messages={user: {device_id: {"body": "test_message"}}},
+        # Send enough messages to the dehydrated device that we need 2 batches
+        for _ in range(0, 110):
+            ensureDeferred(
+                self.message_handler.send_device_message(
+                    requester=requester,
+                    message_type="test.message",
+                    messages={user: {device_id: {"body": "test_message"}}},
+                )
             )
-        )
         self.pump()
 
-        # make sure we can fetch the message with our dehydrated device id
+        # make sure we can fetch the first batch with our dehydrated device id
         channel = self.make_request(
             "GET",
             f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
@@ -232,8 +233,9 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         expected_content = {"body": "test_message"}
         self.assertEqual(channel.json_body["events"][0]["content"], expected_content)
+        self.assertEqual(len(channel.json_body["events"]), 100)
 
-        # fetch messages again and make sure that the message was not deleted
+        # fetch the same messages again to prove that the messages were not deleted
         channel = self.make_request(
             "GET",
             f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
@@ -242,10 +244,13 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["events"][0]["content"], expected_content)
+        self.assertEqual(len(channel.json_body["events"]), 100)
         next_batch_token = channel.json_body.get("next_batch")
 
-        # make sure fetching messages with next batch token works - there are no unfetched
-        # messages so we should receive an empty array, and there should be no `next_batch` in the response.
+        # There are more messages to come
+        self.assertNotEqual(next_batch_token, None)
+
+        # make sure fetching messages with next batch token works
         channel = self.make_request(
             "GET",
             f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events?from={next_batch_token}",
@@ -253,7 +258,10 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["events"], [])
+        self.assertEqual(channel.json_body["events"][0]["content"], expected_content)
+        self.assertEqual(len(channel.json_body["events"]), 10)
+
+        # Now, there are no more messages
         self.assertNotIn("next_batch", channel.json_body)
 
         # make sure we can delete the dehydrated device
