@@ -32,7 +32,10 @@ from synapse.api.constants import (
     ReceiptTypes,
     RelationTypes,
 )
-from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
+from synapse.rest.client import (
+    account_data, devices, knock, login, read_marker,
+    receipts, room, sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -1208,3 +1211,105 @@ class SyncCancellationTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        room.register_servlets,
+        account_data.register_servlets,
+    ]
+
+    def test_initial_sync(self) -> None:
+        """Tests that a reply to an ignored user is omitted from sync"""
+        alice = self.register_user("alice", "password")
+        bob = self.register_user("bob", "password")
+        charlie = self.register_user("charlie", "password")
+        alice_token = self.login("alice", "password")
+        bob_token = self.login("bob", "password")
+        charlie_token = self.login("charlie", "password")
+
+        # Create a room and join everyone to it
+        room_id = self.helper.create_room_as(alice, tok=alice_token)
+        self.helper.join(room_id, bob, tok=bob_token)
+        self.helper.join(room_id, charlie, tok=charlie_token)
+
+        # Alice ignores bob
+        self.helper.set_account_data(
+            alice,
+            "m.ignored_user_list",
+            {
+                bob: {}
+            },
+            tok=alice_token
+        )
+
+        # Alice sends a message
+        alice_msg = self.helper.send(room_id, alice, tok=alice_token)["event_id"]
+        # And Bob replies to it
+        bob_msg = self.helper.send_event(
+            room_id,
+            bob,
+            {
+                "msgtype": "m.text",
+                "body": f"Hello {alice} from Bob!",
+                "m.relates_to": {
+                    "m.in_reply_to": {
+                        "event_id": alice_msg,
+                    }
+                }
+            },
+            tok=bob_token
+        )["event_id"]
+        # And then Charlie replies to Bob
+        charlie_msg = self.helper.send_event(
+            room_id,
+            bob,
+            {
+                "msgtype": "m.text",
+                "body": f"Hello {bob} from Charlie!",
+                "m.relates_to": {
+                    "m.in_reply_to": {
+                        "event_id": bob_msg,
+                    }
+                }
+            },
+            tok=charlie_token
+        )["event_id"]
+        # Because Alice blocked Bob, she probably doesn't want to see Charlie's reply
+        # to his message either. Neither Bob nor Charlie's message should show up in
+        # the next sync.
+
+        # However, we want to make sure a reply from Charlie to Alice doesn't
+        # get dropped.
+        charlie_msg2 = self.helper.send_event(
+            room_id,
+            bob,
+            {
+                "msgtype": "m.text",
+                "body": f"Hello {alice} from Charlie!",
+                "m.relates_to": {
+                    "m.in_reply_to": {
+                        "event_id": alice_msg,
+                    }
+                }
+            },
+            tok=charlie_token
+        )["event_id"]
+        charlie_msg3 = self.helper.send(room_id, charlie, tok=charlie_token)["event_id"]
+
+
+        # Request an initial sync
+        channel = self.make_request("GET", "/sync", access_token=alice_token)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        timeline = channel.json_body["rooms"]["join"][room_id]["timeline"]["events"]
+        timeline_map = {e["event_id"]: e for e in timeline if e.get("state_key") is None}
+        print("\nTimeline map: %s\nAlice: %s\nBob: %s\nCharlie: %s %s %s" % (json.dumps(timeline_map, indent=4), alice_msg, bob_msg, charlie_msg, charlie_msg2, charlie_msg3))
+        assert bob_msg not in timeline_map, "Bob bypassed ignore list"
+        assert charlie_msg not in timeline_map, "Charlie's reply to bob appeared"
+        assert alice_msg in timeline_map, "Alice's message should be in the timeline"
+        assert charlie_msg2 in timeline_map, "Charlie's reply to alice message should be in the timeline"
+        assert charlie_msg3 in timeline_map, "Charlie's unrelated message should be in the timeline"

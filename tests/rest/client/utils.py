@@ -1022,3 +1022,26 @@ class RestHelper:
             access_token=tok,
         )
         assert channel.code == HTTPStatus.OK, channel.text_body
+
+    def set_account_data(
+        self,
+        user_id: str,
+        type: str,
+        content: dict,
+        room_id: str | None = None,
+        *,
+        tok: str
+    ) -> None:
+        if room_id is None:
+            path = f"/user/{user_id}/account_data/{type}"
+        else:
+            path = f"/user/{user_id}/rooms/{room_id}/account_data/{type}"
+        channel = make_request(
+            self.reactor,
+            self.site,
+            method="PUT",
+            path=path,
+            content=content,
+            access_token=tok,
+        )
+        assert channel.code == HTTPStatus.OK, channel.text_body
