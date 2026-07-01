@@ -232,8 +232,7 @@ class FilterCollection:
             profile_fields_filter = filter_json.get("org.matrix.msc4429.profile_fields")
 
             if isinstance(profile_fields_filter, Mapping):
-                ids = profile_fields_filter.get("ids", [])
-                self.profile_fields = set(ids)
+                self.profile_fields = set(profile_fields_filter.get("ids", []))
 
     def __repr__(self) -> str:
         return "<FilterCollection %s>" % (json.dumps(self._filter_json),)
