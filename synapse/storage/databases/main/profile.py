@@ -1101,9 +1101,9 @@ class ProfileWorkerStore(SQLBaseStore):
             # We can't use rowcount as that is incorrect on SQLite when using
             # RETURNING.
             num_deleted = 0
-            for row in txn:
+            for (deleted_stream_id,) in txn:
                 num_deleted += 1
-                min_stream_id = max(min_stream_id, row[0])
+                min_stream_id = max(min_stream_id, deleted_stream_id)
 
             return num_deleted
 
