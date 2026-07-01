@@ -1,0 +1,1 @@
+Fix the `flag_existing_quarantined_media` background update skipping some quarantined remote media and re-running exhausted queries unnecessarily. Introduced in v1.152.0.
