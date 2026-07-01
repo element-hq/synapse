@@ -182,7 +182,7 @@ async def filter_and_transform_events_for_client(
         state_after_event = event_id_to_state.get(event.event_id)
         sender_ignored = event.sender in ignore_list
         if not sender_ignored and (tree := sender_trees.get(event.event_id)):
-            logger.debug("%s is not in %r, checking if any senders in %r are", event.sender, ignore_list, tree)
+            logger.debug("sender %s is not in %r, checking if any senders in %r are", event.sender, ignore_list, tree)
             sender_ignored = any(sender in ignore_list for sender in tree)
             logger.debug("any sender in ignore list: %r", sender_ignored)
         filtered = _check_client_allowed_to_see_event(
@@ -266,7 +266,7 @@ async def filter_and_transform_events_for_client(
     async def walk_relations(root: EventBase, senders: set[str]) -> set[str]:
         senders.add(root.sender)
         logger.debug("Walking relations of %s (senders: %r)", root.event_id, senders)
-        relations = root.unsigned.get("m.relates_to")
+        relations = root.content.get("m.relates_to")
         if not isinstance(relations, dict):
             logger.debug("No more relations to walk (no relates_to)")
             return senders
