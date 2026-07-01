@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-2164229f.js";
+            window.path_to_searchindex_js = "../searchindex-93781aa7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4dc10a98.js"></script>
@@ -1477,21 +1477,25 @@ for more information.</p>
 }
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
-<h2 id="redact-all-the-events-of-a-user"><a class="header" href="#redact-all-the-events-of-a-user">Redact all the events of a user</a></h2>
+<h2 id="redact-events-of-a-user"><a class="header" href="#redact-events-of-a-user">Redact events of a user</a></h2>
 <p>This endpoint allows an admin to redact the events of a given user. There are no restrictions on
 redactions for a local user. By default, we puppet the user who sent the message to redact it themselves.
 Redactions for non-local users are issued using the admin user, and will fail in rooms where the
 admin user is not admin/does not have the specified power level to issue redactions. An option
-is provided to override the default and allow the admin to issue the redactions in all cases.</p>
+is provided to override the default and allow the admin to issue the redactions in all cases.
+There are optional parameters to filter for events that happened in the given time period.</p>
 <p>The API is</p>
 <pre><code>POST /_synapse/admin/v1/user/&lt;user_id&gt;/redact
 
 {
-  "rooms": ["!roomid1", "!roomid2"]
+  "rooms": ["!roomid1", "!roomid2"],
+  "after_ts": 1779564103728,
+  "before_ts": 1779564103730
 }
 </code></pre>
 <p>If an empty list is provided as the key for <code>rooms</code>, all events in all the rooms the user is member of will be redacted,
-otherwise all the events in the rooms provided in the request will be redacted.</p>
+otherwise all the events in the rooms provided in the request will be redacted.
+If neither <code>after_ts</code> nor <code>before_ts</code> is provided, events will be redacted regardless of when they happened. If only one parameter is provided, all events occurring on or before/after given time will be redacted.</p>
 <p>The API starts redaction process running, and returns immediately with a JSON body with
 a redact id which can be used to query the status of the redaction process:</p>
 <pre><code class="language-json">{
@@ -1515,6 +1519,8 @@ the user is a member of will be redacted</li>
 <li><code>use_admin</code> - If set to <code>true</code>, the admin user is used to issue the redactions, rather than puppeting the user. Useful
 when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
 where the admin does not have the sufficient power level to issue the redactions.</li>
+<li><code>after_ts</code> - Redact only events that were sent at this time or after. Format: milliseconds timestamp. <em>Added in Synapse 1.157.0.</em></li>
+<li><code>before_ts</code> - Redact only events that were sent at this time or before. Format: milliseconds timestamp. <em>Added in Synapse 1.157.0.</em></li>
 </ul>
 <p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
