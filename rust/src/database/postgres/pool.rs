@@ -13,11 +13,16 @@
 //! *same* pool, so both share a single set of connections rather than running
 //! two pools that could exhaust the server's connection limit between them.
 
-use deadpool::managed::{Manager, Metrics, Object, Pool, RecycleError, RecycleResult};
+use deadpool::managed::{Manager, Metrics, Object, Pool, PoolError, RecycleError, RecycleResult};
 use log::warn;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use tokio_postgres::{Client, Config, NoTls};
 
+use crate::database::postgres::connection::Connection;
+use crate::database::postgres::errors::{pg_err_to_py, OperationalError};
 use crate::database::postgres::fixup_default_host;
+use crate::database::postgres::helpers::BlockingPostgres;
 use crate::database::runtime::runtime;
 
 /// Creates and recycles [`tokio_postgres`] connections for a [`ConnectionPool`].
@@ -80,6 +85,57 @@ pub type PooledConnection = Object<ConnectionManager>;
 pub fn create_pool(dsn: &str, max_size: usize) -> Result<ConnectionPool, anyhow::Error> {
     let manager = ConnectionManager::from_dsn(dsn)?;
     Ok(Pool::builder(manager).max_size(max_size).build()?)
+}
+
+/// The Python-facing connection pool.
+///
+/// This is the single entry point Python uses to obtain a [`Connection`]:
+/// build a pool from a DSN once, then check connections out of it with
+/// [`PyConnectionPool::connect`]. Each checkout hands back a [`Connection`]
+/// borrowed from the pool that returns itself for reuse when closed or dropped.
+#[pyclass(name = "ConnectionPool", frozen)]
+pub struct PyConnectionPool {
+    pool: ConnectionPool,
+}
+
+#[pymethods]
+impl PyConnectionPool {
+    /// Build a pool from a libpq-style DSN, capped at `max_size` connections.
+    ///
+    /// This only parses the DSN; connections are opened lazily on the first
+    /// (and each subsequent) [`connect`](Self::connect) that needs a new one.
+    #[new]
+    #[pyo3(signature = (dsn, max_size = 10))]
+    fn new(dsn: &str, max_size: usize) -> PyResult<Self> {
+        let pool = create_pool(dsn, max_size).map_err(|e| {
+            PyRuntimeError::new_err(format!("failed to build connection pool: {e}"))
+        })?;
+        Ok(Self { pool })
+    }
+
+    /// Check a connection out of the pool.
+    ///
+    /// Blocks (releasing the GIL) until a connection is available, opening a new
+    /// one if the pool is below `max_size`. A failure to establish the
+    /// connection surfaces through the same DBAPI2 exception hierarchy as a
+    /// query error, so callers can treat it like psycopg2's `connect`.
+    fn connect(&self, py: Python<'_>) -> PyResult<Connection> {
+        let conn = self.pool.get().block_on(py).map_err(pool_err_to_py)?;
+        Ok(Connection::new(conn))
+    }
+}
+
+/// Map a `deadpool` checkout failure onto the DBAPI2 exception hierarchy.
+fn pool_err_to_py(err: PoolError<tokio_postgres::Error>) -> PyErr {
+    match err {
+        // The backend failed to establish the connection: reuse the exact
+        // mapping (and `pgcode` tagging) a query error gets.
+        PoolError::Backend(e) => pg_err_to_py(&e),
+        // Timed out waiting for a slot, pool closed, no runtime, or a
+        // post-create hook failure: all connection-level problems, which
+        // Synapse treats as retryable operational errors.
+        other => OperationalError::new_err(format!("failed to acquire connection: {other}")),
+    }
 }
 
 #[cfg(test)]
