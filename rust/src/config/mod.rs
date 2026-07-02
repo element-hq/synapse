@@ -14,17 +14,20 @@
  */
 
 use std::collections::BTreeSet;
-use std::str::FromStr;
 
-use pyo3::{exceptions::PyRuntimeError, prelude::*};
+use pyo3::prelude::*;
+
+pub mod types;
 
 /// A Rust-side view of Synapse's Python `HomeServerConfig`.
 ///
 /// This only mirrors the subset of config that the Rust handlers need, rather
 /// than the whole thing. Thanks to `#[derive(FromPyObject)]`, each field is
 /// pulled directly off the corresponding attribute of the Python `config`
-/// object, so you can populate it in one shot with
-/// `homeserver.getattr("config")?.extract()?`.
+/// object, so you can populate it in one shot with:
+/// ```
+/// let config: SynapseHomeServerConfig = homeserver.getattr("config")?.extract()?;
+/// ```
 #[derive(FromPyObject, Clone)]
 pub struct SynapseHomeServerConfig {
     pub room: RoomConfig,
@@ -33,42 +36,9 @@ pub struct SynapseHomeServerConfig {
     pub experimental: ExperimentalConfig,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RoomCreationPreset {
-    PrivateChat,
-    PublicChat,
-    TrustedPrivateChat,
-}
-
-impl FromStr for RoomCreationPreset {
-    type Err = PyErr;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "private_chat" => RoomCreationPreset::PrivateChat,
-            "public_chat" => RoomCreationPreset::PublicChat,
-            "trusted_private_chat" => RoomCreationPreset::TrustedPrivateChat,
-            other => {
-                return Err(PyRuntimeError::new_err(format!(
-                    "Unknown variant {other:?} does not translate to `RoomCreationPreset`. \
-                     This is a Synapse programming error."
-                )))
-            }
-        })
-    }
-}
-
-impl<'a, 'py> FromPyObject<'a, 'py> for RoomCreationPreset {
-    type Error = PyErr;
-
-    fn extract(value: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        value.extract::<&str>()?.parse()
-    }
-}
-
 #[derive(FromPyObject, Clone)]
 pub struct RoomConfig {
-    pub encryption_enabled_by_default_for_room_presets: BTreeSet<RoomCreationPreset>,
+    pub encryption_enabled_by_default_for_room_presets: BTreeSet<types::RoomCreationPreset>,
 }
 
 #[derive(FromPyObject, Clone)]
