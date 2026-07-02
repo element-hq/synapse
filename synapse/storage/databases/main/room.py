@@ -295,10 +295,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                     self._insert_quarantine_changes_txn(txn, local_media_result, True)
 
             # We page through `remote_media_cache` with a tuple comparison on
-            # `(media_origin, media_id)` (matching the table's unique constraint and
-            # index). Comparing the columns independently (e.g.
-            # `media_origin >= ? AND media_id > ?`) would incorrectly skip rows in a
-            # newly-reached origin whose media_id is <= the last processed media_id.
+            # `(media_origin, media_id)`. This matches a unique index, and so
+            # will a) page through all rows, and b) will be fast.
+            #
+            # Comparing the columns independently (e.g. `media_origin >= ? AND
+            # media_id > ?`) would incorrectly skip rows in a newly-reached
+            # origin whose media_id is <= the last processed media_id.
             if not remote_done:
                 txn.execute(
                     """
