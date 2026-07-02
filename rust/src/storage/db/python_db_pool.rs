@@ -25,12 +25,10 @@
 //!  - transaction [`LoggingTransactionWrapper`] (implements [`Transaction`]) and query
 //!    the database.
 
-use std::future::Future;
-use std::pin::pin;
 use std::sync::{Arc, Mutex};
-use std::task::Poll;
 
 use anyhow::Context;
+use futures::FutureExt;
 use pyo3::{
     exceptions::{PyRuntimeError, PyTypeError},
     intern,
@@ -127,12 +125,12 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                         // Alternatively, we could just use `futures::executor::block_on`
                         // which is probably cleaner but a single-shot poll is more
                         // enforcing of the concept we want to represent.
-                        match poll_once(func(&mut txn)) {
-                            Poll::Ready(Ok(value)) => {
+                        match func(&mut txn).now_or_never() {
+                            Some(Ok(value)) => {
                                 *callback_slot.lock().unwrap() = Some(Ok(value));
                                 Ok(py.None())
                             }
-                            Poll::Ready(Err(err)) => {
+                            Some(Err(err)) => {
                                 // Re-raise into Python so `runInteraction` rolls the
                                 // transaction back (and can apply its retry logic for
                                 // serialization/deadlock errors).
@@ -140,7 +138,7 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                                 *callback_slot.lock().unwrap() = Some(Err(err));
                                 Err(py_err)
                             }
-                            Poll::Pending => unreachable!(
+                            None => unreachable!(
                                 "The `run_interaction` transaction callback future returned `Poll::Pending`, \
                                 but we expect Synapse Python database work to resolve synchronously. \
                                 This is a Synapse programming error: genuine async work is \
@@ -186,19 +184,6 @@ impl DatabasePool for PythonDatabasePoolWrapper {
             Err(py_err) => Err(anyhow::Error::from(py_err)).with_context(|| format!("run_interaction(name={}) failed", name)),
         }
     }
-}
-
-/// Poll a future exactly once.
-///
-/// Returns [`Poll::Ready`] if the future resolves immediately, or [`Poll::Pending`] if
-/// it would need to suspend. We use this where a future is expected to never genuinely
-/// suspend and want to enforce/check that, rather than driving it to completion with a
-/// blocking executor like `futures::executor::block_on`.
-fn poll_once<F: Future>(future: F) -> Poll<F::Output> {
-    let mut future = pin!(future);
-    let waker = futures::task::noop_waker();
-    let mut cx = std::task::Context::from_waker(&waker);
-    future.as_mut().poll(&mut cx)
 }
 
 /// Convert an [`anyhow::Error`] into a [`PyErr`] to re-raise into Python.
