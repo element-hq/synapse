@@ -81,9 +81,13 @@ def _test_runtime() -> RustRuntime:
     return _runtime
 
 
-def _connect(dsn: str) -> Any:
-    """Open a Rust connection on the shared test runtime."""
-    return postgres.connect(_test_runtime(), dsn)
+def _make_pool(dsn: str, max_size: int = 1) -> Any:
+    """Build a Rust connection pool on the shared test runtime.
+
+    Connections are only ever obtained from a pool, so a pool of one is the
+    test-suite equivalent of a plain ``connect()``.
+    """
+    return postgres.ConnectionPool(_test_runtime(), dsn, max_size)
 
 
 def _build_dsn() -> str:
@@ -135,23 +139,31 @@ class PostgresConnectionTestCase(unittest.TestCase):
     """Tests for the Rust Postgres ``Connection`` / ``Cursor``."""
 
     def setUp(self) -> None:
-        self.conn = _connect(_build_dsn())
+        # Connections are only ever obtained from a pool; check one out for the
+        # duration of the test.
+        self.pool = _make_pool(_build_dsn())
+        self.conn = self.pool.connect()
 
     def tearDown(self) -> None:
-        # Explicitly drop the connection to ensure that the underlying Rust
-        # object is dropped before the Python interpreter shuts down. Otherwise,
-        # the open connection will block us tearing down the test database.
+        # Explicitly drop the connection (returning it to the pool) and then the
+        # pool, so the underlying Rust objects are dropped before the Python
+        # interpreter shuts down. Otherwise the open connection would block us
+        # tearing down the test database.
         del self.conn
+        del self.pool
 
     # ------------------------------------------------------------------
-    # connect()
+    # ConnectionPool.connect()
     # ------------------------------------------------------------------
 
     def test_connect_bad_dsn_raises(self) -> None:
         # A syntactically valid but unconnectable DSN should raise one of our
-        # DBAPI2 errors rather than return a half-open connection.
+        # DBAPI2 errors rather than return a half-open connection. The pool
+        # parses the DSN eagerly but only dials on checkout, so the failure
+        # surfaces from connect().
+        pool = _make_pool("host=127.0.0.1 port=1 dbname=does_not_exist")
         with self.assertRaises(postgres.Error):
-            _connect("host=127.0.0.1 port=1 dbname=does_not_exist")
+            pool.connect()
 
     # ------------------------------------------------------------------
     # execute() / fetch_one() / fetch_all()
@@ -834,12 +846,15 @@ class PostgresConnectionDrivenTestCase(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.conn = _connect(_build_dsn())
+        self.pool = _make_pool(_build_dsn())
+        self.conn = self.pool.connect()
 
     def tearDown(self) -> None:
-        # Drop the connection before the interpreter shuts down (see the note
-        # in PostgresConnectionTestCase.tearDown).
+        # Drop the connection (returning it to the pool) and the pool before the
+        # interpreter shuts down (see the note in
+        # PostgresConnectionTestCase.tearDown).
         del self.conn
+        del self.pool
 
     # -- small helpers ------------------------------------------------------
 
@@ -1097,10 +1112,12 @@ class PostgresErrorMappingTestCase(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.conn = _connect(_build_dsn())
+        self.pool = _make_pool(_build_dsn())
+        self.conn = self.pool.connect()
 
     def tearDown(self) -> None:
         del self.conn
+        del self.pool
 
     def _exec_commit(self, sql: str) -> None:
         """Run a single statement and commit it (its own transaction)."""
@@ -1153,12 +1170,14 @@ class PostgresErrorMappingTestCase(unittest.TestCase):
     "requires Postgres reachable on libpq's default host",
 )
 class PostgresDefaultHostTestCase(unittest.TestCase):
-    """Covers the libpq default-host fixup in ``connect``.
+    """Covers the libpq default-host fixup.
 
     When the DSN omits ``host=``, ``tokio-postgres`` would default to localhost,
     but Synapse wants libpq's default (honouring ``PGHOST`` / the compiled-in
-    socket dir). This only runs when the test Postgres is actually reachable on
-    that default host, so it's guarded separately from the main suite.
+    socket dir). The fixup lives in the pool's connection manager, so checking a
+    connection out of a pool built from a host-less DSN exercises it. This only
+    runs when the test Postgres is actually reachable on that default host, so
+    it's guarded separately from the main suite.
     """
 
     def test_connect_without_host_uses_libpq_default(self) -> None:
@@ -1171,13 +1190,15 @@ class PostgresDefaultHostTestCase(unittest.TestCase):
             parts.append(f"port={POSTGRES_PORT}")
         if POSTGRES_PASSWORD is not None:
             parts.append(f"password={POSTGRES_PASSWORD}")
-        conn = _connect(" ".join(parts))
+        pool = _make_pool(" ".join(parts))
+        conn = pool.connect()
         try:
             self.assertEqual(
                 run_interaction(conn, lambda cursor: _select_one(cursor)), (1,)
             )
         finally:
             del conn
+            del pool
 
 
 def _select_one(cursor: Any) -> Optional[list[Any]]:

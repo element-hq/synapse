@@ -18,24 +18,27 @@ from synapse.synapse_rust.runtime import RustRuntime
 class ConnectionPool:
     """A pool of native `tokio_postgres` connections.
 
-    Built once from a libpq-style DSN; connections are opened lazily. See
-    :mod:`synapse.storage.rust_dbapi` / :mod:`synapse.storage.rust_pool` for the
-    DBAPI2 / Twisted adapters that wrap it.
+    Built once from a libpq-style DSN; connections are opened lazily. This is
+    the only way to obtain a :class:`Connection`.
     """
 
     def __init__(
         self,
+        runtime: RustRuntime,
         dsn: str,
         max_size: int = 10,
-        *,
-        synchronous_commit: bool = True,
-        statement_timeout_ms: Optional[int] = None,
-    ) -> None: ...
+    ) -> None:
+        """
+        ``runtime`` is the homeserver's ``RustRuntime`` (``hs.get_rust_runtime()``);
+        its tokio runtime is started on first use, so this works during schema
+        setup and in tests.
+        """
+
     def connect(self) -> Connection:
         """Check a connection out of the pool, blocking until one is available.
 
-        Raises an ``OperationalError`` if the configured ``checkout_timeout_ms``
-        elapses first.
+        A failure to establish the connection raises the same DBAPI2 exceptions
+        a query error would.
         """
 
     def close(self) -> None: ...
@@ -77,14 +80,6 @@ class Cursor:
     def rowcount(self) -> int: ...
     def description(self) -> Optional[list[tuple[Any, ...]]]: ...
     def close(self) -> None: ...
-
-def connect(runtime: RustRuntime, dsn: str) -> Connection:
-    """Open a new Postgres connection from a libpq-style DSN.
-
-    ``runtime`` is the homeserver's ``RustRuntime`` (``hs.get_rust_runtime()``);
-    its tokio runtime is started on first use, so this works during schema
-    setup and in tests. Blocks until the connection is established.
-    """
 
 # The PEP-249 exception hierarchy raised by the backend. `DatabaseError` and its
 # subclasses carry the SQLSTATE as `pgcode` (a 5-character string, or `None`),
