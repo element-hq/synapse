@@ -72,6 +72,8 @@ class RustConnectionPool:
         *,
         name: str,
         threads: int = 10,
+        synchronous_commit: bool = True,
+        statement_timeout_ms: int | None = None,
     ) -> None:
         """
         Args:
@@ -82,6 +84,9 @@ class RustConnectionPool:
                 pool is sized to match, since each worker holds at most one
                 connection at a time — a 1:1 cap avoids both starvation and
                 idle connections.
+            synchronous_commit: passed to each pooled connection's session setup.
+            statement_timeout_ms: passed to each pooled connection's session
+                setup (statements running longer are aborted).
 
         The owner is responsible for the lifecycle: call :meth:`start` before
         use and :meth:`close` on shutdown (e.g. via the Synapse clock's
@@ -89,7 +94,12 @@ class RustConnectionPool:
         hook itself, so it needs no clock and stays trivially testable.
         """
         self._reactor = reactor
-        self._pool = postgres.ConnectionPool(dsn, threads)
+        self._pool = postgres.ConnectionPool(
+            dsn,
+            threads,
+            synchronous_commit=synchronous_commit,
+            statement_timeout_ms=statement_timeout_ms,
+        )
         self.threadpool = ThreadPool(minthreads=1, maxthreads=threads, name=name)
         self.running = False
 
