@@ -741,10 +741,6 @@ class HomeServer(metaclass=abc.ABCMeta):
     def get_auth(self) -> Auth:
         if self.config.mas.enabled:
             return MasDelegatedAuth(self)
-        if self.config.experimental.msc3861.enabled:
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-            return MSC3861DelegatedAuth(self)
         return InternalAuth(self)
 
     @cache_in_self
