@@ -3,9 +3,9 @@
 //!
 //! We use the generic `deadpool::managed` pool with our own [`ConnectionManager`]
 //! rather than the `deadpool-postgres` crate, so that creating a connection
-//! reuses the same DSN handling (libpq's default host, see
-//! [`super::fixup_default_host`]) and connection-task spawning as
-//! [`super::connect`].
+//! reuses our own DSN handling (libpq's default host, see
+//! [`super::fixup_default_host`]) and drives the connection task on the shared
+//! runtime.
 //!
 //! The pooled item is a plain [`tokio_postgres::Client`]. Rust-native code takes
 //! one from the pool and uses it with the standard `tokio_postgres` async query
@@ -25,18 +25,68 @@ use crate::database::postgres::fixup_default_host;
 use crate::database::postgres::helpers::BlockingPostgres;
 use crate::database::runtime::runtime;
 
+/// Per-connection session settings applied once when a pooled connection is
+/// opened (the native equivalent of the engine's `on_new_connection`).
+///
+/// Note we deliberately do *not* set `bytea_output`: unlike psycopg2,
+/// [`tokio_postgres`] talks the binary protocol for prepared statements, so the
+/// text-format `bytea_output` GUC is irrelevant to how we decode `bytea`.
+#[derive(Clone)]
+pub struct SessionConfig {
+    /// When false, `synchronous_commit` is turned off for the session (don't
+    /// wait for the server to fsync before returning from a commit).
+    pub synchronous_commit: bool,
+    /// If set, `statement_timeout` (in milliseconds) — statements running longer
+    /// are aborted and turned into errors.
+    pub statement_timeout_ms: Option<i32>,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        // Match the engine's defaults: synchronous commit on, no statement
+        // timeout unless configured.
+        Self {
+            synchronous_commit: true,
+            statement_timeout_ms: None,
+        }
+    }
+}
+
+impl SessionConfig {
+    /// The `SET` statements to run on a freshly-opened connection.
+    fn setup_sql(&self) -> String {
+        // Match the engine's `default_isolation_level` (REPEATABLE READ) as the
+        // session default, so a plain `BEGIN` gets the same isolation psycopg2
+        // gave us.
+        let mut sql = String::from(
+            "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ;",
+        );
+        if !self.synchronous_commit {
+            sql.push_str(" SET synchronous_commit TO OFF;");
+        }
+        if let Some(ms) = self.statement_timeout_ms {
+            // `ms` is an integer we control (from config), so inlining is safe.
+            sql.push_str(&format!(" SET statement_timeout TO {ms};"));
+        }
+        sql
+    }
+}
+
 /// Creates and recycles [`tokio_postgres`] connections for a [`ConnectionPool`].
 pub struct ConnectionManager {
     /// The resolved connection config, parsed once from the DSN (with libpq's
     /// default host filled in if the DSN omitted one).
     config: Config,
+    /// Session settings applied to each connection when it is opened.
+    session: SessionConfig,
 }
 
 impl ConnectionManager {
-    /// Build a manager from a libpq-style DSN.
-    pub fn from_dsn(dsn: &str) -> Result<Self, anyhow::Error> {
+    /// Build a manager from a libpq-style DSN and session settings.
+    pub fn from_dsn(dsn: &str, session: SessionConfig) -> Result<Self, anyhow::Error> {
         Ok(Self {
             config: fixup_default_host(dsn)?,
+            session,
         })
     }
 }
@@ -46,10 +96,10 @@ impl Manager for ConnectionManager {
     type Error = tokio_postgres::Error;
 
     async fn create(&self) -> Result<Client, Self::Error> {
-        // As in `super::connect`: establish the connection, then drive its
-        // long-lived connection task (which pumps the socket) on the shared
-        // runtime. The task ends on its own when the `Client` is dropped, i.e.
-        // when the pool discards this connection.
+        // Establish the connection, then drive its long-lived connection task
+        // (which pumps the socket) on the shared runtime. The task ends on its
+        // own when the `Client` is dropped, i.e. when the pool discards this
+        // connection.
         let (client, connection) = self.config.connect(NoTls).await?;
 
         runtime().spawn(async move {
@@ -57,6 +107,10 @@ impl Manager for ConnectionManager {
                 warn!("postgres connection error: {e}");
             }
         });
+
+        // Apply per-connection session setup once, up front (the native
+        // equivalent of the engine's `on_new_connection`).
+        client.batch_execute(&self.session.setup_sql()).await?;
 
         Ok(client)
     }
@@ -81,9 +135,18 @@ pub type ConnectionPool = Pool<ConnectionManager>;
 pub type PooledConnection = Object<ConnectionManager>;
 
 /// Build a [`ConnectionPool`] from a libpq-style DSN, capped at `max_size`
-/// connections.
+/// connections, using the default [`SessionConfig`].
 pub fn create_pool(dsn: &str, max_size: usize) -> Result<ConnectionPool, anyhow::Error> {
-    let manager = ConnectionManager::from_dsn(dsn)?;
+    create_pool_with_session(dsn, max_size, SessionConfig::default())
+}
+
+/// Build a [`ConnectionPool`] with explicit per-connection [`SessionConfig`].
+pub fn create_pool_with_session(
+    dsn: &str,
+    max_size: usize,
+    session: SessionConfig,
+) -> Result<ConnectionPool, anyhow::Error> {
+    let manager = ConnectionManager::from_dsn(dsn, session)?;
     Ok(Pool::builder(manager).max_size(max_size).build()?)
 }
 
@@ -104,10 +167,22 @@ impl PyConnectionPool {
     ///
     /// This only parses the DSN; connections are opened lazily on the first
     /// (and each subsequent) [`connect`](Self::connect) that needs a new one.
+    /// Each connection gets the same per-connection session setup: the default
+    /// (REPEATABLE READ) isolation level, plus `synchronous_commit` /
+    /// `statement_timeout` if configured here.
     #[new]
-    #[pyo3(signature = (dsn, max_size = 10))]
-    fn new(dsn: &str, max_size: usize) -> PyResult<Self> {
-        let pool = create_pool(dsn, max_size).map_err(|e| {
+    #[pyo3(signature = (dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None))]
+    fn new(
+        dsn: &str,
+        max_size: usize,
+        synchronous_commit: bool,
+        statement_timeout_ms: Option<i32>,
+    ) -> PyResult<Self> {
+        let session = SessionConfig {
+            synchronous_commit,
+            statement_timeout_ms,
+        };
+        let pool = create_pool_with_session(dsn, max_size, session).map_err(|e| {
             PyRuntimeError::new_err(format!("failed to build connection pool: {e}"))
         })?;
         Ok(Self { pool })
@@ -219,6 +294,43 @@ mod tests {
                     .get::<_, i32>(0),
                 20
             );
+        });
+    }
+
+    #[test]
+    fn create_applies_session_setup_to_each_connection() {
+        let Some(dsn) = test_dsn() else {
+            eprintln!("skipping: set SYNAPSE_TEST_POSTGRES_DSN to run");
+            return;
+        };
+
+        let session = SessionConfig {
+            synchronous_commit: false,
+            statement_timeout_ms: Some(1234),
+        };
+        let pool = create_pool_with_session(&dsn, 1, session).unwrap();
+
+        runtime().block_on(async {
+            let client = pool.get().await.unwrap();
+
+            // The session default isolation matches the engine's default, and
+            // the configured `synchronous_commit` / `statement_timeout` are set.
+            let show = |name: &'static str| {
+                let client = &client;
+                async move {
+                    client
+                        .query_one(&format!("SHOW {name}"), &[])
+                        .await
+                        .unwrap()
+                        .get::<_, String>(0)
+                }
+            };
+            assert_eq!(
+                show("default_transaction_isolation").await,
+                "repeatable read"
+            );
+            assert_eq!(show("synchronous_commit").await, "off");
+            assert_eq!(show("statement_timeout").await, "1234ms");
         });
     }
 }
