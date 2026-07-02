@@ -17,7 +17,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import json
 from http import HTTPStatus
 from typing import Collection, ContextManager
 from unittest.mock import AsyncMock, Mock, patch
@@ -1177,9 +1176,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             self.store.set_profile_field(
                 user_id=UserID.from_string(self.user),
                 field_name="m.status",
-                new_value=json.dumps(
-                    {"text": "Swimming in the Great Lakes!", "emoji": "🏊"}
-                ),
+                new_value={"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
             )
         )
         self.helper.join(
@@ -1194,7 +1191,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(self.other_user),
                 requester=create_requester(self.other_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
 
@@ -1219,7 +1216,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(self.other_user),
                 requester=create_requester(self.other_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
 
@@ -1248,7 +1245,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(self.other_user),
                 requester=create_requester(self.other_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
 
@@ -1274,7 +1271,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         assert initial_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
             initial_result.profile_updates["@other_user:test"]["m.status"],
-            '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
+            {"text": "On holiday", "emoji": "🏖"},
         )
         self.assertCountEqual(
             initial_result.profile_updates.keys(),
@@ -1302,7 +1299,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(third_user),
                 requester=create_requester(third_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
 
@@ -1361,7 +1358,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(self.other_user),
                 requester=create_requester(self.other_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
         # Check that lazy-loading filters out profile updates as well on initial sync.
@@ -1370,7 +1367,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(third_user),
                 requester=create_requester(third_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On fire", "emoji": "🔥"}),
+                new_value={"text": "On fire", "emoji": "🔥"},
             )
         )
         self.helper.send_messages(
@@ -1439,7 +1436,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(self.other_user),
                 requester=create_requester(self.other_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
         incremental_result = self.get_success(
@@ -1463,7 +1460,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
             incremental_result.profile_updates["@other_user:test"]["m.status"],
-            '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
+            {"text": "On holiday", "emoji": "🏖"},
         )
         # We only send diffs in incremental sync for profile field updates
         self.assertIsNone(
@@ -1509,7 +1506,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(self.other_user),
                 requester=create_requester(self.other_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
         self.get_success(
@@ -1517,7 +1514,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(third_user),
                 requester=create_requester(third_user),
                 field_name="m.status",
-                new_value=json.dumps({"text": "On fire", "emoji": "🔥"}),
+                new_value={"text": "On fire", "emoji": "🔥"},
             )
         )
         self.helper.send_messages(
@@ -1562,7 +1559,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         # This is a field update, so should be here
         self.assertEqual(
             incremental_result.profile_updates["@other_user:test"]["m.status"],
-            '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
+            {"text": "On holiday", "emoji": "🏖"},
         )
         # We don't have events for this user in this response, so their full profile
         # is not included
@@ -1573,7 +1570,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         # This user has events in the timeline, thus their full profile is included
         self.assertEqual(
             incremental_result.profile_updates["@third_user:test"]["m.status"],
-            '{"text": "On fire", "emoji": "\\ud83d\\udd25"}',
+            {"text": "On fire", "emoji": "🔥"},
         )
         self.assertEqual(
             incremental_result.profile_updates["@third_user:test"]["displayname"],
@@ -1847,7 +1844,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 target_user=UserID.from_string(self.user),
                 requester=requester,
                 field_name="m.status",
-                new_value=json.dumps({"text": "On holiday", "emoji": "🏖"}),
+                new_value={"text": "On holiday", "emoji": "🏖"},
             )
         )
         incremental_result = self.get_success(
@@ -1867,7 +1864,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         assert incremental_result.profile_updates["@user:test"] is not None
         self.assertEqual(
             incremental_result.profile_updates["@user:test"]["m.status"],
-            '{"text": "On holiday", "emoji": "\\ud83c\\udfd6"}',
+            {"text": "On holiday", "emoji": "🏖"},
         )
 
 
