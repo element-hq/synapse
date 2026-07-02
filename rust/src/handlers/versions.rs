@@ -123,8 +123,7 @@ async fn build_versions_response(
     let unstable_feature_map = UnstableFeatureMap {
         msc3575: msc3575_enabled,
         msc3881: msc3881_enabled,
-        // The clone here isn't the best but better than manually composing things
-        ..global_unstable_feature_map.clone()
+        ..*global_unstable_feature_map
     };
 
     Ok(VersionsResponse {
