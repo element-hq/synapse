@@ -776,8 +776,10 @@ class ProfileUpdatesStreamRow:
     """The action, either 'update' for a field update, 'left_room' if the user left
     a room or `joined_room` if the user joined a room, see ProfileUpdateAction constant.
     """
-    field_name: str
-    """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles """
+    field_name: str | None
+    """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles.
+    This can be None if `action` is not 'update'.
+    """
 
 
 class ProfileUpdatesStream(_StreamFromIdGen):
