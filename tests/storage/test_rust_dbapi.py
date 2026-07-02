@@ -178,7 +178,10 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self._pool = postgres.ConnectionPool(_build_dsn())
-        self.conn = rust_dbapi.Connection(self._pool.connect())
+        # Pass the pool (owns_pool=False) so `reconnect` can check out a fresh
+        # connection; tearDown closes the pool itself.
+        self.conn = rust_dbapi.Connection(self._pool.connect(), pool=self._pool)
+        self.engine = RustPostgresEngine({})
 
     def tearDown(self) -> None:
         del self.conn
@@ -279,3 +282,33 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
         self.assertTrue(self.conn.autocommit)
         self.conn.set_autocommit(False)
         self.assertFalse(self.conn.autocommit)
+
+    def test_reconnect(self) -> None:
+        # `reconnect` swaps in a fresh pooled connection; the connection is still
+        # usable afterwards.
+        self.conn.reconnect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT 1")
+        self.assertEqual(cursor.fetchone(), (1,))
+        self.conn.commit()
+
+    def test_reconnect_gets_a_fresh_server_session(self) -> None:
+        # `reconnect` exists to recycle a connection (txn_limit bounds
+        # per-session server state), so it must discard the old session rather
+        # than return it to the pool — where, like adbapi's close-and-reopen,
+        # the next checkout would just get the same session back.
+        def backend_pid(conn: rust_dbapi.Connection) -> int:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pg_backend_pid()")
+            (pid,) = cursor.fetchone()  # type: ignore[misc]
+            conn.commit()
+            return pid
+
+        pool = postgres.ConnectionPool(_build_dsn(), 1)
+        self.addCleanup(pool.close)
+        conn = rust_dbapi.Connection(pool.connect(), pool=pool)
+        self.addCleanup(conn.close)
+
+        before = backend_pid(conn)
+        conn.reconnect()
+        self.assertNotEqual(backend_pid(conn), before)

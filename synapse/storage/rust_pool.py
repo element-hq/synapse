@@ -24,9 +24,8 @@ It presents the slice of ``twisted.enterprise.adbapi.ConnectionPool`` that
 ``DatabasePool`` uses — ``runWithConnection``, ``threadID``, ``threadpool`` and
 ``running`` — so it can stand in for ``_db_pool`` (paired with
 :class:`~synapse.storage.engines.RustPostgresEngine`, which drives the wrapped
-connection). What remains before ``make_pool`` can return it: ``reconnect`` on
-the connection (only used on the transaction-limit / closed-connection paths)
-and the startup path (``make_conn`` / ``check_database``).
+connection). ``make_pool`` returns one of these when the database is configured
+with ``use_rust_driver``.
 """
 
 import logging
@@ -188,7 +187,10 @@ class RustConnectionPool:
         A checkout failure surfaces as the raised exception (→ errback) before
         there is any connection to release.
         """
-        conn = DBAPI2Connection(self._pool.connect())
+        # Pass the pool so `func` can `reconnect` (checking out a fresh
+        # connection); `owns_pool=False` since the pool is shared and outlives
+        # this checkout.
+        conn = DBAPI2Connection(self._pool.connect(), pool=self._pool)
         try:
             result = func(conn, *args, **kwargs)
             conn.commit()

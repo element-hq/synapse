@@ -365,6 +365,18 @@ impl Connection {
         Ok(())
     }
 
+    /// Discard the connection instead of returning it to the pool: the
+    /// underlying socket is closed and the pool shrinks (growing back on
+    /// demand). For forced recycling — Synapse's per-connection transaction
+    /// limit calls `reconnect()` expecting a *fresh server session*, which
+    /// `close()` can't deliver (it hands the same live session back to the
+    /// pool, where the next checkout just picks it up again). Idempotent,
+    /// like `close`.
+    fn discard(&self) -> PyResult<()> {
+        self.lock()?.discard();
+        Ok(())
+    }
+
     /// Whether this connection has been closed (or discarded).
     ///
     /// Mirrors psycopg2's `connection.closed`: it is true once the connection
