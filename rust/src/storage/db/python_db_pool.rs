@@ -51,7 +51,6 @@ pub enum DatabaseEngine {
 }
 
 impl DatabaseEngine {
-    //[inline]
     pub fn supports_using_any_list(&self) -> bool {
         match self {
             DatabaseEngine::Sqlite => false,
