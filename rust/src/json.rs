@@ -105,8 +105,6 @@ pub mod allow_missing {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches;
-
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -126,12 +124,12 @@ mod tests {
         let json = r#"{"value":42}"#;
         let deserialized: TestStruct = serde_json::from_str(json).unwrap();
         assert!(deserialized.value.is_some());
-        assert_matches!(deserialized.value, AllowMissing::Some(42));
+        assert!(matches!(deserialized.value, AllowMissing::Some(42)));
 
         let json = r#"{}"#;
         let deserialized: TestStruct = serde_json::from_str(json).unwrap();
         assert!(deserialized.value.is_absent());
-        assert_matches!(deserialized.value, AllowMissing::Absent);
+        assert!(matches!(deserialized.value, AllowMissing::Absent));
     }
 
     #[test]
@@ -203,16 +201,16 @@ mod tests {
         let json = r#"{"value":42}"#;
         let deserialized: TestStructOption = serde_json::from_str(json).unwrap();
         assert!(deserialized.value.is_some());
-        assert_matches!(deserialized.value, AllowMissing::Some(Some(42)));
+        assert!(matches!(deserialized.value, AllowMissing::Some(Some(42))));
 
         let json = r#"{"value":null}"#;
         let deserialized: TestStructOption = serde_json::from_str(json).unwrap();
         assert!(deserialized.value.is_some());
-        assert_matches!(deserialized.value, AllowMissing::Some(None));
+        assert!(matches!(deserialized.value, AllowMissing::Some(None)));
 
         let json = r#"{}"#;
         let deserialized: TestStructOption = serde_json::from_str(json).unwrap();
         assert!(deserialized.value.is_absent());
-        assert_matches!(deserialized.value, AllowMissing::Absent);
+        assert!(matches!(deserialized.value, AllowMissing::Absent));
     }
 }
