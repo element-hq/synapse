@@ -1239,10 +1239,8 @@ class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
         self.helper.set_account_data(
             alice,
             "m.ignored_user_list",
-            {
-                bob: {}
-            },
-            tok=alice_token
+            {"ignored_users": {bob: {}}},
+            tok=alice_token,
         )
 
         # Alice sends a message
@@ -1250,7 +1248,7 @@ class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
         # And Bob replies to it
         bob_msg = self.helper.send_event(
             room_id,
-            bob,
+            EventTypes.Message,
             {
                 "msgtype": "m.text",
                 "body": f"Hello {alice} from Bob!",
@@ -1258,14 +1256,14 @@ class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
                     "m.in_reply_to": {
                         "event_id": alice_msg,
                     }
-                }
+                },
             },
-            tok=bob_token
+            tok=bob_token,
         )["event_id"]
         # And then Charlie replies to Bob
         charlie_msg = self.helper.send_event(
             room_id,
-            bob,
+            EventTypes.Message,
             {
                 "msgtype": "m.text",
                 "body": f"Hello {bob} from Charlie!",
@@ -1273,9 +1271,9 @@ class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
                     "m.in_reply_to": {
                         "event_id": bob_msg,
                     }
-                }
+                },
             },
-            tok=charlie_token
+            tok=charlie_token,
         )["event_id"]
         # Because Alice blocked Bob, she probably doesn't want to see Charlie's reply
         # to his message either. Neither Bob nor Charlie's message should show up in
@@ -1285,7 +1283,7 @@ class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
         # get dropped.
         charlie_msg2 = self.helper.send_event(
             room_id,
-            bob,
+            EventTypes.Message,
             {
                 "msgtype": "m.text",
                 "body": f"Hello {alice} from Charlie!",
@@ -1293,12 +1291,11 @@ class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
                     "m.in_reply_to": {
                         "event_id": alice_msg,
                     }
-                }
+                },
             },
-            tok=charlie_token
+            tok=charlie_token,
         )["event_id"]
         charlie_msg3 = self.helper.send(room_id, charlie, tok=charlie_token)["event_id"]
-
 
         # Request an initial sync
         channel = self.make_request("GET", "/sync", access_token=alice_token)
@@ -1306,10 +1303,21 @@ class StarnapseSyncIgnoreSenderTreeTestCase(unittest.HomeserverTestCase):
 
         # Check for those one time key counts
         timeline = channel.json_body["rooms"]["join"][room_id]["timeline"]["events"]
-        timeline_map = {e["event_id"]: e for e in timeline if e.get("state_key") is None}
-        print("\nTimeline map: %s\nAlice: %s\nBob: %s\nCharlie: %s %s %s" % (json.dumps(timeline_map, indent=4), alice_msg, bob_msg, charlie_msg, charlie_msg2, charlie_msg3))
-        assert bob_msg not in timeline_map, "Bob bypassed ignore list"
-        assert charlie_msg not in timeline_map, "Charlie's reply to bob appeared"
-        assert alice_msg in timeline_map, "Alice's message should be in the timeline"
-        assert charlie_msg2 in timeline_map, "Charlie's reply to alice message should be in the timeline"
-        assert charlie_msg3 in timeline_map, "Charlie's unrelated message should be in the timeline"
+        timeline_map = {
+            e["event_id"]: e for e in timeline if e.get("state_key") is None
+        }
+        self.assertNotIn(bob_msg, timeline_map, "Bob bypassed ignore list")
+        self.assertNotIn(charlie_msg, timeline_map, "Charlie's reply to bob appeared")
+        self.assertIn(
+            alice_msg, timeline_map, "Alice's message should be in the timeline"
+        )
+        self.assertIn(
+            charlie_msg2,
+            timeline_map,
+            "Charlie's reply to alice message should be in the timeline",
+        )
+        self.assertIn(
+            charlie_msg3,
+            timeline_map,
+            "Charlie's unrelated message should be in the timeline",
+        )
