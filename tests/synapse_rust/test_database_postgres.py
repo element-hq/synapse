@@ -168,6 +168,107 @@ class PostgresConnectionTestCase(unittest.TestCase):
         self.assertEqual(run_interaction(self.conn, interaction), [1, 2, 3])
 
     # ------------------------------------------------------------------
+    # executemany()
+    # ------------------------------------------------------------------
+
+    def test_executemany_runs_once_per_param_set(self) -> None:
+        """executemany applies the statement for each parameter set."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute("CREATE TEMP TABLE em (id int, name text)")
+            cursor.executemany(
+                "INSERT INTO em (id, name) VALUES ($1, $2)",
+                [[1, "a"], [2, "b"], [3, "c"]],
+            )
+            cursor.execute("SELECT id, name FROM em ORDER BY id")
+            return cursor.fetch_all()
+
+        self.assertEqual(
+            run_interaction(self.conn, interaction),
+            [(1, "a"), (2, "b"), (3, "c")],
+        )
+
+    def test_executemany_rowcount_is_total_affected(self) -> None:
+        """rowcount after executemany is the sum across all executions."""
+
+        def interaction(cursor: Any) -> int:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [[1], [2], [3]])
+            return cursor.rowcount()
+
+        self.assertEqual(run_interaction(self.conn, interaction), 3)
+
+    def test_executemany_leaves_no_result_set(self) -> None:
+        """executemany produces nothing to describe."""
+
+        def describe(cursor: Any) -> Any:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [[1], [2]])
+            return cursor.description()
+
+        self.assertIsNone(run_interaction(self.conn, describe))
+
+    def test_executemany_fetch_after_raises(self) -> None:
+        """There is no result set after executemany, so fetching is an error."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [[1], [2]])
+            cursor.fetch_one()
+
+        with self.assertRaises(RuntimeError):
+            run_interaction(self.conn, interaction)
+
+    def test_executemany_empty_is_noop(self) -> None:
+        """An empty parameter sequence runs nothing and affects no rows."""
+
+        def interaction(cursor: Any) -> int:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [])
+            # Nothing ran, so rowcount is the "unknown" sentinel...
+            self.assertEqual(cursor.rowcount(), -1)
+            # ...and the table is untouched.
+            cursor.execute("SELECT count(*) FROM em")
+            row = cursor.fetch_one()
+            assert row is not None
+            return row[0]
+
+        self.assertEqual(run_interaction(self.conn, interaction), 0)
+
+    def test_executemany_rolls_back_on_error(self) -> None:
+        """A failure part-way through executemany aborts the transaction, so
+        no rows from the batch survive."""
+
+        table = "rust_pg_test_executemany_rollback"
+        try:
+
+            def interaction(cursor: Any) -> None:
+                cursor.execute(f"CREATE TABLE {table} (id int PRIMARY KEY)")
+                # The third set duplicates the first, violating the primary key.
+                cursor.executemany(
+                    f"INSERT INTO {table} VALUES ($1)",
+                    [[1], [2], [1]],
+                )
+
+            with self.assertRaises(postgres.IntegrityError):
+                run_interaction(self.conn, interaction)
+
+            # The CREATE TABLE and the whole batch were in one transaction that
+            # rolled back, so the table should not exist.
+            def table_exists(cursor: Any) -> Any:
+                cursor.execute("SELECT to_regclass($1)::text", [table])
+                row = cursor.fetch_one()
+                assert row is not None
+                return row[0]
+
+            self.assertIsNone(run_interaction(self.conn, table_exists))
+        finally:
+            run_interaction(
+                self.conn,
+                lambda cursor: cursor.execute(f"DROP TABLE IF EXISTS {table}"),
+            )
+
+    # ------------------------------------------------------------------
     # fetch_next_batch()
     # ------------------------------------------------------------------
 
