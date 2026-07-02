@@ -73,7 +73,6 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "GET",
             "/_matrix/client/versions",
-            content={},
         )
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
@@ -85,7 +84,6 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "GET",
             "/_matrix/client/versions",
-            content={},
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -101,7 +99,6 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "GET",
             "/_matrix/client/versions",
-            content={},
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -121,7 +118,6 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "GET",
             "/_matrix/client/versions",
-            content={},
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -136,7 +132,6 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "GET",
             "/_matrix/client/versions",
-            content={},
             access_token=user2_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
