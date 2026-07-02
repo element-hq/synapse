@@ -15,26 +15,32 @@
 Synapse's transaction functions are synchronous and expect a DBAPI2 connection.
 This adapter lets them run unchanged against the Rust ``Connection`` / ``Cursor``
 shim: it owns a dedicated Twisted thread pool and, for each call, checks a
-connection out of the native Rust ``ConnectionPool``, runs the caller's function
-against it on a worker thread, then returns the connection to the pool and hands
-the result back to the reactor as a ``Deferred``.
+connection out of the native Rust ``ConnectionPool``, wraps it in the DBAPI2
+adapter (:mod:`synapse.storage.rust_dbapi`), runs the caller's function against
+it on a worker thread, then returns the connection to the pool and hands the
+result back to the reactor as a ``Deferred``.
 
-This is deliberately a thin *execution bridge*. Slotting it into
-``DatabasePool`` (so ``runInteraction`` flows through it) additionally needs
-engine-level support for the shim connection — ``in_transaction``,
-``is_connection_closed``, autocommit / isolation and ``reconnect`` — and is left
-to a follow-up.
+It presents the slice of ``twisted.enterprise.adbapi.ConnectionPool`` that
+``DatabasePool`` uses — ``runWithConnection``, ``threadID``, ``threadpool`` and
+``running`` — so it can stand in for ``_db_pool`` (paired with
+:class:`~synapse.storage.engines.RustPostgresEngine`, which drives the wrapped
+connection). What remains before ``make_pool`` can return it: ``reconnect`` on
+the connection (only used on the transaction-limit / closed-connection paths)
+and the startup path (``make_conn`` / ``check_database``).
 """
 
 import logging
+import threading
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Callable, Optional, TypeVar
 
 from typing_extensions import Concatenate, ParamSpec
 
+from twisted.internet import threads
 from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.context import defer_to_threadpool
+from synapse.storage.rust_dbapi import Connection as DBAPI2Connection
 from synapse.synapse_rust.database import postgres
 
 if TYPE_CHECKING:
@@ -51,11 +57,12 @@ R = TypeVar("R")
 class RustConnectionPool:
     """Runs blocking database functions against pooled Rust connections.
 
-    Each :meth:`run_with_connection` call runs its function on a worker thread
-    with a connection checked out of the native Rust pool, and returns a
-    ``Deferred`` that fires on the reactor thread with the result (or an
-    errback if it raised). Log contexts are preserved across the hop, following
-    the same rules as :func:`synapse.logging.context.defer_to_threadpool`.
+    Each :meth:`runWithConnection` call runs its function on a worker thread
+    with a (DBAPI2-adapter) connection checked out of the native Rust pool, and
+    returns a ``Deferred`` that fires on the reactor thread with the result (or
+    an errback if it raised). Log contexts are preserved across the hop,
+    following the same rules as
+    :func:`synapse.logging.context.defer_to_threadpool`.
     """
 
     def __init__(
@@ -107,7 +114,7 @@ class RustConnectionPool:
         self.threadpool.stop()
         self._pool.close()
 
-    def run_with_connection(
+    def runWithConnection(  # noqa: N802 (implements adbapi's interface)
         self,
         func: Callable[Concatenate[Any, P], R],
         *args: P.args,
@@ -115,21 +122,37 @@ class RustConnectionPool:
     ) -> "Deferred[R]":
         """Run ``func(conn, *args, **kwargs)`` on a worker thread.
 
-        ``conn`` is a connection checked out of the Rust pool for the duration
-        of the call. The function is responsible for committing or rolling back
-        (as Synapse's ``new_transaction`` does); the connection is returned to
-        the pool afterwards regardless.
+        ``conn`` is a DBAPI2-adapter connection wrapping one checked out of the
+        Rust pool for the duration of the call. The function is responsible for
+        committing or rolling back (as Synapse's ``new_transaction`` does); the
+        connection is returned to the pool afterwards regardless.
+
+        Named to match ``twisted.enterprise.adbapi.ConnectionPool`` so this can
+        stand in for ``DatabasePool._db_pool``.
 
         Returns:
-            A ``Deferred`` firing with ``func``'s result, following the Synapse
-            logcontext rules (``yield`` / ``await`` it).
+            A raw ``Deferred`` — like ``adbapi.ConnectionPool.runWithConnection``
+            (and unlike a `make_deferred_yieldable`-wrapped one), because the
+            caller wraps it: ``DatabasePool.runWithConnection`` supplies the
+            single ``make_deferred_yieldable``, and the DB function sets up its
+            own ``LoggingContext``. Wrapping it here as well (double
+            ``make_deferred_yieldable``, plus a nested logcontext) breaks
+            logcontext handling when the awaiting request is cancelled.
         """
         if not self.running:
             raise RuntimeError("connection pool is not running")
 
-        return defer_to_threadpool(
+        return threads.deferToThreadPool(
             self._reactor, self.threadpool, self._run, func, args, kwargs
         )
+
+    def threadID(self) -> int:  # noqa: N802 (implements adbapi's interface)
+        """Identify the current worker thread (adbapi interface).
+
+        Used by ``DatabasePool`` only when a per-connection transaction limit is
+        configured, to count transactions per thread.
+        """
+        return threading.get_ident()
 
     def _run(
         self,
@@ -142,7 +165,7 @@ class RustConnectionPool:
         A checkout failure surfaces as the raised exception (→ errback) before
         there is any connection to release.
         """
-        conn = self._pool.connect()
+        conn = DBAPI2Connection(self._pool.connect())
         try:
             return func(conn, *args, **kwargs)
         finally:

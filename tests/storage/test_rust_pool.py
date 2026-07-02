@@ -26,6 +26,8 @@ from twisted.internet import reactor as _reactor
 from twisted.internet.defer import gatherResults, inlineCallbacks
 from twisted.trial import unittest as trial_unittest
 
+from synapse.storage.database import LoggingDatabaseConnection
+from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.storage.rust_pool import RustConnectionPool
 
 from tests.unittest import skip_unless
@@ -81,11 +83,11 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def txn(conn: Any) -> Any:
             cursor = conn.cursor()
             cursor.execute("SELECT 42::int")
-            row = cursor.fetch_one()
+            row = cursor.fetchone()
             conn.commit()
             return row
 
-        result = yield self.pool.run_with_connection(txn)
+        result = yield self.pool.runWithConnection(txn)
         self.assertEqual(result, (42,))
 
     @inlineCallbacks
@@ -93,7 +95,7 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def txn(conn: Any, a: int, b: int, c: int = 0) -> int:
             return a + b + c
 
-        result = yield self.pool.run_with_connection(txn, 1, 2, c=3)
+        result = yield self.pool.runWithConnection(txn, 1, 2, c=3)
         self.assertEqual(result, 6)
 
     @inlineCallbacks
@@ -106,7 +108,7 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
 
         # The failure crosses the thread boundary and surfaces as an errback.
         failure = yield self.assertFailure(
-            self.pool.run_with_connection(txn), MarkerError
+            self.pool.runWithConnection(txn), MarkerError
         )
         self.assertEqual(str(failure), "boom")
 
@@ -118,12 +120,12 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def one(conn: Any) -> Any:
             cursor = conn.cursor()
             cursor.execute("SELECT 1::int")
-            row = cursor.fetch_one()
+            row = cursor.fetchone()
             conn.commit()
             return row
 
-        self.assertEqual((yield self.pool.run_with_connection(one)), (1,))
-        self.assertEqual((yield self.pool.run_with_connection(one)), (1,))
+        self.assertEqual((yield self.pool.runWithConnection(one)), (1,))
+        self.assertEqual((yield self.pool.runWithConnection(one)), (1,))
 
     @inlineCallbacks
     def test_concurrent_calls_are_serviced(self) -> Any:
@@ -132,16 +134,42 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def txn(conn: Any, n: int) -> Any:
             cursor = conn.cursor()
             cursor.execute("SELECT $1::int", [n])
-            row = cursor.fetch_one()
+            row = cursor.fetchone()
             conn.commit()
             return row
 
         results = yield gatherResults(
-            [self.pool.run_with_connection(txn, n) for n in range(10)]
+            [self.pool.runWithConnection(txn, n) for n in range(10)]
         )
         self.assertEqual(results, [(n,) for n in range(10)])
+
+    @inlineCallbacks
+    def test_drives_a_transaction_as_db_pool(self) -> Any:
+        # Mirror what DatabasePool.runWithConnection's inner_func does: the pool
+        # hands a DBAPI2 connection the engine can inspect, wrapped in a
+        # LoggingDatabaseConnection whose cursor is a real LoggingTransaction.
+        engine = RustPostgresEngine({})
+
+        def interaction(conn: Any) -> Any:
+            # A freshly checked-out connection is not mid-transaction.
+            self.assertFalse(engine.in_transaction(conn))
+
+            db_conn = LoggingDatabaseConnection(
+                conn=conn,
+                engine=engine,
+                default_txn_name="test",
+                server_name="test",
+            )
+            txn = db_conn.cursor(txn_name="test")
+            txn.execute("SELECT ?::int + ?::int", (2, 3))
+            row = txn.fetchone()
+            db_conn.commit()
+            return row
+
+        result = yield self.pool.runWithConnection(interaction)
+        self.assertEqual(result, (5,))
 
     def test_run_when_not_running_raises(self) -> None:
         self.pool.close()
         with self.assertRaises(RuntimeError):
-            self.pool.run_with_connection(lambda conn: None)
+            self.pool.runWithConnection(lambda conn: None)
