@@ -388,6 +388,15 @@ impl Connection {
         Ok(self.lock()?.in_txn)
     }
 
+    /// The current autocommit mode.
+    ///
+    /// Mirrors psycopg2's readable `connection.autocommit`; `prepare_database`
+    /// reads it to decide whether it needs to open a transaction explicitly.
+    #[getter]
+    fn autocommit(&self) -> PyResult<bool> {
+        Ok(self.lock()?.autocommit)
+    }
+
     /// Switch autocommit mode on or off.
     ///
     /// In autocommit mode no implicit `BEGIN` is issued, so each statement runs

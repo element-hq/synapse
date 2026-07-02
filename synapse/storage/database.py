@@ -560,7 +560,13 @@ class LoggingTransaction:
         self._do_execute(self.txn.executemany, sql, *args)
 
     def executescript(self, sql: str) -> None:
-        if isinstance(self.database_engine, Sqlite3Engine):
+        # Both the sqlite driver and the Rust Postgres shim expose a
+        # multi-statement `executescript` on the cursor; psycopg2 does not (its
+        # engine runs scripts via a plain `execute`).
+        if isinstance(self.database_engine, Sqlite3Engine) or (
+            isinstance(self.database_engine, PostgresEngine)
+            and not self.database_engine.uses_psycopg2_extras
+        ):
             self._do_execute(self.txn.executescript, sql)  # type: ignore[attr-defined]
         else:
             raise NotImplementedError(

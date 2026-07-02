@@ -4,9 +4,9 @@
 //! Kept in its own module so the cursor code stays focused on the DBAPI shape
 //! rather than the type-mapping table.
 //!
-//! First cut: int / float / bool / str / bytes / None. Lists (for
-//! `ANY($1)`-style queries) and richer types — json, decimal, timestamps —
-//! are deferred to a follow-up.
+//! First cut: int / float / bool / str / bytes / None, plus lists of those (for
+//! `column = ANY($1)` / `!= ALL($1)` queries, which Synapse uses on Postgres).
+//! Richer types — json, decimal, timestamps — are deferred to a follow-up.
 //!
 //! The mapping is column-type-driven on the way *out* (a single Python `int`
 //! becomes `INT2`/`INT4`/`INT8` depending on the column it is bound to) and
@@ -20,22 +20,25 @@
 //! | `Float`             | `float`     | `FLOAT4`, `FLOAT8`                  |
 //! | `Text`              | `str`       | `TEXT`, `VARCHAR`, `NAME`, `BPCHAR` |
 //! | `Bytea`             | `bytes`     | `BYTEA`                             |
+//! | `Array`             | `list`      | any array of the above (e.g. `INT8[]`) |
 //!
-//! Both directions share these type lists via the two `accepts` methods, which
-//! must stay in sync with the `match` arms below.
+//! Decoding (the way *in*) doesn't produce arrays — Synapse only binds them as
+//! parameters — so only the `ToSql` side handles the `Array` variant. The scalar
+//! type lists are shared via [`accepts_column_type`], kept in sync with the
+//! `match` arms below.
 
 use std::error::Error;
 
 use bytes::BytesMut;
 use postgres_protocol::types::{
-    bool_from_sql, bool_to_sql, bytea_to_sql, float4_from_sql, float4_to_sql, float8_from_sql,
-    float8_to_sql, int2_from_sql, int2_to_sql, int4_from_sql, int4_to_sql, int8_from_sql,
-    int8_to_sql, text_to_sql,
+    array_to_sql, bool_from_sql, bool_to_sql, bytea_to_sql, float4_from_sql, float4_to_sql,
+    float8_from_sql, float8_to_sql, int2_from_sql, int2_to_sql, int4_from_sql, int4_to_sql,
+    int8_from_sql, int8_to_sql, text_to_sql, ArrayDimension,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString, PyTuple};
+use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyList, PyString, PyTuple};
 use pyo3::{prelude::*, BoundObject};
-use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, ToSql, Type, WrongType};
+use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type, WrongType};
 
 use crate::database::value::{DbRow, DbValue};
 
@@ -49,6 +52,9 @@ pub enum PgValue {
     Float(f64),
     Text(Box<str>),
     Bytea(Box<[u8]>),
+    /// A Python `list`, bound to a Postgres array column (e.g. for
+    /// `column = ANY($1)`). Each element is itself a [`PgValue`].
+    Array(Vec<PgValue>),
 }
 
 impl PgValue {
@@ -83,6 +89,15 @@ impl PgValue {
         }
         if let Ok(b) = obj.cast::<PyBytes>() {
             return Ok(PgValue::Bytea(b.as_bytes().into()));
+        }
+        // A list is bound as a Postgres array (for `= ANY($1)` / `!= ALL($1)`).
+        // Each element is classified recursively.
+        if let Ok(list) = obj.cast::<PyList>() {
+            let elements = list
+                .iter()
+                .map(|item| PgValue::from_py(&item))
+                .collect::<PyResult<Vec<_>>>()?;
+            return Ok(PgValue::Array(elements));
         }
         Err(PyTypeError::new_err(format!(
             "unsupported parameter type for postgres: {}",
@@ -196,6 +211,43 @@ impl ToSql for PgValue {
                 bytea_to_sql(v, buf);
                 Ok(IsNull::No)
             }
+            (PgValue::Array(elements), ty) => {
+                // The column type is the array; its element type drives how each
+                // element is encoded.
+                let element_ty = match ty.kind() {
+                    Kind::Array(element) => element,
+                    _ => {
+                        return Err(
+                            format!("array parameter can't be bound to column type {ty}").into(),
+                        )
+                    }
+                };
+
+                // An empty array has zero dimensions on the wire; a non-empty one
+                // is a single dimension with the SQL-standard lower bound of 1.
+                let dimensions = if elements.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![ArrayDimension {
+                        len: elements.len() as i32,
+                        lower_bound: 1,
+                    }]
+                };
+
+                array_to_sql(
+                    dimensions,
+                    element_ty.oid(),
+                    elements.iter(),
+                    // `array_to_sql`'s serializer uses `postgres_protocol`'s own
+                    // `IsNull`, distinct from `tokio_postgres`'s; map between them.
+                    |element, buf| match element.to_sql(element_ty, buf)? {
+                        IsNull::No => Ok(postgres_protocol::IsNull::No),
+                        IsNull::Yes => Ok(postgres_protocol::IsNull::Yes),
+                    },
+                    buf,
+                )?;
+                Ok(IsNull::No)
+            }
             // If we get here then the caller has passed a value that doesn't
             // match the type of the column.
             (&PgValue::Bool(_), _) => Err(Box::new(WrongType::new::<bool>(ty.clone()))),
@@ -207,7 +259,9 @@ impl ToSql for PgValue {
     }
 
     fn accepts(ty: &Type) -> bool {
+        // Scalars, plus arrays of a supported scalar element type.
         accepts_column_type(ty)
+            || matches!(ty.kind(), Kind::Array(element) if accepts_column_type(element))
     }
 
     to_sql_checked!();
@@ -442,13 +496,68 @@ mod tests {
     fn from_py_rejects_unsupported_type() {
         Python::initialize();
         Python::attach(|py| {
-            // A list is not a scalar we know how to bind.
-            let list = pyo3::types::PyList::new(py, [1, 2, 3]).unwrap();
-            let err = PgValue::from_py(&list.into_any()).unwrap_err();
+            // A dict is not something we know how to bind.
+            let dict = pyo3::types::PyDict::new(py);
+            let err = PgValue::from_py(&dict.into_any()).unwrap_err();
             assert!(err.is_instance_of::<PyTypeError>(py));
             // The message names the offending type, which is the useful part.
-            assert!(err.to_string().contains("list"), "got: {err}");
+            assert!(err.to_string().contains("dict"), "got: {err}");
         });
+    }
+
+    #[test]
+    fn from_py_classifies_list_as_array() {
+        Python::initialize();
+        Python::attach(|py| {
+            let list = PyList::new(py, [1i64, 2, 3]).unwrap();
+            match PgValue::from_py(&list.into_any()).unwrap() {
+                PgValue::Array(elements) => assert!(matches!(
+                    elements.as_slice(),
+                    [PgValue::Int(1), PgValue::Int(2), PgValue::Int(3)]
+                )),
+                other => panic!("expected Array, got {other:?}"),
+            }
+
+            // Element types are classified individually (here, strings).
+            let list = PyList::new(py, ["a", "b"]).unwrap();
+            match PgValue::from_py(&list.into_any()).unwrap() {
+                PgValue::Array(elements) => assert_eq!(elements.len(), 2),
+                other => panic!("expected Array, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn to_sql_encodes_arrays() {
+        // An `INT8[]` array encodes without error and produces a non-empty
+        // buffer; the element type comes from the array column's element type.
+        let array = PgValue::Array(vec![PgValue::Int(1), PgValue::Int(2)]);
+        let (bytes, is_null) = encode(&array, &Type::INT8_ARRAY);
+        assert!(!is_null);
+        assert!(!bytes.is_empty());
+
+        // A `TEXT[]` array likewise.
+        let array = PgValue::Array(vec![PgValue::Text("x".into())]);
+        assert!(encode_result(&array, &Type::TEXT_ARRAY).is_ok());
+
+        // An empty array is valid (zero dimensions).
+        assert!(encode_result(&PgValue::Array(vec![]), &Type::INT8_ARRAY).is_ok());
+
+        // Binding an array to a non-array column is an error.
+        assert!(encode_result(&PgValue::Array(vec![PgValue::Int(1)]), &Type::INT8).is_err());
+
+        // An element whose type doesn't match the array's element type errors.
+        let bad = PgValue::Array(vec![PgValue::Text("x".into())]);
+        assert!(encode_result(&bad, &Type::INT8_ARRAY).is_err());
+    }
+
+    #[test]
+    fn accepts_arrays_of_supported_elements() {
+        assert!(<PgValue as ToSql>::accepts(&Type::INT8_ARRAY));
+        assert!(<PgValue as ToSql>::accepts(&Type::TEXT_ARRAY));
+        assert!(<PgValue as ToSql>::accepts(&Type::BOOL_ARRAY));
+        // An array of an unsupported element type is rejected.
+        assert!(!<PgValue as ToSql>::accepts(&Type::JSON_ARRAY));
     }
 
     #[test]
