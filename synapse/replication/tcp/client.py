@@ -270,11 +270,12 @@ class ReplicationDataHandler:
             updated_user_ids = {row.user_id for row in rows}
             if updated_user_ids:
                 room_ids: set[str] = set()
-                user_ids_to_room_ids = await self.store.get_rooms_for_users(
-                    updated_user_ids
-                )
-                for batched_user_ids_to_room_ids in user_ids_to_room_ids.values():
-                    room_ids.update(batched_user_ids_to_room_ids)
+                # Get all the rooms of the updated users, dict of
+                # User ID -> [Room ID]
+                users_and_rooms = await self.store.get_rooms_for_users(updated_user_ids)
+                # Loop through each users room ID's and add to our set of rooms
+                for user_room_ids in users_and_rooms.values():
+                    room_ids.update(user_room_ids)
 
                 if room_ids:
                     self.notifier.on_new_event(
