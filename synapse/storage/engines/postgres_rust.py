@@ -40,7 +40,10 @@ are unimplemented. Both are follow-ups for the full ``make_pool`` wiring.
 import logging
 from typing import TYPE_CHECKING, Any, Mapping
 
-from synapse.storage.engines._base import AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER
+from synapse.storage.engines._base import (
+    AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
+    IncorrectDatabaseSetup,
+)
 from synapse.storage.engines.postgres_base import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.synapse_rust.database import postgres
@@ -66,6 +69,7 @@ class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
         # via `rust_dbapi.connect`), so it doesn't structurally satisfy the
         # protocol — hence the ignore.
         super().__init__(postgres, database_config)  # type: ignore[arg-type]
+        self._version: int | None = None  # set by check_database
 
     def convert_param_style(self, sql: str) -> str:
         # The shim binds positional `$1, $2, ...` placeholders (like libpq),
@@ -128,16 +132,57 @@ class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
     def check_database(
         self, db_conn: Any, allow_outdated_version: bool = False
     ) -> None:
-        # Startup database validation reads psycopg2 connection attributes
-        # (server_version, ...) that the shim doesn't expose; adapting it is
-        # part of wiring the Rust backend into startup (a follow-up).
-        raise NotImplementedError(
-            "check_database is not yet implemented for the Rust Postgres backend"
-        )
+        # The shim has no psycopg2-style `conn.server_version`, so read the
+        # version (and encoding) over a cursor instead.
+        allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
+
+        with db_conn.cursor() as cur:
+            cur.execute("SHOW server_version_num")
+            self._version = int(cur.fetchone()[0])
+
+            # Are we on a supported PostgreSQL version?
+            if not allow_outdated_version and self._version < 140000:
+                raise RuntimeError("Synapse requires PostgreSQL 14 or above.")
+
+            cur.execute("SHOW SERVER_ENCODING")
+            rows = cur.fetchall()
+            if rows and rows[0][0] != "UTF8":
+                raise IncorrectDatabaseSetup(
+                    "Database has incorrect encoding: '%s' instead of 'UTF8'\n"
+                    "See docs/postgres.md for more information." % (rows[0][0],)
+                )
+
+            collation, ctype = self.get_db_locale(cur)
+            if collation != "C":
+                logger.warning(
+                    "Database has incorrect collation of %r. Should be 'C'",
+                    collation,
+                )
+                if not allow_unsafe_locale:
+                    raise IncorrectDatabaseSetup(
+                        "Database has incorrect collation of %r. Should be 'C'\n"
+                        "See docs/postgres.md for more information. You can override this check by"
+                        "setting 'allow_unsafe_locale' to true in the database config.",
+                        collation,
+                    )
+
+            if ctype != "C" and not allow_unsafe_locale:
+                logger.warning(
+                    "Database has incorrect ctype of %r. Should be 'C'",
+                    ctype,
+                )
+                raise IncorrectDatabaseSetup(
+                    "Database has incorrect ctype of %r. Should be 'C'\n"
+                    "See docs/postgres.md for more information. You can override this check by"
+                    "setting 'allow_unsafe_locale' to true in the database config.",
+                    ctype,
+                )
 
     @property
     def server_version(self) -> str:
-        # As above: depends on the psycopg2 startup path that isn't wired yet.
-        raise NotImplementedError(
-            "server_version is not yet implemented for the Rust Postgres backend"
-        )
+        """Returns a string giving the server version. For example: '14.4'."""
+        numver = self._version
+        assert numver is not None, "check_database must be called first"
+        # Supported versions are all >= 10, so use the two-part form.
+        # https://www.postgresql.org/docs/current/libpq-status.html#LIBPQ-PQSERVERVERSION
+        return "%i.%i" % (numver / 10000, numver % 10000)

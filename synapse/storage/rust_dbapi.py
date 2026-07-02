@@ -32,10 +32,158 @@ routing change in ``LoggingTransaction`` to reach a shim-backed implementation;
 that is a separate follow-up.
 """
 
-from typing import TYPE_CHECKING, Any, Iterator, Sequence
+import logging
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
+
+from synapse.synapse_rust.database import postgres
 
 if TYPE_CHECKING:
     from synapse.storage.types import SQLQueryParameters
+
+logger = logging.getLogger(__name__)
+
+
+def _quote_dsn_value(value: Any) -> str:
+    """Quote a value for a libpq keyword/value connection string.
+
+    Values with spaces or quotes must be single-quoted with `\\` and `'`
+    backslash-escaped; an empty value must be `''`.
+    """
+    s = str(value)
+    if s == "" or any(c in s for c in " '\\"):
+        escaped = s.replace("\\", "\\\\").replace("'", "\\'")
+        return f"'{escaped}'"
+    return s
+
+
+# psycopg2 accepts a few connection kwargs that are *not* libpq keywords (or
+# not tokio_postgres's spelling of them) and translates them itself. The Rust
+# pool instead parses a strict libpq DSN (via ``tokio_postgres``), which only
+# knows its own keywords, so we map the aliases here. ``database`` ->
+# ``dbname`` is the important one: Synapse's sample config and most real
+# deployments spell the database name ``database``. ``keepalives_count`` is
+# libpq's name for what tokio_postgres calls ``keepalives_retries`` (and is
+# what docs/postgres.md recommends setting).
+_PSYCOPG2_KEY_ALIASES = {
+    "database": "dbname",
+    "keepalives_count": "keepalives_retries",
+}
+
+# The keywords tokio_postgres's DSN parser accepts (see ``Config::param`` in
+# tokio-postgres 0.7.x, pinned by Cargo.lock; parity is asserted by
+# ``test_supported_dsn_keys_are_accepted_by_the_parser``). It hard-errors on
+# anything else, unlike libpq/psycopg2 which accept a much wider set — so only
+# these keys may reach the DSN. ``sslmode`` is deliberately absent: the
+# ``ssl*`` keys are split into TLS params before the DSN is built (see
+# ``split_ssl_params``), and a DSN-level ``sslmode`` would be silently
+# overridden by the pool's TLS setup — better to fail loudly.
+_SUPPORTED_DSN_KEYS = frozenset(
+    {
+        "application_name",
+        "channel_binding",
+        "connect_timeout",
+        "dbname",
+        "host",
+        "hostaddr",
+        "keepalives",
+        "keepalives_idle",
+        "keepalives_interval",
+        "keepalives_retries",
+        "load_balance_hosts",
+        "options",
+        "password",
+        "port",
+        "sslnegotiation",
+        "target_session_attrs",
+        "tcp_user_timeout",
+        "user",
+    }
+)
+
+# libpq keywords whose absence cannot change where we connect, how we
+# authenticate, or whether the connection is encrypted; these are dropped with
+# a warning, for compatibility with psycopg2-era configs. Anything else
+# unknown is a hard error: silently dropping e.g. ``service`` or ``sslcrl``
+# could connect to the wrong database or downgrade security.
+_DROPPABLE_DSN_KEYS = frozenset(
+    {
+        # tokio_postgres always talks UTF8 (and Synapse requires a UTF8 DB).
+        "client_encoding",
+        # Deprecated in libpq and a no-op since PostgreSQL 14.
+        "sslcompression",
+    }
+)
+
+
+def build_dsn(params: Mapping[str, Any]) -> str:
+    """Build a libpq keyword/value DSN from psycopg2-style connection kwargs.
+
+    Synapse's database `args` are psycopg2 connection kwargs — mostly libpq
+    keywords (``user``, ``host``, ``port``, ``password``, …), but ``database``
+    is a psycopg2 alias for libpq's ``dbname`` (see ``_PSYCOPG2_KEY_ALIASES``).
+    The Rust pool takes a strict libpq DSN string rather than kwargs, so join
+    them into one, mapping any aliases to their real keyword. ``None`` values
+    are skipped, matching psycopg2's handling of `None` kwargs (fall back to the
+    libpq default).
+
+    Keywords tokio_postgres doesn't know cannot go into the DSN (its parser
+    hard-errors with no hint about which key is at fault). The known-harmless
+    ones (``_DROPPABLE_DSN_KEYS``) are dropped with a warning; anything else
+    raises, because silently dropping a key like ``service`` or ``passfile``
+    could change *which database we connect to* or quietly downgrade security.
+
+    Raises:
+        ValueError: for an arg the Rust driver can't honour, or when an alias
+            and its target are both set (e.g. ``database`` and ``dbname``),
+            which psycopg2 also rejects.
+    """
+    parts = []
+    for key, value in params.items():
+        if value is None:
+            continue
+        mapped = _PSYCOPG2_KEY_ALIASES.get(key, key)
+        if mapped != key and params.get(mapped) is not None:
+            raise ValueError(
+                f"database config args set both {key!r} and {mapped!r}; "
+                "remove one of them"
+            )
+        if mapped not in _SUPPORTED_DSN_KEYS:
+            if mapped in _DROPPABLE_DSN_KEYS:
+                logger.warning(
+                    "Ignoring database connection argument %r: "
+                    "not supported by the native Rust driver",
+                    key,
+                )
+                continue
+            raise ValueError(
+                f"database config arg {key!r} is not supported by the native "
+                "Rust driver; remove it from `args` or disable "
+                "`use_rust_driver`"
+            )
+        parts.append(f"{mapped}={_quote_dsn_value(value)}")
+    return " ".join(parts)
+
+
+def connect(
+    dsn: str,
+    *,
+    synchronous_commit: bool = True,
+    statement_timeout_ms: int | None = None,
+) -> "Connection":
+    """Open a single standalone connection for bootstrap/one-off use.
+
+    The Rust shim is pool-only, so a lone connection is a pool of one; the
+    returned :class:`Connection` keeps that pool alive for its lifetime. Used by
+    ``make_conn`` for the startup connection that runs schema preparation before
+    the real pool exists.
+    """
+    pool = postgres.ConnectionPool(
+        dsn,
+        1,
+        synchronous_commit=synchronous_commit,
+        statement_timeout_ms=statement_timeout_ms,
+    )
+    return Connection(pool.connect(), pool=pool)
 
 
 class Cursor:
@@ -120,8 +268,12 @@ class Connection:
     engine-facing methods delegate straight to the shim.
     """
 
-    def __init__(self, conn: Any) -> None:
+    def __init__(self, conn: Any, pool: Any = None) -> None:
         self._conn = conn
+        # A pool this connection owns (a bootstrap "pool of one"), kept alive for
+        # the connection's lifetime and closed with it. `None` for connections
+        # borrowed from a shared pool.
+        self._pool = pool
 
     def cursor(self) -> Cursor:
         return Cursor(self._conn.cursor())
@@ -134,6 +286,8 @@ class Connection:
 
     def close(self) -> None:
         self._conn.close()
+        if self._pool is not None:
+            self._pool.close()
 
     # -- engine-facing methods (see RustPostgresEngine) ---------------------
 
