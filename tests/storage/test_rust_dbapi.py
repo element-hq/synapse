@@ -1,0 +1,131 @@
+# This file is licensed under the Affero General Public License (AGPL) version 3.
+#
+# Copyright (C) 2026 Element Creations Ltd
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+"""Tests for the DBAPI2 adapter over the Rust Postgres shim
+(:mod:`synapse.storage.rust_dbapi`), including driving a real
+``LoggingTransaction`` through it."""
+
+from synapse.storage import rust_dbapi
+from synapse.storage.database import LoggingDatabaseConnection
+from synapse.storage.engines.postgres_rust import RustPostgresEngine
+from synapse.synapse_rust.database import postgres
+
+from tests import unittest
+from tests.unittest import skip_unless
+from tests.utils import (
+    POSTGRES_BASE_DB,
+    POSTGRES_HOST,
+    POSTGRES_PASSWORD,
+    POSTGRES_PORT,
+    POSTGRES_USER,
+    USE_POSTGRES_FOR_TESTS,
+)
+
+
+def _build_dsn() -> str:
+    """Build a libpq keyword/value connection string from the test config."""
+
+    parts = [f"dbname={POSTGRES_BASE_DB}"]
+    if POSTGRES_USER is not None:
+        parts.append(f"user={POSTGRES_USER}")
+    if POSTGRES_HOST is not None:
+        parts.append(f"host={POSTGRES_HOST}")
+    if POSTGRES_PORT is not None:
+        parts.append(f"port={POSTGRES_PORT}")
+    if POSTGRES_PASSWORD is not None:
+        parts.append(f"password={POSTGRES_PASSWORD}")
+    return " ".join(parts)
+
+
+@skip_unless(
+    bool(USE_POSTGRES_FOR_TESTS), "requires a Postgres server (set SYNAPSE_POSTGRES)"
+)
+class RustDBAPIAdapterTestCase(unittest.TestCase):
+    """The adapter presents the DBAPI2 shape over the shim."""
+
+    def setUp(self) -> None:
+        self._pool = postgres.ConnectionPool(_build_dsn())
+        self.conn = rust_dbapi.Connection(self._pool.connect())
+
+    def tearDown(self) -> None:
+        del self.conn
+        self._pool.close()
+
+    def test_execute_and_fetchone(self) -> None:
+        cursor = self.conn.cursor()
+        # The adapter passes parameters straight through; the shim binds `$n`.
+        cursor.execute("SELECT $1::int", (7,))
+        self.assertEqual(cursor.fetchone(), (7,))
+        # Exhausted → None.
+        self.assertIsNone(cursor.fetchone())
+        self.conn.commit()
+
+    def test_fetchall(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT g FROM generate_series(1, 3) AS g ORDER BY g")
+        self.assertEqual(cursor.fetchall(), [(1,), (2,), (3,)])
+        self.conn.commit()
+
+    def test_fetchmany_returns_at_most_size(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT g FROM generate_series(1, 3) AS g ORDER BY g")
+        self.assertEqual(cursor.fetchmany(2), [(1,), (2,)])
+        self.assertEqual(cursor.fetchmany(2), [(3,)])
+        self.assertEqual(cursor.fetchmany(2), [])
+        self.conn.commit()
+
+    def test_iteration(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT g FROM generate_series(1, 3) AS g ORDER BY g")
+        self.assertEqual(list(cursor), [(1,), (2,), (3,)])
+        self.conn.commit()
+
+    def test_description_exposes_column_names(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT 1 AS a, 2 AS b")
+        assert cursor.description is not None
+        self.assertEqual([col[0] for col in cursor.description], ["a", "b"])
+        self.conn.commit()
+
+    def test_rowcount_and_executemany(self) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute("CREATE TEMP TABLE t (id int)")
+        cursor.executemany("INSERT INTO t VALUES ($1)", [(1,), (2,), (3,)])
+        self.assertEqual(cursor.rowcount, 3)
+        cursor.execute("SELECT id FROM t ORDER BY id")
+        self.assertEqual(cursor.fetchall(), [(1,), (2,), (3,)])
+        self.conn.commit()
+
+    def test_drives_a_logging_transaction(self) -> None:
+        # The whole point: a real LoggingTransaction (which converts `?` to `$n`
+        # via the engine, then drives the cursor via the DBAPI2 spelling) runs
+        # unchanged against the adapter.
+        engine = RustPostgresEngine({})
+        db_conn = LoggingDatabaseConnection(
+            conn=self.conn,
+            engine=engine,
+            default_txn_name="test",
+            server_name="test",
+        )
+
+        txn = db_conn.cursor(txn_name="test")
+        txn.execute("SELECT ?::int + ?::int", (2, 3))
+        self.assertEqual(txn.fetchone(), (5,))
+
+        txn.execute("SELECT g FROM generate_series(1, 2) AS g ORDER BY g")
+        self.assertEqual(list(txn), [(1,), (2,)])
+
+        txn.execute("SELECT 1 AS only")
+        assert txn.description is not None
+        self.assertEqual(txn.description[0][0], "only")
+
+        db_conn.commit()
