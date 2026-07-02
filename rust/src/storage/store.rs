@@ -92,8 +92,12 @@ impl Store {
                         [] => None,
                         // Otherwise, we should only find a single row for this (user, feature)
                         [row] => Some(row.try_get(0)?),
-                        _ => {
-                            panic!("Programming error (SQL query probably doesn't match our expectations)")
+                        rows => {
+                            anyhow::bail!(
+                                "Unexpected number of rows returned (expected exactly 0 or 1, saw {}). \
+                                This probably means the SQL query probably doesn't match our expectations.",
+                                rows.len(),
+                            );
                         }
                     };
 
