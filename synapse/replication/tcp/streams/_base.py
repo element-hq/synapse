@@ -31,7 +31,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, ProfileUpdateAction
 from synapse.replication.http.streams import ReplicationGetStreamUpdates
 from synapse.types import UserID
 
@@ -772,9 +772,10 @@ class ProfileUpdatesStreamRow:
 
     user_id: UserID
     """The full user ID with the profile update."""
-    action: str
-    """The action, either 'update' for a field update or 'left_room' if the user left a room,
-    see ProfileUpdateAction constant."""
+    action: ProfileUpdateAction
+    """The action, either 'update' for a field update, 'left_room' if the user left
+    a room or `joined_room` if the user joined a room, see ProfileUpdateAction constant.
+    """
     field_name: str
     """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles """
 
