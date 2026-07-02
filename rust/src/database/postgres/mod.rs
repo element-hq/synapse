@@ -18,6 +18,7 @@ mod errors;
 mod helpers;
 mod libpq;
 pub mod pool;
+pub(crate) mod query;
 mod value;
 
 /// Register the `postgres` submodule (the `Connection` / `Cursor` classes, the
