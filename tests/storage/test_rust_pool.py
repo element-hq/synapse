@@ -23,9 +23,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 # The reactor the trial runner spins up; real, so threads and callFromThread work.
 from twisted.internet import reactor as _reactor
-from twisted.internet.defer import Deferred, gatherResults, inlineCallbacks
+from twisted.internet.defer import gatherResults, inlineCallbacks
 from twisted.trial import unittest as trial_unittest
 
+from synapse.storage.database import LoggingDatabaseConnection
+from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.storage.rust_pool import RustConnectionPool
 
 from tests.synapse_rust.test_database_postgres import _build_dsn, _test_runtime
@@ -60,11 +62,11 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def txn(conn: Any) -> Any:
             cursor = conn.cursor()
             cursor.execute("SELECT 42::int")
-            row = cursor.fetch_one()
+            row = cursor.fetchone()
             conn.commit()
             return row
 
-        result = yield self.pool.run_with_connection(txn)
+        result = yield self.pool.runWithConnection(txn)
         self.assertEqual(result, (42,))
 
     @inlineCallbacks
@@ -72,7 +74,7 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def txn(conn: Any, a: int, b: int, c: int = 0) -> int:
             return a + b + c
 
-        result = yield self.pool.run_with_connection(txn, 1, 2, c=3)
+        result = yield self.pool.runWithConnection(txn, 1, 2, c=3)
         self.assertEqual(result, 6)
 
     @inlineCallbacks
@@ -85,7 +87,7 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
 
         # The failure crosses the thread boundary and surfaces as an errback.
         failure = yield self.assertFailure(
-            self.pool.run_with_connection(txn), MarkerError
+            self.pool.runWithConnection(txn), MarkerError
         )
         self.assertEqual(str(failure), "boom")
 
@@ -97,12 +99,83 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def one(conn: Any) -> Any:
             cursor = conn.cursor()
             cursor.execute("SELECT 1::int")
-            row = cursor.fetch_one()
+            row = cursor.fetchone()
             conn.commit()
             return row
 
-        self.assertEqual((yield self.pool.run_with_connection(one)), (1,))
-        self.assertEqual((yield self.pool.run_with_connection(one)), (1,))
+        self.assertEqual((yield self.pool.runWithConnection(one)), (1,))
+        self.assertEqual((yield self.pool.runWithConnection(one)), (1,))
+
+    @inlineCallbacks
+    def test_commits_work_left_open_on_success(self) -> Any:
+        # Like adbapi, the pool commits any transaction the function leaves
+        # open. One-shot background-update runners rely on this: they execute
+        # DDL/DML and return without committing.
+        def create_and_insert(conn: Any) -> None:
+            cursor = conn.cursor()
+            cursor.execute("CREATE TABLE implicit_commit_test (x INT)")
+            cursor.execute("INSERT INTO implicit_commit_test VALUES (1)")
+            # No commit: the pool must supply it.
+
+        def count(conn: Any) -> Any:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM implicit_commit_test")
+            return cursor.fetchone()
+
+        def drop(conn: Any) -> None:
+            conn.cursor().execute("DROP TABLE IF EXISTS implicit_commit_test")
+
+        self.addCleanup(lambda: self.pool.runWithConnection(drop))
+
+        yield self.pool.runWithConnection(create_and_insert)
+        self.assertEqual((yield self.pool.runWithConnection(count)), (1,))
+
+    @inlineCallbacks
+    def test_rolls_back_and_reuses_connection_on_exception(self) -> Any:
+        # Like adbapi, an exception rolls the open transaction back before the
+        # connection is returned, so the pool reuses the (now clean) connection
+        # rather than discarding it as mid-transaction — otherwise every
+        # NotFoundError/StoreError raised inside a transaction would destroy a
+        # TCP/TLS session.
+        pool = RustConnectionPool(
+            reactor, _build_dsn(), name="test-rust-db-single", threads=1
+        )
+        pool.start()
+        self.addCleanup(pool.close)
+
+        class MarkerError(Exception):
+            pass
+
+        pids: list[int] = []
+
+        def create(conn: Any) -> None:
+            conn.cursor().execute("CREATE TABLE rollback_reuse_test (x INT)")
+
+        def drop(conn: Any) -> None:
+            conn.cursor().execute("DROP TABLE IF EXISTS rollback_reuse_test")
+
+        def insert_and_raise(conn: Any) -> None:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pg_backend_pid()")
+            pids.append(cursor.fetchone()[0])
+            cursor.execute("INSERT INTO rollback_reuse_test VALUES (1)")
+            raise MarkerError("boom")
+
+        def check(conn: Any) -> Any:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pg_backend_pid()")
+            pids.append(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM rollback_reuse_test")
+            return cursor.fetchone()
+
+        self.addCleanup(lambda: pool.runWithConnection(drop))
+
+        yield pool.runWithConnection(create)
+        yield self.assertFailure(pool.runWithConnection(insert_and_raise), MarkerError)
+        # The insert was rolled back...
+        self.assertEqual((yield pool.runWithConnection(check)), (0,))
+        # ...and the single pooled connection survived the failed call.
+        self.assertEqual(pids[0], pids[1])
 
     @inlineCallbacks
     def test_concurrent_calls_are_serviced(self) -> Any:
@@ -111,73 +184,42 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         def txn(conn: Any, n: int) -> Any:
             cursor = conn.cursor()
             cursor.execute("SELECT $1::int", [n])
-            row = cursor.fetch_one()
+            row = cursor.fetchone()
             conn.commit()
             return row
 
         results = yield gatherResults(
-            [self.pool.run_with_connection(txn, n) for n in range(10)]
+            [self.pool.runWithConnection(txn, n) for n in range(10)]
         )
         self.assertEqual(results, [(n,) for n in range(10)])
 
     @inlineCallbacks
-    def test_open_transaction_is_committed_on_return(self) -> Any:
-        # adbapi's contract: a function that leaves its transaction open has it
-        # committed for it when it returns, so its writes are visible to the
-        # next caller (who may be on a different connection).
-        yield self._create_scratch_table()
+    def test_drives_a_transaction_as_db_pool(self) -> Any:
+        # Mirror what DatabasePool.runWithConnection's inner_func does: the pool
+        # hands a DBAPI2 connection the engine can inspect, wrapped in a
+        # LoggingDatabaseConnection whose cursor is a real LoggingTransaction.
+        engine = RustPostgresEngine({})
 
-        def insert_without_commit(conn: Any) -> None:
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO rust_pool_scratch (v) VALUES ($1)", [1])
+        def interaction(conn: Any) -> Any:
+            # A freshly checked-out connection is not mid-transaction.
+            self.assertFalse(engine.in_transaction(conn))
 
-        yield self.pool.run_with_connection(insert_without_commit)
-        self.assertEqual((yield self._count_rows()), 1)
+            db_conn = LoggingDatabaseConnection(
+                conn=conn,
+                engine=engine,
+                default_txn_name="test",
+                server_name="test",
+            )
+            txn = db_conn.cursor(txn_name="test")
+            txn.execute("SELECT ?::int + ?::int", (2, 3))
+            row = txn.fetchone()
+            db_conn.commit()
+            return row
 
-    @inlineCallbacks
-    def test_open_transaction_is_rolled_back_on_error(self) -> Any:
-        # ...and a function that raises has its open transaction rolled back, so
-        # nothing it wrote is visible and the connection is clean for reuse.
-        yield self._create_scratch_table()
-
-        class MarkerError(Exception):
-            pass
-
-        def insert_then_fail(conn: Any) -> None:
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO rust_pool_scratch (v) VALUES ($1)", [1])
-            raise MarkerError("boom")
-
-        yield self.assertFailure(
-            self.pool.run_with_connection(insert_then_fail), MarkerError
-        )
-        self.assertEqual((yield self._count_rows()), 0)
-
-    def _create_scratch_table(self) -> "Deferred[None]":
-        def create(conn: Any) -> None:
-            cursor = conn.cursor()
-            cursor.execute("DROP TABLE IF EXISTS rust_pool_scratch")
-            cursor.execute("CREATE TABLE rust_pool_scratch (v INT)")
-
-        def drop() -> "Deferred[None]":
-            def _drop(conn: Any) -> None:
-                conn.cursor().execute("DROP TABLE IF EXISTS rust_pool_scratch")
-
-            return self.pool.run_with_connection(_drop)
-
-        self.addCleanup(drop)
-        return self.pool.run_with_connection(create)
-
-    def _count_rows(self) -> "Deferred[int]":
-        def count(conn: Any) -> int:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM rust_pool_scratch")
-            (n,) = cursor.fetch_one()
-            return n
-
-        return self.pool.run_with_connection(count)
+        result = yield self.pool.runWithConnection(interaction)
+        self.assertEqual(result, (5,))
 
     def test_run_when_not_running_raises(self) -> None:
         self.pool.close()
         with self.assertRaises(RuntimeError):
-            self.pool.run_with_connection(lambda conn: None)
+            self.pool.runWithConnection(lambda conn: None)
