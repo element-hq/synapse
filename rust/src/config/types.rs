@@ -17,6 +17,15 @@ use std::str::FromStr;
 
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 
+/// The presets available when creating a Matrix room according to the Matrix spec:
+///
+/// > Preset | join_rules | history_visibility | guest_access | Other
+/// > --- | --- | --- | --- | ---
+/// > `private_chat` | `invite` | ``shared`` | `can_join` | .
+/// > `trusted_private_chat` | `invite` | shared | `can_join` | All invitees are given the same power level as the room creator.
+/// > `public_chat` | `public` | `shared` | `forbidden` | .
+/// >
+/// > *-- https://spec.matrix.org/v1.18/client-server-api/#post_matrixclientv3createroom*
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RoomCreationPreset {
     PrivateChat,
