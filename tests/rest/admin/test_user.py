@@ -5850,10 +5850,14 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        # Need 1 tick as we send 1 replication request per original event. The
-        # replication request body is streamed by a `Cooperator` that uses the clock to
-        # schedule each chunk at a tiny *non-zero* delay (`CLOCK_SCHEDULE_EPSILON`), so
-        # we need to actually advance the clock for it to fire.
+        # `/redact` just schedules a background task that runs in the background
+        # (fire-and-forget) so we need to do the waiting here.
+        #
+        # Need 1 tick as we send 1 replication request for the redaction of each
+        # original event. The replication request body is streamed by a `Cooperator`
+        # that uses the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
         for _ in range(len(original_event_ids)):
             self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
