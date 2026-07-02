@@ -302,6 +302,13 @@ class DehydratedDeviceEventsServlet(RestServlet):
             limit=limit,
         )
 
+        # For backwards compatibility, the POST API always contains a
+        # next_batch, which points at the latest token if we are finished.
+        # Older clients will hit this API again and stop when we return an
+        # empty list of events.
+        if "next_batch" not in msgs:
+            msgs["next_batch"] = self.message_handler.event_sources.get_current_token().to_device_key
+
         return 200, msgs
 
 
