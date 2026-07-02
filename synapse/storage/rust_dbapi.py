@@ -209,6 +209,12 @@ class Cursor:
         self._exhausted = False
         self._cursor.executemany(sql, [list(p) for p in seq_of_parameters])
 
+    def executescript(self, script: str) -> None:
+        # The shim runs a multi-statement script on the simple-query protocol
+        # (no parameters, no fetchable rows).
+        self._exhausted = False
+        self._cursor.executescript(script)
+
     def _next(self) -> Any:
         """Fetch one row, or `None` once the result set is exhausted."""
         if self._exhausted:
@@ -293,6 +299,10 @@ class Connection:
 
     def set_autocommit(self, autocommit: bool) -> None:
         self._conn.set_autocommit(autocommit)
+
+    @property
+    def autocommit(self) -> bool:
+        return bool(self._conn.autocommit)
 
     def is_closed(self) -> bool:
         return bool(self._conn.is_closed())
