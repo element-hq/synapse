@@ -27,11 +27,18 @@ class ConnectionPool:
         runtime: RustRuntime,
         dsn: str,
         max_size: int = 10,
+        *,
+        synchronous_commit: bool = True,
+        statement_timeout_ms: int | None = None,
     ) -> None:
         """
         ``runtime`` is the homeserver's ``RustRuntime`` (``hs.get_rust_runtime()``);
         its tokio runtime is started on first use, so this works during schema
         setup and in tests.
+
+        Each connection gets the same session setup when opened: the default
+        (REPEATABLE READ) isolation level, plus ``synchronous_commit`` off and
+        ``statement_timeout`` (milliseconds) if configured.
         """
 
     def connect(self) -> Connection:
