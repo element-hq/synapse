@@ -1,1 +1,0 @@
-Fix startup listener logging to report the actual bound TCP port, so listeners configured with port `0` no longer log `Synapse now listening on TCP port 0`.

@@ -224,9 +224,8 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
 
         # make sure we can fetch the message with our dehydrated device id
         channel = self.make_request(
-            "POST",
+            "GET",
             f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
-            content={},
             access_token=token,
             shorthand=False,
         )
@@ -236,9 +235,8 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
 
         # fetch messages again and make sure that the message was not deleted
         channel = self.make_request(
-            "POST",
+            "GET",
             f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
-            content={},
             access_token=token,
             shorthand=False,
         )
@@ -248,11 +246,9 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
 
         # make sure fetching messages with next batch token works - there are no unfetched
         # messages so we should receive an empty array
-        content = {"next_batch": next_batch_token}
         channel = self.make_request(
-            "POST",
-            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
-            content=content,
+            "GET",
+            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events?next_batch={next_batch_token}",
             access_token=token,
             shorthand=False,
         )
