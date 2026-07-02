@@ -108,9 +108,7 @@ pub enum CursorQueryState<S = RowStream> {
         /// Live row stream for the current query.
         stream: FusedStream<S>,
         /// Column names for the result set (empty for a DML statement).
-        ///
-        /// TODO: currently write-only; kept to back a future PEP-249
-        /// `Cursor.description` accessor.
+        /// Exposed to Python via [`CursorQueryState::description`].
         description: Vec<String>,
     },
     /// The result set has been fully consumed and exhaustion reported — a fetch
@@ -118,13 +116,9 @@ pub enum CursorQueryState<S = RowStream> {
     /// `fetch_*` is a programming error; `rowcount` still returns the count.
     Closed {
         /// Column names for the result set, carried over from `Active` so they
-        /// survive once the rows are gone.
-        ///
-        /// TODO: currently write-only; like `Active::description` it is kept to
-        /// back a future PEP-249 `Cursor.description` accessor. `#[allow]`d
-        /// until that reader lands rather than dropped, so the column metadata
-        /// isn't silently lost at the `Active` -> `Closed` transition.
-        #[allow(dead_code)]
+        /// survive once the rows are gone (PEP-249 keeps `description`
+        /// available after the rows have been fetched). Exposed to Python via
+        /// [`CursorQueryState::description`].
         description: Vec<String>,
         /// PEP-249 `rowcount` from the command tag, if it was captured.
         rowcount: Option<u64>,
@@ -355,6 +349,34 @@ impl<S: CursorRowStream> CursorQueryState<S> {
             // count. The stream is always drained by the block above before we
             // get here, so "not yet drained" isn't a case. PEP-249 says -1.
             _ => Ok(PyInt::new(py, -1)),
+        }
+    }
+
+    /// The column names of the current result set, or `None` when there is no
+    /// row-returning result set to describe.
+    ///
+    /// This backs the PEP-249 `Cursor.description`. It is `None` in the `Idle`
+    /// state (no query has run yet, or an error reset the cursor) and also for
+    /// a statement that returns no columns — e.g. an `INSERT`/`UPDATE`/`DELETE`
+    /// without `RETURNING` — matching psycopg2, which reports `description` as
+    /// `None` for such statements. For a row-returning statement the names stay
+    /// available after the rows have been fetched (the `Closed` state), as
+    /// PEP-249 requires.
+    ///
+    /// Only the column *names* are tracked (see `on_query_start`); it is the
+    /// caller's job to shape them into PEP-249's 7-tuples.
+    pub fn description(&self) -> Option<&[String]> {
+        let columns = match self {
+            Self::Active { description, .. } | Self::Closed { description, .. } => description,
+            Self::Idle => return None,
+        };
+
+        // A statement that returns no columns (DML) has an empty column list;
+        // PEP-249 / psycopg2 report `description` as `None` in that case.
+        if columns.is_empty() {
+            None
+        } else {
+            Some(columns)
         }
     }
 
@@ -836,6 +858,63 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("exhausted"));
+        });
+    }
+
+    #[test]
+    fn description_is_none_before_any_query() {
+        let state = CursorQueryState::<FakeStream>::new();
+        assert!(state.description().is_none());
+    }
+
+    #[test]
+    fn description_reports_columns_while_active_and_after_close() {
+        Python::initialize();
+        Python::attach(|py| {
+            // `active_with` builds an `Active` state whose columns are `["col"]`.
+            let mut state = active_with(vec![vec![1]], Some(0));
+            assert_eq!(state.description(), Some(["col".to_string()].as_slice()));
+
+            // Draining the rows moves the cursor to `Closed`, but the column
+            // names survive so `description` is still available (PEP-249).
+            let _ = state.fetch_all(py, handle()).unwrap();
+            assert!(matches!(state, CursorQueryState::Closed { .. }));
+            assert_eq!(state.description(), Some(["col".to_string()].as_slice()));
+        });
+    }
+
+    #[test]
+    fn description_is_none_for_a_column_less_result() {
+        // A DML statement yields no columns; `description` should be `None`
+        // even while the (empty) result set is `Active`.
+        let mut state = CursorQueryState::<FakeStream>::new();
+        state.on_query_start(
+            FakeStream {
+                items: VecDeque::new(),
+                rows_affected: Some(3),
+            },
+            vec![],
+        );
+        assert!(state.description().is_none());
+    }
+
+    #[test]
+    fn description_is_none_after_an_error_resets_to_idle() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = CursorQueryState::<FakeStream>::new();
+            state.on_query_start(
+                FakeStream {
+                    items: VecDeque::from(vec![Err(FakeError("boom"))]),
+                    rows_affected: None,
+                },
+                vec!["col".to_string()],
+            );
+
+            // The error resets the cursor to `Idle`, dropping the columns.
+            let _ = state.fetch_one(py, handle()).unwrap_err();
+            assert!(matches!(state, CursorQueryState::Idle));
+            assert!(state.description().is_none());
         });
     }
 
