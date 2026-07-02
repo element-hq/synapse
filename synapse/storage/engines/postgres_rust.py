@@ -41,7 +41,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Mapping
 
 from synapse.storage.engines._base import AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER
-from synapse.storage.engines.postgres import PostgresEngine
+from synapse.storage.engines.postgres_base import PostgresEngine
+from synapse.storage.types import Connection, Cursor
 from synapse.synapse_rust.database import postgres
 
 if TYPE_CHECKING:
@@ -53,15 +54,18 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_PGCODES = ("40001", "40P01")
 
 
-class RustPostgresEngine(PostgresEngine):
+class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
     """A :class:`PostgresEngine` that talks to the Rust backend's shim."""
 
     def __init__(self, database_config: Mapping[str, Any]):
-        super().__init__(database_config)
-        # Route the DBAPI2 exception hierarchy (OperationalError, DatabaseError,
-        # IntegrityError, …) to the Rust backend's classes; the transaction
-        # driver catches `engine.module.<Error>`.
-        self.module = postgres
+        # The module is the Rust backend's DBAPI2 exception hierarchy
+        # (OperationalError, DatabaseError, IntegrityError, …); the transaction
+        # driver catches `engine.module.<Error>`. It is an intentionally *partial*
+        # `DBAPI2Module`: it exposes only the exception subset Synapse actually
+        # uses and has no module-level `connect` (connections come from the pool,
+        # via `rust_dbapi.connect`), so it doesn't structurally satisfy the
+        # protocol — hence the ignore.
+        super().__init__(postgres, database_config)  # type: ignore[arg-type]
 
     def convert_param_style(self, sql: str) -> str:
         # The shim binds positional `$1, $2, ...` placeholders (like libpq),
@@ -118,3 +122,20 @@ class RustPostgresEngine(PostgresEngine):
             "BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY",
         )
         cursor.executescript(script)
+
+    def check_database(
+        self, db_conn: Any, allow_outdated_version: bool = False
+    ) -> None:
+        # Startup database validation reads psycopg2 connection attributes
+        # (server_version, ...) that the shim doesn't expose; adapting it is
+        # part of wiring the Rust backend into startup (a follow-up).
+        raise NotImplementedError(
+            "check_database is not yet implemented for the Rust Postgres backend"
+        )
+
+    @property
+    def server_version(self) -> str:
+        # As above: depends on the psycopg2 startup path that isn't wired yet.
+        raise NotImplementedError(
+            "server_version is not yet implemented for the Rust Postgres backend"
+        )

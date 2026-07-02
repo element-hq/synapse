@@ -30,7 +30,7 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main import DataStore
 from synapse.storage.databases.main.search import Phrase, SearchToken, _tokenize_query
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import PostgresEngine, Psycopg2Engine
 from synapse.storage.engines.sqlite import Sqlite3Engine
 from synapse.util.clock import Clock
 
@@ -273,7 +273,7 @@ class MessageSearchTest(HomeserverTestCase):
         # from ignoring the initial double quote to treating it as a phrase.
         main_store = homeserver.get_datastores().main
         found = False
-        if isinstance(main_store.database_engine, PostgresEngine):
+        if isinstance(main_store.database_engine, Psycopg2Engine):
             assert main_store.database_engine._version is not None
             found = main_store.database_engine._version < 140000
         self.COMMON_CASES.append(('"fox quick', found))
