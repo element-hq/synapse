@@ -77,7 +77,7 @@ from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
-from synapse.util.clock import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -787,7 +787,12 @@ class HomeserverTestCase(TestCase):
             #
             # In terms of other threads, they may have scheduled something on the
             # reactor to run (like `reactor.callFromThread(...)`)
-            self.reactor.advance(0)
+            #
+            # Ideally, we'd advance by `0` but the `Cooperator` used in our HTTP clients
+            # use `CLOCK_SCHEDULE_EPSILON` and we want to make usage in downstream tests
+            # as simple as possible. A common use case this helps with is anything that
+            # needs to make a HTTP request (like a replication requests)
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
             loop_count += 1
 

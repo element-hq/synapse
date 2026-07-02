@@ -29,7 +29,6 @@ from signedjson.key import (
     get_verify_key,
 )
 
-from twisted.internet.defer import ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, PresenceState
@@ -58,7 +57,7 @@ from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, get_domain_from_id
-from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -949,18 +948,11 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         )
         worker_presence_handler = worker_to_sync_against.get_presence_handler()
 
-        sync_d = ensureDeferred(
+        self.get_success(
             worker_presence_handler.user_syncing(
                 self.user_id, self.device_id, True, PresenceState.ONLINE
             )
         )
-        # `user_syncing` proxies the presence write to the main process over an HTTP
-        # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay
-        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
-        # fire.
-        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
-        self.get_success(sync_d)
 
         # Check that if we wait a while without telling the handler the user has
         # stopped syncing that their presence state doesn't get timed out.
@@ -1271,7 +1263,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
             worker_presence_handler = worker_to_sync_against.get_presence_handler()
 
         # 1. Sync with the first device.
-        sync_d = ensureDeferred(
+        self.get_success(
             worker_presence_handler.user_syncing(
                 user_id,
                 "dev-1",
@@ -1279,20 +1271,13 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 presence_state=dev_1_state,
             )
         )
-        # `user_syncing` proxies the presence write to the main process over an HTTP
-        # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay
-        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
-        # fire.
-        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
-        self.get_success(sync_d)
 
         # 2. Wait half the idle timer.
         self.reactor.advance(IDLE_TIMER / 1000 / 2)
         self.reactor.pump([0.1])
 
         # 3. Sync with the second device.
-        sync_d = ensureDeferred(
+        self.get_success(
             worker_presence_handler.user_syncing(
                 user_id,
                 "dev-2",
@@ -1300,13 +1285,6 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 presence_state=dev_2_state,
             )
         )
-        # `user_syncing` proxies the presence write to the main process over an HTTP
-        # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay
-        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
-        # fire.
-        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
-        self.get_success(sync_d)
 
         # 4. Assert the expected presence state.
         state = self.get_success(
@@ -1324,22 +1302,14 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         #
         # This is due to EXTERNAL_PROCESS_EXPIRY being equivalent to IDLE_TIMER.
         if test_with_workers:
-            sync_d = ensureDeferred(
+            with self.get_success(
                 worker_presence_handler.user_syncing(
                     f"@other-user:{self.hs.config.server.server_name}",
                     "dev-3",
                     affect_presence=True,
                     presence_state=PresenceState.ONLINE,
                 )
-            )
-            # `user_syncing` proxies the presence write to the main process over an HTTP
-            # replication request. The request body is streamed by a `Cooperator` that
-            # uses the clock to schedule each chunk at a tiny *non-zero* delay
-            # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for
-            # it to fire.
-            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
-
-            with self.get_success(sync_d):
+            ):
                 pass
 
         # 5. Advance such that the first device should be discarded (the idle timer),
@@ -1527,7 +1497,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
             worker_presence_handler = worker_to_sync_against.get_presence_handler()
 
         # 1. Sync with the first device.
-        sync_d = ensureDeferred(
+        sync_1 = self.get_success(
             worker_presence_handler.user_syncing(
                 user_id,
                 "dev-1",
@@ -1535,16 +1505,9 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 presence_state=dev_1_state,
             )
         )
-        # `user_syncing` proxies the presence write to the main process over an HTTP
-        # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay
-        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
-        # fire.
-        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
-        sync_1 = self.get_success(sync_d)
 
         # 2. Sync with the second device.
-        sync_d = ensureDeferred(
+        sync_2 = self.get_success(
             worker_presence_handler.user_syncing(
                 user_id,
                 "dev-2",
@@ -1552,13 +1515,6 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 presence_state=dev_2_state,
             )
         )
-        # `user_syncing` proxies the presence write to the main process over an HTTP
-        # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay
-        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
-        # fire.
-        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
-        sync_2 = self.get_success(sync_d)
 
         # 3. Assert the expected presence state.
         state = self.get_success(
@@ -1660,18 +1616,11 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         # Perform a sync with a presence state other than busy. This should NOT change
         # our presence status; we only change from busy if we explicitly set it via
         # /presence/*.
-        sync_d = ensureDeferred(
+        self.get_success(
             worker_to_sync_against.get_presence_handler().user_syncing(
                 self.user_id, self.device_id, True, PresenceState.ONLINE
             )
         )
-        # `user_syncing` proxies the presence write to the main process over an HTTP
-        # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay
-        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
-        # fire.
-        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
-        self.get_success(sync_d)
 
         # Check against the main process that the user's presence did not change.
         state = self.get_success(self.presence_handler.get_state(self.user_id_obj))
