@@ -148,6 +148,16 @@ impl PyConnectionPool {
             .map_err(pool_err_to_py)?;
         Ok(Connection::new(conn, self.handle.clone()))
     }
+
+    /// Close the pool, closing every idle connection.
+    ///
+    /// After this, [`connect`](Self::connect) fails; a connection still checked
+    /// out is closed when it is returned. Idempotent. This lets the owning
+    /// Python code drop the pool's server connections deterministically rather
+    /// than waiting for garbage collection.
+    fn close(&self) {
+        self.pool.close();
+    }
 }
 
 /// Map a `deadpool` checkout failure onto the DBAPI2 exception hierarchy.
