@@ -24,6 +24,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 from canonicaljson import encode_canonical_json
+from pydantic import StrictStr
 
 from synapse.api.constants import (
     MAX_TO_DEVICE_CONTENT_SIZE,
@@ -51,6 +52,12 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class DehydratedEvents:
+    events: list[JsonDict]
+    stream_id: StrictStr
+    limited: bool
 
 
 class DeviceMessageHandler:
@@ -350,7 +357,7 @@ class DeviceMessageHandler:
         device_id: str,
         since_token: str | None,
         limit: int,
-    ) -> JsonDict:
+    ) -> DehydratedEvents:
         """Fetches up to `limit` events sent to `device_id` starting from `since_token`
         and returns the new since token. If there are no more messages, returns an empty
         array.
@@ -361,9 +368,9 @@ class DeviceMessageHandler:
             since_token: stream id to start from when fetching messages
             limit: the number of messages to fetch
         Returns:
-            A dict containing the to-device `messages`, as well as a `next_batch` token that the
-            client can provide in the next call to fetch the next batch of messages. If `next_batch`
-            is missing, there are no more messages to fetch.
+            A DehydratedEvents containing the to-device `events` and `stream_id` token that the
+            client can provide in the next call to fetch the next batch of messages. If there are
+            more messages which will arrive in the next batch, `limited` is True, otherwise False.
         """
 
         user_id = requester.user.to_string()
@@ -427,15 +434,10 @@ class DeviceMessageHandler:
             user_id,
         )
 
-        ret: JsonDict = {
-            "events": messages,
-        }
-
-        # If the stream_id returned from get_messages_for_device equals the to_token we
-        # provided, we've fetched all the available messages. Otherwise, return a
-        # 'next_batch' for the caller to use to request more.
-        if stream_id != to_token:
-            ret["next_batch"] = f"d{stream_id}"
+        ret = DehydratedEvents()
+        ret.events = messages
+        ret.stream_id = f"d{stream_id}"
+        ret.limited = stream_id != to_token
 
         return ret
 

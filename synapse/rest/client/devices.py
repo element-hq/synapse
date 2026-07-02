@@ -265,7 +265,17 @@ class DehydratedDeviceEventsServlet(RestServlet):
             limit=limit,
         )
 
-        return 200, msgs
+        if msgs.limited:
+            msgs_json = {
+                "events": msgs.events,
+                "next_batch": msgs.stream_id,
+            }
+        else:
+            msgs_json = {
+                "events": msgs.events,
+            }
+
+        return 200, msgs_json
 
     class PostBody(RequestBodyModel):
         """
@@ -302,16 +312,14 @@ class DehydratedDeviceEventsServlet(RestServlet):
             limit=limit,
         )
 
-        # For backwards compatibility, the POST API always contains a
-        # next_batch, which points at the latest token if we are finished.
-        # Older clients will hit this API again and stop when we return an
-        # empty list of events.
-        if "next_batch" not in msgs:
-            msgs["next_batch"] = (
-                self.message_handler.event_sources.get_current_token().to_device_key
-            )
+        # For backwards compatibility, we always provide next_batch from the
+        # POST API.
+        msgs_json = {
+            "events": msgs.events,
+            "next_batch": msgs.stream_id,
+        }
 
-        return 200, msgs
+        return 200, msgs_json
 
 
 class DehydratedDeviceV2Servlet(RestServlet):

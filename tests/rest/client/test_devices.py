@@ -283,6 +283,207 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 401)
 
     @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
+    def test_dehydrate_msc3814_legacy_post(self) -> None:
+        """
+        This tests the legacy POST API that was originally used in MSC3814.
+        """
+
+        user = self.register_user("mikey", "pass")
+        token = self.login(user, "pass", device_id="device1")
+        content: JsonDict = {
+            "device_data": {
+                "algorithm": "m.dehydration.v1.olm",
+            },
+            "device_id": "device1",
+            "initial_device_display_name": "foo bar",
+            "device_keys": {
+                "user_id": "@mikey:test",
+                "device_id": "device1",
+                "valid_until_ts": "80",
+                "algorithms": [
+                    "m.olm.curve25519-aes-sha2",
+                ],
+                "keys": {
+                    "<algorithm>:<device_id>": "<key_base64>",
+                },
+                "signatures": {
+                    "<user_id>": {"<algorithm>:<device_id>": "<signature_base64>"}
+                },
+            },
+            "fallback_keys": {
+                "alg1:device1": "f4llb4ckk3y",
+                "signed_<algorithm>:<device_id>": {
+                    "fallback": "true",
+                    "key": "f4llb4ckk3y",
+                    "signatures": {
+                        "<user_id>": {"<algorithm>:<device_id>": "<key_base64>"}
+                    },
+                },
+            },
+            "one_time_keys": {"alg1:k1": "0net1m3k3y"},
+        }
+        channel = self.make_request(
+            "PUT",
+            "_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device",
+            content=content,
+            access_token=token,
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+        device_id = channel.json_body.get("device_id")
+        assert device_id is not None
+        self.assertIsInstance(device_id, str)
+        self.assertEqual("device1", device_id)
+
+        # test that we can now GET the dehydrated device info
+        channel = self.make_request(
+            "GET",
+            "_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device",
+            access_token=token,
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+        returned_device_id = channel.json_body.get("device_id")
+        self.assertEqual(returned_device_id, device_id)
+        device_data = channel.json_body.get("device_data")
+        expected_device_data = {
+            "algorithm": "m.dehydration.v1.olm",
+        }
+        self.assertEqual(device_data, expected_device_data)
+
+        # test that the keys are correctly uploaded
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/r0/keys/query",
+            {
+                "device_keys": {
+                    user: ["device1"],
+                },
+            },
+            token,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body["device_keys"][user][device_id]["keys"],
+            content["device_keys"]["keys"],
+        )
+        # first claim should return the onetime key we uploaded
+        res = self.get_success(
+            self.hs.get_e2e_keys_handler().claim_one_time_keys(
+                {user: {device_id: {"alg1": 1}}},
+                UserID.from_string(user),
+                timeout=None,
+                always_include_fallback_keys=False,
+            )
+        )
+        self.assertEqual(
+            res,
+            {
+                "failures": {},
+                "one_time_keys": {user: {device_id: {"alg1:k1": "0net1m3k3y"}}},
+            },
+        )
+        # second claim should return fallback key
+        res2 = self.get_success(
+            self.hs.get_e2e_keys_handler().claim_one_time_keys(
+                {user: {device_id: {"alg1": 1}}},
+                UserID.from_string(user),
+                timeout=None,
+                always_include_fallback_keys=False,
+            )
+        )
+        self.assertEqual(
+            res2,
+            {
+                "failures": {},
+                "one_time_keys": {user: {device_id: {"alg1:device1": "f4llb4ckk3y"}}},
+            },
+        )
+
+        # create another device for the user
+        (
+            new_device_id,
+            _,
+            _,
+            _,
+        ) = self.get_success(
+            self.registration.register_device(
+                user_id=user,
+                device_id=None,
+                initial_display_name="new device",
+            )
+        )
+        requester = create_requester(user, device_id=new_device_id)
+
+        # Send enough messages to the dehydrated device that we need 2 batches
+        for _ in range(110):
+            ensureDeferred(
+                self.message_handler.send_device_message(
+                    requester=requester,
+                    message_type="test.message",
+                    messages={user: {device_id: {"body": "test_message"}}},
+                )
+            )
+        self.pump()
+
+        # make sure we can fetch the first batch with our dehydrated device id
+        channel = self.make_request(
+            "POST",
+            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
+            content={},
+            access_token=token,
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+        expected_content = {"body": "test_message"}
+        self.assertEqual(channel.json_body["events"][0]["content"], expected_content)
+        self.assertEqual(len(channel.json_body["events"]), 100)
+
+        # fetch the same messages again to prove that the messages were not deleted
+        channel = self.make_request(
+            "POST",
+            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
+            content={},
+            access_token=token,
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["events"][0]["content"], expected_content)
+        self.assertEqual(len(channel.json_body["events"]), 100)
+        next_batch_token = channel.json_body.get("next_batch")
+
+        # There is a next_batch token
+        self.assertNotEqual(next_batch_token, None)
+
+        # make sure fetching messages with next batch token works
+        channel = self.make_request(
+            "POST",
+            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
+            content={"next_batch": next_batch_token},
+            access_token=token,
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["events"][0]["content"], expected_content)
+        self.assertEqual(len(channel.json_body["events"]), 10)
+        next_batch_token = channel.json_body.get("next_batch")
+
+        # There is a next_batch token (even though there are no more messages - this is
+        # the way the legacy API works)
+        self.assertNotEqual(next_batch_token, None)
+
+        # Fetch the next batch - it should be empty, indicating we should stop polling
+        channel = self.make_request(
+            "POST",
+            f"_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device/{device_id}/events",
+            content={"next_batch": next_batch_token},
+            access_token=token,
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(len(channel.json_body["events"]), 0)
+
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_msc3814_dehydrated_device_delete_works(self) -> None:
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")
