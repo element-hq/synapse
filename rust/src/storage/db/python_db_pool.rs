@@ -251,6 +251,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for LoggingTransactionWrapper {
 }
 
 impl LoggingTransactionWrapper {
+    /// Calls the Python `LoggingTransaction.execute` function.
     fn execute<'py>(
         &mut self,
         py: Python<'py>,
