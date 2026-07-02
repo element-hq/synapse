@@ -28,13 +28,16 @@ use std::error::Error;
 
 use bytes::BytesMut;
 use postgres_protocol::types::{
-    bool_to_sql, bytea_to_sql, float4_to_sql, float8_to_sql, int2_to_sql, int4_to_sql, int8_to_sql,
-    text_to_sql,
+    bool_from_sql, bool_to_sql, bytea_to_sql, float4_from_sql, float4_to_sql, float8_from_sql,
+    float8_to_sql, int2_from_sql, int2_to_sql, int4_from_sql, int4_to_sql, int8_from_sql,
+    int8_to_sql, text_to_sql,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString, PyTuple};
 use pyo3::{prelude::*, BoundObject};
-use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type, WrongType};
+use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, ToSql, Type, WrongType};
+
+use crate::database::value::{DbRow, DbValue};
 
 /// Owned representation of a Python value that we can hand to [`tokio_postgres`]
 /// as a [`ToSql`] parameter.
@@ -86,6 +89,42 @@ impl PgValue {
             obj.get_type().name()?,
         )))
     }
+
+    /// Bind a backend-agnostic [`DbValue`] (from the Rust-native query helpers)
+    /// as a Postgres parameter. This is the non-Python counterpart of
+    /// [`PgValue::from_py`].
+    pub(crate) fn from_db_value(value: &DbValue) -> Self {
+        match value {
+            DbValue::Null => PgValue::Null,
+            DbValue::Bool(b) => PgValue::Bool(*b),
+            DbValue::Int(i) => PgValue::Int(*i),
+            DbValue::Float(f) => PgValue::Float(*f),
+            DbValue::Text(s) => PgValue::Text(s.as_str().into()),
+            DbValue::Bytes(b) => PgValue::Bytea(b.as_slice().into()),
+        }
+    }
+}
+
+/// The Postgres column types the value mapping supports, in both directions.
+///
+/// Shared by every `accepts` implementation here ([`PgValue`]'s `ToSql`,
+/// [`PythonPgFromSql`] and [`DbValueFromSql`]) and kept in sync with their
+/// `match` arms, so the supported set can't silently drift between them.
+pub(crate) fn accepts_column_type(ty: &Type) -> bool {
+    matches!(
+        *ty,
+        Type::BOOL
+            | Type::INT2
+            | Type::INT4
+            | Type::INT8
+            | Type::FLOAT4
+            | Type::FLOAT8
+            | Type::TEXT
+            | Type::VARCHAR
+            | Type::NAME
+            | Type::BPCHAR
+            | Type::BYTEA
+    )
 }
 
 // Lets PyO3 extract a `PgValue` directly from a Python argument, e.g. when a
@@ -168,20 +207,7 @@ impl ToSql for PgValue {
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(
-            *ty,
-            Type::BOOL
-                | Type::INT2
-                | Type::INT4
-                | Type::INT8
-                | Type::FLOAT4
-                | Type::FLOAT8
-                | Type::TEXT
-                | Type::VARCHAR
-                | Type::NAME
-                | Type::BPCHAR
-                | Type::BYTEA
-        )
+        accepts_column_type(ty)
     }
 
     to_sql_checked!();
@@ -229,20 +255,7 @@ impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(
-            *ty,
-            Type::BOOL
-                | Type::INT2
-                | Type::INT4
-                | Type::INT8
-                | Type::FLOAT4
-                | Type::FLOAT8
-                | Type::TEXT
-                | Type::VARCHAR
-                | Type::NAME
-                | Type::BPCHAR
-                | Type::BYTEA
-        )
+        accepts_column_type(ty)
     }
 }
 
@@ -291,6 +304,63 @@ impl PythonPgFromSql {
         };
 
         Ok(PythonPgFromSql(Some(obj)))
+    }
+}
+
+/// Convert a Postgres row into a backend-agnostic [`DbRow`] for the Rust-native
+/// query helpers, one [`DbValue`] per column.
+///
+/// The non-Python counterpart of [`pg_row_to_py`]; decodes each column via
+/// [`DbValueFromSql`]. Errors (with the column index and type) if a column can't
+/// be decoded.
+pub(crate) fn pg_row_to_db_row(row: &tokio_postgres::Row) -> Result<DbRow, anyhow::Error> {
+    let mut out = Vec::with_capacity(row.len());
+    for idx in 0..row.len() {
+        let value: DbValueFromSql = row.try_get(idx).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to decode column {idx} (type {}): {e}",
+                row.columns()[idx].type_()
+            )
+        })?;
+        out.push(value.0);
+    }
+    Ok(out)
+}
+
+/// A column value decoded into a backend-agnostic [`DbValue`].
+///
+/// The non-Python counterpart of [`PythonPgFromSql`]: the same supported types
+/// (see [`accepts_column_type`]), but with no GIL and no Python objects — just
+/// the plain Rust value.
+pub(crate) struct DbValueFromSql(pub DbValue);
+
+impl<'a> FromSql<'a> for DbValueFromSql {
+    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        let value = match *ty {
+            Type::BOOL => DbValue::Bool(bool_from_sql(raw)?),
+            Type::INT2 => DbValue::Int(int2_from_sql(raw)?.into()),
+            Type::INT4 => DbValue::Int(int4_from_sql(raw)?.into()),
+            Type::INT8 => DbValue::Int(int8_from_sql(raw)?),
+            Type::FLOAT4 => DbValue::Float(float4_from_sql(raw)?.into()),
+            Type::FLOAT8 => DbValue::Float(float8_from_sql(raw)?),
+            Type::TEXT | Type::VARCHAR | Type::NAME | Type::BPCHAR => {
+                DbValue::Text(std::str::from_utf8(raw)?.to_owned())
+            }
+            Type::BYTEA => DbValue::Bytes(raw.to_vec()),
+            _ => {
+                // Unreachable unless `accepts` drifts out of sync with this match.
+                return Err(format!("unsupported column type for postgres: {ty}").into());
+            }
+        };
+        Ok(DbValueFromSql(value))
+    }
+
+    fn from_sql_null(_ty: &Type) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        Ok(DbValueFromSql(DbValue::Null))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        accepts_column_type(ty)
     }
 }
 
