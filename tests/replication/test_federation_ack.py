@@ -83,7 +83,7 @@ class FederationAckTestCase(HomeserverTestCase):
 
         # Wait for the FEDERATION_ACK to be sent
         #
-        # `on_rdata` handles this as part of a background process (see
+        # `on_rdata` handles this as part of a fire-and-forget background process (see
         # `FederationSenderHandler.update_token`)
         #
         # We're specifically waiting for the database queries in the background process
