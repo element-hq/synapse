@@ -228,7 +228,9 @@ class EventClientSerializer:
         Returns:
             The serialized event
         """
-        # To handle the case of presence events and the like
+        # FIXME: Ideally we would only call `serialize_event` with
+        # `FilteredEvent`s. Currently though some of the old `/events` code paths
+        # pass through presence events and the like.
         if not isinstance(event, FilteredEvent):
             return event
 
@@ -384,6 +386,10 @@ class EventClientSerializer:
 
         # Stitch the serialized events back in, passing through anything that
         # wasn't a FilteredEvent (e.g. presence events) unchanged.
+        #
+        # FIXME: Ideally we would only call `serialize_events` with
+        # `FilteredEvent`s. Currently though some of the old `/events` code paths
+        # pass through presence events and the like.
         return [
             event if not isinstance(event, FilteredEvent) else next(serialized)
             for event in events
