@@ -213,7 +213,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
         requester = create_requester(user, device_id=new_device_id)
 
         # Send enough messages to the dehydrated device that we need 2 batches
-        for _ in range(0, 110):
+        for _ in range(110):
             ensureDeferred(
                 self.message_handler.send_device_message(
                     requester=requester,
