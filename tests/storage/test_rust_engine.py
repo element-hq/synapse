@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from synapse.storage.engines import PostgresEngine, Psycopg2Engine, create_engine
 from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.synapse_rust.database import postgres
 
@@ -83,6 +84,17 @@ class RustPostgresEngineTestCase(unittest.TestCase):
     def test_isolation_level_override_not_yet_supported(self) -> None:
         with self.assertRaises(NotImplementedError):
             self.engine.attempt_to_set_isolation_level(object(), None)
+
+    def test_create_engine_selects_rust_only_when_opted_in(self) -> None:
+        # Default: the psycopg2 engine.
+        self.assertIsInstance(create_engine({"name": "psycopg2"}), Psycopg2Engine)
+
+        # With the opt-in flag: the Rust engine — still a PostgresEngine, so the
+        # storage layer's `isinstance(engine, PostgresEngine)` dialect checks hold.
+        engine = create_engine({"name": "psycopg2", "use_rust_driver": True})
+        self.assertIsInstance(engine, RustPostgresEngine)
+        self.assertIsInstance(engine, PostgresEngine)
+        self.assertNotIsInstance(engine, Psycopg2Engine)
 
 
 @skip_unless(

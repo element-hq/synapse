@@ -60,6 +60,13 @@ def create_engine(database_config: Mapping[str, Any]) -> BaseDatabaseEngine:
         return Sqlite3Engine(database_config)
 
     if name == "psycopg2":
+        # Opt in to the native Rust Postgres driver (same wire protocol and SQL
+        # dialect; a different, psycopg2-free connection/cursor implementation).
+        if database_config.get("use_rust_driver", False):
+            from .postgres_rust import RustPostgresEngine
+
+            return RustPostgresEngine(database_config)
+
         return Psycopg2Engine(database_config)
 
     raise RuntimeError("Unsupported database engine '%s'" % (name,))
