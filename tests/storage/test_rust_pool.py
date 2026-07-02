@@ -20,13 +20,15 @@ unless the suite is configured to run against Postgres.
 """
 
 from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import Mock
 
 # The reactor the trial runner spins up; real, so threads and callFromThread work.
 from twisted.internet import reactor as _reactor
 from twisted.internet.defer import gatherResults, inlineCallbacks
 from twisted.trial import unittest as trial_unittest
 
-from synapse.storage.database import LoggingDatabaseConnection
+from synapse.config.database import DatabaseConnectionConfig
+from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.storage.rust_pool import RustConnectionPool
 
@@ -42,6 +44,7 @@ from tests.utils import (
 
 if TYPE_CHECKING:
     from synapse.types import ISynapseReactor
+    from synapse.util.clock import Clock
 
 # `twisted.internet.reactor` is a module-level singleton that is the reactor
 # object; narrow it for the type checker.
@@ -168,6 +171,46 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
 
         result = yield self.pool.runWithConnection(interaction)
         self.assertEqual(result, (5,))
+
+    @inlineCallbacks
+    def test_make_pool_builds_a_running_rust_pool(self) -> Any:
+        # `make_pool` returns a started RustConnectionPool for a use_rust_driver
+        # config, ready to serve as `_db_pool`.
+        args: dict = {"dbname": POSTGRES_BASE_DB}
+        if POSTGRES_USER is not None:
+            args["user"] = POSTGRES_USER
+        if POSTGRES_HOST is not None:
+            args["host"] = POSTGRES_HOST
+        if POSTGRES_PORT is not None:
+            args["port"] = POSTGRES_PORT
+        if POSTGRES_PASSWORD is not None:
+            args["password"] = POSTGRES_PASSWORD
+
+        db_config = DatabaseConnectionConfig(
+            "master", {"name": "psycopg2", "use_rust_driver": True, "args": args}
+        )
+        engine = RustPostgresEngine(db_config.config)
+
+        pool = make_pool(
+            reactor=reactor,
+            clock=cast("Clock", Mock()),
+            db_config=db_config,
+            engine=engine,
+            server_name="test",
+        )
+        self.addCleanup(pool.close)
+
+        self.assertIsInstance(pool, RustConnectionPool)
+        self.assertTrue(pool.running)
+
+        def txn(conn: Any) -> Any:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            row = cursor.fetchone()
+            conn.commit()
+            return row
+
+        self.assertEqual((yield pool.runWithConnection(txn)), (1,))
 
     def test_run_when_not_running_raises(self) -> None:
         self.pool.close()

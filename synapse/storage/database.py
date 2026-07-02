@@ -46,7 +46,6 @@ from prometheus_client import Counter, Histogram
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.enterprise import adbapi
-from twisted.internet.interfaces import IReactorCore
 
 from synapse.api.errors import StoreError
 from synapse.config.database import DatabaseConnectionConfig
@@ -67,6 +66,10 @@ from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+    from synapse.storage.engines.postgres_rust import RustPostgresEngine
+    from synapse.storage.rust_pool import RustConnectionPool
+    from synapse.types import ISynapseReactor
+    from synapse.util.clock import Clock
 
 # python 3 does not have a maximum int value
 MAX_TXN_ID = 2**63 - 1
@@ -133,12 +136,27 @@ class _PoolConnection(Connection):
 
 def make_pool(
     *,
-    reactor: IReactorCore,
+    reactor: "ISynapseReactor",
+    clock: "Clock",
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
     server_name: str,
 ) -> adbapi.ConnectionPool:
     """Get the connection pool for the database."""
+
+    from synapse.storage.engines.postgres_rust import RustPostgresEngine
+
+    if isinstance(engine, RustPostgresEngine):
+        # RustConnectionPool isn't an adbapi.ConnectionPool, but it provides the
+        # subset of the interface DatabasePool uses of `_db_pool`
+        # (runWithConnection / threadID / running / threadpool).
+        return _make_rust_pool(  # type: ignore[return-value]
+            reactor=reactor,
+            clock=clock,
+            db_config=db_config,
+            engine=engine,
+            server_name=server_name,
+        )
 
     # By default enable `cp_reconnect`. We need to fiddle with db_args in case
     # someone has explicitly set `cp_reconnect`.
@@ -172,6 +190,50 @@ def make_pool(
     )
 
     return connection_pool
+
+
+def _make_rust_pool(
+    *,
+    reactor: "ISynapseReactor",
+    clock: "Clock",
+    db_config: DatabaseConnectionConfig,
+    engine: "RustPostgresEngine",
+    server_name: str,
+) -> "RustConnectionPool":
+    """Build a native-Rust-backed connection pool for the database.
+
+    The `_db_pool` counterpart to the adbapi pool built by `make_pool`, used when
+    the database is configured with `use_rust_driver`.
+    """
+    from synapse.storage import rust_dbapi
+    from synapse.storage.rust_pool import RustConnectionPool
+
+    db_args = db_config.config.get("args", {})
+    dsn = rust_dbapi.build_dsn(
+        {k: v for k, v in db_args.items() if not k.startswith("cp_")}
+    )
+    # Size the pool (threads and connections, 1:1) to the configured cp_max;
+    # Twisted's adbapi default is 5.
+    threads = db_args.get("cp_max", 5)
+
+    pool = RustConnectionPool(
+        reactor,
+        dsn,
+        name=f"database-{db_config.name}",
+        threads=threads,
+        synchronous_commit=engine.synchronous_commit,
+        statement_timeout_ms=engine.statement_timeout,
+    )
+    pool.start()
+    clock.add_system_event_trigger("during", "shutdown", pool.close)
+
+    register_threadpool(
+        name=f"database-{db_config.name}",
+        server_name=server_name,
+        threadpool=pool.threadpool,
+    )
+
+    return pool
 
 
 def make_conn(
@@ -629,6 +691,7 @@ class DatabasePool:
         self._database_config = database_config
         self._db_pool = make_pool(
             reactor=hs.get_reactor(),
+            clock=self._clock,
             db_config=database_config,
             engine=engine,
             server_name=self.server_name,

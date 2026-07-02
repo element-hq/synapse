@@ -734,6 +734,7 @@ def validate_connector(connector: tcp.Connector, expected_ip: str) -> None:
 
 def make_fake_db_pool(
     reactor: ISynapseReactor,
+    clock: "Clock",
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
     server_name: str,
@@ -746,7 +747,11 @@ def make_fake_db_pool(
     pool.
     """
     pool = make_pool(
-        reactor=reactor, db_config=db_config, engine=engine, server_name=server_name
+        reactor=reactor,
+        clock=clock,
+        db_config=db_config,
+        engine=engine,
+        server_name=server_name,
     )
 
     def runWithConnection(
