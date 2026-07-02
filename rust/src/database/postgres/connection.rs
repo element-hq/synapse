@@ -39,21 +39,34 @@
 //! `commit`/`rollback` end the transaction and clear the flag; with no
 //! transaction open they are no-ops, just like psycopg2.
 //!
-//! ## Dropping the `Client` on error
+//! ## Returning vs discarding the connection
+//!
+//! Every [`Connection`] wraps a [`PooledConnection`] checked out of the
+//! [`super::pool`]. Dropping it normally *returns it to the pool* for reuse.
+//! Where that reuse would be unsafe we instead **discard** it: the connection is
+//! detached from the pool with [`Object::take`] and dropped, which both closes
+//! the socket and shrinks the pool so the bad connection is never handed out
+//! again.
 //!
 //! A *query* error (bad SQL, a constraint violation, an integer out of range,
 //! …) leaves the connection open with its transaction in the aborted state,
 //! exactly as psycopg2 does: the error propagates to Python and the driver is
 //! expected to `rollback()`. We do **not** throw the connection away for these.
 //!
-//! The transaction-control statements are different. If `COMMIT` or `ROLLBACK`
-//! itself fails we no longer know what state the server-side session is in, so
-//! we drop the `Client` (closing the socket) rather than hand a possibly-broken
-//! connection back for reuse. Likewise, [`Connection::close`] drops the client;
-//! the server rolls back any transaction left open when the socket closes.
+//! Three situations do force a discard, because the session state is unknown or
+//! unclean and must not reach the next caller:
+//!  - a failed `COMMIT`/`ROLLBACK` — we no longer know the session state;
+//!  - a poisoned mutex — a panic happened mid-operation;
+//!  - the connection being dropped with a transaction still open — it can't be
+//!    rolled back synchronously from `Drop`, so the server does it for us when
+//!    the socket closes.
+//!
+//! [`Connection::close`], by contrast, returns a clean connection to the pool
+//! (discarding it only if a transaction was left open).
 
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
+use deadpool::managed::Object;
 use futures::future::try_join_all;
 use log::warn;
 use pyo3::{
@@ -64,7 +77,8 @@ use pyo3::{
 use tokio_postgres::Client;
 
 use crate::database::postgres::{
-    cursor_state::CursorQueryState, helpers::BlockingPostgresResult, value::PgValue,
+    cursor_state::CursorQueryState, helpers::BlockingPostgresResult, pool::PooledConnection,
+    value::PgValue,
 };
 
 /// `try_lock` a mutex that is single-threaded by contract, mapping its two
@@ -95,10 +109,10 @@ fn try_lock_or_reset<'a, T>(
 
 /// A single Postgres connection exposed to Python.
 ///
-/// Owns the [`tokio_postgres::Client`] for its whole life and is the authority
-/// on transaction state. The `Arc<Mutex<...>>` lets cursors hold a cheap clone
-/// (so they can reach the client to start a query) while keeping all access to
-/// the client serialised.
+/// Wraps a connection checked out of the pool for its whole life and is the
+/// authority on transaction state. The `Arc<Mutex<...>>` lets cursors hold a
+/// cheap clone (so they can reach the client to start a query) while keeping all
+/// access to the client serialised.
 #[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct Connection {
@@ -107,9 +121,10 @@ pub struct Connection {
 
 /// The mutable guts of a [`Connection`], behind its mutex.
 struct ConnInner {
-    /// The driver client. `None` once the connection has been closed (or thrown
-    /// away after a transaction-control error); any further use is an error.
-    client: Option<Client>,
+    /// The pooled connection. `None` once the connection has been closed,
+    /// returned to the pool, or discarded after an error; any further use is an
+    /// error.
+    client: Option<PooledConnection>,
     /// Whether a transaction is currently open (a `BEGIN` has been issued and
     /// not yet matched by a `COMMIT`/`ROLLBACK`). Drives the lazy `BEGIN`.
     in_txn: bool,
@@ -119,12 +134,51 @@ struct ConnInner {
     autocommit: bool,
 }
 
+impl ConnInner {
+    /// Give up the connection cleanly.
+    ///
+    /// The connection is returned to the pool for reuse — **unless** a
+    /// transaction is still open, in which case it can't be rolled back from
+    /// here, so we discard it (detach and drop) rather than hand a
+    /// mid-transaction connection to the next caller.
+    fn release(&mut self) {
+        if let Some(conn) = self.client.take() {
+            if self.in_txn {
+                let _ = Object::take(conn); // detach + drop: not returned to the pool
+            }
+            // else: `conn` dropped here → returned to the pool for reuse.
+        }
+        self.in_txn = false;
+    }
+
+    /// Discard the connection: the session state is unknown or unclean, so it
+    /// must never be reused. It is detached from the pool (shrinking it).
+    fn discard(&mut self) {
+        if let Some(conn) = self.client.take() {
+            let _ = Object::take(conn);
+        }
+        self.in_txn = false;
+    }
+}
+
+impl Drop for ConnInner {
+    fn drop(&mut self) {
+        // Return the connection to the pool (or discard it) when the last
+        // reference — the `Connection` and all its cursors — goes away.
+        self.release();
+    }
+}
+
 impl Connection {
-    /// Wrap a freshly-established `Client` in a `Connection`.
-    pub fn new(client: Client) -> Self {
+    /// Wrap a connection checked out of the pool in a `Connection`.
+    ///
+    /// The connection is returned to the pool when this `Connection` (and every
+    /// cursor cloned from it) is dropped, unless it is discarded first (see the
+    /// module docs).
+    pub fn new(conn: PooledConnection) -> Self {
         Self {
             inner: Arc::new(Mutex::new(ConnInner {
-                client: Some(client),
+                client: Some(conn),
                 in_txn: false,
                 autocommit: false,
             })),
@@ -141,10 +195,9 @@ impl Connection {
     /// know the session state — and errors.
     fn lock(&self) -> PyResult<MutexGuard<'_, ConnInner>> {
         try_lock_or_reset(&self.inner, "connection", |inner| {
-            // On poison we no longer know the session state, so close the
-            // connection: drop the client and clear the transaction flag.
-            inner.client = None;
-            inner.in_txn = false;
+            // On poison we no longer know the session state, so discard the
+            // connection (never returning it to the pool).
+            inner.discard();
         })
     }
 
@@ -209,9 +262,9 @@ impl Connection {
                 Ok(())
             }
             Err(err) => {
-                // Unknown session state: drop the connection rather than reuse it.
-                guard.client = None;
-                guard.in_txn = false;
+                // Unknown session state: discard the connection rather than
+                // reuse it (or return it to the pool).
+                guard.discard();
                 Err(err)
             }
         }
@@ -223,7 +276,7 @@ impl Connection {
 fn client_ref(guard: &ConnInner) -> PyResult<&Client> {
     guard
         .client
-        .as_ref()
+        .as_deref()
         .ok_or_else(|| PyRuntimeError::new_err("connection already closed"))
 }
 
@@ -248,15 +301,14 @@ impl Connection {
         self.end_txn(py, "ROLLBACK")
     }
 
-    /// Close the connection, dropping the underlying client.
+    /// Close the connection, releasing the underlying client.
     ///
-    /// Dropping the client closes the socket; the server rolls back any
-    /// transaction that was still open. Idempotent: closing an
+    /// A standalone client's socket is closed; a pooled connection is returned
+    /// to the pool for reuse (or discarded if a transaction was left open, in
+    /// which case the server rolls it back). Idempotent: closing an
     /// already-closed connection is fine.
     fn close(&self) -> PyResult<()> {
-        let mut guard = self.lock()?;
-        guard.client = None;
-        guard.in_txn = false;
+        self.lock()?.release();
         Ok(())
     }
 
@@ -595,5 +647,114 @@ impl Cursor {
     fn close(&self) -> PyResult<()> {
         *self.lock_state()? = CursorQueryState::new();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! These exercise the pool-backed `Connection` against a live Postgres, so
+    //! they only run when `SYNAPSE_TEST_POSTGRES_DSN` is set (e.g. to
+    //! `host=postgres user=postgres password=postgres dbname=postgres`);
+    //! otherwise they no-op. They assert *which* connections end up back in the
+    //! pool — the transaction/value logic itself is covered by the Python test
+    //! suite that drives these classes end to end.
+
+    use super::*;
+    use crate::database::postgres::pool::create_pool;
+    use crate::database::runtime::runtime;
+
+    fn test_dsn() -> Option<String> {
+        std::env::var("SYNAPSE_TEST_POSTGRES_DSN").ok()
+    }
+
+    /// A clean connection (its transaction committed) is returned to the pool
+    /// when the `Connection` is dropped.
+    #[test]
+    fn pooled_connection_returns_to_pool_after_commit() {
+        let Some(dsn) = test_dsn() else {
+            eprintln!("skipping: set SYNAPSE_TEST_POSTGRES_DSN to run");
+            return;
+        };
+
+        let pool = create_pool(&dsn, 1).unwrap();
+        let obj = runtime().block_on(async { pool.get().await.unwrap() });
+        assert_eq!(pool.status().size, 1);
+
+        Python::initialize();
+        Python::attach(move |py| {
+            let conn = Connection::new(obj);
+            let cursor = conn.cursor();
+            cursor.execute(py, "SELECT 1", None).unwrap();
+            conn.commit(py).unwrap();
+            // Dropping both references releases the pooled connection.
+            drop(cursor);
+            drop(conn);
+        });
+
+        // The (clean) connection went back to the pool rather than being torn
+        // down, so it's available for the next caller.
+        assert_eq!(pool.status().size, 1);
+        assert_eq!(pool.status().available, 1);
+    }
+
+    /// A connection dropped with a transaction still open can't be rolled back
+    /// from `Drop`, so it is discarded (detached from the pool) rather than
+    /// handed to the next caller mid-transaction.
+    #[test]
+    fn pooled_connection_discarded_when_dropped_mid_transaction() {
+        let Some(dsn) = test_dsn() else {
+            eprintln!("skipping: set SYNAPSE_TEST_POSTGRES_DSN to run");
+            return;
+        };
+
+        let pool = create_pool(&dsn, 1).unwrap();
+        let obj = runtime().block_on(async { pool.get().await.unwrap() });
+        assert_eq!(pool.status().size, 1);
+
+        Python::initialize();
+        Python::attach(move |py| {
+            let conn = Connection::new(obj);
+            let cursor = conn.cursor();
+            // Opens a transaction lazily (BEGIN) but never commits/rolls back.
+            cursor.execute(py, "SELECT 1", None).unwrap();
+            drop(cursor);
+            drop(conn);
+        });
+
+        // Detached: the pool shrank rather than accepting a mid-transaction
+        // connection back.
+        assert_eq!(pool.status().size, 0);
+        assert_eq!(pool.status().available, 0);
+    }
+
+    /// A plain query error does *not* poison the connection: after the caller
+    /// rolls back, the (now-clean) connection returns to the pool.
+    #[test]
+    fn pooled_connection_returns_to_pool_after_query_error_and_rollback() {
+        let Some(dsn) = test_dsn() else {
+            eprintln!("skipping: set SYNAPSE_TEST_POSTGRES_DSN to run");
+            return;
+        };
+
+        let pool = create_pool(&dsn, 1).unwrap();
+        let obj = runtime().block_on(async { pool.get().await.unwrap() });
+
+        Python::initialize();
+        Python::attach(move |py| {
+            let conn = Connection::new(obj);
+            let cursor = conn.cursor();
+            // A bad statement aborts the transaction but leaves the connection
+            // usable, exactly as psycopg2 does.
+            cursor
+                .execute(py, "SELECT * FROM does_not_exist", None)
+                .unwrap_err();
+            // The driver's job on failure: roll back, which clears the txn.
+            conn.rollback(py).unwrap();
+            drop(cursor);
+            drop(conn);
+        });
+
+        assert_eq!(pool.status().size, 1);
+        assert_eq!(pool.status().available, 1);
     }
 }
