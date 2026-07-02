@@ -4,13 +4,8 @@
 //! shared multi-thread tokio runtime (see `super::runtime`).
 
 use anyhow::Error;
-use log::warn;
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-
-use crate::database::postgres::helpers::BlockingPostgresResult;
-use crate::database::runtime::runtime;
 
 mod connection;
 mod cursor_state;
@@ -21,15 +16,15 @@ pub mod pool;
 pub(crate) mod query;
 mod value;
 
-/// Register the `postgres` submodule (the `Connection` / `Cursor` classes, the
-/// DBAPI2 exception hierarchy and the `connect` factory) under the parent
+/// Register the `postgres` submodule (the `ConnectionPool`, `Connection` and
+/// `Cursor` classes and the DBAPI2 exception hierarchy) under the parent
 /// `database` module.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child = PyModule::new(py, "postgres")?;
 
+    child.add_class::<pool::PyConnectionPool>()?;
     child.add_class::<connection::Connection>()?;
     child.add_class::<connection::Cursor>()?;
-    child.add_function(wrap_pyfunction!(connect, &child)?)?;
     errors::register_exceptions(py, &child)?;
 
     m.add_submodule(&child)?;
@@ -41,33 +36,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
         .set_item("synapse.synapse_rust.database.postgres", child)?;
 
     Ok(())
-}
-
-/// Open a new Postgres connection from a libpq-style DSN.
-///
-/// Blocks until the connection is established, then spawns the long-lived
-/// connection task (which drives the socket) onto the shared runtime and
-/// hands back a `Connection` wrapping the client.
-#[pyfunction]
-fn connect<'py>(py: Python<'py>, dsn: &str) -> PyResult<Bound<'py, connection::Connection>> {
-    let config = fixup_default_host(dsn)
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to prepare DSN: {e}")))?;
-
-    // TLS is not yet supported: unlike libpq (whose default is
-    // `sslmode=prefer`), we never negotiate TLS regardless of the DSN's
-    // sslmode. Supporting it is left to a follow-up.
-    let (client, connection) = config.connect(tokio_postgres::NoTls).block_on_result(py)?;
-
-    // Spawn the connection task on the runtime.
-    runtime().spawn(async move {
-        if let Err(e) = connection.await {
-            warn!("postgres connection error: {e}");
-        }
-    });
-
-    let conn = connection::Connection::new(client);
-
-    Bound::new(py, conn)
 }
 
 /// Fix up a DSN to ensure it has a host, using libpq's default host if
