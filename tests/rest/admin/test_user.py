@@ -59,7 +59,7 @@ from synapse.rest.client import (
 from synapse.server import HomeServer
 from synapse.storage.databases.main.client_ips import LAST_SEEN_GRANULARITY
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util.clock import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -5850,10 +5850,12 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        # Need 1 tick as we send 1 replication request per original event
-        # and each wait must be >= `_EPSILON` from `http/client.py`
+        # Need 1 tick as we send 1 replication request per original event. The
+        # replication request body is streamed by a `Cooperator` that uses the clock to
+        # schedule each chunk at a tiny *non-zero* delay (`CLOCK_SCHEDULE_EPSILON`), so
+        # we need to actually advance the clock for it to fire.
         for _ in range(len(original_event_ids)):
-            self.reactor.advance(0.001)
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
         # Verify the HTTP `redact_status` endpoint reports completion.
         channel2 = self.make_request(

@@ -58,8 +58,7 @@ from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, get_domain_from_id
-from synapse.util.clock import Clock
-from synapse.util.duration import Duration
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -957,9 +956,10 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         )
         # `user_syncing` proxies the presence write to the main process over an HTTP
         # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay (`_EPSILON`), so
-        # we need to actually advance the clock for it to fire.
-        self.reactor.advance(Duration(microseconds=1).as_secs())
+        # the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
+        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
         self.get_success(sync_d)
 
         # Check that if we wait a while without telling the handler the user has
@@ -1281,9 +1281,10 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         )
         # `user_syncing` proxies the presence write to the main process over an HTTP
         # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay (`_EPSILON`), so
-        # we need to actually advance the clock for it to fire.
-        self.reactor.advance(Duration(microseconds=1).as_secs())
+        # the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
+        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
         self.get_success(sync_d)
 
         # 2. Wait half the idle timer.
@@ -1301,9 +1302,10 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         )
         # `user_syncing` proxies the presence write to the main process over an HTTP
         # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay (`_EPSILON`), so
-        # we need to actually advance the clock for it to fire.
-        self.reactor.advance(Duration(microseconds=1).as_secs())
+        # the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
+        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
         self.get_success(sync_d)
 
         # 4. Assert the expected presence state.
@@ -1331,10 +1333,11 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 )
             )
             # `user_syncing` proxies the presence write to the main process over an HTTP
-            # replication request. The request body is streamed by a `Cooperator` that uses
-            # the clock to schedule each chunk at a tiny *non-zero* delay (`_EPSILON`), so
-            # we need to actually advance the clock for it to fire.
-            self.reactor.advance(Duration(microseconds=1).as_secs())
+            # replication request. The request body is streamed by a `Cooperator` that
+            # uses the clock to schedule each chunk at a tiny *non-zero* delay
+            # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for
+            # it to fire.
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
             with self.get_success(sync_d):
                 pass
@@ -1534,9 +1537,10 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         )
         # `user_syncing` proxies the presence write to the main process over an HTTP
         # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay (`_EPSILON`), so
-        # we need to actually advance the clock for it to fire.
-        self.reactor.advance(Duration(microseconds=1).as_secs())
+        # the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
+        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
         sync_1 = self.get_success(sync_d)
 
         # 2. Sync with the second device.
@@ -1550,9 +1554,10 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         )
         # `user_syncing` proxies the presence write to the main process over an HTTP
         # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay (`_EPSILON`), so
-        # we need to actually advance the clock for it to fire.
-        self.reactor.advance(Duration(microseconds=1).as_secs())
+        # the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
+        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
         sync_2 = self.get_success(sync_d)
 
         # 3. Assert the expected presence state.
@@ -1662,9 +1667,10 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         )
         # `user_syncing` proxies the presence write to the main process over an HTTP
         # replication request. The request body is streamed by a `Cooperator` that uses
-        # the clock to schedule each chunk at a tiny *non-zero* delay (`_EPSILON`), so
-        # we need to actually advance the clock for it to fire.
-        self.reactor.advance(Duration(microseconds=1).as_secs())
+        # the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
+        self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
         self.get_success(sync_d)
 
         # Check against the main process that the user's presence did not change.
