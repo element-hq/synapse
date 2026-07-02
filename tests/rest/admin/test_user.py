@@ -23,7 +23,6 @@ import hashlib
 import hmac
 import json
 import os
-import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
@@ -5335,6 +5334,69 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                         matched.append(event_id)
         self.assertEqual(len(matched), len(originals))
 
+    def test_redact_messages_all_rooms_within_timeframe(self) -> None:
+        """
+        Test that request to redact user's events in all rooms within a specific timeframe is successful
+        """
+        # join rooms, send some messages
+
+        # (event_id, timestamp) pairs
+        all_message_ids: list[tuple[str, int]] = []
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+
+        for i in range(4):
+            for rm in [self.rm1, self.rm2, self.rm3]:
+                event = {"body": f"hello{i}", "msgtype": "m.text"}
+                res = self.helper.send_event(
+                    rm, "m.room.message", event, tok=self.bad_user_tok, expect_code=200
+                )
+                event_id = res["event_id"]
+                event_ts = self.get_success(
+                    self.store.get_event(event_id)
+                ).origin_server_ts
+                all_message_ids.append((event_id, event_ts))
+
+        expected_saved_message_ids = {
+            event_id for event_id, _ in all_message_ids[:5] + all_message_ids[10:]
+        }
+        expected_redacted_message_ids = {
+            event_id for event_id, _ in all_message_ids[5:10]
+        }
+
+        # Redact events 5 up to and including 9
+        _after_event_id, after_ts = all_message_ids[5]
+        _before_event_id, before_ts = all_message_ids[9]
+
+        # redact events in all rooms within specific timeframe
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [], "after_ts": after_ts, "before_ts": before_ts},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Get the set of all redacted event IDs
+        all_redacted_event_ids: set[str] = set()
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            filter = json.dumps({"types": [EventTypes.Redaction]})
+            channel = self.make_request(
+                "GET",
+                f"rooms/{rm}/messages?filter={filter}&limit=50",
+                access_token=self.admin_tok,
+            )
+            self.assertEqual(channel.code, 200)
+
+            # Get the IDs of all redacted events
+            for event in channel.json_body["chunk"]:
+                assert event["type"] == EventTypes.Redaction
+                all_redacted_event_ids.add(event["redacts"])
+
+        # check that only expected messages were redacted
+        self.assertSetEqual(expected_redacted_message_ids, all_redacted_event_ids)
+        self.assertSetEqual(expected_saved_message_ids & all_redacted_event_ids, set())
+
     def test_redact_messages_specific_rooms(self) -> None:
         """
         Test that request to redact events in specified rooms user is member of is successful
@@ -5788,21 +5850,19 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        timeout_s = 10
-        start_time = time.time()
-        redact_result = ""
-        while redact_result != "complete":
-            if start_time + timeout_s < time.time():
-                self.fail("Timed out waiting for redactions.")
+        # Need 1 tick as we send 1 replication request per original event
+        # and each wait must be >= `_EPSILON` from `http/client.py`
+        for _ in range(len(original_event_ids)):
+            self.reactor.advance(0.001)
 
-            channel2 = self.make_request(
-                "GET",
-                f"/_synapse/admin/v1/user/redact_status/{id}",
-                access_token=self.admin_tok,
-            )
-            redact_result = channel2.json_body["status"]
-            if redact_result == "failed":
-                self.fail("Redaction task failed.")
+        # Verify the HTTP `redact_status` endpoint reports completion.
+        channel2 = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel2.code, 200)
+        self.assertEqual(channel2.json_body["status"], "complete")
 
         redaction_ids = set()
         for rm in [self.rm1, self.rm2, self.rm3]:
