@@ -225,9 +225,7 @@ pub struct LoggingTransactionWrapper {
     /// The underlying `LoggingTransaction`
     ///
     /// We purposely avoid `Bound<'py, PyAny>` so it can be stored and moved freely
-    /// across threads (like to extract it from the `new_transaction(...)` callback).
-    /// You will need to acquire your own `py` and bind it using
-    /// `logging_transaction_py.bind(py)` to do anything useful.
+    /// across threads (as required by `Transaction` trait).
     logging_transaction_py: Py<PyAny>,
 
     /// Disambiguate which underlying database engine we're working with
