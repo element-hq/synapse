@@ -138,9 +138,15 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
 
         This is not provided by DBAPI2, and so needs engine-specific support.
 
-        Any ongoing transaction is committed before executing the script in its own
-        transaction. The script transaction is left open and it is the responsibility of
-        the caller to commit it.
+        Transaction handling differs by engine. On the psycopg2 and sqlite3
+        engines any ongoing transaction is committed before the script runs in
+        its own transaction, so in a sequence of scripts (as `prepare_database`
+        applies schema/delta files) each one's work is durable once the next
+        starts. The Rust engine instead runs the script in the connection's
+        ongoing transaction, so a whole sequence is applied either completely
+        or not at all (a mid-sequence failure rolls everything back to a
+        consistent, re-runnable state). In all cases the transaction is left
+        open and it is the responsibility of the caller to commit it.
         """
         ...
 
