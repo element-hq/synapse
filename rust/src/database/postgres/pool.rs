@@ -13,7 +13,7 @@
 //! *same* pool, so both share a single set of connections rather than running
 //! two pools that could exhaust the server's connection limit between them.
 
-use deadpool::managed::{Manager, Metrics, Pool, RecycleError, RecycleResult};
+use deadpool::managed::{Manager, Metrics, Object, Pool, RecycleError, RecycleResult};
 use log::warn;
 use tokio_postgres::{Client, Config, NoTls};
 
@@ -70,6 +70,10 @@ impl Manager for ConnectionManager {
 
 /// A pool of [`tokio_postgres`] connections.
 pub type ConnectionPool = Pool<ConnectionManager>;
+
+/// A connection checked out of a [`ConnectionPool`]. Dereferences to the
+/// underlying [`tokio_postgres::Client`]; returned to the pool when dropped.
+pub type PooledConnection = Object<ConnectionManager>;
 
 /// Build a [`ConnectionPool`] from a libpq-style DSN, capped at `max_size`
 /// connections.
