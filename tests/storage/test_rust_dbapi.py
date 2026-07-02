@@ -116,7 +116,10 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self._pool = postgres.ConnectionPool(_build_dsn())
-        self.conn = rust_dbapi.Connection(self._pool.connect())
+        # Pass the pool (owns_pool=False) so `reconnect` can check out a fresh
+        # connection; tearDown closes the pool itself.
+        self.conn = rust_dbapi.Connection(self._pool.connect(), pool=self._pool)
+        self.engine = RustPostgresEngine({})
 
     def tearDown(self) -> None:
         del self.conn
@@ -217,3 +220,12 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
         self.assertTrue(self.conn.autocommit)
         self.conn.set_autocommit(False)
         self.assertFalse(self.conn.autocommit)
+
+    def test_reconnect(self) -> None:
+        # `reconnect` swaps in a fresh pooled connection; the connection is still
+        # usable afterwards.
+        self.conn.reconnect()
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT 1")
+        self.assertEqual(cursor.fetchone(), (1,))
+        self.conn.commit()

@@ -82,7 +82,7 @@ def connect(
         synchronous_commit=synchronous_commit,
         statement_timeout_ms=statement_timeout_ms,
     )
-    return Connection(pool.connect(), pool=pool)
+    return Connection(pool.connect(), pool=pool, owns_pool=True)
 
 
 class Cursor:
@@ -173,12 +173,14 @@ class Connection:
     engine-facing methods delegate straight to the shim.
     """
 
-    def __init__(self, conn: Any, pool: Any = None) -> None:
+    def __init__(self, conn: Any, pool: Any = None, owns_pool: bool = False) -> None:
         self._conn = conn
-        # A pool this connection owns (a bootstrap "pool of one"), kept alive for
-        # the connection's lifetime and closed with it. `None` for connections
-        # borrowed from a shared pool.
+        # The pool this connection was checked out of, if any. Used to
+        # `reconnect` (check out a fresh connection). When `owns_pool` is set the
+        # pool belongs solely to this connection (a bootstrap "pool of one") and
+        # is closed together with it.
         self._pool = pool
+        self._owns_pool = owns_pool
 
     def cursor(self) -> Cursor:
         return Cursor(self._conn.cursor())
@@ -189,9 +191,22 @@ class Connection:
     def rollback(self) -> None:
         self._conn.rollback()
 
+    def reconnect(self) -> None:
+        """Replace the underlying connection with a fresh one from the pool.
+
+        Mirrors ``adbapi.Connection.reconnect``: the transaction driver calls it
+        when a connection is found closed, or to recycle one that has hit the
+        per-connection transaction limit. The current connection is returned to
+        the pool (or discarded if unusable) and a new one checked out.
+        """
+        if self._pool is None:
+            raise RuntimeError("cannot reconnect a connection with no pool")
+        self._conn.close()
+        self._conn = self._pool.connect()
+
     def close(self) -> None:
         self._conn.close()
-        if self._pool is not None:
+        if self._owns_pool and self._pool is not None:
             self._pool.close()
 
     # -- engine-facing methods (see RustPostgresEngine) ---------------------
