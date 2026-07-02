@@ -32,10 +32,57 @@ routing change in ``LoggingTransaction`` to reach a shim-backed implementation;
 that is a separate follow-up.
 """
 
-from typing import TYPE_CHECKING, Any, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
+
+from synapse.synapse_rust.database import postgres
 
 if TYPE_CHECKING:
     from synapse.storage.types import SQLQueryParameters
+
+
+def _quote_dsn_value(value: Any) -> str:
+    """Quote a value for a libpq keyword/value connection string.
+
+    Values with spaces or quotes must be single-quoted with `\\` and `'`
+    backslash-escaped; an empty value must be `''`.
+    """
+    s = str(value)
+    if s == "" or any(c in s for c in " '\\"):
+        escaped = s.replace("\\", "\\\\").replace("'", "\\'")
+        return f"'{escaped}'"
+    return s
+
+
+def build_dsn(params: Mapping[str, Any]) -> str:
+    """Build a libpq keyword/value DSN from psycopg2-style connection kwargs.
+
+    Synapse's database `args` are libpq-compatible keywords (``dbname``,
+    ``user``, ``host``, ``port``, ``password``, …); the Rust pool takes a DSN
+    string rather than kwargs, so join them into one.
+    """
+    return " ".join(f"{key}={_quote_dsn_value(value)}" for key, value in params.items())
+
+
+def connect(
+    dsn: str,
+    *,
+    synchronous_commit: bool = True,
+    statement_timeout_ms: int | None = None,
+) -> "Connection":
+    """Open a single standalone connection for bootstrap/one-off use.
+
+    The Rust shim is pool-only, so a lone connection is a pool of one; the
+    returned :class:`Connection` keeps that pool alive for its lifetime. Used by
+    ``make_conn`` for the startup connection that runs schema preparation before
+    the real pool exists.
+    """
+    pool = postgres.ConnectionPool(
+        dsn,
+        1,
+        synchronous_commit=synchronous_commit,
+        statement_timeout_ms=statement_timeout_ms,
+    )
+    return Connection(pool.connect(), pool=pool)
 
 
 class Cursor:
@@ -120,8 +167,12 @@ class Connection:
     engine-facing methods delegate straight to the shim.
     """
 
-    def __init__(self, conn: Any) -> None:
+    def __init__(self, conn: Any, pool: Any = None) -> None:
         self._conn = conn
+        # A pool this connection owns (a bootstrap "pool of one"), kept alive for
+        # the connection's lifetime and closed with it. `None` for connections
+        # borrowed from a shared pool.
+        self._pool = pool
 
     def cursor(self) -> Cursor:
         return Cursor(self._conn.cursor())
@@ -134,6 +185,8 @@ class Connection:
 
     def close(self) -> None:
         self._conn.close()
+        if self._pool is not None:
+            self._pool.close()
 
     # -- engine-facing methods (see RustPostgresEngine) ---------------------
 

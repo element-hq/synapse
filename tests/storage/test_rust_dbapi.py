@@ -14,8 +14,9 @@
 (:mod:`synapse.storage.rust_dbapi`), including driving a real
 ``LoggingTransaction`` through it."""
 
+from synapse.config.database import DatabaseConnectionConfig
 from synapse.storage import rust_dbapi
-from synapse.storage.database import LoggingDatabaseConnection
+from synapse.storage.database import LoggingDatabaseConnection, make_conn
 from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.synapse_rust.database import postgres
 
@@ -44,6 +45,67 @@ def _build_dsn() -> str:
     if POSTGRES_PASSWORD is not None:
         parts.append(f"password={POSTGRES_PASSWORD}")
     return " ".join(parts)
+
+
+class BuildDsnTestCase(unittest.TestCase):
+    """`build_dsn` turns psycopg2-style kwargs into a libpq DSN (no database)."""
+
+    def test_joins_keywords(self) -> None:
+        self.assertEqual(
+            rust_dbapi.build_dsn(
+                {"dbname": "synapse", "user": "u", "host": "db", "port": 5432}
+            ),
+            "dbname=synapse user=u host=db port=5432",
+        )
+
+    def test_quotes_values_needing_it(self) -> None:
+        # Spaces / quotes / backslashes get single-quoted and escaped; empty → ''.
+        self.assertEqual(
+            rust_dbapi.build_dsn({"password": "p a'ss\\x", "opt": ""}),
+            "password='p a\\'ss\\\\x' opt=''",
+        )
+
+
+@skip_unless(
+    bool(USE_POSTGRES_FOR_TESTS), "requires a Postgres server (set SYNAPSE_POSTGRES)"
+)
+class RustStartupTestCase(unittest.TestCase):
+    """The startup path: `make_conn` + `check_database` for the Rust engine."""
+
+    def _db_config(self) -> DatabaseConnectionConfig:
+        args: dict = {"dbname": POSTGRES_BASE_DB}
+        if POSTGRES_USER is not None:
+            args["user"] = POSTGRES_USER
+        if POSTGRES_HOST is not None:
+            args["host"] = POSTGRES_HOST
+        if POSTGRES_PORT is not None:
+            args["port"] = POSTGRES_PORT
+        if POSTGRES_PASSWORD is not None:
+            args["password"] = POSTGRES_PASSWORD
+        # `name` must be a recognised engine; the Rust engine is selected by
+        # passing a RustPostgresEngine to make_conn, not by the config name.
+        return DatabaseConnectionConfig("master", {"name": "psycopg2", "args": args})
+
+    def test_make_conn_check_database_and_query(self) -> None:
+        engine = RustPostgresEngine({})
+        db_conn = make_conn(
+            db_config=self._db_config(),
+            engine=engine,
+            default_txn_name="startup",
+            server_name="test",
+        )
+        try:
+            # A bootstrap connection the engine can validate over a cursor.
+            engine.check_database(db_conn)
+            self.assertRegex(engine.server_version, r"^\d+\.\d+$")
+
+            # And it's a working connection.
+            with db_conn.cursor(txn_name="startup") as cur:
+                cur.execute("SELECT 1")
+                self.assertEqual(cur.fetchone(), (1,))
+            db_conn.commit()
+        finally:
+            db_conn.close()
 
 
 @skip_unless(

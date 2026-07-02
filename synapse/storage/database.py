@@ -192,7 +192,23 @@ def make_conn(
         for k, v in db_config.config.get("args", {}).items()
         if not k.startswith("cp_")
     }
-    native_db_conn = engine.module.connect(**db_params)
+
+    from synapse.storage.engines.postgres_rust import RustPostgresEngine
+
+    native_db_conn: Any
+    if isinstance(engine, RustPostgresEngine):
+        # The Rust backend has no `module.connect`; open a standalone (pool-of-one)
+        # connection from the same libpq args, with the engine's session settings.
+        from synapse.storage import rust_dbapi
+
+        native_db_conn = rust_dbapi.connect(
+            rust_dbapi.build_dsn(db_params),
+            synchronous_commit=engine.synchronous_commit,
+            statement_timeout_ms=engine.statement_timeout,
+        )
+    else:
+        native_db_conn = engine.module.connect(**db_params)
+
     db_conn = LoggingDatabaseConnection(
         conn=native_db_conn,
         engine=engine,
