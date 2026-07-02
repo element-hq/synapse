@@ -21,15 +21,13 @@
 
 import json
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, ClassVar, Coroutine, Generator, TypeVar, Union
+from typing import Any, ClassVar, TypeVar
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs
 
 from parameterized.parameterized import parameterized_class
 
-from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.mas import MasDelegatedAuth
@@ -204,31 +202,6 @@ class MasAuthDelegation(HomeserverTestCase):
     def device_scope(self) -> str:
         return self.device_scope_prefix + DEVICE
 
-    def till_deferred_has_result(
-        self,
-        awaitable: Union[
-            "Coroutine[Deferred[Any], Any, T]",
-            "Generator[Deferred[Any], Any, T]",
-            "Deferred[T]",
-        ],
-    ) -> "Deferred[T]":
-        """Wait until a deferred has a result.
-
-        This is useful because the Rust HTTP client will resolve the deferred
-        using reactor.callFromThread, which are only run when we call
-        reactor.advance.
-        """
-        deferred = ensureDeferred(awaitable)
-        tries = 0
-        while not deferred.called:
-            time.sleep(0.1)
-            self.reactor.advance(0)
-            tries += 1
-            if tries > 100:
-                raise Exception("Timed out waiting for deferred to resolve")
-
-        return deferred
-
     def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
@@ -278,11 +251,7 @@ class MasAuthDelegation(HomeserverTestCase):
             "expires_in": 60,
         }
 
-        requester = self.get_success(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            )
-        )
+        requester = self.get_success(self._auth.get_user_by_access_token("some_token"))
 
         self.assertEqual(requester.user.to_string(), USER_ID)
         self.assertEqual(requester.device_id, DEVICE)
@@ -301,11 +270,7 @@ class MasAuthDelegation(HomeserverTestCase):
             "username": USERNAME,
         }
 
-        requester = self.get_success(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            )
-        )
+        requester = self.get_success(self._auth.get_user_by_access_token("some_token"))
 
         self.assertEqual(requester.user.to_string(), USER_ID)
         self.assertEqual(requester.device_id, DEVICE)
@@ -326,9 +291,7 @@ class MasAuthDelegation(HomeserverTestCase):
         }
 
         failure = self.get_failure(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            ),
+            self._auth.get_user_by_access_token("some_token"),
             InvalidClientTokenError,
         )
         self.assertEqual(failure.value.code, 401)
@@ -343,9 +306,7 @@ class MasAuthDelegation(HomeserverTestCase):
         }
 
         failure = self.get_failure(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            ),
+            self._auth.get_user_by_access_token("some_token"),
             AuthError,
         )
         # This is a 500, it should never happen really
@@ -361,9 +322,7 @@ class MasAuthDelegation(HomeserverTestCase):
         }
 
         failure = self.get_failure(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            ),
+            self._auth.get_user_by_access_token("some_token"),
             InvalidClientTokenError,
         )
         self.assertEqual(failure.value.code, 401)
@@ -372,9 +331,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {}
 
         failure = self.get_failure(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            ),
+            self._auth.get_user_by_access_token("some_token"),
             SynapseError,
         )
         self.assertEqual(failure.value.code, 503)
@@ -389,11 +346,7 @@ class MasAuthDelegation(HomeserverTestCase):
             "device_id": DEVICE,
         }
 
-        requester = self.get_success(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            )
-        )
+        requester = self.get_success(self._auth.get_user_by_access_token("some_token"))
 
         self.assertEqual(requester.device_id, DEVICE)
 
@@ -406,11 +359,7 @@ class MasAuthDelegation(HomeserverTestCase):
             "expires_in": 60,
         }
 
-        requester = self.get_success(
-            self.till_deferred_has_result(
-                self._auth.get_user_by_access_token("some_token")
-            )
-        )
+        requester = self.get_success(self._auth.get_user_by_access_token("some_token"))
 
         self.assertEqual(requester.user.to_string(), USER_ID)
         self.assertTrue(self.get_success(self._auth.is_server_admin(requester)))
@@ -435,17 +384,15 @@ class MasAuthDelegation(HomeserverTestCase):
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
 
         # The first CS-API request causes a successful introspection
-        self.get_success(
-            self.till_deferred_has_result(self._auth.get_user_by_req(request))
-        )
+        self.get_success(self._auth.get_user_by_req(request))
         self.assertEqual(self.server.calls, 1)
 
         # Sleep for 60 seconds so the token expires.
         self.reactor.advance(60.0)
 
         # Now the CS-API request fails because the token expired
-        self.assertFailure(
-            self.till_deferred_has_result(self._auth.get_user_by_req(request)),
+        self.get_failure(
+            self._auth.get_user_by_req(request),
             InvalidClientTokenError,
         )
         # Ensure another introspection request was not sent
