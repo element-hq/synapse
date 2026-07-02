@@ -63,6 +63,10 @@ http-body-util = "0.1.3"
 futures = "0.3.31"
 tokio = { version = "1.44.2", features = ["rt", "rt-multi-thread"] }
 tokio-postgres = "0.7"
+# Connection pooling for the native Rust Postgres backend. We use the generic
+# `deadpool::managed` pool with our own manager (rather than `deadpool-postgres`)
+# so it reuses our `connect`/default-host logic and connection-task spawning.
+deadpool = "0.12"
 once_cell = "1.18.0"
 itertools = "0.14.0"
 postgres-protocol = "0.6.10"
