@@ -57,7 +57,7 @@ use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
-    types::{PyInt, PyTuple},
+    types::{PyInt, PyList, PyTuple},
 };
 use tokio_postgres::Client;
 
@@ -451,6 +451,45 @@ impl Cursor {
     /// where it isn't (yet) known it follows PEP-249 and returns `-1`.
     fn rowcount<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
         self.lock_state()?.rowcount(py)
+    }
+
+    /// Return the PEP-249 `description` for the current result set, or `None`.
+    ///
+    /// This is a list with one entry per column, each a 7-tuple
+    /// `(name, type_code, display_size, internal_size, precision, scale,
+    /// null_ok)` as PEP-249 specifies. Only the column name is populated; the
+    /// remaining six fields are always `None` — that is all Synapse needs, as
+    /// it only ever reads `column[0]`.
+    ///
+    /// It is `None` when there is no row-returning result set to describe:
+    /// before any query, after an error reset the cursor, or for a statement
+    /// that returns no rows (e.g. a bare `INSERT`), matching psycopg2.
+    fn description<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyList>>> {
+        let state = self.lock_state()?;
+        let Some(columns) = state.description() else {
+            return Ok(None);
+        };
+
+        let rows = columns
+            .iter()
+            .map(|name| {
+                // PEP-249's 7-tuple; only `name` carries a meaningful value.
+                PyTuple::new(
+                    py,
+                    [
+                        name.into_pyobject(py)?.into_any(),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                    ],
+                )
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+
+        Ok(Some(PyList::new(py, rows)?))
     }
 
     /// Close the cursor, discarding any in-flight result set.
