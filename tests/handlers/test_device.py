@@ -572,7 +572,9 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
                 self.message_handler.send_device_message(
                     requester=requester,
                     message_type="test.message",
-                    messages={user_id: {stored_dehydrated_device_id: {"body": f"foo_{i}"}}},
+                    messages={
+                        user_id: {stored_dehydrated_device_id: {"body": f"foo_{i}"}}
+                    },
                 )
             )
         self.pump()
