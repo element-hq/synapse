@@ -873,6 +873,10 @@ class HomeserverTestCase(TestCase):
     # does raise "@raise SynchronousTestCase.failureException : If the
     # L{Deferred<twisted.internet.defer.Deferred>} has no result or has a failure
     # result." at-least in today's world.
+    #
+    # As another alternative, we could also just update `get_success(...)` to have this
+    # behavior as the default, see
+    # https://github.com/element-hq/synapse/pull/19871#discussion_r3483616710
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Drive deferred to completion and return result or raise exception
         on failure.
