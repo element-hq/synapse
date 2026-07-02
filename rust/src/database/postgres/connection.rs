@@ -54,6 +54,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
+use futures::future::try_join_all;
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
@@ -395,6 +396,65 @@ impl Cursor {
         if !returns_rows {
             state.finish_no_rows(py, &self.connection.handle)?;
         }
+
+        Ok(())
+    }
+
+    /// Execute `query` once for each parameter set in `params_seq`.
+    ///
+    /// This is DBAPI2's `executemany`, used by Synapse for batched writes. The
+    /// statement is `prepare`d once and then run for each parameter set; it
+    /// produces no fetchable rows. Like a single `execute`, the whole batch runs
+    /// inside the connection's (lazily opened) transaction, so a failure
+    /// part-way through aborts it and leaves the caller to roll back.
+    ///
+    /// The per-parameter-set executions are *pipelined*: their futures are
+    /// driven concurrently, so `tokio_postgres` streams the whole batch onto the
+    /// connection without waiting for a round-trip between each — one round-trip
+    /// for the batch rather than one per statement. Results are matched to
+    /// requests in order, and on the first error the rest are abandoned (the
+    /// transaction is aborted anyway).
+    ///
+    /// After it returns `rowcount` reports the total number of rows affected
+    /// across all executions (as psycopg2 does), `description` is `None`, and
+    /// any `fetch_*` is an error. An empty `params_seq` runs nothing at all —
+    /// no statement is sent and no transaction is opened — and leaves
+    /// `rowcount` at the PEP-249 "unknown" sentinel (`-1`).
+    #[pyo3(signature = (query, params_seq))]
+    fn executemany(
+        &self,
+        py: Python<'_>,
+        query: &str,
+        params_seq: Vec<Vec<PgValue>>,
+    ) -> PyResult<()> {
+        // Drop any previous result set before starting the new statement.
+        self.lock_state()?.new_query();
+
+        // An empty batch is a no-op (matching psycopg2): don't send anything or
+        // open a transaction, and leave `rowcount` reporting "unknown".
+        if params_seq.is_empty() {
+            self.lock_state()?.on_command_complete(None);
+            return Ok(());
+        }
+
+        let total = self.connection.with_client(py, |client, handle| {
+            // Prepare once, then build a future per parameter set. Driving them
+            // concurrently is what makes `tokio_postgres` pipeline them onto the
+            // connection; blocking on the joined future runs the whole batch.
+            let statement = client.prepare(query).block_on_result(py, handle)?;
+
+            let counts = try_join_all(
+                params_seq
+                    .into_iter()
+                    .map(|params| client.execute_raw(&statement, params)),
+            )
+            .block_on_result(py, handle)?;
+
+            Ok(counts.into_iter().sum::<u64>())
+        })?;
+
+        // Retain the summed affected-row count for `rowcount`, as psycopg2 does.
+        self.lock_state()?.on_command_complete(Some(total));
 
         Ok(())
     }

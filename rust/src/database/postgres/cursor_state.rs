@@ -380,6 +380,19 @@ impl<S: CursorRowStream> CursorQueryState<S> {
         }
     }
 
+    /// Record a completed command that produced no fetchable rows, retaining
+    /// its affected-row count for `rowcount`.
+    ///
+    /// Used by `executemany`, which runs a statement repeatedly for its side
+    /// effects: there is no result set to fetch (`description` is `None` and
+    /// any `fetch_*` errors as exhausted), but the (summed) rowcount is kept.
+    pub fn on_command_complete(&mut self, rowcount: Option<u64>) {
+        *self = Self::Closed {
+            description: Vec::new(),
+            rowcount,
+        };
+    }
+
     /// The error to raise when a `fetch_*` method finds no rows available,
     /// distinguishing "no query was ever run" from "the result set has already
     /// been exhausted". Only meaningful for the non-`Active` states.
@@ -914,6 +927,53 @@ mod tests {
             // The error resets the cursor to `Idle`, dropping the columns.
             let _ = state.fetch_one(py, handle()).unwrap_err();
             assert!(matches!(state, CursorQueryState::Idle));
+            assert!(state.description().is_none());
+        });
+    }
+
+    #[test]
+    fn on_command_complete_retains_rowcount_without_a_result_set() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = CursorQueryState::<FakeStream>::new();
+            // Simulate a completed `executemany` that affected 5 rows.
+            state.on_command_complete(Some(5));
+
+            assert!(matches!(state, CursorQueryState::Closed { .. }));
+            // The rowcount is retained, but there is nothing to describe or
+            // fetch.
+            assert_eq!(
+                state
+                    .rowcount(py, handle())
+                    .unwrap()
+                    .extract::<i64>()
+                    .unwrap(),
+                5
+            );
+            assert!(state.description().is_none());
+            assert!(state
+                .fetch_one(py, handle())
+                .unwrap_err()
+                .to_string()
+                .contains("exhausted"));
+        });
+    }
+
+    #[test]
+    fn on_command_complete_with_no_count_reports_minus_one() {
+        Python::initialize();
+        Python::attach(|py| {
+            let mut state = CursorQueryState::<FakeStream>::new();
+            // An empty `executemany` batch: nothing ran, so no count.
+            state.on_command_complete(None);
+            assert_eq!(
+                state
+                    .rowcount(py, handle())
+                    .unwrap()
+                    .extract::<i64>()
+                    .unwrap(),
+                -1
+            );
             assert!(state.description().is_none());
         });
     }
