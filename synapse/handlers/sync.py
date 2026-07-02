@@ -2255,22 +2255,28 @@ class SyncHandler:
         lazy_load_members = sync_config.filter_collection.lazy_load_members()
         include_users = None
         if lazy_load_members:
-            # Collect members from the existing `sync_result_builder` data
+            # Collect members from the existing `sync_result_builder` data.
+            # Ensure we filter out any remove users until we support profile
+            # updates for federated users.
             include_users = set()
             # invited
             for invited in sync_result_builder.invited:
-                include_users.add(invited.invite.sender)
+                if self._is_mine_id(invited.invite.sender):
+                    include_users.add(invited.invite.sender)
             # joined
             for joined in sync_result_builder.joined:
                 for timeline_event in joined.timeline.events:
-                    include_users.add(timeline_event.event.sender)
+                    if self._is_mine_id(timeline_event.event.sender):
+                        include_users.add(timeline_event.event.sender)
             # knocked
             for knocked in sync_result_builder.knocked:
-                include_users.add(knocked.knock.sender)
+                if self._is_mine_id(knocked.knock.sender):
+                    include_users.add(knocked.knock.sender)
             # archived
             for archived in sync_result_builder.archived:
                 for timeline_event in archived.timeline.events:
-                    include_users.add(timeline_event.event.sender)
+                    if self._is_mine_id(timeline_event.event.sender):
+                        include_users.add(timeline_event.event.sender)
 
         if since_token is None:
             await self._generate_initial_sync_entry_for_profile_updates(

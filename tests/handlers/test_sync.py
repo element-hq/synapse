@@ -55,6 +55,7 @@ from synapse.util.duration import Duration
 import tests.unittest
 import tests.utils
 from tests.test_utils.event_builders import make_test_pdu_event
+from tests.test_utils.event_injection import inject_member_event
 from tests.unittest import override_config
 
 _request_key = 0
@@ -1523,6 +1524,15 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.helper.send_messages(
             room_id=self.joined_room, num_events=10, tok=third_tok
         )
+        # Join a federated user to the room
+        self.get_success(
+            inject_member_event(
+                self.hs,
+                self.joined_room,
+                "@federateduser:federatedhs",
+                "join",
+            )
+        )
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 requester,
@@ -1545,6 +1555,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 ),
                 request_key=generate_request_key(),
             )
+        )
+
+        # Ensure our federated user is filtered out, even though they have an
+        # event in the joined room timeline
+        self.assertFalse(
+            "@federateduser:federatedhs" in incremental_result.profile_updates.keys()
         )
         # Lazy loading only filters initial sync profile updates. Incremental syncs
         # should include all tracked profile updates for the syncing user.
@@ -1576,6 +1592,100 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@third_user:test"]["displayname"],
             "third_user",
         )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_sync_filters_out_profile_updates_from_federated_users(
+        self,
+        is_initial: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled lazy loading sync response
+        doesn't contain federated users even if there are timeline events from them.
+        """
+        # Join a federated user to the room, causing a membership event into
+        # the joined rooms sync response
+        self.get_success(
+            inject_member_event(
+                self.hs,
+                self.joined_room,
+                "@federateduser1:federatedhs",
+                "join",
+            )
+        )
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Ensure our federated user is filtered out, even though they have an
+        # event in the joined room timeline
+        self.assertFalse(
+            "@federateduser1:federatedhs" in initial_result.profile_updates.keys()
+        )
+        if not is_initial:
+            # Join another federated user to the room, causing a membership event into
+            # the joined rooms sync response
+            self.get_success(
+                inject_member_event(
+                    self.hs,
+                    self.joined_room,
+                    "@federateduser2:federatedhs",
+                    "join",
+                )
+            )
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=initial_result.next_batch,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json={
+                                "org.matrix.msc4429.profile_fields": {
+                                    "ids": ["m.status", "displayname", "avatar_url"]
+                                },
+                                "room": {
+                                    "state": {
+                                        "lazy_load_members": True,
+                                    },
+                                },
+                            },
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+
+            # Ensure our federated user is filtered out, even though they have an
+            # event in the joined room timeline
+            self.assertFalse(
+                "@federateduser2:federatedhs"
+                in incremental_result.profile_updates.keys()
+            )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_lazy_loading_cache_filters_recently_sent_profiles(
