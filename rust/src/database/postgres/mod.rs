@@ -20,6 +20,7 @@ mod connection;
 mod cursor_state;
 mod errors;
 mod helpers;
+pub mod pool;
 mod value;
 
 /// Register the `postgres` submodule (the `Connection` / `Cursor` classes, the
@@ -92,7 +93,7 @@ fn connect<'py>(
 /// Synapse previously used (and is what e.g. `psql` uses). libpq's default host
 /// is configurable, so when the DSN omits a host we ask libpq what its default
 /// would be and use that instead (see [`crate::libpq::default_host`]).
-fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
+pub(crate) fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
     let mut config = dsn.parse::<tokio_postgres::Config>()?;
 
     // `tokio_postgres` parses only the DSN string (it does not consult `PGHOST`
