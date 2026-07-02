@@ -17,18 +17,18 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 use pythonize::{pythonize, PythonizeError};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::config::{RoomCreationPreset, SynapseHomeServerConfig};
 use crate::deferred::create_deferred;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
 /// `GET /_matrix/client/versions` response
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug)]
 struct VersionsResponse {
     versions: Vec<String>,
     /// as per MSC1497
-    unstable_features: std::collections::BTreeMap<String, bool>,
+    unstable_features: UnstableFeatureMap,
 }
 
 impl<'py> IntoPyObject<'py> for VersionsResponse {
@@ -156,7 +156,7 @@ async fn build_versions_response(
             "v1.11".to_string(),
             "v1.12".to_string(),
         ]),
-        unstable_features: serde_json::from_value(serde_json::to_value(unstable_feature_map)?)?,
+        unstable_features: unstable_feature_map,
     })
 }
 
