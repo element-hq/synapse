@@ -20,18 +20,16 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any, Mapping, NoReturn, cast
+from typing import TYPE_CHECKING, Any, Mapping, NoReturn
 
 import psycopg2.extensions
 
 from synapse.storage.engines._base import (
     AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
-    BaseDatabaseEngine,
     IncorrectDatabaseSetup,
     IsolationLevel,
 )
-from synapse.storage.types import Cursor
-from synapse.util.duration import Duration
+from synapse.storage.engines.postgres_base import PostgresEngine
 
 if TYPE_CHECKING:
     from synapse.storage.database import LoggingDatabaseConnection
@@ -40,9 +38,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PostgresEngine(
-    BaseDatabaseEngine[psycopg2.extensions.connection, psycopg2.extensions.cursor]
+class Psycopg2Engine(
+    PostgresEngine[psycopg2.extensions.connection, psycopg2.extensions.cursor]
 ):
+    """The Postgres backend that talks to the database via psycopg2."""
+
     def __init__(self, database_config: Mapping[str, Any]):
         super().__init__(psycopg2, database_config)
         psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
@@ -54,17 +54,6 @@ class PostgresEngine(
             raise Exception("Passing bytes to DB is disabled.")
 
         psycopg2.extensions.register_adapter(bytes, _disable_bytes_adapter)
-        self.synchronous_commit: bool = database_config.get("synchronous_commit", True)
-        # Set the statement timeout to 10 minutes by default.
-        #
-        # Any query taking more than 10 minutes should probably be considered a bug;
-        # most of the time this is a sign that work needs to be split up or that
-        # some degenerate query plan has been created and the client has probably
-        # timed out/walked off anyway.
-        # This is in milliseconds.
-        self.statement_timeout: int | None = database_config.get(
-            "statement_timeout", Duration(minutes=10).as_millis()
-        )
         self._version: int | None = None  # unknown as yet
 
         self.isolation_level_map: Mapping[int, int] = {
@@ -75,18 +64,6 @@ class PostgresEngine(
         self.default_isolation_level = (
             psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ
         )
-        self.config = database_config
-
-    @property
-    def single_threaded(self) -> bool:
-        return False
-
-    def get_db_locale(self, txn: Cursor) -> tuple[str, str]:
-        txn.execute(
-            "SELECT datcollate, datctype FROM pg_database WHERE datname = current_database()"
-        )
-        collation, ctype = cast(tuple[str, str], txn.fetchone())
-        return collation, ctype
 
     def check_database(
         self,
@@ -140,33 +117,6 @@ class PostgresEngine(
                         ctype,
                     )
 
-    def check_new_database(self, txn: Cursor) -> None:
-        """Gets called when setting up a brand new database. This allows us to
-        apply stricter checks on new databases versus existing database.
-        """
-
-        allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
-        if allow_unsafe_locale:
-            return
-
-        collation, ctype = self.get_db_locale(txn)
-
-        errors = []
-
-        if collation != "C":
-            errors.append("    - 'COLLATE' is set to %r. Should be 'C'" % (collation,))
-
-        if ctype != "C":
-            errors.append("    - 'CTYPE' is set to %r. Should be 'C'" % (ctype,))
-
-        if errors:
-            raise IncorrectDatabaseSetup(
-                "Database is incorrectly configured:\n\n%s\n\n"
-                "See docs/postgres.md for more information. You can override this check by"
-                "setting 'allow_unsafe_locale' to true in the database config.",
-                "\n".join(errors),
-            )
-
     def convert_param_style(self, sql: str) -> str:
         return sql.replace("?", "%s")
 
@@ -190,11 +140,6 @@ class PostgresEngine(
         cursor.close()
         db_conn.commit()
 
-    @property
-    def supports_using_any_list(self) -> bool:
-        """Do we support using `a = ANY(?)` and passing a list"""
-        return True
-
     def is_deadlock(self, error: Exception) -> bool:
         if isinstance(error, psycopg2.DatabaseError):
             # https://www.postgresql.org/docs/current/static/errcodes-appendix.html
@@ -205,9 +150,6 @@ class PostgresEngine(
 
     def is_connection_closed(self, conn: psycopg2.extensions.connection) -> bool:
         return bool(conn.closed)
-
-    def lock_table(self, txn: Cursor, table: str) -> None:
-        txn.execute("LOCK TABLE %s in EXCLUSIVE MODE" % (table,))
 
     @property
     def server_version(self) -> str:
@@ -222,10 +164,6 @@ class PostgresEngine(
             return "%i.%i" % (numver / 10000, numver % 10000)
         else:
             return "%i.%i.%i" % (numver / 10000, (numver % 10000) / 100, numver % 100)
-
-    @property
-    def row_id_name(self) -> str:
-        return "ctid"
 
     def in_transaction(self, conn: psycopg2.extensions.connection) -> bool:
         return conn.status != psycopg2.extensions.STATUS_READY

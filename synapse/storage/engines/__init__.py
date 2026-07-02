@@ -22,16 +22,20 @@ from typing import Any, Mapping, NoReturn
 
 from ._base import BaseDatabaseEngine, IncorrectDatabaseSetup
 
-# The classes `PostgresEngine` and `Sqlite3Engine` must always be importable, because
-# we use `isinstance(engine, PostgresEngine)` to write different queries for postgres
-# and sqlite. But the database driver modules are both optional: they may not be
-# installed. To account for this, create dummy classes on import failure so we can
-# still run `isinstance()` checks.
+# `PostgresEngine` is the driver-agnostic Postgres base (psycopg2 and the native
+# Rust backend both subclass it). It has no driver dependency, so it always
+# imports — which matters because `isinstance(engine, PostgresEngine)` is used
+# throughout the storage layer to write Postgres- vs sqlite-flavoured queries.
+from .postgres_base import PostgresEngine
+
+# The concrete driver engines are optional: their driver modules may not be
+# installed. Create dummy classes on import failure so `isinstance()` checks
+# still work (and construction fails with a clear message).
 try:
-    from .postgres import PostgresEngine
+    from .postgres import Psycopg2Engine
 except ImportError:
 
-    class PostgresEngine(BaseDatabaseEngine):  # type: ignore[no-redef]
+    class Psycopg2Engine(PostgresEngine):  # type: ignore[no-redef]
         def __new__(cls, *args: object, **kwargs: object) -> NoReturn:
             raise RuntimeError(
                 f"Cannot create {cls.__name__} -- psycopg2 module is not installed"
@@ -56,7 +60,7 @@ def create_engine(database_config: Mapping[str, Any]) -> BaseDatabaseEngine:
         return Sqlite3Engine(database_config)
 
     if name == "psycopg2":
-        return PostgresEngine(database_config)
+        return Psycopg2Engine(database_config)
 
     raise RuntimeError("Unsupported database engine '%s'" % (name,))
 
@@ -65,6 +69,7 @@ __all__ = [
     "create_engine",
     "BaseDatabaseEngine",
     "PostgresEngine",
+    "Psycopg2Engine",
     "Sqlite3Engine",
     "IncorrectDatabaseSetup",
 ]
