@@ -494,6 +494,55 @@ class PostgresConnectionTestCase(unittest.TestCase):
         self.assertEqual(self.conn.run_interaction(interaction), [3, 2, 3])
 
     # ------------------------------------------------------------------
+    # description
+    # ------------------------------------------------------------------
+
+    def test_description_is_none_before_query(self) -> None:
+        """A cursor that has not run a query has no description."""
+
+        def interaction(cursor: Any) -> Any:
+            return cursor.description()
+
+        self.assertIsNone(self.conn.run_interaction(interaction))
+
+    def test_description_reports_column_names(self) -> None:
+        """A row-returning statement describes its columns; only the name is
+        populated, in a PEP-249 7-tuple."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("SELECT 1 AS a, 'x'::text AS b")
+            return cursor.description()
+
+        description = self.conn.run_interaction(interaction)
+        self.assertEqual([col[0] for col in description], ["a", "b"])
+        # Each entry is a PEP-249 7-tuple with only the name populated.
+        for col in description:
+            self.assertEqual(len(col), 7)
+            self.assertTrue(all(field is None for field in col[1:]))
+
+    def test_description_available_after_fetch(self) -> None:
+        """The description survives after the rows have been fetched."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("SELECT 1 AS a")
+            cursor.fetch_all()  # exhausts the result set
+            return cursor.description()
+
+        description = self.conn.run_interaction(interaction)
+        self.assertEqual([col[0] for col in description], ["a"])
+
+    def test_description_is_none_for_dml(self) -> None:
+        """A statement that returns no rows (a bare INSERT) has no
+        description, matching psycopg2."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("CREATE TEMP TABLE d (id int)")
+            cursor.execute("INSERT INTO d VALUES (1)")
+            return cursor.description()
+
+        self.assertIsNone(self.conn.run_interaction(interaction))
+
+    # ------------------------------------------------------------------
     # Transaction handling (COMMIT on success, ROLLBACK on error)
     # ------------------------------------------------------------------
 
