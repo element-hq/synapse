@@ -728,7 +728,7 @@ class HomeserverTestCase(TestCase):
         d: "Deferred[Any]",
     ) -> None:
         """
-        Wait for the deferred to finish or raise (with real-time timeout).
+        Wait for the deferred to finish or raise.
 
         Does not advance time in the Twisted reactor clock but will loop 100 times
         waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
