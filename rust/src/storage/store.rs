@@ -78,9 +78,11 @@ impl Store {
                 async move {
                     let rows = txn
                         .query(
-                            "SELECT enabled \
-                             FROM per_user_experimental_features \
-                             WHERE user_id = ? AND feature = ?",
+                            r#"
+                            SELECT enabled
+                            FROM per_user_experimental_features
+                            WHERE user_id = ? AND feature = ?
+                            "#,
                             &[user_id.as_ref(), feature.as_ref()],
                         )
                         .await?;
