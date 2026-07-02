@@ -64,7 +64,7 @@
 //! [`Connection::close`], by contrast, returns a clean connection to the pool
 //! (discarding it only if a transaction was left open).
 
-use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError, Weak};
 
 use deadpool::managed::Object;
 use futures::future::try_join_all;
@@ -131,16 +131,57 @@ struct ConnInner {
     /// runs in its own implicit transaction. Defaults to `false`, matching
     /// psycopg2's transactional default.
     autocommit: bool,
+    /// The query states of every cursor opened on this connection, held weakly
+    /// so a dropped cursor doesn't leak an entry (pruned on each sweep). Used
+    /// by [`ConnInner::drop_cursor_streams`] to drop live row streams before a
+    /// `COMMIT`/`ROLLBACK` is sent or the connection is given up.
+    cursor_states: Vec<Weak<Mutex<CursorQueryState>>>,
 }
 
 impl ConnInner {
+    /// Drop any live cursor row streams, pruning entries for dropped cursors.
+    ///
+    /// `tokio_postgres` delivers responses strictly in order: a large unread
+    /// row stream sitting ahead of a later statement's response (a `COMMIT`, or
+    /// the next checkout's first query if the connection went back to the pool)
+    /// can block the connection task on the stream's backpressure, stalling
+    /// that later statement forever. Dropping the stream closes its channel, so
+    /// the connection task discards the remaining rows and moves on.
+    ///
+    /// This diverges from psycopg2, whose client-side buffering lets rows be
+    /// fetched after `commit()`: here commit/rollback/close invalidates any
+    /// unfetched results. Synapse's transaction driver never fetches after
+    /// commit, so the difference is unobservable in practice.
+    fn drop_cursor_streams(&mut self) {
+        self.cursor_states.retain(|weak| {
+            let Some(state) = weak.upgrade() else {
+                // The cursor (and with it any stream) is gone; prune the entry.
+                return false;
+            };
+            // `try_lock`, honouring the single-thread-per-connection contract:
+            // it can only fail if a cursor is concurrently in use on another
+            // thread (the contract is already broken), where skipping the reset
+            // beats blocking or panicking.
+            if let Ok(mut state) = state.try_lock() {
+                state.new_query();
+            }
+            true
+        });
+    }
+
     /// Give up the connection cleanly.
     ///
     /// The connection is returned to the pool for reuse — **unless** a
     /// transaction is still open, in which case it can't be rolled back from
     /// here, so we discard it (detach and drop) rather than hand a
     /// mid-transaction connection to the next caller.
+    ///
+    /// Any live cursor streams are dropped first, so a returned connection's
+    /// task isn't left blocked delivering rows nobody will read (which would
+    /// stall the next checkout's first statement — see
+    /// [`ConnInner::drop_cursor_streams`]).
     fn release(&mut self) {
+        self.drop_cursor_streams();
         if let Some(conn) = self.client.take() {
             if self.in_txn {
                 let _ = Object::take(conn); // detach + drop: not returned to the pool
@@ -153,6 +194,7 @@ impl ConnInner {
     /// Discard the connection: the session state is unknown or unclean, so it
     /// must never be reused. It is detached from the pool (shrinking it).
     fn discard(&mut self) {
+        self.drop_cursor_streams();
         if let Some(conn) = self.client.take() {
             let _ = Object::take(conn);
         }
@@ -180,6 +222,7 @@ impl Connection {
                 client: Some(conn),
                 in_txn: false,
                 autocommit: false,
+                cursor_states: Vec::new(),
             })),
         }
     }
@@ -250,6 +293,11 @@ impl Connection {
             return Ok(());
         }
 
+        // Drop any live cursor streams first: our COMMIT/ROLLBACK response is
+        // delivered *after* any still-unread rows, so a stalled stream would
+        // block it forever (see `drop_cursor_streams`).
+        guard.drop_cursor_streams();
+
         let result = {
             let client = client_ref(&guard)?;
             client.execute(stmt, &[]).block_on_result(py)
@@ -285,9 +333,15 @@ impl Connection {
     ///
     /// Cheap: no I/O and no `BEGIN` happens here (the transaction is opened
     /// lazily on the first `execute`). The returned cursor shares this
-    /// connection's client.
-    fn cursor(&self) -> Cursor {
-        Cursor::new(self.clone())
+    /// connection's client; its query state is registered (weakly) with the
+    /// connection so live row streams can be dropped at transaction end (see
+    /// `ConnInner::drop_cursor_streams`).
+    fn cursor(&self) -> PyResult<Cursor> {
+        let cursor = Cursor::new(self.clone());
+        self.lock()?
+            .cursor_states
+            .push(Arc::downgrade(&cursor.state));
+        Ok(cursor)
     }
 
     /// Commit the current transaction, if one is open. A no-op otherwise.
@@ -309,6 +363,28 @@ impl Connection {
     fn close(&self) -> PyResult<()> {
         self.lock()?.release();
         Ok(())
+    }
+
+    /// Whether this connection has been closed (or discarded).
+    ///
+    /// Mirrors psycopg2's `connection.closed`: it is true once the connection
+    /// has been closed/returned/discarded, or if the underlying socket has been
+    /// torn down. The database engine's `is_connection_closed` reads this to
+    /// decide whether a pooled connection needs replacing.
+    fn is_closed(&self) -> PyResult<bool> {
+        Ok(match self.lock()?.client.as_ref() {
+            None => true,
+            Some(conn) => conn.is_closed(),
+        })
+    }
+
+    /// Whether a transaction is currently open on this connection.
+    ///
+    /// Mirrors the engine's `in_transaction` check (psycopg2 reads
+    /// `conn.status`): the transaction driver asserts a pooled connection is
+    /// not left mid-transaction before handing it out again.
+    fn in_transaction(&self) -> PyResult<bool> {
+        Ok(self.lock()?.in_txn)
     }
 
     /// Switch autocommit mode on or off.
@@ -642,7 +718,7 @@ mod tests {
         Python::initialize();
         Python::attach(move |py| {
             let conn = Connection::new(obj);
-            let cursor = conn.cursor();
+            let cursor = conn.cursor().unwrap();
             cursor.execute(py, "SELECT 1", None).unwrap();
             conn.commit(py).unwrap();
             // Dropping both references releases the pooled connection.
@@ -673,7 +749,7 @@ mod tests {
         Python::initialize();
         Python::attach(move |py| {
             let conn = Connection::new(obj);
-            let cursor = conn.cursor();
+            let cursor = conn.cursor().unwrap();
             // Opens a transaction lazily (BEGIN) but never commits/rolls back.
             cursor.execute(py, "SELECT 1", None).unwrap();
             drop(cursor);
@@ -684,6 +760,43 @@ mod tests {
         // connection back.
         assert_eq!(pool.status().size, 0);
         assert_eq!(pool.status().available, 0);
+    }
+
+    /// `is_closed` and `in_transaction` track the connection's lifecycle, as
+    /// the database engine's `is_connection_closed` / `in_transaction` need.
+    #[test]
+    fn is_closed_and_in_transaction_reflect_state() {
+        let Some(dsn) = test_dsn() else {
+            eprintln!("skipping: set SYNAPSE_TEST_POSTGRES_DSN to run");
+            return;
+        };
+
+        let pool = create_pool(&dsn, 1).unwrap();
+        let obj = runtime().block_on(async { pool.get().await.unwrap() });
+
+        Python::initialize();
+        Python::attach(move |py| {
+            let conn = Connection::new(obj);
+            // Freshly checked out: open and idle.
+            assert!(!conn.is_closed().unwrap());
+            assert!(!conn.in_transaction().unwrap());
+
+            // The first statement lazily opens a transaction.
+            let cursor = conn.cursor().unwrap();
+            cursor.execute(py, "SELECT 1", None).unwrap();
+            assert!(conn.in_transaction().unwrap());
+
+            // Committing ends it; the connection is still open.
+            conn.commit(py).unwrap();
+            assert!(!conn.in_transaction().unwrap());
+            assert!(!conn.is_closed().unwrap());
+
+            // Closing releases it: further use sees it as closed.
+            conn.close().unwrap();
+            assert!(conn.is_closed().unwrap());
+
+            drop(cursor);
+        });
     }
 
     /// A plain query error does *not* poison the connection: after the caller
@@ -701,7 +814,7 @@ mod tests {
         Python::initialize();
         Python::attach(move |py| {
             let conn = Connection::new(obj);
-            let cursor = conn.cursor();
+            let cursor = conn.cursor().unwrap();
             // A bad statement aborts the transaction but leaves the connection
             // usable, exactly as psycopg2 does.
             cursor

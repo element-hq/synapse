@@ -321,8 +321,13 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// rather than erroring, per PEP-249.
     pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
         // `rows_affected()` is only valid after the stream is drained, so drain
-        // it here. This is OK as in Python the rowcount should only be accessed
-        // for queries that DO NOT return rows, e.g. INSERT, UPDATE, DELETE.
+        // it here. For a row-returning statement this discards any not-yet-
+        // fetched rows (unlike psycopg2, whose client-side buffering keeps them
+        // fetchable) while still reporting the *total* row count from the
+        // command tag. That divergence is safe for Synapse: audited callers
+        // either read `rowcount` after DML, or fetch *before* reading it (e.g.
+        // `simple_select_one_txn`'s fetchone-then-`rowcount > 1` check) — none
+        // fetch afterwards.
         self.finish_no_rows(py)?;
 
         match self {
