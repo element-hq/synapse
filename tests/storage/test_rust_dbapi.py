@@ -253,3 +253,29 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
         self.assertEqual(txn.description[0][0], "only")
 
         db_conn.commit()
+
+    def test_array_parameter(self) -> None:
+        # A list parameter binds as a Postgres array, for `= ANY($1)` queries.
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT 5 = ANY($1::int[])", ([1, 5, 9],))
+        self.assertEqual(cursor.fetchone(), (True,))
+        cursor.execute("SELECT 7 = ANY($1::int[])", ([1, 5, 9],))
+        self.assertEqual(cursor.fetchone(), (False,))
+        self.conn.commit()
+
+    def test_executescript(self) -> None:
+        # A multi-statement script runs via the shim's simple-query path.
+        cursor = self.conn.cursor()
+        cursor.executescript(
+            "CREATE TEMP TABLE s (a int); INSERT INTO s VALUES (1), (2);"
+        )
+        cursor.execute("SELECT count(*) FROM s")
+        self.assertEqual(cursor.fetchone(), (2,))
+        self.conn.commit()
+
+    def test_autocommit_property(self) -> None:
+        self.assertFalse(self.conn.autocommit)
+        self.conn.set_autocommit(True)
+        self.assertTrue(self.conn.autocommit)
+        self.conn.set_autocommit(False)
+        self.assertFalse(self.conn.autocommit)
