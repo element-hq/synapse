@@ -294,8 +294,13 @@ impl<S: CursorRowStream> CursorQueryState<S> {
     /// rather than erroring, per PEP-249.
     pub fn rowcount<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
         // The command tag, and so the count, only arrives once the stream is
-        // drained. Draining discards any unfetched rows, which is fine: callers
-        // only read `rowcount` after INSERT, UPDATE or DELETE.
+        // drained. For a row-returning statement draining discards any
+        // not-yet-fetched rows (psycopg2 buffers client-side, so they would
+        // stay fetchable there) while still reporting the total count from the
+        // command tag. That is fine for Synapse: audited callers either read
+        // `rowcount` after INSERT, UPDATE or DELETE, or fetch before reading it
+        // (e.g. `simple_select_one_txn`'s fetchone-then-`rowcount > 1` check).
+        // None fetch afterwards.
         self.finish_no_rows(py)?;
 
         match self {
