@@ -1634,6 +1634,7 @@ dependencies = [
  "blake2",
  "bytes",
  "deadpool",
+ "fallible-iterator",
  "futures",
  "headers",
  "hex",
