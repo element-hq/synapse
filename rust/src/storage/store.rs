@@ -61,8 +61,6 @@ impl Store {
         user_id: &str,
         feature: PerUserExperimentalFeature,
     ) -> Result<Option<bool>, anyhow::Error> {
-        // It's not enabled globally, so check whether it's enabled per-user.
-        //
         // We need owned copies to move into the callback because it is `'static` (it
         // may be moved to another thread). We use `Arc<str>` rather than `String` so
         // the per-call clone is just a cheap refcount bump rather than a fresh
