@@ -32,7 +32,7 @@ use std::collections::HashMap;
 
 use pyo3::{
     exceptions::{PyTypeError, PyValueError},
-    pyclass, pyfunction, pymethods, Bound, IntoPyObject, PyAny, PyResult, Python,
+    pyclass, pyfunction, pymethods, Bound, PyAny, PyResult, Python,
 };
 use pythonize::pythonize;
 use serde_json::{Map, Number, Value};
@@ -96,7 +96,7 @@ pub enum EventFormat {
 /// The output shape is chosen by [`EventFormat`]. The field `requester`, when
 /// set, controls whether sender-only fields (such as the transaction ID) are
 /// included.
-#[pyclass(frozen, skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object, get_all)]
 #[derive(Clone)]
 pub struct SerializeEventConfig {
     /// Whether to apply the client event format transform (v1/v2/raw). When
@@ -152,44 +152,6 @@ impl SerializeEventConfig {
             include_admin_metadata,
             msc4354_enabled,
         })
-    }
-
-    #[getter]
-    fn as_client_event(&self) -> bool {
-        self.as_client_event
-    }
-
-    #[getter]
-    fn event_format(&self) -> EventFormat {
-        self.event_format
-    }
-
-    #[getter]
-    fn requester<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, Requester>>> {
-        self.requester
-            .as_ref()
-            .map(|r| r.clone().into_pyobject(py))
-            .transpose()
-    }
-
-    #[getter]
-    fn event_field_allowlist(&self) -> Option<Vec<String>> {
-        self.event_field_allowlist.clone()
-    }
-
-    #[getter]
-    fn include_stripped_room_state(&self) -> bool {
-        self.include_stripped_room_state
-    }
-
-    #[getter]
-    fn include_admin_metadata(&self) -> bool {
-        self.include_admin_metadata
-    }
-
-    #[getter]
-    fn msc4354_enabled(&self) -> bool {
-        self.msc4354_enabled
     }
 }
 
