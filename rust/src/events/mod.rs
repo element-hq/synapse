@@ -137,9 +137,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 /// metadata, rejection reason, and a reference to the room version that
 /// produced this event). See the module-level docs for the high-level
 /// design.
-///
-/// `Clone` is shallow (see [`FormattedEvent`]) and lets an `Event` be held by
-/// value, e.g. inside [`BundledAggregations`](crate::events::relations::BundledAggregations).
 #[pyclass(frozen, weakref, skip_from_py_object)]
 pub struct Event {
     /// The parsed event JSON.
