@@ -22,10 +22,11 @@ result back to the reactor as a ``Deferred``.
 
 It presents the slice of ``twisted.enterprise.adbapi.ConnectionPool`` that
 ``DatabasePool`` uses — ``runWithConnection``, ``threadID``, ``threadpool`` and
-``running`` — so it can stand in for ``_db_pool`` (paired with
-:class:`~synapse.storage.engines.RustPostgresEngine`, which drives the wrapped
-connection). ``make_pool`` returns one of these when the database is configured
-with ``use_rust_driver``.
+``running`` — plus the ``runQuery`` / ``runOperation`` / ``connect`` convenience
+methods that some tests call on ``_db_pool`` directly, so it can stand in for it
+(paired with :class:`~synapse.storage.engines.RustPostgresEngine`, which drives
+the wrapped connection). ``make_pool`` returns one of these when the database is
+configured with ``use_rust_driver``.
 """
 
 import logging
@@ -101,6 +102,9 @@ class RustConnectionPool:
         )
         self.threadpool = ThreadPool(minthreads=1, maxthreads=threads, name=name)
         self.running = False
+        # Connections handed out by `connect()` for direct synchronous use, one
+        # cached per thread (adbapi's model). Closed together with the pool.
+        self._connections: dict[int, DBAPI2Connection] = {}
 
     def start(self) -> None:
         """Start the thread pool. Idempotent."""
@@ -121,6 +125,9 @@ class RustConnectionPool:
             return
         self.running = False
         self.threadpool.stop()
+        for conn in self._connections.values():
+            conn.close()
+        self._connections.clear()
         self._pool.close()
 
     def runWithConnection(  # noqa: N802 (implements adbapi's interface)
@@ -162,6 +169,77 @@ class RustConnectionPool:
         configured, to count transactions per thread.
         """
         return threading.get_ident()
+
+    def runQuery(  # noqa: N802 (implements adbapi's interface)
+        self, *args: Any, **kwargs: Any
+    ) -> "Deferred[list[Any]]":
+        """Run a single query in its own transaction and return all its rows.
+
+        Mirrors ``twisted.enterprise.adbapi.ConnectionPool.runQuery``: the
+        arguments are passed straight to the cursor's ``execute``, the
+        transaction is committed on success (rolled back on error), and the
+        result is the ``fetchall()``. Synapse itself goes through
+        ``DatabasePool``; this is here for callers that use ``_db_pool``
+        directly (e.g. tests).
+        """
+        return self.runWithConnection(self._run_query, args, kwargs)
+
+    def runOperation(  # noqa: N802 (implements adbapi's interface)
+        self, *args: Any, **kwargs: Any
+    ) -> "Deferred[None]":
+        """Run a single statement in its own transaction, discarding any rows.
+
+        Mirrors ``twisted.enterprise.adbapi.ConnectionPool.runOperation``.
+        """
+        return self.runWithConnection(self._run_operation, args, kwargs)
+
+    def connect(self) -> DBAPI2Connection:
+        """Return a connection for direct, synchronous use on the caller's thread.
+
+        Mirrors ``twisted.enterprise.adbapi.ConnectionPool.connect``: one
+        connection is cached per thread and reused (recreated if it has been
+        closed), and all cached connections are closed when the pool closes.
+        Unlike ``runWithConnection`` this does no thread hop — the caller drives
+        the connection itself, as schema-preparation code and some tests do.
+        """
+        tid = self.threadID()
+        conn = self._connections.get(tid)
+        if conn is None or conn.is_closed():
+            conn = DBAPI2Connection(self._pool.connect(), pool=self._pool)
+            self._connections[tid] = conn
+        return conn
+
+    def _run_query(
+        self, conn: DBAPI2Connection, args: tuple, kwargs: dict
+    ) -> list[Any]:
+        def body(cursor: Any) -> list[Any]:
+            cursor.execute(*args, **kwargs)
+            return cursor.fetchall()
+
+        return self._in_transaction(conn, body)
+
+    def _run_operation(self, conn: DBAPI2Connection, args: tuple, kwargs: dict) -> None:
+        def body(cursor: Any) -> None:
+            cursor.execute(*args, **kwargs)
+
+        self._in_transaction(conn, body)
+
+    @staticmethod
+    def _in_transaction(conn: DBAPI2Connection, body: Callable[[Any], R]) -> R:
+        """Run ``body(cursor)`` in a transaction: commit on success, else roll back.
+
+        Matches adbapi's ``_runInteraction`` ordering — the commit is part of the
+        protected region, so a failure to commit also rolls back.
+        """
+        cursor = conn.cursor()
+        try:
+            result = body(cursor)
+            cursor.close()
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
 
     def _run(
         self,
