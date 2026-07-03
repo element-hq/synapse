@@ -817,6 +817,102 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.assertDictEqual(devices["device_keys"][local_user]["abc"], device_key_1)
         self.assertDictEqual(devices["device_keys"][local_user]["def"], device_key_2)
 
+    def test_update_signature_master_key(self) -> None:
+        """should be able to update a signature on the Master signing key with an unknown algorithm"""
+        local_user = "@boris:" + self.hs.hostname
+        master_key = {
+            # private key: HvQBbU+hc2Zr+JP1sE0XwBe1pfZZEYtJNPJLZJtS+F8
+            "user_id": local_user,
+            "usage": ["master"],
+            "keys": {
+                "ed25519:EmkqvokUn8p+vQAGZitOk4PWjp7Ukp3txV2TbMPEiBQ": "EmkqvokUn8p+vQAGZitOk4PWjp7Ukp3txV2TbMPEiBQ"
+            },
+            "signatures": {local_user: {"unknown:abcdefg": "abcdefg"}},
+        }
+        self_signing_key = {
+            # private key: 2lonYOM6xYKdEsO+6KrC766xBcHnYnim1x/4LFGF8B0
+            "user_id": local_user,
+            "usage": ["self_signing"],
+            "keys": {
+                "ed25519:nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unI9kDYcHwk": "nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unI9kDYcHwk"
+            },
+        }
+        master_signing_key = key.decode_signing_key_base64(
+            "ed25519",
+            "EmkqvokUn8p+vQAGZitOk4PWjp7Ukp3txV2TbMPEiBQ",
+            "HvQBbU+hc2Zr+JP1sE0XwBe1pfZZEYtJNPJLZJtS+F8",
+        )
+        sign.sign_json(self_signing_key, local_user, master_signing_key)
+        self.get_success(
+            self.handler.upload_signing_keys_for_user(
+                local_user,
+                {"master_key": master_key, "self_signing_key": self_signing_key},
+            )
+        )
+
+        device_key: JsonDict = {
+            "user_id": local_user,
+            "device_id": "abc",
+            "algorithms": [
+                "m.olm.curve25519-aes-sha2",
+                RoomEncryptionAlgorithms.MEGOLM_V1_AES_SHA2,
+            ],
+            "keys": {
+                "ed25519:abc": "base64+ed25519+key",
+                "curve25519:abc": "base64+curve25519+key",
+            },
+            "signatures": {local_user: {"ed25519:abc": "base64+signature"}},
+        }
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user, "abc", {"device_keys": device_key}
+            )
+        )
+
+        # update the signature and upload it
+        master_key["signatures"][local_user]["unknown:abcdefg"] = "ABCDEFG"
+        self.get_success(
+            self.handler.upload_signatures_for_device_keys(
+                local_user,
+                {
+                    local_user: {
+                        "EmkqvokUn8p+vQAGZitOk4PWjp7Ukp3txV2TbMPEiBQ": master_key
+                    }
+                },
+            )
+        )
+
+        devices = self.get_success(
+            self.handler.query_devices(
+                {"device_keys": {local_user: []}}, 0, local_user, "device123"
+            )
+        )
+        if "unsigned" in devices["master_keys"][local_user]:
+            del devices["master_keys"][local_user]["unsigned"]
+        self.assertDictEqual(devices["master_keys"][local_user], master_key)
+
+        # update the signature and upload it
+        master_key["signatures"][local_user]["unknown:abcdefg"] = "AbCdEfG"
+        self.get_success(
+            self.handler.upload_signatures_for_device_keys(
+                local_user,
+                {
+                    local_user: {
+                        "EmkqvokUn8p+vQAGZitOk4PWjp7Ukp3txV2TbMPEiBQ": master_key
+                    }
+                },
+            )
+        )
+
+        devices = self.get_success(
+            self.handler.query_devices(
+                {"device_keys": {local_user: []}}, 0, local_user, "device123"
+            )
+        )
+        if "unsigned" in devices["master_keys"][local_user]:
+            del devices["master_keys"][local_user]["unsigned"]
+        self.assertDictEqual(devices["master_keys"][local_user], master_key)
+
     def test_self_signing_key_doesnt_show_up_as_device(self) -> None:
         """signing keys should be hidden when fetching a user's devices"""
         local_user = "@boris:" + self.hs.hostname
