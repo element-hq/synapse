@@ -25,6 +25,9 @@
 //! `TID` (a row's `ctid`) round-trips through its textual `(block,offset)` form
 //! as psycopg2 does: it decodes to a `str` and a `str` binds back to it.
 //!
+//! `json` / `jsonb` columns decode to the matching Python object (dict / list /
+//! scalar), as psycopg2 does by default; see `json_from_sql`.
+//!
 //! Arrays are handled in both directions on the Python path: bound as a
 //! parameter from a `list` (the `Array` variant's `ToSql`) and decoded from an
 //! array column back into a `list` (e.g. the `text[]` cache-invalidation keys
@@ -370,12 +373,40 @@ impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
     }
 
     fn accepts(ty: &Type) -> bool {
-        // Scalars, plus arrays of a supported scalar element type (mirroring
-        // `PgValue`'s `ToSql::accepts`). The `DbValue` decoder below stays
-        // scalar-only — the Rust-native query helpers don't read array columns.
+        // Scalars, `json`/`jsonb`, plus arrays of a supported scalar element
+        // type (mirroring `PgValue`'s `ToSql::accepts`). The `DbValue` decoder
+        // below stays scalar-only — the Rust-native query helpers don't read
+        // json or array columns.
         accepts_column_type(ty)
+            || matches!(*ty, Type::JSON | Type::JSONB)
             || matches!(ty.kind(), Kind::Array(element) if accepts_column_type(element))
     }
+}
+
+/// Decode a `json` / `jsonb` column into the matching Python object (dict, list,
+/// str, int, float, bool, or `None`), as psycopg2 does by default.
+///
+/// `json` is the raw JSON text; `jsonb` is a one-byte version header (currently
+/// `1`) followed by the JSON text. The text is parsed with `serde_json` and
+/// converted to Python via `pythonize`.
+fn json_from_sql(
+    py: Python<'_>,
+    ty: &Type,
+    raw: &[u8],
+) -> Result<Py<PyAny>, Box<dyn Error + Sync + Send>> {
+    let text = if *ty == Type::JSONB {
+        match raw.split_first() {
+            Some((1, rest)) => rest,
+            Some((v, _)) => return Err(format!("unsupported jsonb version {v}").into()),
+            None => return Err("empty jsonb value".into()),
+        }
+    } else {
+        raw
+    };
+    let value: serde_json::Value = serde_json::from_slice(text)?;
+    Ok(pythonize::pythonize(py, &value)
+        .map_err(|e| format!("cannot convert json to a Python value: {e}"))?
+        .unbind())
 }
 
 impl PythonPgFromSql {
@@ -438,6 +469,7 @@ impl PythonPgFromSql {
             }
             Type::BYTEA => PyBytes::new(py, raw).into_any().unbind(),
             Type::TID => PyString::new(py, &tid_from_sql(raw)?).into_any().unbind(),
+            Type::JSON | Type::JSONB => json_from_sql(py, ty, raw)?,
             _ => {
                 // This should never happen, unless the `accepts` method is out
                 // of sync.
@@ -592,6 +624,26 @@ mod tests {
         assert!(tid_to_sql("(nope)", &mut BytesMut::new()).is_err());
         // A wire value of the wrong width is rejected on decode.
         assert!(tid_from_sql(&[0, 0, 0]).is_err());
+    }
+
+    #[test]
+    fn json_from_sql_decodes_to_python() {
+        Python::initialize();
+        Python::attach(|py| {
+            // `json`: the raw text, parsed to the matching Python object.
+            let obj = json_from_sql(py, &Type::JSON, br#"{"a": 5}"#).unwrap();
+            let bound = obj.bind(py);
+            let dict = bound.cast::<pyo3::types::PyDict>().unwrap();
+            let a = dict.get_item("a").unwrap().unwrap();
+            assert_eq!(a.extract::<i64>().unwrap(), 5);
+
+            // `jsonb`: a version byte then the text; a scalar decodes directly.
+            let obj = json_from_sql(py, &Type::JSONB, b"\x01\"hi\"").unwrap();
+            assert_eq!(obj.bind(py).extract::<String>().unwrap(), "hi");
+
+            // An unknown jsonb version is rejected rather than mis-decoded.
+            assert!(json_from_sql(py, &Type::JSONB, b"\x02null").is_err());
+        });
     }
 
     #[test]
