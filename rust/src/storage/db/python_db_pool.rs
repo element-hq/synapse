@@ -163,7 +163,10 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                         // enforcing of the concept we want to represent.
                         match func(&mut txn).now_or_never() {
                             Some(Ok(value)) => {
-                                *callback_slot.lock().unwrap() = Some(Ok(value));
+                                let mut callback_slot =  callback_slot
+                                    .lock()
+                                    .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
+                                *callback_slot = Some(Ok(value));
                                 Ok(py.None())
                             }
                             Some(Err(err)) => {
@@ -171,7 +174,10 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                                 // transaction back (and can apply its retry logic for
                                 // serialization/deadlock errors).
                                 let py_err = anyhow_to_pyerr(&err);
-                                *callback_slot.lock().unwrap() = Some(Err(err));
+                                let mut callback_slot =  callback_slot
+                                    .lock()
+                                    .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `callback_slot`: {:#}", err))?;
+                                *callback_slot = Some(Err(err));
                                 Err(py_err)
                             }
                             None => unreachable!(
