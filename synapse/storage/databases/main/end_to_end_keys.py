@@ -1821,26 +1821,21 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             txn: LoggingTransaction,
             signatures: "Iterable[SignatureListItem]",
         ) -> None:
-            self.db_pool.simple_insert_many_txn(
+            self.db_pool.simple_upsert_many_txn(
                 txn,
                 "e2e_cross_signing_signatures",
-                keys=(
-                    "user_id",
-                    "key_id",
-                    "target_user_id",
-                    "target_device_id",
-                    "signature",
-                ),
-                values=[
+                key_names=("user_id", "key_id", "target_user_id", "target_device_id"),
+                key_values=[
                     (
                         user_id,
                         item.signing_key_id,
                         item.target_user_id,
                         item.target_device_id,
-                        item.signature,
                     )
                     for item in signatures
                 ],
+                value_names=("signature",),
+                value_values=[(item.signature,) for item in signatures],
             )
 
             to_invalidate = [
