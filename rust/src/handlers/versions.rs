@@ -19,7 +19,7 @@ use pyo3::prelude::*;
 use pythonize::{pythonize, PythonizeError};
 use serde::Serialize;
 
-use crate::config::{RoomCreationPreset, SynapseHomeServerConfig};
+use crate::config::{types::RoomCreationPreset, SynapseHomeServerConfig};
 use crate::deferred::create_deferred;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
