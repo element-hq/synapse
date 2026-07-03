@@ -455,12 +455,10 @@ class ProfileWorkerStore(SQLBaseStore):
             self._check_profile_size(txn, user_id, field_name, new_value)
 
             if isinstance(self.database_engine, PostgresEngine):
-                from psycopg2.extras import Json
-
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
                 sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?::text, ?::jsonb))
                 ON CONFLICT (user_id)
                 DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
                 """
@@ -471,9 +469,11 @@ class ProfileWorkerStore(SQLBaseStore):
                         user_id.localpart,
                         user_id.to_string(),
                         field_name,
-                        # Pass as a JSON object since we have passing bytes disabled
-                        # at the database driver.
-                        Json(json.loads(canonical_value)),
+                        # The field value as a JSON document; the `?::jsonb` cast
+                        # in the query turns it into jsonb. Passed as text rather
+                        # than raw bytes, since binding bytes is disabled at the
+                        # database driver.
+                        canonical_value.decode("utf-8"),
                     ),
                 )
             else:

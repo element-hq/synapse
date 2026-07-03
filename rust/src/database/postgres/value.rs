@@ -271,6 +271,22 @@ impl ToSql for PgValue {
                 tid_to_sql(v, buf)?;
                 Ok(IsNull::No)
             }
+            (PgValue::Text(v), &Type::JSON) => {
+                // A JSON document passed as text and bound to a `json` column /
+                // `?::json` cast (e.g. a custom profile field value). `json`'s
+                // wire format is just the raw text.
+                buf.extend_from_slice(v.as_bytes());
+                Ok(IsNull::No)
+            }
+            (PgValue::Text(v), &Type::JSONB | &Type::JSONPATH) => {
+                // `jsonb` and `jsonpath` share a wire format: a one-byte version
+                // header (1) then the text. A `jsonpath` param is bound as text,
+                // e.g. `JSONB_PATH_EXISTS(fields, ?)` when reading a custom
+                // profile field.
+                buf.extend_from_slice(&[1u8]);
+                buf.extend_from_slice(v.as_bytes());
+                Ok(IsNull::No)
+            }
             (PgValue::Bytea(v), &Type::BYTEA) => {
                 bytea_to_sql(v, buf);
                 Ok(IsNull::No)
@@ -323,8 +339,10 @@ impl ToSql for PgValue {
     }
 
     fn accepts(ty: &Type) -> bool {
-        // Scalars, plus arrays of a supported scalar element type.
+        // Scalars, `json`/`jsonb`/`jsonpath` (a `Text` document binds to these),
+        // plus arrays of a supported scalar element type.
         accepts_column_type(ty)
+            || matches!(*ty, Type::JSON | Type::JSONB | Type::JSONPATH)
             || matches!(ty.kind(), Kind::Array(element) if accepts_column_type(element))
     }
 
@@ -690,6 +708,20 @@ mod tests {
                 other => panic!("expected Array, got {other:?}"),
             }
         });
+    }
+
+    #[test]
+    fn to_sql_encodes_text_as_json_and_jsonb() {
+        // A JSON document passed as text binds to a `json` column verbatim, and
+        // to `jsonb` with the one-byte version header prepended.
+        assert_eq!(
+            encode(&PgValue::Text("[1, 2]".into()), &Type::JSON).0,
+            b"[1, 2]".to_vec()
+        );
+        assert_eq!(
+            encode(&PgValue::Text("[1, 2]".into()), &Type::JSONB).0,
+            b"\x01[1, 2]".to_vec()
+        );
     }
 
     #[test]
