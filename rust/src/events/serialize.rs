@@ -735,8 +735,8 @@ fn unescape(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '\\' {
             match chars.peek() {
-                Some('\\') | Some('.') => {
-                    out.push(*chars.peek().expect("just peeked"));
+                Some(&c @ ('\\' | '.')) => {
+                    out.push(c);
                     chars.next();
                 }
                 _ => out.push('\\'),
