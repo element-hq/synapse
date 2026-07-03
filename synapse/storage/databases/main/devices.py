@@ -2019,7 +2019,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn,
             table="device_lists_remote_extremeties",
             keyvalues={"user_id": user_id},
-            values={"stream_id": stream_id},
+            # `stream_id` is a TEXT column, so store it as a string (this method
+            # takes an int) rather than relying on the driver to coerce it.
+            values={"stream_id": str(stream_id)},
         )
 
     async def add_device_change_to_streams(
