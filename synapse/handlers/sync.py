@@ -2230,7 +2230,7 @@ class SyncHandler:
 
             per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
             for field_name in profile_fields:
-                if profile_data.get(field_name):
+                if field_name in profile_data.keys():
                     per_user_updates[field_name] = profile_data[field_name]
 
             if per_user_updates:
@@ -2405,8 +2405,9 @@ class SyncHandler:
                         if other_user_id in joined_room_user_ids
                         else set(updated_user_fields.get(other_user_id, []))
                     )
+                    fields = set(profile_data.keys()).intersection(fields)
                     for field_name in fields:
-                        per_user_updates[field_name] = profile_data.get(field_name)
+                        per_user_updates[field_name] = profile_data[field_name]
 
                 if per_user_updates:
                     profile_updates[other_user_id] = per_user_updates

@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import Collection, ContextManager
+from typing import Collection, ContextManager, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -43,6 +43,7 @@ from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import (
     JsonDict,
+    JsonValue,
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
@@ -1725,6 +1726,97 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 "@federateduser2:federatedhs"
                 in incremental_result.profile_updates.keys()
             )
+
+    @parameterized.expand(
+        [
+            [True, True],
+            [False, False],
+            [True, False],
+            [False, True],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_sync_profile_updates_works_correctly_with_falsey_values(
+        self,
+        is_initial: bool,
+        is_lazy: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled a sync response correctly includes falsey
+        profile field values.
+        """
+        requester = create_requester(self.user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["falseyvaluefield"]},
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        for value in [False, 0, "", [], {}, None]:
+            if is_initial:
+                self.get_success(
+                    self.profile_handler.set_field(
+                        target_user=UserID.from_string(self.other_user),
+                        requester=create_requester(self.other_user),
+                        field_name="falseyvaluefield",
+                        new_value=cast(JsonValue | dict[str, JsonValue], value),
+                    )
+                )
+            initial_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            if is_initial:
+                assert initial_result.profile_updates["@other_user:test"] is not None
+                self.assertEqual(
+                    initial_result.profile_updates["@other_user:test"][
+                        "falseyvaluefield"
+                    ],
+                    value,
+                )
+            else:
+                self.get_success(
+                    self.profile_handler.set_field(
+                        target_user=UserID.from_string(self.other_user),
+                        requester=create_requester(self.other_user),
+                        field_name="falseyvaluefield",
+                        new_value=cast(JsonValue | dict[str, JsonValue], value),
+                    )
+                )
+                incremental_result = self.get_success(
+                    self.sync_handler.wait_for_sync_for_user(
+                        requester,
+                        since_token=initial_result.next_batch,
+                        sync_config=generate_sync_config(
+                            user_id=self.user,
+                            filter_collection=FilterCollection(
+                                hs=self.hs,
+                                filter_json=filter_json,
+                            ),
+                        ),
+                        request_key=generate_request_key(),
+                    )
+                )
+                assert (
+                    incremental_result.profile_updates["@other_user:test"] is not None
+                )
+                self.assertEqual(
+                    incremental_result.profile_updates["@other_user:test"][
+                        "falseyvaluefield"
+                    ],
+                    value,
+                )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_lazy_loading_cache_filters_recently_sent_profiles_and_fields(
