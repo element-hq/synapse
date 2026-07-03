@@ -94,22 +94,49 @@ class RustConnectionPool:
         hook itself, so it needs no clock and stays trivially testable.
         """
         self._reactor = reactor
-        self._pool = postgres.ConnectionPool(
-            dsn,
-            threads,
-            synchronous_commit=synchronous_commit,
-            statement_timeout_ms=statement_timeout_ms,
-        )
+        self._dsn = dsn
+        self._synchronous_commit = synchronous_commit
+        self._statement_timeout_ms = statement_timeout_ms
+        self._threads = threads
+        self._pool: Any = self._open_pool()
         self.threadpool = ThreadPool(minthreads=1, maxthreads=threads, name=name)
         self.running = False
         # Connections handed out by `connect()` for direct synchronous use, one
         # cached per thread (adbapi's model). Closed together with the pool.
         self._connections: dict[int, DBAPI2Connection] = {}
+        # How a connection is obtained from the pool (adbapi interface). Held as
+        # a swappable attribute so tests can replace it to simulate a database
+        # outage; called as `connectionFactory(self)`.
+        self.connectionFactory = self._default_connection_factory
+
+    def _open_pool(self) -> Any:
+        """Open a fresh native Rust connection pool from the stored config."""
+        return postgres.ConnectionPool(
+            self._dsn,
+            self._threads,
+            synchronous_commit=self._synchronous_commit,
+            statement_timeout_ms=self._statement_timeout_ms,
+        )
+
+    def _default_connection_factory(
+        self, _pool: "RustConnectionPool"
+    ) -> DBAPI2Connection:
+        # Check a connection out of the native pool and wrap it in the DBAPI2
+        # adapter. `owns_pool=False`: the pool is shared and outlives the
+        # checkout. Mirrors `adbapi.ConnectionPool.connectionFactory`.
+        return DBAPI2Connection(self._pool.connect(), pool=self._pool)
 
     def start(self) -> None:
-        """Start the thread pool. Idempotent."""
+        """Start the thread pool. Idempotent.
+
+        Reopens the native connection pool if a previous :meth:`close` shut it
+        down, so a closed pool can be brought back up (as the database-outage
+        tests do with a `close()`/`start()` cycle).
+        """
         if self.running:
             return
+        if self._pool is None:
+            self._pool = self._open_pool()
         self.threadpool.start()
         self.running = True
 
@@ -119,7 +146,7 @@ class RustConnectionPool:
         Stops the thread pool first (waiting for in-flight work to finish, which
         returns its connection to the pool), then closes the Rust pool so its
         server connections are dropped promptly rather than lingering until
-        garbage collection.
+        garbage collection. The pool can be reopened by a later :meth:`start`.
         """
         if not self.running:
             return
@@ -128,7 +155,9 @@ class RustConnectionPool:
         for conn in self._connections.values():
             conn.close()
         self._connections.clear()
-        self._pool.close()
+        if self._pool is not None:
+            self._pool.close()
+            self._pool = None
 
     def runWithConnection(  # noqa: N802 (implements adbapi's interface)
         self,
@@ -205,7 +234,7 @@ class RustConnectionPool:
         tid = self.threadID()
         conn = self._connections.get(tid)
         if conn is None or conn.is_closed():
-            conn = DBAPI2Connection(self._pool.connect(), pool=self._pool)
+            conn = self.connectionFactory(self)
             self._connections[tid] = conn
         return conn
 
@@ -252,10 +281,12 @@ class RustConnectionPool:
         A checkout failure surfaces as the raised exception (→ errback) before
         there is any connection to release.
         """
-        # Pass the pool so `func` can `reconnect` (checking out a fresh
-        # connection); `owns_pool=False` since the pool is shared and outlives
-        # this checkout.
-        conn = DBAPI2Connection(self._pool.connect(), pool=self._pool)
+        # Check a connection out via `connectionFactory` (see
+        # `_default_connection_factory`); the wrapper keeps the pool so `func`
+        # can `reconnect`. Routing through the factory lets tests swap it to
+        # simulate a checkout failure. A checkout failure surfaces as the raised
+        # exception (→ errback) before there is any connection to release.
+        conn = self.connectionFactory(self)
         try:
             return func(conn, *args, **kwargs)
         finally:
