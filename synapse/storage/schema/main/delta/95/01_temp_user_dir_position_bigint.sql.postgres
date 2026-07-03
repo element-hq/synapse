@@ -1,0 +1,21 @@
+--
+-- This file is licensed under the Affero General Public License (AGPL) version 3.
+--
+-- Copyright (C) 2026 Element Creations, Ltd
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- See the GNU Affero General Public License for more details:
+-- <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+-- The user-directory rebuild's staging table changed its `position` column
+-- from TEXT to BIGINT, but the table is created with IF NOT EXISTS and only
+-- dropped when the populate_user_directory background update completes, so a
+-- server upgrading mid-rebuild keeps the old TEXT column — which the native
+-- Rust driver's strictly-typed binding can neither read nor write. Upgrade it
+-- in place; a no-op for servers without the table (i.e. almost all of them).
+ALTER TABLE IF EXISTS _temp_populate_user_directory_position
+    ALTER COLUMN position TYPE BIGINT USING position::bigint;
