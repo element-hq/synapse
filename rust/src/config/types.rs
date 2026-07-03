@@ -15,7 +15,7 @@
 
 use std::str::FromStr;
 
-use pyo3::{exceptions::PyRuntimeError, prelude::*};
+use pyo3::{exceptions::PyAssertionError, prelude::*};
 
 /// The presets available when creating a Matrix room according to the Matrix spec:
 ///
@@ -42,7 +42,7 @@ impl FromStr for RoomCreationPreset {
             "public_chat" => RoomCreationPreset::PublicChat,
             "trusted_private_chat" => RoomCreationPreset::TrustedPrivateChat,
             other => {
-                return Err(PyRuntimeError::new_err(format!(
+                return Err(PyAssertionError::new_err(format!(
                     "Unknown variant {other:?} does not translate to `RoomCreationPreset`. \
                      This is a Synapse programming error."
                 )))

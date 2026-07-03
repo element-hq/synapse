@@ -31,7 +31,7 @@ use anyhow::Context;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
 use pyo3::{
-    exceptions::{PyRuntimeError, PyTypeError},
+    exceptions::{PyAssertionError, PyRuntimeError, PyTypeError},
     intern,
     prelude::*,
     types::{PyBool, PyCFunction, PyFloat, PyInt, PyList, PyString},
@@ -181,7 +181,7 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                                 Err(py_err)
                             }
                             None => {
-                                Err(PyRuntimeError::new_err(
+                                Err(PyAssertionError::new_err(
                                     "The `run_interaction` transaction callback future returned `Poll::Pending`, \
                                     but we expect Synapse Python database work to resolve synchronously. \
                                     This is a Synapse programming error: genuine async work is \
