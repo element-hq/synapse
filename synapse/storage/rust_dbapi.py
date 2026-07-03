@@ -53,14 +53,30 @@ def _quote_dsn_value(value: Any) -> str:
     return s
 
 
+# psycopg2 accepts a few connection kwargs that are *not* libpq keywords and
+# translates them itself. The Rust pool instead parses a strict libpq DSN
+# (via ``tokio_postgres``), which only knows the real keywords, so we map the
+# aliases here. ``database`` -> ``dbname`` is the important one: Synapse's
+# sample config and most real deployments spell the database name ``database``.
+_PSYCOPG2_KEY_ALIASES = {"database": "dbname"}
+
+
 def build_dsn(params: Mapping[str, Any]) -> str:
     """Build a libpq keyword/value DSN from psycopg2-style connection kwargs.
 
-    Synapse's database `args` are libpq-compatible keywords (``dbname``,
-    ``user``, ``host``, ``port``, ``password``, …); the Rust pool takes a DSN
-    string rather than kwargs, so join them into one.
+    Synapse's database `args` are psycopg2 connection kwargs — mostly libpq
+    keywords (``user``, ``host``, ``port``, ``password``, …), but ``database``
+    is a psycopg2 alias for libpq's ``dbname`` (see ``_PSYCOPG2_KEY_ALIASES``).
+    The Rust pool takes a strict libpq DSN string rather than kwargs, so join
+    them into one, mapping any aliases to their real keyword. ``None`` values
+    are skipped, matching psycopg2's handling of `None` kwargs (fall back to the
+    libpq default).
     """
-    return " ".join(f"{key}={_quote_dsn_value(value)}" for key, value in params.items())
+    return " ".join(
+        f"{_PSYCOPG2_KEY_ALIASES.get(key, key)}={_quote_dsn_value(value)}"
+        for key, value in params.items()
+        if value is not None
+    )
 
 
 def connect(

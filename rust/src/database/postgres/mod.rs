@@ -39,27 +39,42 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 }
 
 /// Fix up a DSN to ensure it has a host, using libpq's default host if
-/// necessary.
+/// necessary, and fill in libpq's environment defaults for the fields
+/// [`tokio_postgres`] doesn't read from the environment.
 ///
-/// [`tokio_postgres`] has a different default host than libpq, which is what
-/// Synapse previously used (and is what e.g. `psql` uses). libpq's default host
-/// is configurable, so when the DSN omits a host we ask libpq what its default
-/// would be and use that instead (see [`libpq::default_host`]).
-pub(crate) fn fixup_default_host(dsn: &str) -> Result<tokio_postgres::Config, Error> {
+/// [`tokio_postgres`] parses only the DSN string: unlike libpq (which is what
+/// Synapse previously used, and what e.g. `psql` uses) it does not consult
+/// `PGHOST` / `PGUSER` / `PGPASSWORD` or the compiled-in defaults. So when the
+/// DSN omits one of these we fill it the way libpq would, so a config that
+/// relied on those environment variables (as Synapse's test setup does)
+/// connects the same way it did under psycopg2.
+pub(crate) fn fixup_config_defaults(dsn: &str) -> Result<tokio_postgres::Config, Error> {
     let mut config = dsn.parse::<tokio_postgres::Config>()?;
 
-    // `tokio_postgres` parses only the DSN string (it does not consult `PGHOST`
-    // or the compiled-in default), so an empty host list means the DSN really
-    // omitted the host. A DSN that gives a `hostaddr` instead of a `host` is
-    // still connectable as-is, so leave it alone too — injecting a default host
-    // there would just confuse TLS/SNI.
-    if !config.get_hosts().is_empty() || !config.get_hostaddrs().is_empty() {
-        return Ok(config);
+    // Host. A DSN that gives a `hostaddr` instead of a `host` is still
+    // connectable as-is, so leave it alone too — injecting a default host there
+    // would just confuse TLS/SNI. Otherwise resolve libpq's default host
+    // without connecting (see `libpq::default_host`).
+    if config.get_hosts().is_empty() && config.get_hostaddrs().is_empty() {
+        config.host(&libpq::default_host()?);
     }
 
-    // Resolve libpq's default host without connecting (see `libpq::default_host`).
-    let host = libpq::default_host()?;
-    config.host(&host);
+    // User: libpq falls back to `PGUSER`, then the OS user.
+    if config.get_user().is_none() {
+        if let Some(user) = std::env::var("PGUSER")
+            .ok()
+            .or_else(|| std::env::var("USER").ok())
+        {
+            config.user(&user);
+        }
+    }
+
+    // Password: libpq falls back to `PGPASSWORD`.
+    if config.get_password().is_none() {
+        if let Ok(password) = std::env::var("PGPASSWORD") {
+            config.password(&password);
+        }
+    }
 
     Ok(config)
 }
