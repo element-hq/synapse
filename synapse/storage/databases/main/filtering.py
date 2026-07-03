@@ -154,7 +154,9 @@ class FilteringWorkerStore(SQLBaseStore):
         self, user_id: UserID, filter_id: int | str
     ) -> JsonMapping:
         # filter_id is BIGINT UNSIGNED, so if it isn't a number, fail
-        # with a coherent error message rather than 500 M_UNKNOWN.
+        # with a coherent error message rather than 500 M_UNKNOWN. Bind the int
+        # (the value often arrives as a string from the request) so it matches
+        # the BIGINT column rather than relying on the driver to coerce it.
         try:
             filter_id = int(filter_id)
         except ValueError:
