@@ -110,8 +110,8 @@ pub struct SerializeEventConfig {
     /// The entity requesting the event. Used to gate sender-only fields such as
     /// `transaction_id` and `delay_id`.
     requester: Option<Requester>,
-    /// If set, only include these field paths in the output. An empty list
-    /// returns an empty event; `None` returns all fields.
+    /// If set, only include these field paths in the output. An empty list or
+    /// `None` returns all fields.
     ///
     /// The fields can be "dotted" fields, e.g. `content.body`.
     event_field_allowlist: Option<Vec<String>>,
