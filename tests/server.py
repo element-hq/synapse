@@ -255,7 +255,7 @@ class FakeChannel:
         def _produce() -> None:
             if self._producer:
                 self._producer.resumeProducing()
-                self._reactor.callLater(0.1, _produce)
+                self._reactor.callLater(0.0, _produce)
 
         if not streaming:
             self._reactor.callLater(0.0, _produce)
@@ -940,7 +940,7 @@ class FakeTransport:
             # mypy ignored here because:
             #   - this is part of the test infrastructure (outside of Synapse) so tracking
             #     these calls for for homeserver shutdown doesn't make sense.
-            d.addCallback(lambda x: self._reactor.callLater(0.1, _produce))  # type: ignore[call-later-not-tracked,call-overload]
+            d.addCallback(lambda x: self._reactor.callLater(0.0, _produce))  # type: ignore[call-later-not-tracked,call-overload]
 
         if not streaming:
             # mypy ignored here because:

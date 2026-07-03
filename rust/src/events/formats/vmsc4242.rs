@@ -33,7 +33,7 @@ use pyo3::PyResult;
 use serde::{Deserialize, Serialize};
 
 use crate::events::constants::event_type::M_ROOM_CREATE;
-use crate::events::formats::v4::get_room_id_for_optional_room_id;
+use crate::events::formats::v4::{get_room_id_for_optional_room_id, validate_optional_room_id};
 use crate::events::formats::EventCommonFields;
 use crate::events::Event;
 use crate::json::AllowMissing;
@@ -61,6 +61,8 @@ impl EventFormatVMSC4242 {
         if common_fields.other_fields.contains_key("event_id") {
             bail!("MSC4242 events must not have an explicit event_id");
         }
+
+        validate_optional_room_id(self.room_id.as_ref_opt(), common_fields)?;
 
         Ok(())
     }

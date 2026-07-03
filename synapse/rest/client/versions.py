@@ -191,6 +191,8 @@ class VersionsRestServlet(RestServlet):
                     ),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
+                    # MSC4143: Matrix RTC transports (LiveKit backend)
+                    "org.matrix.msc4143": self.config.experimental.msc4143_enabled,
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
                     # Arbitrary key-value profile fields.
@@ -208,6 +210,7 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4380.stable": True,
                     # MSC4445: Sync timeline order
                     "org.matrix.msc4445.initial_sync_timeline_topological_ordering": True,
+                    "uk.timedout.msc4491.create_room_invite_reasons": self.config.experimental.msc4491_enabled,
                 },
             },
         )

@@ -363,6 +363,115 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         _mark_read(cutoff_event_id)
         _assert_count(0)
 
+    def test_count_aggregation_receipt_before_first_rotation(self) -> None:
+        """
+        Regression test: reading a highlight before the first rotation must not
+        permanently inflate the badge count.
+
+        Highlights survive the receipt-triggered DELETE (highlight=1), so if
+        last_receipt_stream_ordering is NULL when rotation creates the summary
+        row, the badge query re-counts them forever.
+        """
+        user_id, token, _, other_token, room_id = self._create_users_and_room()
+
+        def _assert_badge(expected: int) -> None:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            self.assertEqual(counts.get(room_id, 0), expected)
+
+        def _send(highlight: bool = False) -> str:
+            return self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content={"msgtype": "m.text", "body": user_id if highlight else "msg"},
+                tok=other_token,
+            )["event_id"]
+
+        def _read(event_id: str) -> None:
+            self.get_success(
+                self.store.insert_receipt(
+                    room_id,
+                    "m.read",
+                    user_id=user_id,
+                    event_ids=[event_id],
+                    thread_id=None,
+                    data={},
+                )
+            )
+
+        # Highlight arrives; user reads it before any rotation (no summary row exists).
+        _read(_send(highlight=True))
+        # One new event after the receipt makes stream_ordering > max_clause true.
+        _send()
+        # Without the fix: badge = 2 (highlight re-counted). With fix: badge = 1.
+        self.get_success(self.store._rotate_notifs())
+        _assert_badge(1)
+
+    def test_count_aggregation_receipt_before_first_rotation_in_thread(self) -> None:
+        """
+        Same regression as test_count_aggregation_receipt_before_first_rotation,
+        but for a highlight inside a thread cleared by an unthreaded receipt.
+
+        The fix must pre-populate event_push_summary for every thread with
+        pending push actions, not just MAIN_TIMELINE.
+        """
+        user_id, token, _, other_token, room_id = self._create_users_and_room()
+
+        def _assert_badge(expected: int) -> None:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            self.assertEqual(counts.get(room_id, 0), expected)
+
+        def _send(thread_root: str | None = None, highlight: bool = False) -> str:
+            content: JsonDict = {
+                "msgtype": "m.text",
+                "body": user_id if highlight else "msg",
+            }
+            if thread_root is not None:
+                content["m.relates_to"] = {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root,
+                }
+            return self.helper.send_event(
+                room_id,
+                type="m.room.message",
+                content=content,
+                tok=other_token,
+            )["event_id"]
+
+        def _read(event_id: str) -> None:
+            self.get_success(
+                self.store.insert_receipt(
+                    room_id,
+                    "m.read",
+                    user_id=user_id,
+                    event_ids=[event_id],
+                    thread_id=None,
+                    data={},
+                )
+            )
+
+        # A thread root, then a highlight inside that thread.
+        thread_root = _send()
+        thread_highlight = _send(thread_root=thread_root, highlight=True)
+        # User reads everything with an unthreaded receipt before any rotation.
+        _read(thread_highlight)
+        # A new event in the same thread makes stream_ordering > max_clause true.
+        _send(thread_root=thread_root)
+        # Without the fix: badge = 2 (thread highlight re-counted). With: badge = 1.
+        self.get_success(self.store._rotate_notifs())
+        _assert_badge(1)
+
     def test_count_aggregation_threads(self) -> None:
         """
         This is essentially the same test as test_count_aggregation, but adds

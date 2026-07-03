@@ -37,7 +37,7 @@ use crate::{
     json::AllowMissing,
 };
 
-/// Version-specific fields for room version 11.
+/// Version-specific fields for room version 12+.
 #[derive(Serialize, Deserialize)]
 pub struct EventFormatV4 {
     #[serde(
@@ -56,6 +56,8 @@ impl EventFormatV4 {
         if common_fields.other_fields.contains_key("event_id") {
             bail!("v4 events must not have an explicit event_id");
         }
+
+        validate_optional_room_id(self.room_id.as_ref_opt(), common_fields)?;
 
         Ok(())
     }
