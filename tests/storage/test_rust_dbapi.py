@@ -58,6 +58,22 @@ class BuildDsnTestCase(unittest.TestCase):
             "dbname=synapse user=u host=db port=5432",
         )
 
+    def test_maps_database_alias_to_dbname(self) -> None:
+        # psycopg2 accepts `database` as an alias for libpq's `dbname` (Synapse's
+        # sample config and most deployments use it); the strict libpq DSN the
+        # Rust pool parses only knows `dbname`, so it must be translated.
+        self.assertEqual(
+            rust_dbapi.build_dsn({"database": "synapse", "user": "u"}),
+            "dbname=synapse user=u",
+        )
+
+    def test_skips_none_values(self) -> None:
+        # `None` kwargs (unset config) are omitted, as psycopg2 treats them.
+        self.assertEqual(
+            rust_dbapi.build_dsn({"dbname": "d", "host": None, "port": None}),
+            "dbname=d",
+        )
+
     def test_quotes_values_needing_it(self) -> None:
         # Spaces / quotes / backslashes get single-quoted and escaped; empty → ''.
         self.assertEqual(
