@@ -29,6 +29,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use futures::FutureExt;
+use once_cell::sync::OnceCell;
 use pyo3::{
     exceptions::{PyRuntimeError, PyTypeError},
     intern,
@@ -40,6 +41,41 @@ use crate::deferred::run_python_awaitable;
 use crate::storage::db::{
     DatabasePool, DbRow, DbValue, ErasedInteraction, ErasedResult, Transaction,
 };
+
+/// A reference to the `synapse.storage.engines` module.
+static STORAGE_ENGINES_MODULE: OnceCell<Py<PyAny>> = OnceCell::new();
+
+/// Access to the `synapse.storage.engines` module.
+fn storage_engines_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    Ok(STORAGE_ENGINES_MODULE
+        .get_or_try_init(|| py.import("synapse.storage.engines").map(Into::into))?
+        .bind(py))
+}
+
+static SQLITE3_ENGINE_CLASS: OnceCell<Py<PyAny>> = OnceCell::new();
+static POSTGRES_ENGINE_CLASS: OnceCell<Py<PyAny>> = OnceCell::new();
+
+/// Access to the `Sqlite3Engine` class
+fn sqlite3_engine_class(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    Ok(SQLITE3_ENGINE_CLASS
+        .get_or_try_init(|| {
+            storage_engines_module(py)?
+                .getattr("Sqlite3Engine")
+                .map(Into::into)
+        })?
+        .bind(py))
+}
+
+/// Access to the `PostgresEngine` class
+fn postgres_engine_class(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
+    Ok(POSTGRES_ENGINE_CLASS
+        .get_or_try_init(|| {
+            storage_engines_module(py)?
+                .getattr("PostgresEngine")
+                .map(Into::into)
+        })?
+        .bind(py))
+}
 
 /// The database engines we support in the Python side of Synapse
 #[derive(Copy, Clone, Debug)]
@@ -201,23 +237,21 @@ fn anyhow_to_pyerr(err: &anyhow::Error) -> PyErr {
 
 /// Given a Python `LoggingTransaction`, figures out the database engine that backs it
 fn detect_engine(txn_py: &Bound<'_, PyAny>) -> PyResult<DatabaseEngine> {
-    let name = txn_py
-        .getattr("database_engine")
-        .expect("`LoggingTransaction` must have `database_engine` attr")
-        .get_type()
-        .name()
-        .expect("`database_engine` type must have a name")
-        .to_str()
-        .expect("`database_engine` type name must be valid UTF-8")
-        .to_owned();
+    let py = txn_py.py();
+    let database_engine = txn_py.getattr(intern!(py, "database_engine"))?;
 
-    Ok(match name.as_str() {
-        "PostgresEngine" => DatabaseEngine::Postgres,
-        "Sqlite3Engine" => DatabaseEngine::Sqlite,
-        other => unimplemented!(
-            "Unknown database engine {other:?}. This is a Synapse programming error."
-        ),
-    })
+    // Compare against the actual engine classes imported from Python (the PyO3
+    // equivalent of an `isinstance` check).
+    if database_engine.is_instance(postgres_engine_class(py)?)? {
+        Ok(DatabaseEngine::Postgres)
+    } else if database_engine.is_instance(sqlite3_engine_class(py)?)? {
+        Ok(DatabaseEngine::Sqlite)
+    } else {
+        Err(PyTypeError::new_err(format!(
+            "Unknown database engine {}. This is a Synapse programming error.",
+            database_engine.get_type().name()?
+        )))
+    }
 }
 
 /// Wrapper for a `LoggingTransaction` from the Python side of Synapse.
