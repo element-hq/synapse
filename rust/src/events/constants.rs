@@ -94,6 +94,10 @@ pub mod unsigned_field {
     pub const KNOCK_ROOM_STATE: &str = "knock_room_state";
     /// Unsigned field: m.relations
     pub const M_RELATIONS: &str = "m.relations";
+    /// Unsigned field: replaces_state
+    pub const REPLACES_STATE: &str = "replaces_state";
+    /// Unsigned field: prev_content
+    pub const PREV_CONTENT: &str = "prev_content";
 }
 
 /// Relation types (the `rel_type` of an `m.relates_to`).

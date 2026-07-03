@@ -40,7 +40,7 @@ use serde_json::{Map, Number, Value};
 use crate::{
     events::{
         constants::{
-            event_field::{CONTENT, EVENT_ID, ROOM_ID, SENDER, UNSIGNED},
+            event_field::{self, CONTENT, EVENT_ID, ROOM_ID, SENDER, UNSIGNED},
             event_type::{M_ROOM_CREATE, M_ROOM_REDACTION},
             redaction_field::REDACTS,
             relation_type, unsigned_field,
@@ -57,23 +57,23 @@ const USER_ID: &str = "user_id";
 
 /// Keys dropped by the v2 client event format.
 const V2_DROP_KEYS: [&str; 7] = [
-    "auth_events",
-    "prev_events",
-    "hashes",
-    "signatures",
-    "depth",
-    "origin",
-    "prev_state",
+    event_field::AUTH_EVENTS,
+    event_field::PREV_EVENTS,
+    event_field::HASHES,
+    event_field::SIGNATURES,
+    event_field::DEPTH,
+    event_field::ORIGIN,
+    event_field::PREV_STATE,
 ];
 
 /// Keys copied from `unsigned` to the top level by the v1 client event format.
 const V1_COPY_KEYS: [&str; 6] = [
-    "age",
-    "redacted_because",
-    "replaces_state",
-    "prev_content",
-    "invite_room_state",
-    "knock_room_state",
+    unsigned_field::AGE,
+    unsigned_field::REDACTED_BECAUSE,
+    unsigned_field::REPLACES_STATE,
+    unsigned_field::PREV_CONTENT,
+    unsigned_field::INVITE_ROOM_STATE,
+    unsigned_field::KNOCK_ROOM_STATE,
 ];
 
 /// The format used to convert an event from its federation shape to the shape
