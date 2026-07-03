@@ -180,12 +180,14 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                                 *callback_slot = Some(Err(err));
                                 Err(py_err)
                             }
-                            None => unreachable!(
-                                "The `run_interaction` transaction callback future returned `Poll::Pending`, \
-                                but we expect Synapse Python database work to resolve synchronously. \
-                                This is a Synapse programming error: genuine async work is \
-                                not supported here.",
-                            ),
+                            None => {
+                                Err(PyRuntimeError::new_err(
+                                    "The `run_interaction` transaction callback future returned `Poll::Pending`, \
+                                    but we expect Synapse Python database work to resolve synchronously. \
+                                    This is a Synapse programming error: genuine async work is \
+                                    not supported here.",
+                                ))
+                            }
                         }
                     },
                 )?
