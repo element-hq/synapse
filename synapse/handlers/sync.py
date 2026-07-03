@@ -2329,12 +2329,21 @@ class SyncHandler:
 
         # Process field updates and users who have events in the sync response
         if users:
-            user_fields: dict[str, set[str]] = {}
+            updated_user_fields: dict[str, set[str]] = {}
             # Set fields from updates
             for update in updates:
-                if not update.field_name or update.user_id not in users:
+                # Skip the update if there is no field update (a joined or left room
+                # action), the client didn't ask for this field, or we're not
+                # interested in this user.
+                if (
+                    not update.field_name
+                    or update.field_name not in profile_fields
+                    or update.user_id not in users
+                ):
                     continue
-                user_fields.setdefault(update.user_id, set()).add(update.field_name)
+                updated_user_fields.setdefault(update.user_id, set()).add(
+                    update.field_name
+                )
 
             # Note: there's a small race condition here where a profile update may
             # occur between fetching `now_token` above and reaching this step. In
@@ -2357,10 +2366,11 @@ class SyncHandler:
 
                 per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
                 if include_users and other_user_id in include_users:
-                    # Include the full profile as this user has events in
-                    # a lazy loaded sync response, except for fields we've recently
-                    # sent in a previous lazy loaded sync response
-                    for field_name in profile_data.keys():
+                    # Include all the fields the client asked for, as this user
+                    # has events in a lazy loaded sync response, except for
+                    # fields we've recently sent in a previous lazy loaded sync response
+                    fields = set(profile_data.keys()).intersection(profile_fields)
+                    for field_name in fields:
                         cache_key = (
                             sync_config.user.to_string(),
                             sync_config.device_id,
@@ -2388,12 +2398,15 @@ class SyncHandler:
                                     cast(str, profile_data.get(field_name)),
                                 )
                 else:
-                    # Include only the diff, unless the user recently joined
-                    # We don't use a cache here as changes are always sent
+                    # Include only the diff, unless the user recently joined,
+                    # then send all the fields the client asked for.
+                    # We don't use a cache here as for non-lazy sync we always
+                    # send changes and/or fields the client asked for, if relevant
+                    # as above joined condition.
                     fields = (
-                        list(profile_data.keys())
+                        profile_fields
                         if other_user_id in joined_room_user_ids
-                        else user_fields.get(other_user_id, [])
+                        else set(updated_user_fields.get(other_user_id, []))
                     )
                     for field_name in fields:
                         per_user_updates[field_name] = profile_data.get(field_name)
