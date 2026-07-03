@@ -125,9 +125,11 @@ pub trait DatabasePoolExt: DatabasePool {
 
         async move {
             let boxed = self.run_interaction_erased(name, erased).await?;
-            Ok(*boxed.downcast::<R>().expect(
-                "run_interaction return type mismatch (this is a Synapse programming error)",
-            ))
+            boxed.downcast::<R>().map(|b| *b).map_err(|_| {
+                anyhow::anyhow!(
+                    "run_interaction return type mismatch (this is a Synapse programming error)"
+                )
+            })
         }
     }
 }
