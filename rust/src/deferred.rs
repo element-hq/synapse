@@ -158,7 +158,13 @@ where
             None,
             move |args, _kwargs| -> PyResult<Py<PyAny>> {
                 let value = args.get_item(0)?.unbind();
-                if let Some(tx) = success_sender.lock().unwrap().take() {
+                if let Some(tx) = success_sender
+                    .lock()
+                    .map_err(|err| {
+                        anyhow::anyhow!("Failed to acquire lock on `success_sender`: {:#}", err)
+                    })?
+                    .take()
+                {
                     let _ = tx.send(Ok(value));
                 }
                 Ok(args.py().None())
@@ -173,7 +179,13 @@ where
             None,
             move |args, _kwargs| -> PyResult<Py<PyAny>> {
                 let err = failure_to_pyerr(&args.get_item(0)?);
-                if let Some(tx) = error_sender.lock().unwrap().take() {
+                if let Some(tx) = error_sender
+                    .lock()
+                    .map_err(|err| {
+                        anyhow::anyhow!("Failed to acquire lock on `error_sender`: {:#}", err)
+                    })?
+                    .take()
+                {
                     let _ = tx.send(Err(err));
                 }
                 Ok(args.py().None())
