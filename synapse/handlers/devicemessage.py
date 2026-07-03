@@ -23,8 +23,8 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
+import attr
 from canonicaljson import encode_canonical_json
-from pydantic import StrictStr
 
 from synapse.api.constants import (
     MAX_TO_DEVICE_CONTENT_SIZE,
@@ -54,9 +54,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
 class DehydratedEvents:
     events: list[JsonDict]
-    stream_id: StrictStr
+    stream_id: str
     limited: bool
 
 
@@ -434,12 +435,11 @@ class DeviceMessageHandler:
             user_id,
         )
 
-        ret = DehydratedEvents()
-        ret.events = messages
-        ret.stream_id = f"d{stream_id}"
-        ret.limited = stream_id != to_token
-
-        return ret
+        return DehydratedEvents(
+            events=messages,
+            stream_id=f"d{stream_id}",
+            limited=(stream_id != to_token),
+        )
 
 
 def split_device_messages_into_edus(
