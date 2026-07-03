@@ -15,6 +15,7 @@
 from typing import Any
 
 from synapse.storage.engines import PostgresEngine, Psycopg2Engine, create_engine
+from synapse.storage.engines._base import IsolationLevel
 from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.synapse_rust.database import postgres
 
@@ -81,9 +82,40 @@ class RustPostgresEngineTestCase(unittest.TestCase):
         # Neither is an unrelated exception.
         self.assertFalse(self.engine.is_deadlock(ValueError("unrelated")))
 
-    def test_isolation_level_override_not_yet_supported(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            self.engine.attempt_to_set_isolation_level(object(), None)
+    def test_isolation_level_sets_session_characteristics(self) -> None:
+        # The shim has no psycopg2 `set_isolation_level`, so the engine issues a
+        # `SET SESSION CHARACTERISTICS` statement (and commits it) instead. Check
+        # the level mapping, and that `None` resets to the default (REPEATABLE
+        # READ) — see `attempt_to_set_isolation_level`.
+        executed: list[str] = []
+
+        class FakeCursor:
+            def execute(self, sql: str) -> None:
+                executed.append(sql)
+
+            def close(self) -> None:
+                pass
+
+        class FakeConn:
+            def cursor(self) -> "FakeCursor":
+                return FakeCursor()
+
+            def commit(self) -> None:
+                executed.append("COMMIT")
+
+        conn = FakeConn()
+        self.engine.attempt_to_set_isolation_level(conn, IsolationLevel.SERIALIZABLE)
+        self.engine.attempt_to_set_isolation_level(conn, None)
+
+        self.assertEqual(
+            executed,
+            [
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+                "COMMIT",
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+                "COMMIT",
+            ],
+        )
 
     def test_create_engine_selects_rust_only_when_opted_in(self) -> None:
         # Default: the psycopg2 engine.
