@@ -125,6 +125,10 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
                 f"CREATE INDEX IF NOT EXISTS {TEMP_TABLE}_rooms_evs ON {TEMP_TABLE}_rooms (events)"
             )
 
+            # NB: the `position` column used to be TEXT; `IF NOT EXISTS` keeps
+            # a table made by an older release, which the schema delta
+            # 94/05_temp_user_dir_position_bigint.sql.postgres upgrades in
+            # place.
             sql = f"""
                 CREATE TABLE IF NOT EXISTS {TEMP_TABLE}_position (
                     position BIGINT NOT NULL
