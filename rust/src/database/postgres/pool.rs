@@ -4,7 +4,7 @@
 //! We use the generic `deadpool::managed` pool with our own [`ConnectionManager`]
 //! rather than the `deadpool-postgres` crate, so that creating a connection
 //! reuses our own DSN handling (libpq's default host, see
-//! [`super::fixup_default_host`]) and drives the connection task on the shared
+//! [`super::fixup_config_defaults`]) and drives the connection task on the shared
 //! runtime.
 //!
 //! The pooled item is a plain [`tokio_postgres::Client`]. Rust-native code takes
@@ -21,7 +21,7 @@ use tokio_postgres::{Client, Config, NoTls};
 
 use crate::database::postgres::connection::Connection;
 use crate::database::postgres::errors::{pg_err_to_py, OperationalError};
-use crate::database::postgres::fixup_default_host;
+use crate::database::postgres::fixup_config_defaults;
 use crate::database::postgres::helpers::BlockingPostgres;
 use crate::database::runtime::runtime;
 
@@ -85,7 +85,7 @@ impl ConnectionManager {
     /// Build a manager from a libpq-style DSN and session settings.
     pub fn from_dsn(dsn: &str, session: SessionConfig) -> Result<Self, anyhow::Error> {
         Ok(Self {
-            config: fixup_default_host(dsn)?,
+            config: fixup_config_defaults(dsn)?,
             session,
         })
     }

@@ -113,6 +113,7 @@ from tests.utils import (
     POSTGRES_USER,
     SQLITE_PERSIST_DB,
     USE_POSTGRES_FOR_TESTS,
+    USE_RUST_DRIVER_FOR_TESTS,
     default_config,
 )
 
@@ -837,6 +838,11 @@ def make_fake_db_pool(
     is a drop-in replacement for the normal `make_pool` which builds such a connection
     pool.
     """
+    from synapse.storage.engines.postgres_rust import RustPostgresEngine
+
+    if isinstance(engine, RustPostgresEngine):
+        return _make_fake_rust_db_pool(reactor, clock, db_config, engine, server_name)
+
     pool = make_pool(
         reactor=reactor,
         clock=clock,
@@ -875,6 +881,35 @@ def make_fake_db_pool(
     # Replace the thread pool with a threadless 'thread' pool
     pool.threadpool = ThreadPool(reactor)
     pool.running = True
+    return pool
+
+
+def _make_fake_rust_db_pool(
+    reactor: ISynapseReactor,
+    clock: "Clock",
+    db_config: DatabaseConnectionConfig,
+    engine: BaseDatabaseEngine,
+    server_name: str,
+) -> Any:
+    """`make_fake_db_pool` for the native Rust backend.
+
+    Builds a real `RustConnectionPool`, then swaps its worker thread pool for the
+    threadless test `ThreadPool` so `runWithConnection` runs on the reactor's
+    main thread during `pump` (the shim's `block_on` waits there for the tokio
+    workers that actually drive the connection). This keeps db queries
+    deterministic, matching the adbapi fake.
+    """
+    pool = make_pool(
+        reactor=reactor,
+        clock=clock,
+        db_config=db_config,
+        engine=engine,
+        server_name=server_name,
+    )
+    # `make_pool` started a real worker thread pool; stop it and swap in the
+    # threadless one so nothing actually runs on background threads.
+    pool.threadpool.stop()
+    pool.threadpool = ThreadPool(reactor)
     return pool
 
 
@@ -1232,6 +1267,8 @@ def setup_test_homeserver(
                 "cp_max": 5,
             },
         }
+        if USE_RUST_DRIVER_FOR_TESTS:
+            database_config["use_rust_driver"] = True
     else:
         if SQLITE_PERSIST_DB:
             # The current working directory is in _trial_temp, so this gets created within that directory.
@@ -1277,19 +1314,23 @@ def setup_test_homeserver(
     database = DatabaseConnectionConfig("master", database_config)
     config.database.databases = [database]
 
-    db_engine = create_engine(database.config)
-
     # Create the database before we actually try and connect to it, based off
     # the template database we generate in setupdb()
     if USE_POSTGRES_FOR_TESTS:
-        db_conn = db_engine.module.connect(
+        # Creating and dropping databases is admin work, done directly over
+        # psycopg2 (always available in tests) regardless of the driver under
+        # test — CREATE DATABASE can't run inside a transaction, so it needs an
+        # autocommit connection.
+        import psycopg2
+
+        db_conn = psycopg2.connect(
             dbname=POSTGRES_BASE_DB,
             user=POSTGRES_USER,
             host=POSTGRES_HOST,
             port=POSTGRES_PORT,
             password=POSTGRES_PASSWORD,
         )
-        db_engine.attempt_to_set_autocommit(db_conn, True)
+        db_conn.autocommit = True
         cur = db_conn.cursor()
         cur.execute("DROP DATABASE IF EXISTS %s;" % (test_db,))
         cur.execute(
@@ -1303,15 +1344,15 @@ def setup_test_homeserver(
 
             dropped = False
 
-            # Drop the test database
-            db_conn = db_engine.module.connect(
+            # Drop the test database (admin work over psycopg2, as above).
+            db_conn = psycopg2.connect(
                 dbname=POSTGRES_BASE_DB,
                 user=POSTGRES_USER,
                 host=POSTGRES_HOST,
                 port=POSTGRES_PORT,
                 password=POSTGRES_PASSWORD,
             )
-            db_engine.attempt_to_set_autocommit(db_conn, True)
+            db_conn.autocommit = True
             cur = db_conn.cursor()
 
             # Try a few times to drop the DB. Some things may hold on to the
