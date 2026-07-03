@@ -1796,8 +1796,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"].keys(),
-            ["displayname", "avatar_url"],
+            set(incremental_result.profile_updates["@other_user:test"].keys()),
+            {"avatar_url", "displayname"},
         )
 
         # If we have more events from the other_user, and do another lazy sync,
@@ -1873,8 +1873,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"].keys(),
-            ["sooninterestingfield"],
+            set(incremental_result.profile_updates["@other_user:test"].keys()),
+            {"sooninterestingfield"},
         )
 
     @override_config({"include_profile_updates_in_sync": True})

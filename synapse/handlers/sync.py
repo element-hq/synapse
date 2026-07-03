@@ -26,7 +26,6 @@ from typing import (
     Any,
     Mapping,
     Sequence,
-    cast,
 )
 
 import attr
@@ -346,9 +345,9 @@ class SyncHandler:
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )
-        # ExpiringCache((User, Device, Other User, Profile Field)) -> LruCache(user_id => field_value)
+        # ExpiringCache((User, Device)) -> LruCache(Other User ID + Field Name -> bool)
         self.lazy_loaded_profile_fields_cache: ExpiringCache[
-            tuple[str, str | None, str, str], LruCache[str, str]
+            tuple[str, str | None], LruCache[str, bool]
         ] = ExpiringCache(
             cache_name="lazy_loaded_profile_fields_cache",
             server_name=self.server_name,
@@ -357,6 +356,16 @@ class SyncHandler:
             max_len=0,
             expiry_ms=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
         )
+        """This cache contains fields we have sent to clients as profile updates,
+        for a particular user + device combo. The cache entry is a combination of the
+        user + field name, with the value existing indicating the field has recently
+        been sent. The boolean value does not hold other significance. A missing
+        cache entry means "we have not sent this user + field name combo to the
+        syncing user".
+
+        We don't manually remove entries from this cache, though it may be ignored
+        in cases where the sync must send the field down to the client.
+        """
 
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
 
@@ -1065,9 +1074,9 @@ class SyncHandler:
         return cache
 
     def get_lazy_loaded_profile_fields_cache(
-        self, cache_key: tuple[str, str | None, str, str]
-    ) -> LruCache[str, str]:
-        cache: LruCache[str, str] | None = self.lazy_loaded_profile_fields_cache.get(
+        self, cache_key: tuple[str, str | None]
+    ) -> LruCache[str, bool]:
+        cache: LruCache[str, bool] | None = self.lazy_loaded_profile_fields_cache.get(
             cache_key
         )
         if cache is None:
@@ -2374,29 +2383,17 @@ class SyncHandler:
                         cache_key = (
                             sync_config.user.to_string(),
                             sync_config.device_id,
-                            other_user_id,
-                            field_name,
                         )
                         cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
-                        # Only send the field if we haven't recently sent it
-                        if cache.get(other_user_id) is None:
-                            # If the field value is a None, don't send it down or
-                            # set the cache unless we're sure it has become None due
-                            # to a profile update, otherwise we'll just be sending the
-                            # same field down in every single incremental lazy sync
-                            # regardless of cache state
-                            if (
-                                profile_data.get(field_name) is not None
-                                or other_user_id in updated_users
-                            ):
-                                per_user_updates[field_name] = profile_data.get(
-                                    field_name
-                                )
-                                # Update our cache
-                                cache.set(
-                                    other_user_id,
-                                    cast(str, profile_data.get(field_name)),
-                                )
+                        # Only send this users field if we haven't recently sent it
+                        if cache.get(f"{other_user_id}-{field_name}") is None:
+                            per_user_updates[field_name] = profile_data.get(field_name)
+                            # Update our cache to indicate this user/field combo
+                            # has been recently sent.
+                            cache.set(
+                                f"{other_user_id}-{field_name}",
+                                True,
+                            )
                 else:
                     # Include only the diff, unless the user recently joined,
                     # then send all the fields the client asked for.
