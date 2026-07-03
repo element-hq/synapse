@@ -208,7 +208,10 @@ impl DatabasePool for PythonDatabasePoolWrapper {
         .await;
 
         // Return the result we captured based on if `runInteraction` was successful
-        let captured_result = result_slot.lock().unwrap().take();
+        let captured_result = result_slot
+            .lock()
+            .map_err(|err| anyhow::anyhow!("Failed to acquire lock on `result_slot`: {:#}", err))?
+            .take();
         match run_interaction_outcome {
             // Only return the `captured_result` if `runInteraction` succeeded. We don't
             // want to accidentally return a successful result when the transaction
