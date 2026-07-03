@@ -15,6 +15,7 @@
 from typing import Any
 
 from synapse.storage.engines import PostgresEngine, Psycopg2Engine, create_engine
+from synapse.storage.engines._base import IsolationLevel
 from synapse.storage.engines.postgres_rust import RustPostgresEngine
 from synapse.synapse_rust.database import postgres
 
@@ -81,9 +82,46 @@ class RustPostgresEngineTestCase(unittest.TestCase):
         # Neither is an unrelated exception.
         self.assertFalse(self.engine.is_deadlock(ValueError("unrelated")))
 
-    def test_isolation_level_override_not_yet_supported(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            self.engine.attempt_to_set_isolation_level(object(), None)
+    def test_isolation_level_sets_session_characteristics(self) -> None:
+        # The shim has no psycopg2 `set_isolation_level`, so the engine issues a
+        # `SET SESSION CHARACTERISTICS` statement (and commits it) instead —
+        # rolling back any pending transaction first, as psycopg2 does. Check
+        # the level mapping, and that `None` resets to the default (REPEATABLE
+        # READ) — see `attempt_to_set_isolation_level`.
+        executed: list[str] = []
+
+        class FakeCursor:
+            def execute(self, sql: str) -> None:
+                executed.append(sql)
+
+            def close(self) -> None:
+                pass
+
+        class FakeConn:
+            def cursor(self) -> "FakeCursor":
+                return FakeCursor()
+
+            def commit(self) -> None:
+                executed.append("COMMIT")
+
+            def rollback(self) -> None:
+                executed.append("ROLLBACK")
+
+        conn = FakeConn()
+        self.engine.attempt_to_set_isolation_level(conn, IsolationLevel.SERIALIZABLE)
+        self.engine.attempt_to_set_isolation_level(conn, None)
+
+        self.assertEqual(
+            executed,
+            [
+                "ROLLBACK",
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+                "COMMIT",
+                "ROLLBACK",
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+                "COMMIT",
+            ],
+        )
 
     def test_create_engine_selects_rust_only_when_opted_in(self) -> None:
         # Default: the psycopg2 engine.
@@ -129,6 +167,35 @@ class RustPostgresEngineConnectionTestCase(unittest.TestCase):
         self.assertFalse(self.engine.is_connection_closed(self.conn))
         self.conn.close()
         self.assertTrue(self.engine.is_connection_closed(self.conn))
+
+    def test_isolation_level_reset_rolls_back_pending_writes(self) -> None:
+        # `attempt_to_set_isolation_level` runs from `runWithConnection`'s
+        # `finally` after a transaction function raised, when the transaction
+        # may still be open with uncommitted writes: it must roll those back
+        # (as psycopg2's `set_isolation_level` does), not commit them.
+        self._exec("CREATE TEMPORARY TABLE isolation_reset_test (x INT)")
+        self.conn.commit()
+
+        self._exec("INSERT INTO isolation_reset_test VALUES (1)")
+        self.engine.attempt_to_set_isolation_level(self.conn, None)
+
+        cursor = self._exec("SELECT COUNT(*) FROM isolation_reset_test")
+        self.assertEqual(cursor.fetch_one()[0], 0)
+        self.conn.rollback()
+
+    def test_isolation_level_reset_survives_aborted_transaction(self) -> None:
+        # Resetting the isolation level on a server-side-aborted transaction
+        # must not raise 25P02 ("current transaction is aborted"), which would
+        # mask the error that aborted it.
+        with self.assertRaises(postgres.DatabaseError):
+            self._exec("SELECT no_such_column FROM nonexistent_table")
+
+        self.engine.attempt_to_set_isolation_level(self.conn, None)
+
+        # The connection is usable again afterwards.
+        cursor = self._exec("SELECT 1")
+        self.assertEqual(cursor.fetch_one()[0], 1)
+        self.conn.rollback()
 
     def test_attempt_to_set_autocommit(self) -> None:
         # In autocommit mode the shim issues no implicit BEGIN, so a statement

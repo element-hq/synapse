@@ -1131,6 +1131,10 @@ class DatabasePool:
                 i.e. outside of a transaction. This is useful for transaction
                 that are only a single query. Currently only affects postgres.
             isolation_level: Set the server isolation level for this transaction.
+                Note: resetting the level afterwards rolls back anything `func`
+                left uncommitted (psycopg2's `set_isolation_level` semantics),
+                so `func` must commit its own work — the connection pool's
+                commit-on-success does not apply to it.
             kwargs: named args to pass to `func`
 
         Returns:
