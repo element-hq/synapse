@@ -47,19 +47,19 @@ pub struct JsonObject {
 impl<'py> FromPyObject<'_, 'py> for JsonObject {
     type Error = PyErr;
 
-    fn extract(ob: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         // Fast path: already a JsonObject, so just share the underlying map
         // (cheap, as it's immutable and behind an `Arc`).
-        if let Ok(obj) = ob.cast::<JsonObject>() {
+        if let Ok(json_obj) = obj.cast::<JsonObject>() {
             return Ok(JsonObject {
-                object: obj.get().object.clone(),
+                object: json_obj.get().object.clone(),
             });
         }
 
         // Otherwise accept any mapping and convert it via pythonize. Unlike the
         // `#[new]` constructor we don't accept `None` here: an absent value is
         // represented as `Option<JsonObject>` at the field/argument level.
-        let mapping = ob
+        let mapping = obj
             .cast::<PyMapping>()
             .map_err(|_| PyTypeError::new_err("expected a mapping"))?;
         let object: BTreeMap<Box<str>, Value> = depythonize(&mapping)?;
