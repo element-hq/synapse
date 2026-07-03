@@ -3513,7 +3513,9 @@ class PersistEventsStore:
             values={
                 "event_id": event_id,
                 "reason": reason,
-                "last_check": self._clock.time_msec(),
+                # `last_check` is a TEXT column, so store the timestamp as a
+                # string rather than relying on the driver to coerce an int.
+                "last_check": str(self._clock.time_msec()),
             },
         )
 
