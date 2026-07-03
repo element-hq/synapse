@@ -25,18 +25,23 @@
 //! `TID` (a row's `ctid`) round-trips through its textual `(block,offset)` form
 //! as psycopg2 does: it decodes to a `str` and a `str` binds back to it.
 //!
-//! Decoding (the way *in*) doesn't produce arrays — Synapse only binds them as
-//! parameters — so only the `ToSql` side handles the `Array` variant. The scalar
-//! type lists are shared via [`accepts_column_type`], kept in sync with the
-//! `match` arms below.
+//! Arrays are handled in both directions on the Python path: bound as a
+//! parameter from a `list` (the `Array` variant's `ToSql`) and decoded from an
+//! array column back into a `list` (e.g. the `text[]` cache-invalidation keys
+//! the caches replication stream reads). The scalar type lists are shared via
+//! [`accepts_column_type`], kept in sync with the `match` arms below; the
+//! `ToSql` and Python `FromSql` `accepts` extend it with arrays. The
+//! Rust-native `DbValue` decoder stays scalar-only — nothing reads array
+//! columns through it.
 
 use std::error::Error;
 
 use bytes::BytesMut;
+use fallible_iterator::FallibleIterator;
 use postgres_protocol::types::{
-    array_to_sql, bool_from_sql, bool_to_sql, bytea_to_sql, float4_from_sql, float4_to_sql,
-    float8_from_sql, float8_to_sql, int2_from_sql, int2_to_sql, int4_from_sql, int4_to_sql,
-    int8_from_sql, int8_to_sql, text_to_sql, ArrayDimension,
+    array_from_sql, array_to_sql, bool_from_sql, bool_to_sql, bytea_to_sql, float4_from_sql,
+    float4_to_sql, float8_from_sql, float8_to_sql, int2_from_sql, int2_to_sql, int4_from_sql,
+    int4_to_sql, int8_from_sql, int8_to_sql, text_to_sql, ArrayDimension,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::types::{PyBool, PyByteArray, PyBytes, PyFloat, PyInt, PyList, PyString, PyTuple};
@@ -365,7 +370,11 @@ impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
     }
 
     fn accepts(ty: &Type) -> bool {
+        // Scalars, plus arrays of a supported scalar element type (mirroring
+        // `PgValue`'s `ToSql::accepts`). The `DbValue` decoder below stays
+        // scalar-only — the Rust-native query helpers don't read array columns.
         accepts_column_type(ty)
+            || matches!(ty.kind(), Kind::Array(element) if accepts_column_type(element))
     }
 }
 
@@ -377,6 +386,28 @@ impl PythonPgFromSql {
         ty: &Type,
         raw: &[u8],
     ) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        // An array column (e.g. the `text[]` cache-invalidation keys read back
+        // by the caches replication stream) decodes to a Python `list`, each
+        // element decoded by the array's element type. Postgres arrays are not
+        // nested (a multi-dimensional array shares the scalar element type), so
+        // the recursion only ever bottoms out in the scalar arms below.
+        if let Kind::Array(element_ty) = ty.kind() {
+            let array = array_from_sql(raw)?;
+            let mut elements: Vec<Py<PyAny>> = Vec::new();
+            let mut values = array.values();
+            while let Some(element) = values.next()? {
+                let obj = match element {
+                    Some(bytes) => Self::from_sql_with_py(py, element_ty, bytes)?
+                        .0
+                        .unwrap_or_else(|| py.None()),
+                    None => py.None(),
+                };
+                elements.push(obj);
+            }
+            let list = PyList::new(py, elements)?;
+            return Ok(PythonPgFromSql(Some(list.into_any().unbind())));
+        }
+
         let obj = match *ty {
             Type::BOOL => {
                 let b = postgres_protocol::types::bool_from_sql(raw)?;

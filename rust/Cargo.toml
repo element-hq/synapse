@@ -25,6 +25,9 @@ name = "synapse.synapse_rust"
 anyhow = "1.0.63"
 base64 = "0.22.1"
 bytes = "1.6.0"
+# Matches the version postgres-protocol uses, for iterating a decoded array's
+# elements (`ArrayValues` is a `FallibleIterator`); see database/postgres/value.rs.
+fallible-iterator = "0.2"
 headers = "0.4.0"
 http = "1.1.0"
 lazy_static = "1.4.0"
