@@ -18,9 +18,12 @@
 //! | `Bool`              | `bool`      | `BOOL`                              |
 //! | `Int`               | `int`       | `INT2`, `INT4`, `INT8`              |
 //! | `Float`             | `float`     | `FLOAT4`, `FLOAT8`                  |
-//! | `Text`              | `str`       | `TEXT`, `VARCHAR`, `NAME`, `BPCHAR` |
-//! | `Bytea`             | `bytes`     | `BYTEA`                             |
+//! | `Text`              | `str`       | `TEXT`, `VARCHAR`, `NAME`, `BPCHAR`, `TID` |
+//! | `Bytea`             | `bytes` / `bytearray` | `BYTEA`                   |
 //! | `Array`             | `list`      | any array of the above (e.g. `INT8[]`) |
+//!
+//! `TID` (a row's `ctid`) round-trips through its textual `(block,offset)` form
+//! as psycopg2 does: it decodes to a `str` and a `str` binds back to it.
 //!
 //! Decoding (the way *in*) doesn't produce arrays — Synapse only binds them as
 //! parameters — so only the `ToSql` side handles the `Array` variant. The scalar
@@ -36,7 +39,7 @@ use postgres_protocol::types::{
     int8_from_sql, int8_to_sql, text_to_sql, ArrayDimension,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::types::{PyBool, PyByteArray, PyBytes, PyFloat, PyInt, PyList, PyString, PyTuple};
 use pyo3::{prelude::*, BoundObject};
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type, WrongType};
 
@@ -90,6 +93,12 @@ impl PgValue {
         if let Ok(b) = obj.cast::<PyBytes>() {
             return Ok(PgValue::Bytea(b.as_bytes().into()));
         }
+        // Synapse deliberately passes binary data as `bytearray` — it disables
+        // psycopg2's `bytes` adapter to catch accidental text-as-bytes bugs
+        // (see PostgresEngine) — so accept `bytearray` as a BYTEA parameter too.
+        if let Ok(b) = obj.cast::<PyByteArray>() {
+            return Ok(PgValue::Bytea(b.to_vec().into()));
+        }
         // A list is bound as a Postgres array (for `= ANY($1)` / `!= ALL($1)`).
         // Each element is classified recursively.
         if let Ok(list) = obj.cast::<PyList>() {
@@ -139,7 +148,48 @@ pub(crate) fn accepts_column_type(ty: &Type) -> bool {
             | Type::NAME
             | Type::BPCHAR
             | Type::BYTEA
+            // `tid` (a row's `ctid`) is decoded to / bound from its textual
+            // `(block,offset)` form, as psycopg2 does; see `tid_from_sql`.
+            | Type::TID
     )
+}
+
+/// Decode a `tid` (`ctid`) wire value into Postgres' textual `(block,offset)`
+/// form.
+///
+/// The binary format is three big-endian `u16`s — the block number's high and
+/// low halves, then the item offset — matching the server's `tidsend`. psycopg2
+/// renders `tid` as this same `(block,offset)` string, and Synapse reads it back
+/// as text (e.g. the receipts-dedup background update selects a `ctid` and then
+/// compares against it), so mirror that.
+fn tid_from_sql(raw: &[u8]) -> Result<String, Box<dyn Error + Sync + Send>> {
+    if raw.len() != 6 {
+        return Err(format!("tid wire value must be 6 bytes, got {}", raw.len()).into());
+    }
+    let bi_hi = u32::from(u16::from_be_bytes([raw[0], raw[1]]));
+    let bi_lo = u32::from(u16::from_be_bytes([raw[2], raw[3]]));
+    let offset = u16::from_be_bytes([raw[4], raw[5]]);
+    let block = (bi_hi << 16) | bi_lo;
+    Ok(format!("({block},{offset})"))
+}
+
+/// Encode Postgres' textual `(block,offset)` `tid` form into its wire bytes —
+/// the inverse of [`tid_from_sql`], for when a `tid` read out as text is bound
+/// straight back as a parameter (`WHERE ctid != $1`).
+fn tid_to_sql(s: &str, buf: &mut BytesMut) -> Result<(), Box<dyn Error + Sync + Send>> {
+    let malformed = || format!("cannot bind {s:?} as a tid: expected \"(block,offset)\"");
+    let (block_s, offset_s) = s
+        .trim()
+        .strip_prefix('(')
+        .and_then(|r| r.strip_suffix(')'))
+        .and_then(|inner| inner.split_once(','))
+        .ok_or_else(malformed)?;
+    let block: u32 = block_s.trim().parse().map_err(|_| malformed())?;
+    let offset: u16 = offset_s.trim().parse().map_err(|_| malformed())?;
+    buf.extend_from_slice(&((block >> 16) as u16).to_be_bytes());
+    buf.extend_from_slice(&((block & 0xffff) as u16).to_be_bytes());
+    buf.extend_from_slice(&offset.to_be_bytes());
+    Ok(())
 }
 
 // Lets PyO3 extract a `PgValue` directly from a Python argument, e.g. when a
@@ -205,6 +255,12 @@ impl ToSql for PgValue {
             }
             (PgValue::Text(v), &Type::TEXT | &Type::VARCHAR | &Type::NAME | &Type::BPCHAR) => {
                 text_to_sql(v, buf);
+                Ok(IsNull::No)
+            }
+            (PgValue::Text(v), &Type::TID) => {
+                // A `tid` read out as text (see `tid_from_sql`) and bound
+                // straight back as a parameter, e.g. `WHERE ctid != $1`.
+                tid_to_sql(v, buf)?;
                 Ok(IsNull::No)
             }
             (PgValue::Bytea(v), &Type::BYTEA) => {
@@ -350,6 +406,7 @@ impl PythonPgFromSql {
                 PyString::from_bytes(py, raw)?.into_any().unbind()
             }
             Type::BYTEA => PyBytes::new(py, raw).into_any().unbind(),
+            Type::TID => PyString::new(py, &tid_from_sql(raw)?).into_any().unbind(),
             _ => {
                 // This should never happen, unless the `accepts` method is out
                 // of sync.
@@ -401,6 +458,7 @@ impl<'a> FromSql<'a> for DbValueFromSql {
                 DbValue::Text(std::str::from_utf8(raw)?.to_owned())
             }
             Type::BYTEA => DbValue::Bytes(raw.to_vec()),
+            Type::TID => DbValue::Text(tid_from_sql(raw)?),
             _ => {
                 // Unreachable unless `accepts` drifts out of sync with this match.
                 return Err(format!("unsupported column type for postgres: {ty}").into());
@@ -478,7 +536,31 @@ mod tests {
                 PgValue::Bytea(b) => assert_eq!(&*b, b"\x00\xff"),
                 other => panic!("expected Bytea, got {other:?}"),
             }
+
+            // `bytearray` binds as BYTEA too (Synapse's chosen binary type).
+            match PgValue::from_py(&PyByteArray::new(py, b"\x00\xff").into_any()).unwrap() {
+                PgValue::Bytea(b) => assert_eq!(&*b, b"\x00\xff"),
+                other => panic!("expected Bytea, got {other:?}"),
+            }
         });
+    }
+
+    #[test]
+    fn tid_round_trips_through_text() {
+        // A `tid` decodes to `(block,offset)` and that text binds back to the
+        // same wire bytes, so a `ctid` read out and compared as a parameter
+        // survives the round trip.
+        let mut buf = BytesMut::new();
+        tid_to_sql("(66051,7)", &mut buf).unwrap();
+        // 66051 = 0x00010203 -> hi 0x0001, lo 0x0203; offset 7.
+        assert_eq!(&buf[..], &[0x00, 0x01, 0x02, 0x03, 0x00, 0x07]);
+        assert_eq!(tid_from_sql(&buf).unwrap(), "(66051,7)");
+
+        // Malformed text is rejected rather than silently mis-encoded.
+        assert!(tid_to_sql("66051,7", &mut BytesMut::new()).is_err());
+        assert!(tid_to_sql("(nope)", &mut BytesMut::new()).is_err());
+        // A wire value of the wrong width is rejected on decode.
+        assert!(tid_from_sql(&[0, 0, 0]).is_err());
     }
 
     #[test]
