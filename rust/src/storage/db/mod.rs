@@ -221,7 +221,6 @@ impl FromDbValue for i64 {
     fn from_value(value: DbValue) -> Result<Self, anyhow::Error> {
         match value {
             DbValue::Int(i) => Ok(i),
-            DbValue::Bool(b) => Ok(b as i64),
             other => anyhow::bail!("cannot read {other:?} as i64"),
         }
     }
@@ -231,7 +230,6 @@ impl FromDbValue for f64 {
     fn from_value(value: DbValue) -> Result<Self, anyhow::Error> {
         match value {
             DbValue::Float(f) => Ok(f),
-            DbValue::Int(i) => Ok(i as f64),
             other => anyhow::bail!("cannot read {other:?} as f64"),
         }
     }
