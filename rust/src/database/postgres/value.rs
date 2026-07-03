@@ -47,7 +47,9 @@ use postgres_protocol::types::{
     int4_to_sql, int8_from_sql, int8_to_sql, text_to_sql, ArrayDimension,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::types::{PyBool, PyByteArray, PyBytes, PyFloat, PyInt, PyList, PyString, PyTuple};
+use pyo3::types::{
+    PyBool, PyByteArray, PyBytes, PyFloat, PyInt, PyList, PyMemoryView, PyString, PyTuple,
+};
 use pyo3::{prelude::*, BoundObject};
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type, WrongType};
 
@@ -106,6 +108,14 @@ impl PgValue {
         // (see PostgresEngine) — so accept `bytearray` as a BYTEA parameter too.
         if let Ok(b) = obj.cast::<PyByteArray>() {
             return Ok(PgValue::Bytea(b.to_vec().into()));
+        }
+        // A `memoryview` (most often over binary event data) is also bound as
+        // BYTEA. The buffer protocol isn't available under the limited ABI, so
+        // copy its bytes out via `tobytes()`.
+        if let Ok(mv) = obj.cast::<PyMemoryView>() {
+            let raw = mv.call_method0("tobytes")?;
+            let bytes = raw.cast::<PyBytes>()?;
+            return Ok(PgValue::Bytea(bytes.as_bytes().into()));
         }
         // A list is bound as a Postgres array (for `= ANY($1)` / `!= ALL($1)`).
         // Each element is classified recursively.
@@ -620,6 +630,13 @@ mod tests {
 
             // `bytearray` binds as BYTEA too (Synapse's chosen binary type).
             match PgValue::from_py(&PyByteArray::new(py, b"\x00\xff").into_any()).unwrap() {
+                PgValue::Bytea(b) => assert_eq!(&*b, b"\x00\xff"),
+                other => panic!("expected Bytea, got {other:?}"),
+            }
+
+            // A `memoryview` over bytes binds as BYTEA via the buffer protocol.
+            let memoryview = py.eval(c"memoryview(b'\\x00\\xff')", None, None).unwrap();
+            match PgValue::from_py(&memoryview).unwrap() {
                 PgValue::Bytea(b) => assert_eq!(&*b, b"\x00\xff"),
                 other => panic!("expected Bytea, got {other:?}"),
             }
