@@ -12,26 +12,43 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::time::{Duration, SystemTime};
+use std::{
+    collections::VecDeque,
+    time::{Duration, SystemTime},
+};
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use pyo3::{Bound, IntoPyObject, PyAny, Python};
 use pythonize::{pythonize, PythonizeError};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use ulid::Ulid;
+
+/// The maximum number of transaction IDs we remember per session, so that the
+/// memory used by a session stays bounded even if a client sends a large number
+/// of requests. MSC4388 exchanges only need a handful of sends, so in practice
+/// this is never reached.
+const MAX_RECORDED_TRANSACTIONS: usize = 100;
+
+/// The recorded outcome of a `PUT` request, so that a retry using the same
+/// transaction ID can be answered without re-evaluating the compare-and-swap.
+#[derive(Clone)]
+pub enum PutOutcome {
+    /// The payload was accepted, advancing the session to this sequence token.
+    Accepted(String),
+    /// The supplied `sequence_token` did not match, so the payload was
+    /// rejected as a concurrent write.
+    ConcurrentWrite,
+}
 
 /// A single session, containing data, metadata, and expiry information.
 pub struct Session {
     id: Ulid,
-    hash: [u8; 32],
-    /// The hash from before the last `update`, if any. Used so that clients can
-    /// safely retry a PUT request (e.g. after a network error) without getting
-    /// a spurious 409 conflict: a PUT whose `sequence_token` matches this
-    /// previous hash and whose `data` matches the currently-stored data is
-    /// treated as an idempotent no-op.
-    previous_hash: Option<[u8; 32]>,
     data: String,
+    /// Counter incremented on each successful write, whose decimal
+    /// representation is the `sequence_token`, as recommended by MSC4388.
+    sequence: u64,
+    /// The outcome of each `PUT` seen for this session, keyed by the
+    /// transaction ID used, oldest first. Used to make retries idempotent.
+    transactions: VecDeque<(String, PutOutcome)>,
     last_modified: SystemTime,
     expires: SystemTime,
 }
@@ -75,6 +92,12 @@ pub struct PutResponse {
     sequence_token: String,
 }
 
+impl PutResponse {
+    pub fn new(sequence_token: String) -> Self {
+        Self { sequence_token }
+    }
+}
+
 impl<'source> IntoPyObject<'source> for PutResponse {
     type Target = PyAny;
     type Output = Bound<'source, Self::Target>;
@@ -88,12 +111,11 @@ impl<'source> IntoPyObject<'source> for PutResponse {
 impl Session {
     /// Create a new session with the given data and time-to-live.
     pub fn new(id: Ulid, data: String, now: SystemTime, ttl: Duration) -> Self {
-        let hash = Self::compute_hash(&data, now);
         Self {
             id,
-            hash,
-            previous_hash: None,
             data,
+            sequence: 0,
+            transactions: VecDeque::new(),
             expires: now + ttl,
             last_modified: now,
         }
@@ -104,43 +126,62 @@ impl Session {
         self.expires <= now
     }
 
+    /// Handle a send (`PUT`) for this session: perform the compare-and-swap
+    /// against the supplied `sequence_token`, recording the outcome against
+    /// the transaction ID so that a retry using the same transaction ID is
+    /// answered with the same response rather than being re-evaluated.
+    pub fn send(
+        &mut self,
+        txn_id: &str,
+        sequence_token: &str,
+        data: String,
+        now: SystemTime,
+    ) -> PutOutcome {
+        if let Some(outcome) = self.transaction_outcome(txn_id) {
+            return outcome.clone();
+        }
+
+        let outcome = if self.sequence_token() == sequence_token {
+            self.update(data, now);
+            PutOutcome::Accepted(self.sequence_token())
+        } else {
+            PutOutcome::ConcurrentWrite
+        };
+
+        self.record_transaction(txn_id.to_owned(), outcome.clone());
+
+        outcome
+    }
+
     /// Update the session with new data and last modified time.
-    pub fn update(&mut self, data: String, now: SystemTime) {
-        self.previous_hash = Some(self.hash);
-        self.hash = Self::compute_hash(&data, now);
+    fn update(&mut self, data: String, now: SystemTime) {
+        self.sequence += 1;
         self.data = data;
         self.last_modified = now;
     }
 
-    /// Returns true if a PUT with the given `sequence_token` and `data` should
-    /// be treated as an idempotent retry of the most recent update (i.e. the
-    /// token matches the hash from before the last update, and the data
-    /// already matches the currently-stored data).
-    pub fn is_idempotent_retry(&self, sequence_token: &str, data: &str) -> bool {
-        let Some(previous_hash) = self.previous_hash else {
-            return false;
-        };
-        if data != self.data {
-            return false;
+    /// The outcome of a previous `PUT` made with the given transaction ID, if
+    /// we have seen it for this session.
+    fn transaction_outcome(&self, txn_id: &str) -> Option<&PutOutcome> {
+        self.transactions
+            .iter()
+            .find(|(id, _)| id == txn_id)
+            .map(|(_, outcome)| outcome)
+    }
+
+    /// Record the outcome of a `PUT` against the transaction ID it used, so
+    /// that a retry with the same transaction ID gets the same response.
+    fn record_transaction(&mut self, txn_id: String, outcome: PutOutcome) {
+        self.transactions.push_back((txn_id, outcome));
+        while self.transactions.len() > MAX_RECORDED_TRANSACTIONS {
+            self.transactions.pop_front();
         }
-        URL_SAFE_NO_PAD.encode(previous_hash) == sequence_token
     }
 
-    /// Compute the hash of the data and timestamp.
-    fn compute_hash(data: &str, now: SystemTime) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        let now_millis = now
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        hasher.update(now_millis.to_be_bytes());
-        hasher.finalize().into()
-    }
-
-    /// The sequence token for the session.
+    /// The sequence token for the session, which as recommended by MSC4388 is
+    /// the decimal representation of the write counter.
     pub fn sequence_token(&self) -> String {
-        URL_SAFE_NO_PAD.encode(self.hash)
+        self.sequence.to_string()
     }
 
     pub fn get_response(&self, now: SystemTime) -> GetResponse {
@@ -164,12 +205,6 @@ impl Session {
                 .duration_since(now)
                 .unwrap_or_default()
                 .as_millis() as u64,
-        }
-    }
-
-    pub fn put_response(&self) -> PutResponse {
-        PutResponse {
-            sequence_token: self.sequence_token(),
         }
     }
 }
