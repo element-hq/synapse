@@ -207,7 +207,11 @@ impl FromDbValue for bool {
         match value {
             DbValue::Bool(b) => Ok(b),
             // SQLite has no native boolean type and stores them as integers.
-            DbValue::Int(i) => Ok(i != 0),
+            DbValue::Int(i) => match i {
+                0 => Ok(false),
+                1 => Ok(true),
+                _ => anyhow::bail!("cannot read DbValue::Int({i}) as bool"),
+            },
             other => anyhow::bail!("cannot read {other:?} as bool"),
         }
     }
