@@ -7,17 +7,22 @@
 //! [`super::fixup_config_defaults`]) and drives the connection task on the shared
 //! runtime.
 //!
-//! The pooled item is a plain [`tokio_postgres::Client`]. Rust-native code takes
-//! one from the pool and uses it with the standard `tokio_postgres` async query
-//! functions; the Python-facing `Connection`/`Cursor` shim borrows from the
-//! *same* pool, so both share a single set of connections rather than running
-//! two pools that could exhaust the server's connection limit between them.
+//! The pooled item is a [`PooledClient`]: a [`tokio_postgres::Client`] plus a
+//! per-connection prepared-statement cache (see [`PooledClient::prepare_cached`]).
+//! Rust-native code takes one from the pool and uses it with the standard
+//! `tokio_postgres` async query functions (it derefs to the client); the
+//! Python-facing `Connection`/`Cursor` shim borrows from the *same* pool, so
+//! both share a single set of connections rather than running two pools that
+//! could exhaust the server's connection limit between them.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 use deadpool::managed::{Manager, Metrics, Object, Pool, PoolError, RecycleError, RecycleResult};
 use log::warn;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use tokio_postgres::{Client, Config, NoTls};
+use tokio_postgres::{Client, Config, NoTls, Statement};
 
 use crate::database::postgres::connection::Connection;
 use crate::database::postgres::errors::{pg_err_to_py, OperationalError};
@@ -91,11 +96,74 @@ impl ConnectionManager {
     }
 }
 
+/// A pooled [`Client`] plus its cache of prepared statements.
+///
+/// The cache lives *with* the pooled connection (not with a checkout): named
+/// prepared statements are per-session server state, so they survive being
+/// returned to the pool, and a repeated query on any later checkout of the same
+/// connection skips the prepare round-trip. Dereferences to the [`Client`] so
+/// existing call sites are unaffected.
+pub struct PooledClient {
+    client: Client,
+    /// Prepared statements keyed by their SQL. Guarded by a plain [`Mutex`]:
+    /// the critical sections are lookups/inserts (never awaits).
+    statements: Mutex<HashMap<String, Statement>>,
+}
+
+/// The cache is cleared once it holds this many statements. Synapse's hot set
+/// of distinct SQL strings is far smaller; the bound exists so one-off SQL
+/// (e.g. `execute_values`'s literal-spliced statements) can't grow the map
+/// without limit on a long-lived connection. A clear-all is crude but simple,
+/// and the hot set re-warms in one round of queries.
+const STATEMENT_CACHE_CAP: usize = 512;
+
+impl PooledClient {
+    /// Fetch the prepared [`Statement`] for `sql`, preparing and caching it on
+    /// a miss. With `refresh`, any cached entry is discarded and re-prepared —
+    /// used to recover when concurrent DDL invalidates a cached plan (SQLSTATE
+    /// `0A000`, "cached plan must not change result type").
+    pub async fn prepare_cached(
+        &self,
+        sql: &str,
+        refresh: bool,
+    ) -> Result<Statement, tokio_postgres::Error> {
+        if refresh {
+            self.statements.lock().expect("not poisoned").remove(sql);
+        } else if let Some(statement) = self.statements.lock().expect("not poisoned").get(sql) {
+            return Ok(statement.clone());
+        }
+
+        let statement = self.client.prepare(sql).await?;
+
+        let mut statements = self.statements.lock().expect("not poisoned");
+        if statements.len() >= STATEMENT_CACHE_CAP {
+            statements.clear();
+        }
+        statements.insert(sql.to_owned(), statement.clone());
+        Ok(statement)
+    }
+
+    /// Drop the cached statement for `sql`, if any. No I/O: used to shed a
+    /// stale plan from inside an aborted transaction, where re-preparing is
+    /// impossible until the transaction ends.
+    pub fn invalidate(&self, sql: &str) {
+        self.statements.lock().expect("not poisoned").remove(sql);
+    }
+}
+
+impl std::ops::Deref for PooledClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Client {
+        &self.client
+    }
+}
+
 impl Manager for ConnectionManager {
-    type Type = Client;
+    type Type = PooledClient;
     type Error = tokio_postgres::Error;
 
-    async fn create(&self) -> Result<Client, Self::Error> {
+    async fn create(&self) -> Result<PooledClient, Self::Error> {
         // Establish the connection, then drive its long-lived connection task
         // (which pumps the socket) on the shared runtime. The task ends on its
         // own when the `Client` is dropped, i.e. when the pool discards this
@@ -112,10 +180,13 @@ impl Manager for ConnectionManager {
         // equivalent of the engine's `on_new_connection`).
         client.batch_execute(&self.session.setup_sql()).await?;
 
-        Ok(client)
+        Ok(PooledClient {
+            client,
+            statements: Mutex::new(HashMap::new()),
+        })
     }
 
-    async fn recycle(&self, client: &mut Client, _: &Metrics) -> RecycleResult<Self::Error> {
+    async fn recycle(&self, client: &mut PooledClient, _: &Metrics) -> RecycleResult<Self::Error> {
         // Cheap liveness check before handing a pooled connection back out: if
         // the connection task has ended (server closed the socket, fatal error,
         // …) the client reports closed, so tell deadpool to drop it and create
