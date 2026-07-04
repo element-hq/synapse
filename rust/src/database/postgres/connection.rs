@@ -22,7 +22,7 @@
 //! A [`Cursor`] is therefore cheap: it holds a clone of the owning
 //! [`Connection`] (an `Arc`) plus its own result-set state
 //! ([`CursorQueryState`]). It borrows the client only for the brief moment it
-//! takes to *start* a query (`prepare` + `query_raw`); the resulting row stream
+//! takes to *start* a query (a cached `prepare` + `query_raw`); the resulting row stream
 //! is self-contained (`'static`), so once a query has been issued the cursor
 //! reads rows from its own state without touching the connection again. Many
 //! cursors can share one connection this way, though in practice Synapse's
@@ -74,10 +74,11 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyInt, PyList, PyTuple},
 };
-use tokio_postgres::Client;
 
 use crate::database::postgres::{
-    cursor_state::CursorQueryState, helpers::BlockingPostgresResult, pool::PooledConnection,
+    cursor_state::CursorQueryState,
+    helpers::BlockingPostgresResult,
+    pool::{PooledClient, PooledConnection},
     value::PgValue,
 };
 
@@ -253,7 +254,7 @@ impl Connection {
     fn with_client<R>(
         &self,
         py: Python<'_>,
-        f: impl FnOnce(&Client) -> PyResult<R>,
+        f: impl FnOnce(&PooledClient) -> PyResult<R>,
     ) -> PyResult<R> {
         let mut guard = self.lock()?;
 
@@ -261,11 +262,12 @@ impl Connection {
         // matching psycopg2. We set `in_txn` *after* a successful `BEGIN` but
         // before running `f`, so that if `f` (the user's statement) fails the
         // open-but-aborted transaction is still tracked and `rollback()` knows
-        // to clean it up.
+        // to clean it up. `batch_execute` uses the simple-query protocol: one
+        // round-trip, no prepare.
         if !guard.autocommit && !guard.in_txn {
             {
                 let client = client_ref(&guard)?;
-                client.execute("BEGIN", &[]).block_on_result(py)?;
+                client.batch_execute("BEGIN").block_on_result(py)?;
             }
             guard.in_txn = true;
         }
@@ -301,7 +303,8 @@ impl Connection {
 
         let result = {
             let client = client_ref(&guard)?;
-            client.execute(stmt, &[]).block_on_result(py)
+            // Simple-query protocol: one round-trip, no prepare.
+            client.batch_execute(stmt).block_on_result(py)
         };
 
         match result {
@@ -321,7 +324,7 @@ impl Connection {
 
 /// Borrow the live client out of a locked inner state, or error if the
 /// connection has been closed.
-fn client_ref(guard: &ConnInner) -> PyResult<&Client> {
+fn client_ref(guard: &ConnInner) -> PyResult<&PooledClient> {
     guard
         .client
         .as_deref()
@@ -515,17 +518,16 @@ impl Cursor {
             *state = CursorQueryState::new()
         })
     }
-}
 
-#[pymethods]
-impl Cursor {
-    /// Execute `query`, optionally with positional `params` bound to `$1`,
-    /// `$2`, ... placeholders.
-    ///
-    /// Any previous result set is discarded. After this returns, rows (if any)
-    /// can be read with `fetch_one`/`fetch_all`/`fetch_next_batch`.
-    #[pyo3(signature = (query, params = None))]
-    fn execute(&self, py: Python<'_>, query: &str, params: Option<Vec<PgValue>>) -> PyResult<()> {
+    /// One attempt at [`Cursor::execute`]'s body; `refresh` forces a fresh
+    /// prepare (bypassing and replacing the cached statement).
+    fn execute_once(
+        &self,
+        py: Python<'_>,
+        query: &str,
+        params: Vec<PgValue>,
+        refresh: bool,
+    ) -> PyResult<()> {
         // Drop any previous result set before starting the new query.
         self.lock_state()?.new_query();
 
@@ -533,11 +535,9 @@ impl Cursor {
         // the query. `query_raw` returns a `'static` `RowStream`, so the borrow
         // ends here and the cursor owns the stream from now on.
         let (stream, description) = self.connection.with_client(py, |client| {
-            let statement = client.prepare(query).block_on_result(py)?;
+            let statement = client.prepare_cached(query, refresh).block_on_result(py)?;
 
-            let stream = client
-                .query_raw(&statement, params.unwrap_or_default())
-                .block_on_result(py)?;
+            let stream = client.query_raw(&statement, params).block_on_result(py)?;
 
             // The column names back the (future) PEP-249 `Cursor.description`;
             // pull them out of the prepared statement here so `cursor_state`
@@ -567,6 +567,59 @@ impl Cursor {
         }
 
         Ok(())
+    }
+}
+
+/// Whether `err` is Postgres's "cached plan must not change result type"
+/// (SQLSTATE `0A000`), raised at Bind time when concurrent DDL has invalidated
+/// a cached prepared statement's result shape.
+fn is_stale_plan_err(py: Python<'_>, err: &PyErr) -> bool {
+    err.value(py)
+        .getattr("pgcode")
+        .ok()
+        .and_then(|code| code.extract::<Option<String>>().ok().flatten())
+        .is_some_and(|code| code == "0A000")
+}
+
+#[pymethods]
+impl Cursor {
+    /// Execute `query`, optionally with positional `params` bound to `$1`,
+    /// `$2`, ... placeholders.
+    ///
+    /// Any previous result set is discarded. After this returns, rows (if any)
+    /// can be read with `fetch_one`/`fetch_all`/`fetch_next_batch`.
+    ///
+    /// Prepared statements are cached per pooled connection (see
+    /// [`PooledClient::prepare_cached`]). If concurrent DDL invalidates a
+    /// cached plan (SQLSTATE `0A000`, "cached plan must not change result
+    /// type"), the statement is re-prepared and — outside a transaction, where
+    /// the error hasn't aborted anything — retried once. Inside a transaction
+    /// the error propagates (the transaction is aborted anyway); the fresh
+    /// prepare means the caller's retry gets a valid plan.
+    #[pyo3(signature = (query, params = None))]
+    fn execute(&self, py: Python<'_>, query: &str, params: Option<Vec<PgValue>>) -> PyResult<()> {
+        let params = params.unwrap_or_default();
+
+        match self.execute_once(py, query, params.clone(), false) {
+            Err(err) if is_stale_plan_err(py, &err) => {
+                if self.connection.lock()?.in_txn {
+                    // The transaction is aborted, so nothing (not even a fresh
+                    // prepare) can run on it; drop the stale cache entry — no
+                    // I/O — and propagate. The caller's next transaction
+                    // re-prepares a valid plan.
+                    self.connection.with_client(py, |client| {
+                        client.invalidate(query);
+                        Ok(())
+                    })?;
+                    Err(err)
+                } else {
+                    // Autocommit: nothing is aborted, so re-prepare fresh and
+                    // retry once.
+                    self.execute_once(py, query, params, true)
+                }
+            }
+            other => other,
+        }
     }
 
     /// Execute `query` once for each parameter set in `params_seq`.
@@ -610,7 +663,7 @@ impl Cursor {
             // Prepare once, then build a future per parameter set. Driving them
             // concurrently is what makes `tokio_postgres` pipeline them onto the
             // connection; blocking on the joined future runs the whole batch.
-            let statement = client.prepare(query).block_on_result(py)?;
+            let statement = client.prepare_cached(query, false).block_on_result(py)?;
 
             let counts = try_join_all(
                 params_seq
