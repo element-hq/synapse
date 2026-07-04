@@ -23,6 +23,7 @@ pub mod rendezvous;
 pub mod room_versions;
 pub mod segmenter;
 pub mod storage;
+pub mod tikv_engine;
 pub mod tokio_runtime;
 pub mod types;
 
@@ -80,6 +81,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     segmenter::register_module(py, m)?;
     room_versions::register_module(py, m)?;
     types::register_module(py, m)?;
+    tikv_engine::register_module(py, m)?;
 
     Ok(())
 }
