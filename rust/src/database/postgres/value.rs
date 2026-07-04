@@ -890,7 +890,18 @@ mod tests {
             );
         }
 
-        for ty in [Type::JSON, Type::TIMESTAMPTZ, Type::UUID] {
+        // `json`/`jsonb`/`jsonpath` are additionally accepted by both the
+        // Python decoder and `ToSql` (see their `accepts` overrides), but not
+        // by the shared scalar list.
+        for ty in [Type::JSON, Type::JSONB] {
+            assert!(<PgValue as ToSql>::accepts(&ty), "ToSql should accept {ty}");
+            assert!(
+                <PythonPgFromSql as tokio_postgres::types::FromSql>::accepts(&ty),
+                "FromSql should accept {ty}"
+            );
+        }
+
+        for ty in [Type::TIMESTAMPTZ, Type::UUID] {
             assert!(
                 !<PgValue as ToSql>::accepts(&ty),
                 "ToSql should reject {ty}"
@@ -956,7 +967,7 @@ mod tests {
         // out of sync; decoding an unsupported type is an error, not a panic.
         Python::initialize();
         Python::attach(|_py| {
-            assert!(PythonPgFromSql::from_sql(&Type::JSON, b"{}").is_err());
+            assert!(PythonPgFromSql::from_sql(&Type::UUID, b"0123456789abcdef").is_err());
         });
     }
 
