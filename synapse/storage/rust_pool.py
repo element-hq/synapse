@@ -58,10 +58,11 @@ class RustConnectionPool:
 
     Each :meth:`runWithConnection` call runs its function on a worker thread
     with a (DBAPI2-adapter) connection checked out of the native Rust pool, and
-    returns a ``Deferred`` that fires on the reactor thread with the result (or
-    an errback if it raised). Log contexts are preserved across the hop,
-    following the same rules as
-    :func:`synapse.logging.context.defer_to_threadpool`.
+    returns a *raw* ``Deferred`` that fires on the reactor thread with the
+    result (or an errback if it raised) — like
+    ``adbapi.ConnectionPool.runWithConnection``, logcontext handling is the
+    caller's job (``DatabasePool.runWithConnection`` supplies the single
+    ``make_deferred_yieldable``; see :meth:`runWithConnection`).
     """
 
     def __init__(
@@ -128,7 +129,12 @@ class RustConnectionPool:
         # Check a connection out of the native pool and wrap it in the DBAPI2
         # adapter. `owns_pool=False`: the pool is shared and outlives the
         # checkout. Mirrors `adbapi.ConnectionPool.connectionFactory`.
-        return DBAPI2Connection(self._pool.connect(), pool=self._pool)
+        pool = self._pool
+        if pool is None:
+            # `close()` dropped the native pool and no `start()` has reopened
+            # it; a clear error beats an AttributeError on None.
+            raise RuntimeError("connection pool has been closed")
+        return DBAPI2Connection(pool.connect(), pool=pool)
 
     def start(self) -> None:
         """Start the thread pool. Idempotent.
@@ -156,7 +162,9 @@ class RustConnectionPool:
             return
         self.running = False
         self.threadpool.stop()
-        for conn in self._connections.values():
+        # Snapshot: a concurrent `connect()` on another thread must not change
+        # the dict's size under this iteration.
+        for conn in list(self._connections.values()):
             conn.close()
         self._connections.clear()
         if self._pool is not None:
