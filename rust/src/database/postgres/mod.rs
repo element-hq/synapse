@@ -16,6 +16,7 @@ mod cursor_state;
 mod errors;
 mod helpers;
 pub mod pool;
+mod tls;
 mod value;
 
 /// Register the `postgres` submodule (the `ConnectionPool`, `Connection` and

@@ -30,6 +30,11 @@ class ConnectionPool:
         *,
         synchronous_commit: bool = True,
         statement_timeout_ms: int | None = None,
+        sslmode: str | None = None,
+        sslrootcert: str | None = None,
+        sslcert: str | None = None,
+        sslkey: str | None = None,
+        sslpassword: str | None = None,
     ) -> None:
         """
         ``runtime`` is the homeserver's ``RustRuntime`` (``hs.get_rust_runtime()``);
@@ -39,6 +44,9 @@ class ConnectionPool:
         Each connection gets the same session setup when opened: the default
         (REPEATABLE READ) isolation level, plus ``synchronous_commit`` off and
         ``statement_timeout`` (milliseconds) if configured.
+
+        The ``ssl*`` keyword arguments are the libpq TLS settings; see
+        ``rust/src/database/postgres/tls.rs``.
         """
 
     def connect(self) -> Connection:
