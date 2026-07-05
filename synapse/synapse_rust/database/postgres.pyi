@@ -30,6 +30,7 @@ class ConnectionPool:
         *,
         synchronous_commit: bool = True,
         statement_timeout_ms: int | None = None,
+        checkout_timeout_ms: int | None = None,
         sslmode: str | None = None,
         sslrootcert: str | None = None,
         sslcert: str | None = None,
@@ -44,6 +45,8 @@ class ConnectionPool:
         Each connection gets the same session setup when opened: the default
         (REPEATABLE READ) isolation level, plus ``synchronous_commit`` off and
         ``statement_timeout`` (milliseconds) if configured.
+        ``checkout_timeout_ms`` bounds how long ``connect`` may wait for a
+        connection; ``None`` or ``0`` waits indefinitely.
 
         The ``ssl*`` keyword arguments are the libpq TLS settings; see
         ``rust/src/database/postgres/tls.rs``.
