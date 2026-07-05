@@ -209,9 +209,10 @@ def _make_rust_pool(
     from synapse.storage.rust_pool import RustConnectionPool
 
     db_args = db_config.config.get("args", {})
-    dsn = rust_dbapi.build_dsn(
+    dsn_args, ssl_params = rust_dbapi.split_ssl_params(
         {k: v for k, v in db_args.items() if not k.startswith("cp_")}
     )
+    dsn = rust_dbapi.build_dsn(dsn_args)
     # Size the pool (threads and connections, 1:1) to the configured cp_max;
     # Twisted's adbapi default is 5.
     threads = db_args.get("cp_max", 5)
@@ -223,6 +224,7 @@ def _make_rust_pool(
         threads=threads,
         synchronous_commit=engine.synchronous_commit,
         statement_timeout_ms=engine.statement_timeout,
+        ssl_params=ssl_params,
     )
     pool.start()
     clock.add_system_event_trigger("during", "shutdown", pool.close)
@@ -261,12 +263,15 @@ def make_conn(
     if isinstance(engine, RustPostgresEngine):
         # The Rust backend has no `module.connect`; open a standalone (pool-of-one)
         # connection from the same libpq args, with the engine's session settings.
+        # The `ssl*` keys go to the pool as explicit params rather than in the DSN.
         from synapse.storage import rust_dbapi
 
+        dsn_args, ssl_params = rust_dbapi.split_ssl_params(db_params)
         native_db_conn = rust_dbapi.connect(
-            rust_dbapi.build_dsn(db_params),
+            rust_dbapi.build_dsn(dsn_args),
             synchronous_commit=engine.synchronous_commit,
             statement_timeout_ms=engine.statement_timeout,
+            ssl_params=ssl_params,
         )
     else:
         native_db_conn = engine.module.connect(**db_params)

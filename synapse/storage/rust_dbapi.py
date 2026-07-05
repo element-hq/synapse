@@ -164,24 +164,62 @@ def build_dsn(params: Mapping[str, Any]) -> str:
     return " ".join(parts)
 
 
+# libpq TLS keywords. psycopg2 forwards these to libpq; the Rust pool takes them
+# as explicit params to :class:`ConnectionPool` rather than in the DSN, because
+# ``tokio_postgres`` can't parse the cert-file paths and rejects the
+# ``verify-ca`` / ``verify-full`` modes. See ``rust/src/database/postgres/tls.rs``.
+SSL_PARAM_KEYS = ("sslmode", "sslrootcert", "sslcert", "sslkey", "sslpassword")
+
+
+def split_ssl_params(
+    args: Mapping[str, Any],
+) -> "tuple[dict[str, Any], dict[str, Any]]":
+    """Split connection args into (DSN args, TLS params).
+
+    The TLS params (the ``ssl*`` keys, ``None`` values dropped) are passed to the
+    Rust pool separately; everything else goes into the DSN. Keeps existing
+    psycopg2-style ``database.args`` — which may carry ``sslmode`` etc. — working
+    on the Rust backend.
+
+    libpq's deprecated ``requiressl`` is translated to the ``sslmode`` it
+    spells (``1`` → ``require``, else ``prefer``) rather than dropped — a
+    config that demanded an encrypted connection must not silently lose that
+    requirement. An explicit ``sslmode`` wins, as in libpq.
+    """
+    ssl_params = {key: args[key] for key in SSL_PARAM_KEYS if args.get(key) is not None}
+    requiressl = args.get("requiressl")
+    if requiressl is not None and "sslmode" not in ssl_params:
+        truthy = str(requiressl).lower() in ("1", "true", "yes", "on")
+        ssl_params["sslmode"] = "require" if truthy else "prefer"
+    dsn_args = {
+        key: value
+        for key, value in args.items()
+        if key not in SSL_PARAM_KEYS and key != "requiressl"
+    }
+    return dsn_args, ssl_params
+
+
 def connect(
     dsn: str,
     *,
     synchronous_commit: bool = True,
     statement_timeout_ms: int | None = None,
+    ssl_params: Mapping[str, Any] | None = None,
 ) -> "Connection":
     """Open a single standalone connection for bootstrap/one-off use.
 
     The Rust shim is pool-only, so a lone connection is a pool of one; the
     returned :class:`Connection` keeps that pool alive for its lifetime. Used by
     ``make_conn`` for the startup connection that runs schema preparation before
-    the real pool exists.
+    the real pool exists. ``ssl_params`` are the libpq ``ssl*`` keys (see
+    :func:`split_ssl_params`).
     """
     pool = postgres.ConnectionPool(
         dsn,
         1,
         synchronous_commit=synchronous_commit,
         statement_timeout_ms=statement_timeout_ms,
+        **(ssl_params or {}),
     )
     return Connection(pool.connect(), pool=pool, owns_pool=True)
 

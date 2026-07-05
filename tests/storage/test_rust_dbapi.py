@@ -122,6 +122,24 @@ class BuildDsnTestCase(unittest.TestCase):
                 rust_dbapi.build_dsn({"dbname": "d", key: value})
             self.assertIn(key, str(ctx.exception))
 
+    def test_requiressl_maps_to_sslmode(self) -> None:
+        # libpq's deprecated requiressl=1 spells sslmode=require; the
+        # encryption requirement must not be silently dropped. An explicit
+        # sslmode wins, as in libpq.
+        dsn_args, ssl_params = rust_dbapi.split_ssl_params(
+            {"dbname": "d", "requiressl": 1}
+        )
+        self.assertEqual(ssl_params, {"sslmode": "require"})
+        self.assertEqual(dsn_args, {"dbname": "d"})
+
+        _, ssl_params = rust_dbapi.split_ssl_params({"requiressl": 0})
+        self.assertEqual(ssl_params, {"sslmode": "prefer"})
+
+        _, ssl_params = rust_dbapi.split_ssl_params(
+            {"requiressl": 1, "sslmode": "verify-full"}
+        )
+        self.assertEqual(ssl_params, {"sslmode": "verify-full"})
+
     def test_supported_dsn_keys_are_accepted_by_the_parser(self) -> None:
         # _SUPPORTED_DSN_KEYS mirrors tokio_postgres's Config::param keyword
         # set; if the crate is upgraded and a key is renamed or removed, this

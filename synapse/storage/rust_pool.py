@@ -74,6 +74,7 @@ class RustConnectionPool:
         threads: int = 10,
         synchronous_commit: bool = True,
         statement_timeout_ms: int | None = None,
+        ssl_params: "dict[str, Any] | None" = None,
     ) -> None:
         """
         Args:
@@ -87,6 +88,9 @@ class RustConnectionPool:
             synchronous_commit: passed to each pooled connection's session setup.
             statement_timeout_ms: passed to each pooled connection's session
                 setup (statements running longer are aborted).
+            ssl_params: the libpq ``ssl*`` keys (see
+                :func:`synapse.storage.rust_dbapi.split_ssl_params`), passed to
+                each pooled connection's TLS setup.
 
         The owner is responsible for the lifecycle: call :meth:`start` before
         use and :meth:`close` on shutdown (e.g. via the Synapse clock's
@@ -97,6 +101,7 @@ class RustConnectionPool:
         self._dsn = dsn
         self._synchronous_commit = synchronous_commit
         self._statement_timeout_ms = statement_timeout_ms
+        self._ssl_params = dict(ssl_params or {})
         self._threads = threads
         self._pool: Any = self._open_pool()
         self.threadpool = ThreadPool(minthreads=1, maxthreads=threads, name=name)
@@ -116,6 +121,7 @@ class RustConnectionPool:
             self._threads,
             synchronous_commit=self._synchronous_commit,
             statement_timeout_ms=self._statement_timeout_ms,
+            **self._ssl_params,
         )
 
     def _default_connection_factory(

@@ -14,6 +14,7 @@ mod helpers;
 mod libpq;
 pub mod pool;
 pub(crate) mod query;
+mod tls;
 mod value;
 
 /// Register the `postgres` submodule (the `ConnectionPool`, `Connection` and
