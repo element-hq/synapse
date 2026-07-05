@@ -74,6 +74,7 @@ class RustConnectionPool:
         threads: int = 10,
         synchronous_commit: bool = True,
         statement_timeout_ms: int | None = None,
+        checkout_timeout_ms: int | None = None,
         ssl_params: "dict[str, Any] | None" = None,
     ) -> None:
         """
@@ -88,6 +89,9 @@ class RustConnectionPool:
             synchronous_commit: passed to each pooled connection's session setup.
             statement_timeout_ms: passed to each pooled connection's session
                 setup (statements running longer are aborted).
+            checkout_timeout_ms: how long a connection checkout may block before
+                failing with an operational error rather than waiting for the
+                pool indefinitely. ``None`` or ``0`` disables the timeout.
             ssl_params: the libpq ``ssl*`` keys (see
                 :func:`synapse.storage.rust_dbapi.split_ssl_params`), passed to
                 each pooled connection's TLS setup.
@@ -101,6 +105,7 @@ class RustConnectionPool:
         self._dsn = dsn
         self._synchronous_commit = synchronous_commit
         self._statement_timeout_ms = statement_timeout_ms
+        self._checkout_timeout_ms = checkout_timeout_ms
         self._ssl_params = dict(ssl_params or {})
         self._threads = threads
         self._pool: Any = self._open_pool()
@@ -121,6 +126,7 @@ class RustConnectionPool:
             self._threads,
             synchronous_commit=self._synchronous_commit,
             statement_timeout_ms=self._statement_timeout_ms,
+            checkout_timeout_ms=self._checkout_timeout_ms,
             **self._ssl_params,
         )
 

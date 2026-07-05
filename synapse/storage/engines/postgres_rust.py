@@ -80,6 +80,14 @@ class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
         super().__init__(postgres, database_config)  # type: ignore[arg-type]
         self._version: int | None = None  # set by check_database
 
+        # How long a connection checkout may block before failing with an
+        # operational error, rather than waiting indefinitely for the pool (a
+        # free slot or a new connection). In milliseconds; `0` disables it.
+        # Rust-only: the psycopg2/adbapi path has no equivalent hook.
+        self.pool_checkout_timeout_ms: int = database_config.get(
+            "pool_checkout_timeout", 30000
+        )
+
     def convert_param_style(self, sql: str) -> str:
         # The shim binds positional `$1, $2, ...` placeholders (like libpq),
         # not psycopg2's `%s`. Rewrite `?` left-to-right, matching the Rust-side

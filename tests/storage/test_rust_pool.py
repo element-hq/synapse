@@ -19,6 +19,7 @@ test reactor deliberately mocks the database thread pool out) and are skipped
 unless the suite is configured to run against Postgres.
 """
 
+import time
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import Mock
 
@@ -287,3 +288,26 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
         self.pool.close()
         with self.assertRaises(RuntimeError):
             self.pool.runWithConnection(lambda conn: None)
+
+    def test_checkout_timeout_raises_when_pool_exhausted(self) -> None:
+        # With a one-connection pool and a short checkout timeout, holding the
+        # only connection makes a second checkout fail with an operational error
+        # instead of blocking indefinitely (the `checkout_timeout_ms` plumbing).
+        from synapse.synapse_rust.database import (
+            postgres,
+        )
+
+        pool = postgres.ConnectionPool(_build_dsn(), 1, checkout_timeout_ms=200)
+        self.addCleanup(pool.close)
+
+        held = pool.connect()  # take the only connection and keep it checked out
+        self.addCleanup(held.close)
+
+        started = time.monotonic()
+        with self.assertRaises(postgres.OperationalError) as ctx:
+            pool.connect()
+        elapsed = time.monotonic() - started
+
+        self.assertIn("timed out", str(ctx.exception).lower())
+        # It should fail promptly (around the 200ms budget), not hang.
+        self.assertLess(elapsed, 5.0)
