@@ -76,6 +76,19 @@ postgres-protocol = "0.6.10"
 # default host. Ships pre-generated bindings and links the system libpq itself,
 # so — unlike a bindgen-based binding — the build needs no libclang.
 pq-sys = "0.7.5"
+# Use the `ring` crypto provider (not the default `aws-lc-rs`, which needs cmake
+# and isn't available here) — `ring` is already in the tree via reqwest.
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "logging",
+    "std",
+    "tls12",
+] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
+tokio-postgres-rustls = { version = "0.14.0", default-features = false, features = [
+    "ring",
+] }
 
 [build-dependencies]
 blake2 = "0.10.4"

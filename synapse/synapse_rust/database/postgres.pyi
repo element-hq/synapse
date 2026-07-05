@@ -28,6 +28,11 @@ class ConnectionPool:
         *,
         synchronous_commit: bool = True,
         statement_timeout_ms: Optional[int] = None,
+        sslmode: Optional[str] = None,
+        sslrootcert: Optional[str] = None,
+        sslcert: Optional[str] = None,
+        sslkey: Optional[str] = None,
+        sslpassword: Optional[str] = None,
     ) -> None: ...
     def connect(self) -> Connection:
         """Check a connection out of the pool, blocking until one is available.

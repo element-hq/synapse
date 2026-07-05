@@ -22,12 +22,14 @@ use deadpool::managed::{Manager, Metrics, Object, Pool, PoolError, RecycleError,
 use log::warn;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use tokio_postgres::{Client, Config, NoTls, Statement};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_postgres::{Client, Config, Connection as PgConnection, NoTls, Socket, Statement};
 
 use crate::database::postgres::connection::Connection;
 use crate::database::postgres::errors::{pg_err_to_py, OperationalError};
 use crate::database::postgres::fixup_config_defaults;
 use crate::database::postgres::helpers::BlockingPostgres;
+use crate::database::postgres::tls::{self, TlsConnector, TlsParams};
 use crate::database::runtime::runtime;
 
 /// Per-connection session settings applied once when a pooled connection is
@@ -80,20 +82,46 @@ impl SessionConfig {
 /// Creates and recycles [`tokio_postgres`] connections for a [`ConnectionPool`].
 pub struct ConnectionManager {
     /// The resolved connection config, parsed once from the DSN (with libpq's
-    /// default host filled in if the DSN omitted one).
+    /// default host filled in if the DSN omitted one, and the SSL mode set from
+    /// the `ssl*` params).
     config: Config,
     /// Session settings applied to each connection when it is opened.
     session: SessionConfig,
+    /// How to (or whether to) negotiate TLS for each connection.
+    tls: TlsConnector,
 }
 
 impl ConnectionManager {
-    /// Build a manager from a libpq-style DSN and session settings.
-    pub fn from_dsn(dsn: &str, session: SessionConfig) -> Result<Self, anyhow::Error> {
+    /// Build a manager from a libpq-style DSN, session settings and TLS params.
+    pub fn from_dsn(
+        dsn: &str,
+        session: SessionConfig,
+        tls_params: &TlsParams,
+    ) -> Result<Self, anyhow::Error> {
+        let mut config = fixup_config_defaults(dsn)?;
+        let (ssl_mode, connector) = tls::build(tls_params)?;
+        config.ssl_mode(ssl_mode);
         Ok(Self {
-            config: fixup_config_defaults(dsn)?,
+            config,
             session,
+            tls: connector,
         })
     }
+}
+
+/// Drive a connection's background task (which pumps the socket) on the shared
+/// runtime. The task ends on its own when the `Client` is dropped, i.e. when the
+/// pool discards the connection. Generic over the stream so it works for both
+/// the plaintext and TLS connectors.
+fn spawn_connection_task<S>(connection: PgConnection<Socket, S>)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    runtime().spawn(async move {
+        if let Err(e) = connection.await {
+            warn!("postgres connection error: {e}");
+        }
+    });
 }
 
 /// A pooled [`Client`] plus its cache of prepared statements.
@@ -168,13 +196,18 @@ impl Manager for ConnectionManager {
         // (which pumps the socket) on the shared runtime. The task ends on its
         // own when the `Client` is dropped, i.e. when the pool discards this
         // connection.
-        let (client, connection) = self.config.connect(NoTls).await?;
-
-        runtime().spawn(async move {
-            if let Err(e) = connection.await {
-                warn!("postgres connection error: {e}");
+        let client = match &self.tls {
+            TlsConnector::NoTls => {
+                let (client, connection) = self.config.connect(NoTls).await?;
+                spawn_connection_task(connection);
+                client
             }
-        });
+            TlsConnector::Rustls(connector) => {
+                let (client, connection) = self.config.connect(connector.clone()).await?;
+                spawn_connection_task(connection);
+                client
+            }
+        };
 
         // Apply per-connection session setup once, up front (the native
         // equivalent of the engine's `on_new_connection`).
@@ -208,16 +241,23 @@ pub type PooledConnection = Object<ConnectionManager>;
 /// Build a [`ConnectionPool`] from a libpq-style DSN, capped at `max_size`
 /// connections, using the default [`SessionConfig`].
 pub fn create_pool(dsn: &str, max_size: usize) -> Result<ConnectionPool, anyhow::Error> {
-    create_pool_with_session(dsn, max_size, SessionConfig::default())
+    create_pool_with_session(
+        dsn,
+        max_size,
+        SessionConfig::default(),
+        &TlsParams::default(),
+    )
 }
 
-/// Build a [`ConnectionPool`] with explicit per-connection [`SessionConfig`].
+/// Build a [`ConnectionPool`] with explicit per-connection [`SessionConfig`] and
+/// TLS params.
 pub fn create_pool_with_session(
     dsn: &str,
     max_size: usize,
     session: SessionConfig,
+    tls_params: &TlsParams,
 ) -> Result<ConnectionPool, anyhow::Error> {
-    let manager = ConnectionManager::from_dsn(dsn, session)?;
+    let manager = ConnectionManager::from_dsn(dsn, session, tls_params)?;
     Ok(Pool::builder(manager).max_size(max_size).build()?)
 }
 
@@ -242,18 +282,31 @@ impl PyConnectionPool {
     /// (REPEATABLE READ) isolation level, plus `synchronous_commit` /
     /// `statement_timeout` if configured here.
     #[new]
-    #[pyo3(signature = (dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None))]
+    #[pyo3(signature = (dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         dsn: &str,
         max_size: usize,
         synchronous_commit: bool,
         statement_timeout_ms: Option<i32>,
+        sslmode: Option<String>,
+        sslrootcert: Option<String>,
+        sslcert: Option<String>,
+        sslkey: Option<String>,
+        sslpassword: Option<String>,
     ) -> PyResult<Self> {
         let session = SessionConfig {
             synchronous_commit,
             statement_timeout_ms,
         };
-        let pool = create_pool_with_session(dsn, max_size, session).map_err(|e| {
+        let tls_params = TlsParams {
+            sslmode,
+            sslrootcert,
+            sslcert,
+            sslkey,
+            sslpassword,
+        };
+        let pool = create_pool_with_session(dsn, max_size, session, &tls_params).map_err(|e| {
             PyRuntimeError::new_err(format!("failed to build connection pool: {e}"))
         })?;
         Ok(Self { pool })
@@ -379,7 +432,7 @@ mod tests {
             synchronous_commit: false,
             statement_timeout_ms: Some(1234),
         };
-        let pool = create_pool_with_session(&dsn, 1, session).unwrap();
+        let pool = create_pool_with_session(&dsn, 1, session, &TlsParams::default()).unwrap();
 
         runtime().block_on(async {
             let client = pool.get().await.unwrap();
