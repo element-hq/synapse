@@ -17,8 +17,12 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 
-use deadpool::managed::{Manager, Metrics, Object, Pool, PoolError, RecycleError, RecycleResult};
+use deadpool::managed::{
+    Manager, Metrics, Object, Pool, PoolError, RecycleError, RecycleResult, TimeoutType, Timeouts,
+};
+use deadpool::Runtime;
 use log::warn;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -239,26 +243,45 @@ pub type ConnectionPool = Pool<ConnectionManager>;
 pub type PooledConnection = Object<ConnectionManager>;
 
 /// Build a [`ConnectionPool`] from a libpq-style DSN, capped at `max_size`
-/// connections, using the default [`SessionConfig`].
+/// connections, using the default [`SessionConfig`] and no checkout timeout.
 pub fn create_pool(dsn: &str, max_size: usize) -> Result<ConnectionPool, anyhow::Error> {
     create_pool_with_session(
         dsn,
         max_size,
         SessionConfig::default(),
         &TlsParams::default(),
+        None,
     )
 }
 
 /// Build a [`ConnectionPool`] with explicit per-connection [`SessionConfig`] and
 /// TLS params.
+///
+/// If `checkout_timeout` is set, a checkout ([`PyConnectionPool::connect`] /
+/// [`Pool::get`]) blocks for at most that long before failing with a
+/// [`PoolError::Timeout`] rather than waiting indefinitely. We bound both the
+/// wait-for-a-free-slot phase and the establish-a-new-connection phase, so a
+/// checkout can never hang forever (e.g. against an unreachable server).
 pub fn create_pool_with_session(
     dsn: &str,
     max_size: usize,
     session: SessionConfig,
     tls_params: &TlsParams,
+    checkout_timeout: Option<Duration>,
 ) -> Result<ConnectionPool, anyhow::Error> {
     let manager = ConnectionManager::from_dsn(dsn, session, tls_params)?;
-    Ok(Pool::builder(manager).max_size(max_size).build()?)
+    let mut builder = Pool::builder(manager).max_size(max_size);
+    if let Some(timeout) = checkout_timeout {
+        // deadpool enforces timeouts by sleeping on a runtime (we drive `get()`
+        // on our own tokio runtime, so `Runtime::Tokio1` is correct). `recycle`
+        // is left unbounded: it's a cheap local `is_closed` check, not I/O.
+        builder = builder.runtime(Runtime::Tokio1).timeouts(Timeouts {
+            wait: Some(timeout),
+            create: Some(timeout),
+            recycle: None,
+        });
+    }
+    Ok(builder.build()?)
 }
 
 /// The Python-facing connection pool.
@@ -282,13 +305,14 @@ impl PyConnectionPool {
     /// (REPEATABLE READ) isolation level, plus `synchronous_commit` /
     /// `statement_timeout` if configured here.
     #[new]
-    #[pyo3(signature = (dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
+    #[pyo3(signature = (dsn, max_size = 10, *, synchronous_commit = true, statement_timeout_ms = None, checkout_timeout_ms = None, sslmode = None, sslrootcert = None, sslcert = None, sslkey = None, sslpassword = None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         dsn: &str,
         max_size: usize,
         synchronous_commit: bool,
         statement_timeout_ms: Option<i32>,
+        checkout_timeout_ms: Option<u64>,
         sslmode: Option<String>,
         sslrootcert: Option<String>,
         sslcert: Option<String>,
@@ -306,9 +330,15 @@ impl PyConnectionPool {
             sslkey,
             sslpassword,
         };
-        let pool = create_pool_with_session(dsn, max_size, session, &tls_params).map_err(|e| {
-            PyRuntimeError::new_err(format!("failed to build connection pool: {e}"))
-        })?;
+        // A `checkout_timeout_ms` of `None` or `0` means no timeout (block until a
+        // connection is available), matching the previous behaviour.
+        let checkout_timeout = checkout_timeout_ms
+            .filter(|&ms| ms > 0)
+            .map(Duration::from_millis);
+        let pool = create_pool_with_session(dsn, max_size, session, &tls_params, checkout_timeout)
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("failed to build connection pool: {e}"))
+            })?;
         Ok(Self { pool })
     }
 
@@ -340,9 +370,21 @@ fn pool_err_to_py(err: PoolError<tokio_postgres::Error>) -> PyErr {
         // The backend failed to establish the connection: reuse the exact
         // mapping (and `pgcode` tagging) a query error gets.
         PoolError::Backend(e) => pg_err_to_py(&e),
-        // Timed out waiting for a slot, pool closed, no runtime, or a
-        // post-create hook failure: all connection-level problems, which
-        // Synapse treats as retryable operational errors.
+        // Hit the configured checkout timeout. Report which phase so a slow
+        // server (Create) is distinguishable from pool exhaustion (Wait).
+        PoolError::Timeout(t) => {
+            let phase = match t {
+                TimeoutType::Wait => "waiting for a free connection slot",
+                TimeoutType::Create => "establishing a new connection",
+                TimeoutType::Recycle => "recycling a connection",
+            };
+            OperationalError::new_err(format!(
+                "timed out checking out a database connection ({phase})"
+            ))
+        }
+        // Pool closed, no runtime, or a post-create hook failure: all
+        // connection-level problems, which Synapse treats as retryable
+        // operational errors.
         other => OperationalError::new_err(format!("failed to acquire connection: {other}")),
     }
 }
@@ -432,7 +474,7 @@ mod tests {
             synchronous_commit: false,
             statement_timeout_ms: Some(1234),
         };
-        let pool = create_pool_with_session(&dsn, 1, session, &TlsParams::default()).unwrap();
+        let pool = create_pool_with_session(&dsn, 1, session, &TlsParams::default(), None).unwrap();
 
         runtime().block_on(async {
             let client = pool.get().await.unwrap();
@@ -455,6 +497,41 @@ mod tests {
             );
             assert_eq!(show("synchronous_commit").await, "off");
             assert_eq!(show("statement_timeout").await, "1234ms");
+        });
+    }
+
+    #[test]
+    fn checkout_times_out_when_pool_is_exhausted() {
+        let Some(dsn) = test_dsn() else {
+            eprintln!("skipping: set SYNAPSE_TEST_POSTGRES_DSN to run");
+            return;
+        };
+
+        // A single-connection pool with a short checkout timeout.
+        let pool = create_pool_with_session(
+            &dsn,
+            1,
+            SessionConfig::default(),
+            &TlsParams::default(),
+            Some(Duration::from_millis(200)),
+        )
+        .unwrap();
+
+        runtime().block_on(async {
+            // Hold the only connection, so a second checkout has to wait.
+            let _held = pool.get().await.unwrap();
+
+            let started = std::time::Instant::now();
+            let result = pool.get().await;
+            assert!(
+                matches!(result, Err(PoolError::Timeout(TimeoutType::Wait))),
+                "expected a wait timeout when the pool is exhausted"
+            );
+            // It should fail promptly (around the 200ms budget), not hang.
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "checkout did not time out promptly"
+            );
         });
     }
 }

@@ -106,6 +106,7 @@ def connect(
     *,
     synchronous_commit: bool = True,
     statement_timeout_ms: int | None = None,
+    checkout_timeout_ms: int | None = None,
     ssl_params: Mapping[str, Any] | None = None,
 ) -> "Connection":
     """Open a single standalone connection for bootstrap/one-off use.
@@ -114,13 +115,15 @@ def connect(
     returned :class:`Connection` keeps that pool alive for its lifetime. Used by
     ``make_conn`` for the startup connection that runs schema preparation before
     the real pool exists. ``ssl_params`` are the libpq ``ssl*`` keys (see
-    :func:`split_ssl_params`).
+    :func:`split_ssl_params`); ``checkout_timeout_ms`` bounds how long opening the
+    connection may block (``None``/``0`` waits indefinitely).
     """
     pool = postgres.ConnectionPool(
         dsn,
         1,
         synchronous_commit=synchronous_commit,
         statement_timeout_ms=statement_timeout_ms,
+        checkout_timeout_ms=checkout_timeout_ms,
         **(ssl_params or {}),
     )
     return Connection(pool.connect(), pool=pool, owns_pool=True)

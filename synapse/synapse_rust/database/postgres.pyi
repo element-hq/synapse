@@ -28,6 +28,7 @@ class ConnectionPool:
         *,
         synchronous_commit: bool = True,
         statement_timeout_ms: Optional[int] = None,
+        checkout_timeout_ms: Optional[int] = None,
         sslmode: Optional[str] = None,
         sslrootcert: Optional[str] = None,
         sslcert: Optional[str] = None,
