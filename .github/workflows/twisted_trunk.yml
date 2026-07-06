@@ -1,5 +1,8 @@
 name: Twisted Trunk
 
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: 0 8 * * *
@@ -168,6 +171,10 @@ jobs:
       - trial
       - sytest
       - complement
+
+    permissions:
+      contents: read
+      issues: write
 
     runs-on: ubuntu-latest
 
