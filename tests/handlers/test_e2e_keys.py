@@ -20,7 +20,7 @@
 #
 #
 import time
-from typing import Iterable
+from typing import Any, Iterable
 from unittest import mock
 
 from parameterized import parameterized
@@ -820,7 +820,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
     def test_update_signature_master_key(self) -> None:
         """should be able to update a signature on the Master signing key with an unknown algorithm"""
         local_user = "@boris:" + self.hs.hostname
-        master_key = {
+        master_key: dict[str, Any] = {
             # private key: HvQBbU+hc2Zr+JP1sE0XwBe1pfZZEYtJNPJLZJtS+F8
             "user_id": local_user,
             "usage": ["master"],
