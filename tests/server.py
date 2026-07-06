@@ -371,6 +371,7 @@ def make_request(
     await_result: bool = True,
     custom_headers: Iterable[CustomHeaderType] | None = None,
     client_ip: str = "127.0.0.1",
+    timeout_ms: int = 1000,
 ) -> FakeChannel:
     """
     Make a web request using the given method, path and content, and render it
@@ -399,6 +400,8 @@ def make_request(
         custom_headers: (name, value) pairs to add as request headers
         client_ip: The IP to use as the requesting IP. Useful for testing
             ratelimiting.
+        timeout_ms: if `await_result` is `True`, the amount of time to wait on
+            the request before timing out. Ignored otherwise.
 
     Returns:
         channel
@@ -483,7 +486,7 @@ def make_request(
     req.requestReceived(method, path, b"1.1")
 
     if await_result:
-        channel.await_result()
+        channel.await_result(timeout_ms=timeout_ms)
 
     return channel
 
