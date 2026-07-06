@@ -1208,8 +1208,8 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         results: dict[str, dict[str, dict[str, JsonDict]]] = {}
         missing: list[tuple[str, str, str, int]] = []
         if isinstance(self.database_engine, PostgresEngine):
-            # If we can use execute_values we can use a single batch query
-            # in autocommit mode.
+            # On Postgres we can claim everything in a single batch query in
+            # autocommit mode.
             unfulfilled_claim_counts: dict[tuple[str, str, str], int] = {}
             for user_id, device_id, algorithm, count in query_list:
                 unfulfilled_claim_counts[user_id, device_id, algorithm] = count
@@ -1277,10 +1277,11 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 query_list,
                 db_autocommit=True,
             )
-            # Use an UPDATE FROM... RETURNING combined with a VALUES block to do
-            # everything in one query. Note: this is also supported in SQLite 3.33.0,
-            # (see https://www.sqlite.org/lang_update.html#update_from), but we do not
-            # have an equivalent of psycopg2's execute_values to do this in one query.
+            # Use an UPDATE FROM... RETURNING combined with an unnest()ed set to
+            # do everything in one query. Note: UPDATE ... FROM is also supported
+            # in SQLite 3.33.0 (see
+            # https://www.sqlite.org/lang_update.html#update_from), but we keep the
+            # per-key fallback there.
         else:
             return await self._claim_e2e_fallback_keys_simple(query_list)
 
@@ -1295,20 +1296,33 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         """
         results: dict[str, dict[str, dict[str, JsonDict]]] = {}
 
-        sql = """
-            WITH claims(user_id, device_id, algorithm, mark_as_used) AS (
-                VALUES ?
-            )
-            UPDATE e2e_fallback_keys_json k
-            SET used = used OR mark_as_used
-            FROM claims
-            WHERE (k.user_id, k.device_id, k.algorithm) = (claims.user_id, claims.device_id, claims.algorithm)
-            RETURNING k.user_id, k.device_id, k.algorithm, k.key_id, k.key_json;
-        """
-        claimed_keys = cast(
-            list[tuple[str, str, str, str, str]],
-            txn.execute_values(sql, query_list),
-        )
+        # Unnest the (user_id, device_id, algorithm, mark_as_used) tuples into the
+        # `claims` set. The per-column `::` casts let the parameters bind as arrays
+        # — and let the Rust driver, which prepares statements, resolve their types.
+        user_ids: list[str] = []
+        device_ids: list[str] = []
+        algorithms: list[str] = []
+        marks: list[bool] = []
+        for user_id, device_id, algorithm, mark_as_used in query_list:
+            user_ids.append(user_id)
+            device_ids.append(device_id)
+            algorithms.append(algorithm)
+            marks.append(mark_as_used)
+
+        claimed_keys: list[tuple[str, str, str, str, str]] = []
+        if user_ids:
+            sql = """
+                WITH claims(user_id, device_id, algorithm, mark_as_used) AS (
+                    SELECT * FROM unnest(?::text[], ?::text[], ?::text[], ?::boolean[])
+                )
+                UPDATE e2e_fallback_keys_json k
+                SET used = used OR mark_as_used
+                FROM claims
+                WHERE (k.user_id, k.device_id, k.algorithm) = (claims.user_id, claims.device_id, claims.algorithm)
+                RETURNING k.user_id, k.device_id, k.algorithm, k.key_id, k.key_json;
+            """
+            txn.execute(sql, (user_ids, device_ids, algorithms, marks))
+            claimed_keys = cast(list[tuple[str, str, str, str, str]], txn.fetchall())
 
         seen_user_device: set[tuple[str, str]] = set()
         for user_id, device_id, algorithm, key_id, key_json in claimed_keys:
@@ -1438,30 +1452,44 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         # Doing so means that keys are issued in the same order they were uploaded,
         # which reduces the chances of a client expiring its copy of a (private)
         # key while the public key is still on the server, waiting to be issued.
-        sql = """
-            WITH claims(user_id, device_id, algorithm, claim_count) AS (
-                VALUES ?
-            ), ranked_keys AS (
-                SELECT
-                    user_id, device_id, algorithm, key_id, claim_count,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY (user_id, device_id, algorithm)
-                        ORDER BY ts_added_ms
-                    ) AS r
-                FROM e2e_one_time_keys_json
-                    JOIN claims USING (user_id, device_id, algorithm)
-            )
-            DELETE FROM e2e_one_time_keys_json k
-            WHERE (user_id, device_id, algorithm, key_id) IN (
-                SELECT user_id, device_id, algorithm, key_id
-                FROM ranked_keys
-                WHERE r <= claim_count
-            )
-            RETURNING user_id, device_id, algorithm, key_id, key_json;
-        """
-        otk_rows = cast(
-            list[tuple[str, str, str, str, str]], txn.execute_values(sql, query_list)
-        )
+        # Unnest the (user_id, device_id, algorithm, claim_count) tuples into the
+        # `claims` set. The per-column `::` casts let the parameters bind as arrays
+        # — and let the Rust driver, which prepares statements, resolve their types.
+        user_ids: list[str] = []
+        device_ids: list[str] = []
+        algorithms: list[str] = []
+        claim_counts: list[int] = []
+        for user_id, device_id, algorithm, claim_count in query_list:
+            user_ids.append(user_id)
+            device_ids.append(device_id)
+            algorithms.append(algorithm)
+            claim_counts.append(claim_count)
+
+        otk_rows: list[tuple[str, str, str, str, str]] = []
+        if user_ids:
+            sql = """
+                WITH claims(user_id, device_id, algorithm, claim_count) AS (
+                    SELECT * FROM unnest(?::text[], ?::text[], ?::text[], ?::bigint[])
+                ), ranked_keys AS (
+                    SELECT
+                        user_id, device_id, algorithm, key_id, claim_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY (user_id, device_id, algorithm)
+                            ORDER BY ts_added_ms
+                        ) AS r
+                    FROM e2e_one_time_keys_json
+                        JOIN claims USING (user_id, device_id, algorithm)
+                )
+                DELETE FROM e2e_one_time_keys_json k
+                WHERE (user_id, device_id, algorithm, key_id) IN (
+                    SELECT user_id, device_id, algorithm, key_id
+                    FROM ranked_keys
+                    WHERE r <= claim_count
+                )
+                RETURNING user_id, device_id, algorithm, key_id, key_json;
+            """
+            txn.execute(sql, (user_ids, device_ids, algorithms, claim_counts))
+            otk_rows = cast(list[tuple[str, str, str, str, str]], txn.fetchall())
 
         seen_user_device = {
             (user_id, device_id) for user_id, device_id, _, _, _ in otk_rows

@@ -141,6 +141,14 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
         del self.conn
         self._pool.close()
 
+    def _logging_conn(self) -> LoggingDatabaseConnection:
+        return LoggingDatabaseConnection(
+            conn=self.conn,
+            engine=self.engine,
+            default_txn_name="test",
+            server_name="test",
+        )
+
     def test_execute_and_fetchone(self) -> None:
         cursor = self.conn.cursor()
         # The adapter passes parameters straight through; the shim binds `$n`.
@@ -190,13 +198,7 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
         # The whole point: a real LoggingTransaction (which converts `?` to `$n`
         # via the engine, then drives the cursor via the DBAPI2 spelling) runs
         # unchanged against the adapter.
-        engine = RustPostgresEngine({})
-        db_conn = LoggingDatabaseConnection(
-            conn=self.conn,
-            engine=engine,
-            default_txn_name="test",
-            server_name="test",
-        )
+        db_conn = self._logging_conn()
 
         txn = db_conn.cursor(txn_name="test")
         txn.execute("SELECT ?::int + ?::int", (2, 3))
@@ -245,3 +247,13 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
         cursor.execute("SELECT 1")
         self.assertEqual(cursor.fetchone(), (1,))
         self.conn.commit()
+
+    def test_execute_batch(self) -> None:
+        # execute_batch routes to the shim's (pipelined) executemany.
+        db_conn = self._logging_conn()
+        txn = db_conn.cursor(txn_name="test")
+        txn.execute("CREATE TEMP TABLE t (id int)")
+        txn.execute_batch("INSERT INTO t VALUES (?)", [(1,), (2,), (3,)])
+        txn.execute("SELECT id FROM t ORDER BY id")
+        self.assertEqual(txn.fetchall(), [(1,), (2,), (3,)])
+        db_conn.commit()

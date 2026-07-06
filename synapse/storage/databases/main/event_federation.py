@@ -337,18 +337,22 @@ class EventFederationWorkerStore(
             results = set()
 
         if isinstance(self.database_engine, PostgresEngine):
-            # We can use `execute_values` to efficiently fetch the gaps when
-            # using postgres.
-            sql = """
-                SELECT event_id
-                FROM event_auth_chains AS c, (VALUES ?) AS l(chain_id, max_seq)
-                WHERE
-                    c.chain_id = l.chain_id
-                    AND sequence_number <= max_seq
-            """
+            # Fetch the gaps for every chain in a single query by unnesting the
+            # (chain_id, max_seq) pairs into a joinable set. The `::bigint[]`
+            # casts let the parameters bind as arrays — and let the Rust driver,
+            # which prepares statements, resolve their types.
+            if chains:
+                sql = """
+                    SELECT event_id
+                    FROM event_auth_chains AS c,
+                        unnest(?::bigint[], ?::bigint[]) AS l(chain_id, max_seq)
+                    WHERE
+                        c.chain_id = l.chain_id
+                        AND sequence_number <= max_seq
+                """
 
-            rows = txn.execute_values(sql, chains.items())
-            results.update(r for (r,) in rows)
+                txn.execute(sql, (list(chains.keys()), list(chains.values())))
+                results.update(r for (r,) in txn)
         else:
             # For SQLite we just fall back to doing a noddy for loop.
             sql = """
@@ -883,23 +887,31 @@ class EventFederationWorkerStore(
     ) -> set[str]:
         result: set[str] = set()
         if isinstance(self.database_engine, PostgresEngine):
-            # We can use `execute_values` to efficiently fetch the gaps when
-            # using postgres.
-            sql = """
-                SELECT event_id
-                FROM event_auth_chains AS c, (VALUES ?) AS l(chain_id, min_seq, max_seq)
-                WHERE
-                    c.chain_id = l.chain_id
-                    AND min_seq < sequence_number AND sequence_number <= max_seq
-            """
+            # Fetch the gaps for every chain in a single query by unnesting the
+            # (chain_id, min_seq, max_seq) triples into a joinable set. The
+            # `::bigint[]` casts let the parameters bind as arrays — and let the
+            # Rust driver, which prepares statements, resolve their types.
+            if chains:
+                chain_ids: list[int] = []
+                min_seqs: list[int] = []
+                max_seqs: list[int] = []
+                for chain_id, (min_no, max_no) in chains.items():
+                    chain_ids.append(chain_id)
+                    min_seqs.append(min_no)
+                    max_seqs.append(max_no)
 
-            args = [
-                (chain_id, min_no, max_no)
-                for chain_id, (min_no, max_no) in chains.items()
-            ]
+                sql = """
+                    SELECT event_id
+                    FROM event_auth_chains AS c,
+                        unnest(?::bigint[], ?::bigint[], ?::bigint[])
+                            AS l(chain_id, min_seq, max_seq)
+                    WHERE
+                        c.chain_id = l.chain_id
+                        AND min_seq < sequence_number AND sequence_number <= max_seq
+                """
 
-            rows = txn.execute_values(sql, args)
-            result.update(r for (r,) in rows)
+                txn.execute(sql, (chain_ids, min_seqs, max_seqs))
+                result.update(r for (r,) in txn)
         else:
             # For SQLite we just fall back to doing a noddy for loop.
             sql = """

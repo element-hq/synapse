@@ -43,6 +43,10 @@ class Psycopg2Engine(
 ):
     """The Postgres backend that talks to the database via psycopg2."""
 
+    # psycopg2's cursor is a real psycopg2 cursor, so the `psycopg2.extras`
+    # helpers can be used on it directly.
+    uses_psycopg2_extras: bool = True
+
     def __init__(self, database_config: Mapping[str, Any]):
         super().__init__(psycopg2, database_config)
         psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)

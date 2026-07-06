@@ -349,9 +349,13 @@ class StateDeletionDataStore:
             )
             for state_group in state_groups
         ]
-        if isinstance(txn.database_engine, PostgresEngine):
+        if (
+            isinstance(txn.database_engine, PostgresEngine)
+            and txn.database_engine.uses_psycopg2_extras
+        ):
             txn.execute_values(sql % ("?",), rows, fetch=False)
         else:
+            # The Rust backend and SQLite go through executemany.
             txn.execute_batch(sql % ("(?, ?)",), rows)
 
     async def mark_state_groups_as_used(self, state_groups: Collection[int]) -> None:
