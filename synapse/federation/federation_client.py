@@ -1946,10 +1946,7 @@ class FederationClient(FederationBase):
         destination: str,
         timeout: int,
     ) -> JsonDict:
-        """Fetch users from the user directory of a remote server.
-
-        The federation endpoint always returns the remote server's full local
-        directory, so no result limit is sent.
+        """Fetch the full user directory of a remote server.
 
         Args:
             destination: The server to query.
