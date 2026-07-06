@@ -1972,14 +1972,14 @@ class FederationClient(FederationBase):
                 destination,
                 e,
             )
-            return {"limited": False, "results": []}
+            return {"results": []}
         except Exception:
             # Unexpected error; log with a stack trace for debugging.
             logger.exception(
                 "Unexpected error searching remote user directory [destination=%s]",
                 destination,
             )
-            return {"limited": False, "results": []}
+            return {"results": []}
 
     @staticmethod
     def _parse_remote_user_directory_results(

@@ -338,7 +338,6 @@ class FederationClientTest(FederatingHomeserverTestCase):
         """Test that the federation client correctly handles user directory search requests."""
         # Mock the transport layer's user_directory_search method
         mock_results = {
-            "limited": False,
             "results": [
                 {
                     "user_id": "@user:other.example.com",
@@ -379,7 +378,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
         )
 
         # Check that the result is an empty result set
-        self.assertEqual(result, {"limited": False, "results": []})
+        self.assertEqual(result, {"results": []})
 
 
 class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
@@ -417,7 +416,6 @@ class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
 
         self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
             return_value={
-                "limited": False,
                 "results": [
                     {
                         "user_id": "@bob:remote.example.com",

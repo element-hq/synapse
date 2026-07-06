@@ -901,7 +901,6 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
     {}
     Response:
     {
-        "limited": false,
         "results": [
             {
                 "user_id": "@user:example.com",

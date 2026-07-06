@@ -1507,23 +1507,19 @@ class FederationServer(FederationBase):
         homeserver's own users (the table may also hold cached remote users).
 
         Returns:
-            A dict of the form ``{"limited": False, "results": [...]}``.
+            A dict of the form ``{"results": [...]}``.
         """
         results = await self.store.get_users_in_user_dir()
 
         # Federation endpoint: only return users local to this homeserver.
-        filtered_results = []
-        for user in results.get("results", []):
-            try:
-                if self.hs.is_mine_id(user["user_id"]):
-                    filtered_results.append(user)
-            except SynapseError:
-                # Ignore malformed user IDs.
-                continue
+        # is_mine_id is infallible and returns False for malformed user IDs.
+        filtered_results = [
+            user
+            for user in results.get("results", [])
+            if self.hs.is_mine_id(user["user_id"])
+        ]
 
-        # The federation endpoint never truncates: it always returns the full
-        # local directory.
-        return {"limited": False, "results": filtered_results}
+        return {"results": filtered_results}
 
 
 class FederationHandlerRegistry:
