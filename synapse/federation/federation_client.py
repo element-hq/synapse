@@ -42,8 +42,6 @@ from typing import (
 import attr
 from prometheus_client import Counter
 
-from twisted.internet import defer
-
 from synapse.api.constants import Direction, EventContentFields, EventTypes, Membership
 from synapse.api.errors import (
     CodeMessageException,
@@ -71,7 +69,6 @@ from synapse.federation.federation_base import (
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
-from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -1974,63 +1971,6 @@ class FederationClient(FederationBase):
                 e,
             )
             return {"limited": False, "results": []}
-
-    async def search_user_directory_across_federation(
-        self,
-        destinations: Collection[str],
-        limit: int = 10,
-    ) -> JsonDict:
-        """Fetch users from the directories of multiple federated servers.
-
-        Args:
-            destinations: The servers to query.
-            limit: Maximum number of results to return per server.
-
-        Returns:
-            Combined results from all servers.
-        """
-
-        if not destinations:
-            return {"limited": False, "results": []}
-
-        # Query each server individually and collect results
-        combined_results = []
-        limited = False
-
-        # Create a list of deferreds to query each server
-        query_tasks = []
-        for destination in destinations:
-            if not self._is_mine_server_name(destination):
-                # Convert coroutine to Deferred
-                deferred = defer.ensureDeferred(
-                    self.user_directory_search(
-                        destination,
-                        self.user_directory_search_timeout,
-                    )
-                )
-                query_tasks.append(deferred)
-
-        # Execute all queries in parallel
-        if query_tasks:
-            server_results = await make_deferred_yieldable(
-                defer.gatherResults(
-                    query_tasks,
-                    consumeErrors=True,
-                )
-            )
-
-            # Process results from each server
-            for result in server_results:
-                if result.get("limited", False):
-                    limited = True
-                combined_results.extend(result.get("results", []))
-
-        # Limit the total number of results
-        if len(combined_results) > limit:
-            combined_results = combined_results[:limit]
-            limited = True
-
-        return {"limited": limited, "results": combined_results}
 
     @staticmethod
     def _parse_remote_user_directory_results(
