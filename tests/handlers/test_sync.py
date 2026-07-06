@@ -33,6 +33,7 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
+    LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
     SyncConfig,
     SyncRequestKey,
     SyncResult,
@@ -2177,6 +2178,158 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         # We didn't ask for displayname
         self.assertFalse(
             "displayname" in incremental_result.profile_updates["@user:test"].keys(),
+        )
+
+    @parameterized.expand([[True, False], [True, True], [False, False], [False, True]])
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_join_leave_join_leave(
+        self,
+        eager_sync: bool,
+        is_lazy: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response
+        correctly handles multiple join / leave / join / leave in a row.
+
+        In the first variant we sync and check after each iteration of join/leave.
+        In the second variant we only sync at the end of all the join/leaves.
+        We do both of these as lazy and not-lazy variants.
+        """
+        # Use third_user for this test as other_user is already joined
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["displayname", "avatar_url"]}
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Join the room
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        next_token = initial_result.next_batch
+        if eager_sync:
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=next_token,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            # We expect there to be the users profile
+            self.assertIsNotNone(
+                incremental_result.profile_updates["@third_user:test"],
+            )
+            next_token = incremental_result.next_batch
+        # Leave the room
+        self.helper.leave(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        if eager_sync:
+            # Ensure we don't get caught by the cache
+            self.reactor.advance((LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE / 1000) + 1)
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=next_token,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            # We expect there to be a null profile
+            self.assertIsNone(
+                incremental_result.profile_updates["@third_user:test"],
+            )
+            next_token = incremental_result.next_batch
+        # Join the room
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        if eager_sync:
+            # Ensure we don't get caught by the cache
+            self.reactor.advance((LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE / 1000) + 1)
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=next_token,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            # We expect there to be the users profile
+            self.assertIsNotNone(
+                incremental_result.profile_updates["@third_user:test"],
+            )
+            next_token = incremental_result.next_batch
+        # Leave the room
+        self.helper.leave(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        # Ensure we don't get caught by the cache
+        self.reactor.advance((LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE / 1000) + 1)
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=next_token,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # The end result should be null profile
+        self.assertIsNone(
+            incremental_result.profile_updates["@third_user:test"],
         )
 
 
