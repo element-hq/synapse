@@ -6,6 +6,9 @@ name: Attempt to automatically fix linting errors
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   # We use nightly so that `fmt` correctly groups together imports, and
   # clippy correctly fixes up the benchmarks.
