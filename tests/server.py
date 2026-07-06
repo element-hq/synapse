@@ -332,6 +332,9 @@ class FakeChannel:
         # first `self._reactor.advance(0.1)` would be first spent driving the database
         # queries, and only leaving 0.9s remaining (0.1s shy of the sleep finishing) so
         # the request would timeout.
+        #
+        # The goal is to remove the foot-guns and having to think about this for the
+        # standard cases.
         self._reactor.advance(0)
 
         loop_count = 0
