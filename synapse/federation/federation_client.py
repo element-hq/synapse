@@ -100,10 +100,6 @@ sent_queries_counter = Counter(
 
 PDU_RETRY_TIME_MS = 1 * 60 * 1000
 
-# Localpart of the synthetic requester MXID used when querying remote homeservers
-# during the periodic federated user directory sync.
-FEDERATED_USER_DIR_SYNC_REQUESTER_LOCALPART = "_user_directory_sync"
-
 T = TypeVar("T")
 
 
@@ -187,12 +183,6 @@ class FederationClient(FederationBase):
             max_len=1000,
             expiry_ms=5 * 60 * 1000,
             reset_expiry_on_get=False,
-        )
-
-        # Synthetic requester used for the federated user directory sync. The
-        # remote server requires the requester to belong to our server.
-        self._federated_user_dir_sync_requester = (
-            f"@{FEDERATED_USER_DIR_SYNC_REQUESTER_LOCALPART}:{self.server_name}"
         )
 
         # Periodically sync remote homeservers' user directories into our own,
@@ -1956,7 +1946,6 @@ class FederationClient(FederationBase):
 
     async def user_directory_search(
         self,
-        requester: str,
         destination: str,
         timeout: int,
     ) -> JsonDict:
@@ -1966,7 +1955,6 @@ class FederationClient(FederationBase):
         directory, so no result limit is sent.
 
         Args:
-            requester: The user that initiated the request.
             destination: The server to query.
             timeout: Timeout in milliseconds for the request.
 
@@ -1975,7 +1963,7 @@ class FederationClient(FederationBase):
         """
         try:
             response = await self.transport_layer.user_directory_search(
-                requester, destination, timeout
+                destination, timeout
             )
             return response
         except Exception as e:
@@ -1989,14 +1977,12 @@ class FederationClient(FederationBase):
 
     async def search_user_directory_across_federation(
         self,
-        requester: str,
         destinations: Collection[str],
         limit: int = 10,
     ) -> JsonDict:
         """Fetch users from the directories of multiple federated servers.
 
         Args:
-            requester: The user that initiated the request.
             destinations: The servers to query.
             limit: Maximum number of results to return per server.
 
@@ -2018,7 +2004,6 @@ class FederationClient(FederationBase):
                 # Convert coroutine to Deferred
                 deferred = defer.ensureDeferred(
                     self.user_directory_search(
-                        requester,
                         destination,
                         self.user_directory_search_timeout,
                     )
@@ -2105,7 +2090,6 @@ class FederationClient(FederationBase):
                 continue
 
             response = await self.user_directory_search(
-                self._federated_user_dir_sync_requester,
                 destination,
                 self.user_directory_search_timeout,
             )

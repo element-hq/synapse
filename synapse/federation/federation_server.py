@@ -1484,7 +1484,7 @@ class FederationServer(FederationBase):
             raise AuthError(code=403, msg="Server is banned from room")
 
     async def on_user_directory_search_request(
-        self, requester_id: str, origin: str
+        self, origin: str
     ) -> tuple[int, JsonMapping]:
         """Handle a user directory request from a remote server.
 
@@ -1492,7 +1492,6 @@ class FederationServer(FederationBase):
         always syncs the full local directory rather than matching a term.
 
         Args:
-            requester_id: The user ID of the requester on the origin server.
             origin: The server that sent the request.
 
         Returns:

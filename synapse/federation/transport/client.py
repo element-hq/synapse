@@ -855,7 +855,6 @@ class TransportLayerClient:
 
     async def user_directory_search(
         self,
-        requester: str,
         destination: str,
         timeout: int,
     ) -> JsonDict:
@@ -866,7 +865,6 @@ class TransportLayerClient:
         directory.
 
         Args:
-            requester: The user that initiated the request.
             destination: The server to query.
             timeout: timeout in milliseconds to get the response from destination.
 
@@ -877,11 +875,10 @@ class TransportLayerClient:
             FEDERATION_UNSTABLE_PREFIX,
             "/de.bwi.federated_user_dir" + "/user_directory/search",
         )
-        content = {"requester": requester}
         return await self.client.post_json(
             destination,
             path=path,
-            data=content,
+            data={},
             # ignore backoff for user search as we will set a small user_directory_search_timeout
             ignore_backoff=True,
             timeout=timeout,

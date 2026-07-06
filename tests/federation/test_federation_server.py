@@ -114,9 +114,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         channel = self.make_signed_federation_request(
             "POST",
             "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
-            content={
-                "requester": "@requester:other.example.com",
-            },
+            content={},
         )
 
         # Check that the response is correct
@@ -126,21 +124,6 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].get("user_id"), "@userlambda:test")
 
-    def test_federation_user_directory_search_servlet_invalid_request(self) -> None:
-        """Test that the federation user directory search servlet rejects invalid requests."""
-        self.register_user("user", "password")
-
-        # Make a request with a missing requester
-        channel = self.make_signed_federation_request(
-            "POST",
-            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
-            content={},
-        )
-
-        # Check that the response is an error
-        self.assertEqual(channel.code, 400)
-        self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
-
     def test_federation_user_directory_search_servlet_no_results(self) -> None:
         """An empty local directory yields no results."""
         # No local users are registered, so the directory is empty.
@@ -149,9 +132,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         channel = self.make_signed_federation_request(
             "POST",
             "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
-            content={
-                "requester": "@requester:other.example.com",
-            },
+            content={},
         )
 
         # Check that the response is correct

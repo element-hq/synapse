@@ -47,7 +47,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ThumbnailProvider
-from synapse.types import JsonDict, JsonMapping, get_domain_from_id
+from synapse.types import JsonDict, JsonMapping
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -898,9 +898,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
     Implements a federation API endpoint for searching a server's user directory.
     POST /_matrix/federation/v3/user_directory/search
     Request:
-    {
-        "requester": "@user:example.com"
-    }
+    {}
     Response:
     {
         "limited": false,
@@ -922,11 +920,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
     async def on_POST(
         self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
     ) -> tuple[int, JsonMapping]:
-        requester = content.get("requester")
-        if requester is None or get_domain_from_id(requester) != origin:
-            raise SynapseError(400, "Missing or invalid requester", Codes.BAD_JSON)
-
-        return await self.handler.on_user_directory_search_request(requester, origin)
+        return await self.handler.on_user_directory_search_request(origin)
 
 
 FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
