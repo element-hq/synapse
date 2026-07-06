@@ -253,17 +253,27 @@ class DehydratedDeviceEventsServlet(RestServlet):
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
-        next_batch = parse_string(request, "next_batch")
+        since_token = parse_string(request, "from")
         limit = parse_integer(request, "limit", 100)
 
         msgs = await self.message_handler.get_events_for_dehydrated_device(
             requester=requester,
             device_id=device_id,
-            since_token=next_batch,
+            since_token=since_token,
             limit=limit,
         )
 
-        return 200, msgs
+        if msgs.limited:
+            msgs_json = {
+                "events": msgs.events,
+                "next_batch": msgs.stream_id,
+            }
+        else:
+            msgs_json = {
+                "events": msgs.events,
+            }
+
+        return 200, msgs_json
 
     class PostBody(RequestBodyModel):
         """
@@ -300,7 +310,14 @@ class DehydratedDeviceEventsServlet(RestServlet):
             limit=limit,
         )
 
-        return 200, msgs
+        # For backwards compatibility, we always provide next_batch from the
+        # POST API.
+        msgs_json = {
+            "events": msgs.events,
+            "next_batch": msgs.stream_id,
+        }
+
+        return 200, msgs_json
 
 
 class DehydratedDeviceV2Servlet(RestServlet):

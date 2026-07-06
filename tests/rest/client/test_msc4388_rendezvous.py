@@ -261,6 +261,77 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "endpoint": "https://issuer",
             },
             "experimental_features": {
+                "msc4388_mode": "open",
+            },
+        }
+    )
+    def test_rendezvous_put_is_idempotent(self) -> None:
+        """
+        A PUT using the previous sequence_token but with data that already
+        matches what is currently stored should be treated as an idempotent
+        retry and succeed (rather than returning 409). This lets clients
+        safely retry a PUT after a network error without losing the session.
+        """
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+        initial_sequence_token = channel.json_body["sequence_token"]
+        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
+
+        # Perform an update.
+        channel = self.make_request(
+            "PUT",
+            session_endpoint,
+            {"sequence_token": initial_sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        updated_sequence_token = channel.json_body["sequence_token"]
+
+        # Replaying the same PUT with the previous (now-stale) sequence_token
+        # and matching data should succeed and return the current token.
+        channel = self.make_request(
+            "PUT",
+            session_endpoint,
+            {"sequence_token": initial_sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+        # But replaying with the previous token and *different* data must
+        # still be rejected as a concurrent write.
+        channel = self.make_request(
+            "PUT",
+            session_endpoint,
+            {"sequence_token": initial_sequence_token, "data": "something=else"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 409)
+        self.assertEqual(
+            channel.json_body["errcode"], "IO_ELEMENT_MSC4388_CONCURRENT_WRITE"
+        )
+
+        # The stored data should be unchanged.
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["data"], "foo=baz")
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+    @override_config(
+        {
+            "disable_registration": True,
+            "matrix_authentication_service": {
+                "enabled": True,
+                "secret": "secret_value",
+                "endpoint": "https://issuer",
+            },
+            "experimental_features": {
                 "msc4388_mode": "authenticated",
             },
         }
