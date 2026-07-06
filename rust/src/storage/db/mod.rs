@@ -79,7 +79,7 @@ pub trait DatabasePoolExt: DatabasePool {
     /// unnecessary waiting in your transaction anyway.
     ///
     /// Usage:
-    /// ```rust
+    /// ```no_run
     /// db_pool
     /// .run_interaction(|txn| {
     ///     async move {
