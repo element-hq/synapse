@@ -906,8 +906,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
             {
                 "user_id": "@user:example.com",
                 "display_name": "Display Name",
-                "avatar_url": "mxc://example.com/avatar",
-                "m.user_directory.visibility": "local"
+                "avatar_url": "mxc://example.com/avatar"
             }
         ]
     }
