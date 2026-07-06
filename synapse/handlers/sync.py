@@ -348,7 +348,7 @@ class SyncHandler:
         )
         # ExpiringCache((User, Device))
         #   -> LruCache(
-        #       md5(Other User ID + Field Name + Field value) -> bool
+        #       sha256(Other User ID + Field Name + Field value) -> bool
         #   )
         self.lazy_loaded_profile_fields_cache: ExpiringCache[
             tuple[str, str | None], LruCache[str, bool]
@@ -362,7 +362,7 @@ class SyncHandler:
         )
         """This cache contains fields and values we have sent to clients as profile
         updates, for a particular user + device combo. The cache entry is a combination
-        of the user + field name + value, all hashed into md5, an existing value
+        of the user + field name + value, all hashed into sha256, an existing value
         indicating the field has recently been sent. The boolean value does not hold
         other significance. A missing cache entry means "we have not sent this user +
         field name + value combo to the syncing user".
@@ -1082,7 +1082,7 @@ class SyncHandler:
     ) -> LruCache[str, bool]:
         """This cache contains fields and values we have sent to clients as profile
         updates, for a particular user + device combo. The cache entry is a combination
-        of the user + field name + value, all hashed into md5, an existing value
+        of the user + field name + value, all hashed into sha256, an existing value
         indicating the field has recently been sent. The boolean value does not hold
         other significance. A missing cache entry means "we have not sent this user +
         field name + value combo to the syncing user".
@@ -2404,7 +2404,7 @@ class SyncHandler:
                         # user ID + field name + value, which ensures if the value
                         # changes, we'll miss the cache, thus sending the field update
                         # to the syncing user.
-                        cache_value = hashlib.md5(
+                        cache_value = hashlib.sha256(
                             f"{other_user_id}-{field_name}-{profile_data.get(field_name)}".encode(
                                 "utf8"
                             )
