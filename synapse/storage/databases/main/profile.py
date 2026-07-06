@@ -301,9 +301,9 @@ class ProfileWorkerStore(SQLBaseStore):
         user_localpart = user_id.localpart
         await self.db_pool.simple_upsert(
             table="profiles",
-            keyvalues={"user_id": user_localpart},
+            keyvalues={"full_user_id": user_id.to_string()},
             values={},
-            insertion_values={"full_user_id": user_id.to_string()},
+            insertion_values={"user_id": user_localpart},
             desc="create_profile",
         )
 
