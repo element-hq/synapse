@@ -100,7 +100,7 @@ from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
-from synapse.util.clock import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
@@ -335,7 +335,13 @@ class FakeChannel:
         #
         # The goal is to remove the foot-guns and having to think about this for the
         # standard cases.
-        self._reactor.advance(0)
+        #
+        # FIXME: Ideally, we'd advance by `0` but there is a handful of tests that
+        # assume that time advances in between requests and many requests complete from
+        # a single advance. For now, we'll just advance by minuscule amount of time.
+        # It's a balance between test convenience of this helper and materializing test
+        # expectations so we may never fix this.
+        self._reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
         loop_count = 0
         while not self.is_finished():
