@@ -1193,13 +1193,13 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
     async def get_users_in_user_dir(self) -> SearchResult:
         """Get every user stored in the user directory.
 
-        Unlike :meth:`search_user_dir`, this does not match a search term: it
-        returns all profiles in the ``user_directory`` table. It is used by the
+        Unlike `search_user_dir`, this does not match a search term: it
+        returns all profiles in the `user_directory` table. It is used by the
         federation responder to hand a server's full local directory to a
         remote homeserver.
 
         Returns:
-            A ``SearchResult`` of the form::
+            A `SearchResult` of the form:
 
                 {
                     "limited": False,  # always False; no term/limit is applied

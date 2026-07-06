@@ -1513,11 +1513,19 @@ class FederationServer(FederationBase):
 
         # Federation endpoint: only return users local to this homeserver.
         # is_mine_id is infallible and returns False for malformed user IDs.
-        filtered_results = [
-            user
-            for user in results.get("results", [])
-            if self.hs.is_mine_id(user["user_id"])
-        ]
+        filtered_results: list[JsonDict] = []
+        for user in results["results"]:
+            if not self.hs.is_mine_id(user["user_id"]):
+                continue
+
+            # Omit optional fields entirely when unset rather than sending
+            # null over the wire.
+            entry: JsonDict = {"user_id": user["user_id"]}
+            if user["display_name"] is not None:
+                entry["display_name"] = user["display_name"]
+            if user["avatar_url"] is not None:
+                entry["avatar_url"] = user["avatar_url"]
+            filtered_results.append(entry)
 
         return {"results": filtered_results}
 
