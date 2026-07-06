@@ -2332,6 +2332,132 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@third_user:test"],
         )
 
+    @parameterized.expand(
+        [
+            ["string value", "new string value"],
+            [True, False],
+            [None, "not None"],
+            [[], ["with item"]],
+            [{}, {"key": "value"}],
+            [{"foo": "bar"}, {"bar": "foo"}],
+            [42, 42.24],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_profile_updates_dont_get_silenced_by_cache(
+        self,
+        value: str | bool | list | dict | int | float | None,
+        new_value: str | bool | list | dict | int | float | None,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental lazy sync response
+        includes all the profile update changes for the user, even if the profile
+        field has been recently sent and is in our lazy loading cache.
+
+        Parameterize across different types of potential value types that profile
+        field updates could have to ensure robustness.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertFalse(
+            "@other_user:test" in initial_result.profile_updates,
+        )
+
+        # Update the field
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value=cast(JsonValue | dict[str, JsonValue], value),
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # We should have the field change in our sync response.
+        # It will also be added to the lazy loading cache, so the same field value
+        # isn't sent again immediately.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            value,
+        )
+
+        # Update the field again, busting our cache
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value=cast(JsonValue | dict[str, JsonValue], new_value),
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Even though the field was added to the lazy loading members cache,
+        # it should come through as an update, as the field value changed.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            new_value,
+        )
+
 
 class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
     """Tests Sync Handler state behavior when using `use_state_after."""

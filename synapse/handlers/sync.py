@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import hashlib
 import itertools
 import logging
 from typing import (
@@ -345,7 +346,10 @@ class SyncHandler:
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )
-        # ExpiringCache((User, Device)) -> LruCache(Other User ID + Field Name -> bool)
+        # ExpiringCache((User, Device))
+        #   -> LruCache(
+        #       md5(Other User ID + Field Name + Field value) -> bool
+        #   )
         self.lazy_loaded_profile_fields_cache: ExpiringCache[
             tuple[str, str | None], LruCache[str, bool]
         ] = ExpiringCache(
@@ -356,12 +360,12 @@ class SyncHandler:
             max_len=0,
             expiry_ms=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
         )
-        """This cache contains fields we have sent to clients as profile updates,
-        for a particular user + device combo. The cache entry is a combination of the
-        user + field name, with the value existing indicating the field has recently
-        been sent. The boolean value does not hold other significance. A missing
-        cache entry means "we have not sent this user + field name combo to the
-        syncing user".
+        """This cache contains fields and values we have sent to clients as profile
+        updates, for a particular user + device combo. The cache entry is a combination
+        of the user + field name + value, all hashed into md5, an existing value
+        indicating the field has recently been sent. The boolean value does not hold
+        other significance. A missing cache entry means "we have not sent this user +
+        field name + value combo to the syncing user".
 
         We don't manually remove entries from this cache, though it may be ignored
         in cases where the sync must send the field down to the client.
@@ -1076,12 +1080,12 @@ class SyncHandler:
     def get_lazy_loaded_profile_fields_cache(
         self, cache_key: tuple[str, str | None]
     ) -> LruCache[str, bool]:
-        """This cache contains fields we have sent to clients as profile updates,
-        for a particular user + device combo. The cache entry is a combination of the
-        user + field name, with the value existing indicating the field has recently
-        been sent. The boolean value does not hold other significance. A missing
-        cache entry means "we have not sent this user + field name combo to the
-        syncing user".
+        """This cache contains fields and values we have sent to clients as profile
+        updates, for a particular user + device combo. The cache entry is a combination
+        of the user + field name + value, all hashed into md5, an existing value
+        indicating the field has recently been sent. The boolean value does not hold
+        other significance. A missing cache entry means "we have not sent this user +
+        field name + value combo to the syncing user".
 
         We don't manually remove entries from this cache, though it may be ignored
         in cases where the sync must send the field down to the client.
@@ -2395,13 +2399,22 @@ class SyncHandler:
                             sync_config.device_id,
                         )
                         cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
-                        # Only send this users field if we haven't recently sent it
-                        if cache.get(f"{other_user_id}-{field_name}") is None:
+                        # Only send this users field if we haven't recently sent it.
+                        # Our cache value to check against is an md5 of a string of
+                        # user ID + field name + value, which ensures if the value
+                        # changes, we'll miss the cache, thus sending the field update
+                        # to the syncing user.
+                        cache_value = hashlib.md5(
+                            f"{other_user_id}-{field_name}-{profile_data.get(field_name)}".encode(
+                                "utf8"
+                            )
+                        ).hexdigest()
+                        if cache.get(cache_value) is None:
                             per_user_updates[field_name] = profile_data.get(field_name)
                             # Update our cache to indicate this user/field combo
                             # has been recently sent.
                             cache.set(
-                                f"{other_user_id}-{field_name}",
+                                cache_value,
                                 True,
                             )
                 else:
