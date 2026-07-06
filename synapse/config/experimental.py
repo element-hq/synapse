@@ -631,8 +631,8 @@ class ExperimentalConfig(Config):
             "bwi_federated_user_dir_enabled", False
         )
 
-        self.bwi_federated_user_dir_federation_search_timeout: int = experimental.get(
-            "bwi_federated_user_dir_federation_search_timeout", 2000
+        self.bwi_federated_user_dir_federation_search_timeout: int = self.parse_duration(
+            experimental.get("bwi_federated_user_dir_federation_search_timeout", 2000)
         )
 
         self.bwi_federated_user_dir_sync_interval_ms: int = self.parse_duration(
