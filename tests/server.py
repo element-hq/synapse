@@ -337,10 +337,12 @@ class FakeChannel:
         #
         # FIXME: Ideally, we'd advance by `0` but there is a handful of tests that
         # assume that time advances in between requests and many requests complete from
-        # a single advance. For now, we'll just advance by minuscule amount of time.
-        # It's a balance between test convenience of this helper and materializing test
-        # expectations so we may never fix this.
-        self._reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
+        # a single advance. Second best, we'd just advance by minuscule amount of time
+        # (`CLOCK_SCHEDULE_EPSILON`) but some tests assume at-least a millisecond in
+        # between as our timestamps are often recorded at the millisecond granularity
+        # (`origin_server_ts`, etc). It's a balance between test convenience of this
+        # helper and materializing test expectations so we may never fix this.
+        self._reactor.advance(Duration(milliseconds=1).as_secs())
 
         # We only count the looping time (record the start after we advance once above)
         start_time_seconds = self._reactor.seconds()
