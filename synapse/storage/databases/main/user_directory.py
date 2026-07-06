@@ -696,38 +696,49 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
         if isinstance(self.database_engine, PostgresEngine):
             # We weight the localpart most highly, then display name and finally
-            # server name
-            template = """
+            # server name. Each row is (user_id, localpart, domain, display).
+            rows = [
                 (
-                    %s,
-                    setweight(to_tsvector('simple', %s), 'A')
-                    || setweight(to_tsvector('simple', %s), 'D')
-                    || setweight(to_tsvector('simple', COALESCE(%s, '')), 'B')
+                    p.user_id,
+                    get_localpart_from_id(p.user_id),
+                    get_domain_from_id(p.user_id),
+                    (
+                        _filter_text_for_index(p.display_name)
+                        if p.display_name
+                        else None
+                    ),
                 )
-            """
-
-            sql = """
+                for p in profiles
+            ]
+            if self.database_engine.uses_psycopg2_extras:
+                # psycopg2: one multi-row INSERT, each row wrapped by the template.
+                template = """
+                    (
+                        %s,
+                        setweight(to_tsvector('simple', %s), 'A')
+                        || setweight(to_tsvector('simple', %s), 'D')
+                        || setweight(to_tsvector('simple', COALESCE(%s, '')), 'B')
+                    )
+                """
+                sql = """
                     INSERT INTO user_directory_search(user_id, vector)
                     VALUES ? ON CONFLICT (user_id) DO UPDATE SET vector=EXCLUDED.vector
                 """
-            txn.execute_values(
-                sql,
-                [
-                    (
-                        p.user_id,
-                        get_localpart_from_id(p.user_id),
-                        get_domain_from_id(p.user_id),
-                        (
-                            _filter_text_for_index(p.display_name)
-                            if p.display_name
-                            else None
-                        ),
+                txn.execute_values(sql, rows, template=template, fetch=False)
+            else:
+                # The Rust backend has no execute_values; run the same per-row
+                # tsvector upsert via executemany.
+                sql = """
+                    INSERT INTO user_directory_search(user_id, vector)
+                    VALUES (
+                        ?,
+                        setweight(to_tsvector('simple', ?), 'A')
+                        || setweight(to_tsvector('simple', ?), 'D')
+                        || setweight(to_tsvector('simple', COALESCE(?, '')), 'B')
                     )
-                    for p in profiles
-                ],
-                template=template,
-                fetch=False,
-            )
+                    ON CONFLICT (user_id) DO UPDATE SET vector=EXCLUDED.vector
+                """
+                txn.execute_batch(sql, rows)
         elif isinstance(self.database_engine, Sqlite3Engine):
             values = []
             for p in profiles:

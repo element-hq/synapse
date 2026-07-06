@@ -57,6 +57,12 @@ _RETRYABLE_PGCODES = ("40001", "40P01")
 class RustPostgresEngine(PostgresEngine[Connection, Cursor]):
     """A :class:`PostgresEngine` that talks to the Rust backend's shim."""
 
+    # The shim cursor is not a psycopg2 cursor, so the `psycopg2.extras`
+    # helpers can't be used on it; `LoggingTransaction.execute_batch` takes a
+    # shim-backed path (its pipelined `executemany`) instead, and the callers of
+    # `execute_values` fall back to `executemany` / `unnest()` for the Rust engine.
+    uses_psycopg2_extras: bool = False
+
     # SQL isolation-level names for each `IsolationLevel`. The shim has no
     # psycopg2-style `set_isolation_level`, so a per-transaction override is
     # applied as a `SET SESSION CHARACTERISTICS` statement (see

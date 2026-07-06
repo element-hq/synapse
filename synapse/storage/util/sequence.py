@@ -100,14 +100,19 @@ class PostgresSequenceGenerator(SequenceGenerator):
         self._sequence_name = sequence_name
 
     def get_next_id_txn(self, txn: Cursor) -> int:
-        txn.execute("SELECT nextval(?)", (self._sequence_name,))
+        # Cast the sequence name to text so the parameter is typed `text` rather
+        # than inferred as `regclass`; Postgres then coerces the name, and the
+        # native Rust driver (which binds typed parameters, and can't produce a
+        # `regclass` from a name) doesn't need to special-case it.
+        txn.execute("SELECT nextval(?::text)", (self._sequence_name,))
         fetch_res = txn.fetchone()
         assert fetch_res is not None
         return fetch_res[0]
 
     def get_next_mult_txn(self, txn: Cursor, n: int) -> list[int]:
         txn.execute(
-            "SELECT nextval(?) FROM generate_series(1, ?)", (self._sequence_name, n)
+            "SELECT nextval(?::text) FROM generate_series(1, ?)",
+            (self._sequence_name, n),
         )
         return [i for (i,) in txn]
 

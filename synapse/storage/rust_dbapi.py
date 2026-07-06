@@ -26,10 +26,11 @@ connection-level methods the database engine calls (``in_transaction``,
 ``is_closed``, ``set_autocommit``) so a wrapped connection is a drop-in for the
 raw one.
 
-Not handled here: ``execute_batch`` / ``execute_values`` (psycopg2 extras that
-``LoggingTransaction`` invokes directly for ``PostgresEngine``) still need a
-routing change in ``LoggingTransaction`` to reach a shim-backed implementation;
-that is a separate follow-up.
+The psycopg2 extras that ``LoggingTransaction`` uses are routed to shim-backed
+equivalents (via ``engine.uses_psycopg2_extras``): ``execute_batch`` maps onto
+the shim's pipelined ``executemany``. ``execute_values`` has no shim equivalent —
+the Rust callers use ``executemany`` (bulk statements) or ``unnest()`` (the
+VALUES-join queries) directly instead.
 """
 
 import logging

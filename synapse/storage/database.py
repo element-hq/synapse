@@ -500,7 +500,10 @@ class LoggingTransaction:
         More efficient than `executemany` on PostgreSQL
         """
 
-        if isinstance(self.database_engine, PostgresEngine):
+        if (
+            isinstance(self.database_engine, PostgresEngine)
+            and self.database_engine.uses_psycopg2_extras
+        ):
             from psycopg2.extras import execute_batch
 
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
@@ -510,6 +513,8 @@ class LoggingTransaction:
                 lambda the_sql: execute_batch(self.txn, the_sql, args), sql
             )
         else:
+            # The Rust backend has no psycopg2 extras; its `executemany` is
+            # already pipelined, so route there (as the sqlite path does too).
             # TODO: is it safe for values to be Iterable[Iterable[Any]] here?
             # https://docs.python.org/3/library/sqlite3.html?highlight=sqlite3#sqlite3.Cursor.executemany
             # suggests that the outer collection may be iterable, but
@@ -524,8 +529,11 @@ class LoggingTransaction:
         template: str | None = None,
         fetch: bool = True,
     ) -> list[tuple]:
-        """Corresponds to psycopg2.extras.execute_values. Only available when
-        using postgres.
+        """Corresponds to psycopg2.extras.execute_values.
+
+        Only usable on the psycopg2 backend: the Rust backend has no psycopg2
+        extras, so its callers take shim-backed paths instead — bulk statements
+        through ``executemany`` and the VALUES-join queries through ``unnest()``.
 
         The `fetch` parameter must be set to False if the query does not return
         rows (e.g. INSERTs).
@@ -534,6 +542,8 @@ class LoggingTransaction:
         compose the query.
         """
         assert isinstance(self.database_engine, PostgresEngine)
+        assert self.database_engine.uses_psycopg2_extras
+
         from psycopg2.extras import execute_values
 
         return self._do_execute(
@@ -1343,9 +1353,12 @@ class DatabasePool:
         if not values:
             return
 
-        if isinstance(txn.database_engine, PostgresEngine):
-            # We use `execute_values` as it can be a lot faster than `execute_batch`,
-            # but it's only available on postgres.
+        if (
+            isinstance(txn.database_engine, PostgresEngine)
+            and txn.database_engine.uses_psycopg2_extras
+        ):
+            # On psycopg2 a single multi-row INSERT via `execute_values` is a lot
+            # faster than `execute_batch`.
             sql = "INSERT INTO %s (%s) VALUES ?" % (
                 table,
                 ", ".join(k for k in keys),
@@ -1353,6 +1366,7 @@ class DatabasePool:
 
             txn.execute_values(sql, values, fetch=False)
         else:
+            # The Rust backend and SQLite go through `executemany` (execute_batch).
             sql = "INSERT INTO %s (%s) VALUES(%s)" % (
                 table,
                 ", ".join(k for k in keys),
@@ -1813,9 +1827,12 @@ class DatabasePool:
         for x, y in zip(key_values, value_values):
             args.append(tuple(x) + tuple(y))
 
-        if isinstance(txn.database_engine, PostgresEngine):
-            # We use `execute_values` as it can be a lot faster than `execute_batch`,
-            # but it's only available on postgres.
+        if (
+            isinstance(txn.database_engine, PostgresEngine)
+            and txn.database_engine.uses_psycopg2_extras
+        ):
+            # On psycopg2 a single multi-row INSERT via `execute_values` is a lot
+            # faster than `execute_batch`.
             sql = "INSERT INTO %s (%s) VALUES ? ON CONFLICT (%s) DO %s" % (
                 table,
                 ", ".join(k for k in allnames),
@@ -1826,6 +1843,7 @@ class DatabasePool:
             txn.execute_values(sql, args, fetch=False)
 
         else:
+            # The Rust backend and SQLite go through `executemany` (execute_batch).
             sql = "INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO %s" % (
                 table,
                 ", ".join(k for k in allnames),
@@ -1834,7 +1852,7 @@ class DatabasePool:
                 latter,
             )
 
-            return txn.execute_batch(sql, args)
+            txn.execute_batch(sql, args)
 
     @overload
     async def simple_select_one(
@@ -2580,9 +2598,12 @@ class DatabasePool:
             values: for each row, a list of values in the same order as `keys`
         """
 
-        if isinstance(txn.database_engine, PostgresEngine):
-            # We use `execute_values` as it can be a lot faster than `execute_batch`,
-            # but it's only available on postgres.
+        if (
+            isinstance(txn.database_engine, PostgresEngine)
+            and txn.database_engine.uses_psycopg2_extras
+        ):
+            # On psycopg2 a single `DELETE ... IN (VALUES ?)` via `execute_values`
+            # is a lot faster than `execute_batch`.
             sql = "DELETE FROM %s WHERE (%s) IN (VALUES ?)" % (
                 table,
                 ", ".join(k for k in keys),
@@ -2590,6 +2611,7 @@ class DatabasePool:
 
             txn.execute_values(sql, values, fetch=False)
         else:
+            # The Rust backend and SQLite go through `executemany` (execute_batch).
             sql = "DELETE FROM %s WHERE (%s) = (%s)" % (
                 table,
                 ", ".join(k for k in keys),
