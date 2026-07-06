@@ -117,7 +117,7 @@ class AuthBlocking:
             # If the user is already part of the MAU cohort or a trial user
             if user_id:
                 timestamp = await self.store.user_last_seen_monthly_active(user_id)
-                if timestamp:
+                if timestamp is not None:
                     return
 
                 is_trial = await self.store.is_trial_user(user_id)
