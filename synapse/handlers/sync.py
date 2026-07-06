@@ -1076,6 +1076,16 @@ class SyncHandler:
     def get_lazy_loaded_profile_fields_cache(
         self, cache_key: tuple[str, str | None]
     ) -> LruCache[str, bool]:
+        """This cache contains fields we have sent to clients as profile updates,
+        for a particular user + device combo. The cache entry is a combination of the
+        user + field name, with the value existing indicating the field has recently
+        been sent. The boolean value does not hold other significance. A missing
+        cache entry means "we have not sent this user + field name combo to the
+        syncing user".
+
+        We don't manually remove entries from this cache, though it may be ignored
+        in cases where the sync must send the field down to the client.
+        """
         cache: LruCache[str, bool] | None = self.lazy_loaded_profile_fields_cache.get(
             cache_key
         )
