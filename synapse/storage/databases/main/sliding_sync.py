@@ -749,10 +749,14 @@ class SlidingSyncStore(SQLBaseStore):
                 for room_id, user_id in to_update
             ]
 
-            if isinstance(self.database_engine, PostgresEngine):
+            if (
+                isinstance(self.database_engine, PostgresEngine)
+                and self.database_engine.uses_psycopg2_extras
+            ):
                 sql = sql.format(value_placeholder="?")
                 txn.execute_values(sql, args, fetch=False)
             else:
+                # The Rust backend and SQLite go through executemany.
                 sql = sql.format(value_placeholder="(?, ?, ?, ?, ?)")
                 txn.execute_batch(sql, args)
 
