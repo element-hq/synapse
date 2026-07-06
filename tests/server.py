@@ -331,6 +331,17 @@ class FakeChannel:
         # TODO: Why?
         self._reactor.run()
 
+        # First, get the request started before we start looping and advancing non-zero
+        # time increments.
+        #
+        # Without this, if some request handler had a
+        # `self.hs.get_clock().sleep(Duration(seconds=1))`, and called
+        # `channel.await_result(timeout_ms=1000)`, it wouldn't be called because the
+        # first `self._reactor.advance(0.1)` would be spent first just getting the
+        # request going, and it would only spend 0.9s in the handler (0.1s shy of the
+        # sleep finishing) so the request would timeout.
+        self._reactor.advance(0)
+
         loop_count = 0
         while not self.is_finished():
             if (
