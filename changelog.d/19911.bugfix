@@ -1,0 +1,1 @@
+Fix storage type mismatches where values were bound with a type that didn't match their database column.
