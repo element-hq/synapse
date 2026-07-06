@@ -8,6 +8,9 @@ on:
       - .github/workflows/docs-pr.yaml
       - scripts-dev/schema_versions.py
 
+permissions:
+  contents: read
+
 jobs:
   pages:
     name: GitHub Pages
