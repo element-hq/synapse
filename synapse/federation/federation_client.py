@@ -1984,18 +1984,39 @@ class FederationClient(FederationBase):
         entries: list[RemoteUserDirectoryEntry] = []
         for user in response.get("results", []):
             if not isinstance(user, dict):
+                logger.debug(
+                    "Skipping remote user directory entry that is not an object: %r",
+                    user,
+                )
                 continue
 
             user_id = user.get("user_id")
             if not isinstance(user_id, str):
+                logger.debug(
+                    "Skipping remote user directory entry with missing or "
+                    "non-string user_id: %r",
+                    user,
+                )
                 continue
 
             display_name = user.get("display_name")
             if not isinstance(display_name, str):
+                if display_name is not None:
+                    logger.debug(
+                        "Ignoring non-string display_name for remote user %s: %r",
+                        user_id,
+                        display_name,
+                    )
                 display_name = None
 
             avatar_url = user.get("avatar_url")
             if not isinstance(avatar_url, str):
+                if avatar_url is not None:
+                    logger.debug(
+                        "Ignoring non-string avatar_url for remote user %s: %r",
+                        user_id,
+                        avatar_url,
+                    )
                 avatar_url = None
 
             entries.append(
@@ -2019,7 +2040,7 @@ class FederationClient(FederationBase):
         """
         destinations = await self.store.get_known_destinations()
         if not destinations:
-            logger.debug("Federated user directory sync: no known destinations")
+            logger.debug("ending federated user directory sync: no known destinations")
             return
 
         # De-duplicate by user id across destinations.
@@ -2048,7 +2069,7 @@ class FederationClient(FederationBase):
         )
         await handler.upsert_remote_users(list(entries_by_user.values()))
 
-        logger.info(
+        logger.debug(
             "Federated user directory sync upserted %d remote users",
             len(entries_by_user),
         )
