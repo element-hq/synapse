@@ -1959,16 +1959,25 @@ class FederationClient(FederationBase):
             The results containing a list of users from the remote directory.
         """
         try:
-            response = await self.transport_layer.user_directory_search(
+            return await self.transport_layer.user_directory_search(
                 destination, timeout
             )
-            return response
-        except Exception as e:
-            # If something goes wrong, we still want to return what we have
-            logger.exception(
-                "Error searching user directory across federation[destination=%s] : %s",
+        except (RequestSendFailed, HttpResponseException) as e:
+            # A failing or unreachable destination shouldn't break the sync. The
+            # endpoint is rate-limited, and the transport layer surfaces a 429 as
+            # a RequestSendFailed after exhausting retries, so log without a
+            # stack trace.
+            logger.warning(
+                "Failed to search remote user directory [destination=%s]: %s",
                 destination,
                 e,
+            )
+            return {"limited": False, "results": []}
+        except Exception:
+            # Unexpected error; log with a stack trace for debugging.
+            logger.exception(
+                "Unexpected error searching remote user directory [destination=%s]",
+                destination,
             )
             return {"limited": False, "results": []}
 
