@@ -439,6 +439,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         roger_token = self.login("roger", "password")
         self.register_user("millie", "password")
         millie_token = self.login("millie", "password")
+        self.register_user("gracie", "password")
+        gracie_token = self.login("gracie", "password")
         room_id = self.helper.create_room_as(
             room_creator=self.frank.to_string(),
             tok=self.frank_token,
@@ -449,6 +451,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.helper.join(room_id, "@roger:test", tok=roger_token)
         self.helper.join(room_with_millie_id, "@millie:test", tok=millie_token)
+        self.helper.join(room_id, "@gracie:test", tok=gracie_token)
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -470,6 +473,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             [
                 ProfileUpdate(
                     stream_id=4,
+                    user_id="@gracie:test",
+                    action="joined_room",
+                    field_name=None,
+                ),
+                ProfileUpdate(
+                    stream_id=5,
                     user_id=self.frank.to_string(),
                     action="update",
                     field_name="m.status",
@@ -488,7 +497,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=4,
+                    stream_id=5,
                     user_id=self.frank.to_string(),
                     action="update",
                     field_name="m.status",
@@ -496,7 +505,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ],
         )
 
-        # Leave room and verify only the "left room" exists for roger
+        # Make frank leave room and verify only the "left room" + gracies join exists
+        # for roger
         self.helper.leave(room_id, self.frank.to_string(), tok=self.frank_token)
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
@@ -510,8 +520,41 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=5,
+                    stream_id=4,
+                    user_id="@gracie:test",
+                    action="joined_room",
+                    field_name=None,
+                ),
+                ProfileUpdate(
+                    stream_id=6,
                     user_id=self.frank.to_string(),
+                    action="left_room",
+                    field_name=None,
+                ),
+            ],
+        )
+        # Make gracie leave room and verify only the "left room"'s
+        self.helper.leave(room_id, "@gracie:test", tok=gracie_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id="@roger:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=6,
+                    user_id=self.frank.to_string(),
+                    action="left_room",
+                    field_name=None,
+                ),
+                ProfileUpdate(
+                    stream_id=7,
+                    user_id="@gracie:test",
                     action="left_room",
                     field_name=None,
                 ),
@@ -531,7 +574,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=4,
+                    stream_id=5,
                     user_id=self.frank.to_string(),
                     action="update",
                     field_name="m.status",

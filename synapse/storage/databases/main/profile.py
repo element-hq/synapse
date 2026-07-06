@@ -958,7 +958,7 @@ class ProfileWorkerStore(SQLBaseStore):
         self, user_id: UserID, users_to_remove: set[str]
     ) -> None:
         """
-        Clear all the ProfileUpdateAction.UPDATE rows from the
+        Clear all the ProfileUpdateAction rows from the
         `profile_updates_per_user` table from a particular user for
         a list of target users.
 
@@ -983,10 +983,10 @@ class ProfileWorkerStore(SQLBaseStore):
         ) -> None:
             sql = """
                 SELECT stream_id FROM profile_updates
-                    WHERE user_id = ? AND action = ?
+                    WHERE user_id = ?
             """
 
-            txn.execute(sql, (user_id.to_string(), ProfileUpdateAction.UPDATE.value))
+            txn.execute(sql, (user_id.to_string(),))
             res = txn.fetchall()
             if not res:
                 return
