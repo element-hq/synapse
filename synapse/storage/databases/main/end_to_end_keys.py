@@ -101,6 +101,15 @@ class EndToEndKeyBackgroundStore(SQLBaseStore):
             columns=("user_id", "device_id", "algorithm", "ts_added_ms"),
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="e2e_cross_signing_signatures_add_key_id_to_index",
+            index_name="e2e_cross_signing_signatures3_idx",
+            table="e2e_cross_signing_signatures",
+            columns=("user_id", "target_user_id", "target_device_id", "key_id"),
+            unique=True,
+            replaces_index="e2e_cross_signing_signatures2_idx",
+        )
+
 
 class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorkerStore):
     def __init__(

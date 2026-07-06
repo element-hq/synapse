@@ -10,7 +10,9 @@
 --
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
---
 
-DROP INDEX IF EXISTS e2e_cross_signing_signatures_idx2; CREATE UNIQUE INDEX IF NOT
-EXISTS e2e_cross_signing_signatures3_idx ON e2e_cross_signing_signatures(user_id, target_user_id, target_device_id, key_id);
+-- Adds the `key_id` to the e2e_cross_signing_signatures index, since the
+-- ("user_id", "key_id", "target_user_id", "target_device_id") should be
+-- unique.
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+  (9205, 'e2e_cross_signing_signatures_add_key_id_to_index', '{}');
