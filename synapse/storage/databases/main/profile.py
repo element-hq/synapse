@@ -960,7 +960,9 @@ class ProfileWorkerStore(SQLBaseStore):
         """
         Clear all the ProfileUpdateAction rows from the
         `profile_updates_per_user` table from a particular user for
-        a list of target users.
+        a list of target users. This could be needed for example to ensure when
+        a user leaves the last shared room with another user, that we clear all
+        the old updates to ensure we don't leak any field updates to the other user.
 
         This does not remove the stream ID row from `profile_updates` as it is
         likely other per user rows may refer to it. Our automatic pruning of old
