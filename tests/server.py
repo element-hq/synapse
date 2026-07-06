@@ -318,7 +318,6 @@ class FakeChannel:
             timeout_ms: The Twisted reactor time we wait until we raise a `TimedOutException`
         """
         timeout = Duration(milliseconds=timeout_ms)
-        start_time_seconds = self._reactor.seconds()
 
         # TODO: Why?
         self._reactor.run()
@@ -343,6 +342,8 @@ class FakeChannel:
         # expectations so we may never fix this.
         self._reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
+        # We only count the looping time (record the start after we advance once above)
+        start_time_seconds = self._reactor.seconds()
         loop_count = 0
         while not self.is_finished():
             if (
