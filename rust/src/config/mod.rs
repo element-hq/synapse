@@ -25,7 +25,7 @@ pub mod types;
 /// than the whole thing. Thanks to `#[derive(FromPyObject)]`, each field is
 /// pulled directly off the corresponding attribute of the Python `config`
 /// object, so you can populate it in one shot with:
-/// ```no_run
+/// ```ignore
 /// let config: SynapseHomeServerConfig = homeserver.getattr("config")?.extract()?;
 /// ```
 #[derive(FromPyObject, Clone)]
