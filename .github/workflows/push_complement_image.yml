@@ -76,8 +76,10 @@ jobs:
       - name: Run scripts-dev/complement.sh to generate complement-synapse:latest image.
         run: scripts-dev/complement.sh --build-only
       - name: Tag and push generated image
+        env:
+          TAGS: ${{ join(fromJson(steps.meta.outputs.json).tags, ' ') }}
         run: |
-          for TAG in ${{ join(fromJson(steps.meta.outputs.json).tags, ' ') }}; do 
+          for TAG in $TAGS; do
             echo "tag and push $TAG"
             # `localhost/complement-synapse` should match the image created by `scripts-dev/complement.sh`
             docker tag localhost/complement-synapse $TAG

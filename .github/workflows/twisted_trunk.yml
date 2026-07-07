@@ -60,9 +60,11 @@ jobs:
           python-version: "3.x"
           extras: "all"
           poetry-version: "2.4.1"
-      - run: |
+      - env:
+          TWISTED_REF: ${{ inputs.twisted_ref || 'trunk' }}
+        run: |
           poetry remove twisted
-          poetry add --extras tls git+https://github.com/twisted/twisted.git#${{ inputs.twisted_ref || 'trunk' }}
+          poetry add --extras tls "git+https://github.com/twisted/twisted.git#$TWISTED_REF"
           poetry install --no-interaction --extras "all test"
       - name: Remove unhelpful options from mypy config
         run: sed -e '/warn_unused_ignores = True/d' -e '/warn_redundant_casts = True/d' -i mypy.ini
