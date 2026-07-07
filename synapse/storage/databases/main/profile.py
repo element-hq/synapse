@@ -754,7 +754,7 @@ class ProfileWorkerStore(SQLBaseStore):
             txn=txn,
             user_id=user_id,
             action=ProfileUpdateAction.UPDATE,
-            field_name=field_name,
+            field_names=[field_name],
             target_users=target_users,
         )
 
@@ -766,7 +766,7 @@ class ProfileWorkerStore(SQLBaseStore):
         txn: LoggingTransaction,
         user_id: UserID,
         action: ProfileUpdateAction,
-        field_name: str | None,
+        field_names: list[str] | None,
         target_users: set[str],
     ) -> int | None:
         """
@@ -777,38 +777,68 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id: User ID that made the profile update
             action: The profile update action, either `update`, `left_room` or
                 `joined_room`
-            field_name: The field to set the value for, if ProfileUpdateAction.UPDATE
+            field_names: A list of fields that were set, if ProfileUpdateAction.UPDATE
             target_users: Set of users to create profile update stream rows for
 
         Returns:
-            The stream ID created in this transaction
+            The latest stream ID created in this transaction
         """
         if not self._msc4429_enabled:
             return None
 
         if action == ProfileUpdateAction.UPDATE:
-            assert field_name is not None
+            assert field_names
         else:
-            assert field_name is None
+            assert not field_names
 
         # Record the profile update
-        stream_id = self._profile_updates_id_gen.get_next_txn(txn)
-        self.db_pool.simple_insert_txn(
+        inserted_ts = self.clock.time_msec()
+        if field_names:
+            stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
+                txn, len(field_names)
+            )
+            values: list[tuple[int, str, str, str, str | None, int]] = [
+                (
+                    stream_id,
+                    self._instance_name,
+                    user_id.to_string(),
+                    action.value,
+                    field_name,
+                    inserted_ts,
+                )
+                for stream_id, field_name in zip(stream_ids, field_names)
+            ]
+        else:
+            stream_ids = [self._profile_updates_id_gen.get_next_txn(txn)]
+            values = [
+                (
+                    stream_ids[0],
+                    self._instance_name,
+                    user_id.to_string(),
+                    action.value,
+                    None,
+                    inserted_ts,
+                )
+            ]
+        self.db_pool.simple_insert_many_txn(
             txn,
             table="profile_updates",
-            values={
-                "stream_id": stream_id,
-                "instance_name": self._instance_name,
-                "user_id": user_id.to_string(),
-                "action": action.value,
-                "field_name": field_name,
-                "inserted_ts": self.clock.time_msec(),
-            },
+            keys=[
+                "stream_id",
+                "instance_name",
+                "user_id",
+                "action",
+                "field_name",
+                "inserted_ts",
+            ],
+            values=values,
         )
 
-        # Add per user tracking rows
+        # Add per user tracking rows pointing to the latest stream ID
         inserted_ts = self.clock.time_msec()
-        values = [(stream_id, user_id, inserted_ts) for user_id in target_users]
+        per_user_values = [
+            (stream_ids[-1], user_id, inserted_ts) for user_id in target_users
+        ]
         self.db_pool.simple_insert_many_txn(
             txn,
             table="profile_updates_per_user",
@@ -817,9 +847,9 @@ class ProfileWorkerStore(SQLBaseStore):
                 "user_id",
                 "inserted_ts",
             ],
-            values=values,
+            values=per_user_values,
         )
-        return stream_id
+        return stream_ids[-1]
 
     async def set_profile_field(
         self,
@@ -888,7 +918,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 txn=txn,
                 user_id=user_id,
                 action=ProfileUpdateAction.UPDATE,
-                field_name=field_name,
+                field_names=[field_name],
                 target_users=target_users,
             )
             return stream_id
@@ -897,16 +927,48 @@ class ProfileWorkerStore(SQLBaseStore):
             "delete_profile_field", delete_profile_field
         )
 
-    async def delete_profile(self, user_id: UserID) -> None:
+    async def delete_profile(
+        self,
+        user_id: UserID,
+        field_names: list[str],
+        target_users: set[str],
+    ) -> int | None:
         """
-        Deletes an entire user profile, including displayname, avatar_url and all custom fields.
-        Used at user deactivation when erasure is requested.
+        Deletes an entire user profile, including displayname, avatar_url and all
+        custom fields. Used at user deactivation when erasure is requested.
+
+        Args:
+            user_id: User ID whose profile is going to be deleted.
+            field_names: List of profile fields the user had.
+            target_users: List of users who share rooms and are interested in
+                profile updates for this user.
+
+        Returns:
+            Latest stream ID for the profile updates stream.
         """
 
-        await self.db_pool.simple_delete(
-            desc="delete_profile",
-            table="profiles",
-            keyvalues={"full_user_id": user_id.to_string()},
+        def _delete_profile_txn(txn: LoggingTransaction) -> int | None:
+            # Delete the profile
+            txn.execute(
+                """
+                DELETE FROM profiles
+                WHERE full_user_id = ?
+                """,
+                (user_id.to_string(),),
+            )
+            # Update the profile updates stream
+            stream_id = self._record_profile_updates_txn(
+                txn=txn,
+                user_id=user_id,
+                action=ProfileUpdateAction.UPDATE,
+                field_names=field_names,
+                target_users=target_users,
+            )
+            return stream_id
+
+        return await self.db_pool.runInteraction(
+            "delete_profile",
+            _delete_profile_txn,
         )
 
     async def record_profile_updates_for_user_left_room(
@@ -972,7 +1034,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 txn=txn,
                 user_id=user_id,
                 action=ProfileUpdateAction.LEFT_ROOM,
-                field_name=None,
+                field_names=[],
                 target_users=users_to_update,
             )
             return stream_id
@@ -1008,7 +1070,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 txn=txn,
                 user_id=user_id,
                 action=ProfileUpdateAction.JOINED_ROOM,
-                field_name=None,
+                field_names=[],
                 target_users=users_to_update,
             )
             return stream_id

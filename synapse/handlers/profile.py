@@ -571,28 +571,39 @@ class ProfileHandler:
             # have it.
             raise AuthError(400, "Cannot remove another user's profile")
 
-        profile_updates: list[tuple[str, JsonValue | None]] = []
-        current_profile: ProfileInfo | None = None
+        profile_updates: list[str] = []
+        profile_update_targets: dict = {"rooms": set(), "users": set()}
 
         if self._msc4429_enabled:
-            if current_profile is None:
-                current_profile = await self.store.get_profileinfo(target_user)
+            current_profile = await self.store.get_profileinfo(target_user)
 
             if current_profile.display_name is not None:
-                profile_updates.append((ProfileFields.DISPLAYNAME, None))
+                profile_updates.append(ProfileFields.DISPLAYNAME)
             if current_profile.avatar_url is not None:
-                profile_updates.append((ProfileFields.AVATAR_URL, None))
+                profile_updates.append(ProfileFields.AVATAR_URL)
 
             custom_fields = await self.store.get_profile_fields(target_user)
             for field_name in custom_fields.keys():
-                profile_updates.append((field_name, None))
+                profile_updates.append(field_name)
 
-        await self.store.delete_profile(target_user)
+            if profile_updates:
+                profile_update_targets = await self.get_targets_for_profile_updates(
+                    target_user
+                )
+                # Discard ourselves as we're deactivating this account
+                profile_update_targets["users"].discard(target_user.to_string())
 
-        # Record profile updates for the profile update stream
-        if len(profile_updates):
-            await self._dispatch_record_profile_updates(
-                target_user, {field_name for field_name, _value in profile_updates}
+        # Record the profile delete and update the profile updates stream
+        stream_id = await self.store.delete_profile(
+            user_id=target_user,
+            field_names=profile_updates,
+            target_users=profile_update_targets["users"],
+        )
+        if stream_id and profile_update_targets["rooms"]:
+            self._notifier.on_new_event(
+                StreamKeyType.PROFILE_UPDATES,
+                stream_id,
+                rooms=profile_update_targets["rooms"],
             )
 
         await self._third_party_rules.on_profile_update(
