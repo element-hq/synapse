@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   # We use nightly so that `fmt` correctly groups together imports, and
@@ -20,6 +20,8 @@ jobs:
   fixup:
     name: Fix up
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed to push the lint fixes back to the branch
 
     steps:
       - name: Checkout repository
