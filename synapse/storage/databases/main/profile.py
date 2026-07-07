@@ -79,6 +79,7 @@ class ProfileWorkerStore(SQLBaseStore):
             "populate_full_user_id_profiles", self.populate_full_user_id_profiles
         )
 
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
         self._can_write_to_profile_updates = (
             self._instance_name in hs.config.worker.writers.profile_updates
         )
@@ -758,92 +759,46 @@ class ProfileWorkerStore(SQLBaseStore):
         if total_bytes > MAX_PROFILE_SIZE:
             raise StoreError(400, "Profile too large", Codes.PROFILE_TOO_LARGE)
 
-    async def set_profile_displayname(
-        self, user_id: UserID, new_displayname: str | None
-    ) -> None:
-        """
-        Set the display name of a user.
-
-        Args:
-            user_id: The user's ID.
-            new_displayname: The new display name. If this is None, the user's display
-                name is removed.
-        """
-        user_localpart = user_id.localpart
-
-        def set_profile_displayname(txn: LoggingTransaction) -> None:
-            if new_displayname is not None:
-                self._check_profile_size(
-                    txn, user_id, ProfileFields.DISPLAYNAME, new_displayname
-                )
-
-            self.db_pool.simple_upsert_txn(
-                txn,
-                table="profiles",
-                keyvalues={"user_id": user_localpart},
-                values={
-                    "displayname": new_displayname,
-                    "full_user_id": user_id.to_string(),
-                },
-            )
-
-        await self.db_pool.runInteraction(
-            "set_profile_displayname", set_profile_displayname
-        )
-
-    async def set_profile_avatar_url(
-        self, user_id: UserID, new_avatar_url: str | None
-    ) -> None:
-        """
-        Set the avatar of a user.
-
-        Args:
-            user_id: The user's ID.
-            new_avatar_url: The new avatar URL. If this is None, the user's avatar is
-                removed.
-        """
-        user_localpart = user_id.localpart
-
-        def set_profile_avatar_url(txn: LoggingTransaction) -> None:
-            if new_avatar_url is not None:
-                self._check_profile_size(
-                    txn, user_id, ProfileFields.AVATAR_URL, new_avatar_url
-                )
-
-            self.db_pool.simple_upsert_txn(
-                txn,
-                table="profiles",
-                keyvalues={"user_id": user_localpart},
-                values={
-                    "avatar_url": new_avatar_url,
-                    "full_user_id": user_id.to_string(),
-                },
-            )
-
-        await self.db_pool.runInteraction(
-            "set_profile_avatar_url", set_profile_avatar_url
-        )
-
-    async def set_profile_field(
+    def _set_profile_field_txn(
         self,
+        txn: LoggingTransaction,
         user_id: UserID,
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
-    ) -> None:
+        target_users: set[str],
+    ) -> int | None:
         """
-        Set a custom profile field for a user.
+        Wrapper function to set a profile field value and write to the profile
+        update stream tables in one transaction.
 
         Args:
-            user_id: The user's ID.
-            field_name: The name of the custom profile field.
-            new_value: The value of the custom profile field.
+            txn: The transaction to use
+            user_id: The user to set the profile field for
+            field_name: The field to set the value for
+            new_value: New value for the profile field
+            target_users: Users to trigger a profile update stream row for
+
+        Returns:
+            The profile updates stream ID that was created in this transaction
         """
+        if self._msc4429_enabled:
+            assert self._can_write_to_profile_updates
 
-        # Encode to canonical JSON.
-        canonical_value = encode_canonical_json(new_value)
+        self._check_profile_size(txn, user_id, field_name, new_value)
 
-        def set_profile_field(txn: LoggingTransaction) -> None:
-            self._check_profile_size(txn, user_id, field_name, new_value)
+        if field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL):
+            self.db_pool.simple_upsert_txn(
+                txn,
+                table="profiles",
+                keyvalues={"user_id": user_id.localpart},
+                values={
+                    field_name: new_value,
+                    "full_user_id": user_id.to_string(),
+                },
+            )
+        else:
+            # Encode to canonical JSON.
+            canonical_value = encode_canonical_json(new_value)
 
             if isinstance(self.database_engine, PostgresEngine):
                 from psycopg2.extras import Json
@@ -851,10 +806,10 @@ class ProfileWorkerStore(SQLBaseStore):
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
                 sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
-                ON CONFLICT (user_id)
-                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
-                """
+                      INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
+                      ON CONFLICT (user_id)
+                          DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields \
+                      """
 
                 txn.execute(
                     sql,
@@ -871,10 +826,10 @@ class ProfileWorkerStore(SQLBaseStore):
                 # You may be tempted to use json_patch instead of providing the parameters
                 # twice, but that recursively merges objects instead of replacing.
                 sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
-                ON CONFLICT (user_id)
-                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
-                """
+                      INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
+                      ON CONFLICT (user_id)
+                          DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?)) \
+                      """
                 # This will error if field_name has double quotes in it, but that's not
                 # possible due to the grammar.
                 json_field_name = f'$."{field_name}"'
@@ -891,9 +846,99 @@ class ProfileWorkerStore(SQLBaseStore):
                     ),
                 )
 
-        await self.db_pool.runInteraction("set_profile_field", set_profile_field)
+        if not self._msc4429_enabled:
+            return None
 
-    async def delete_profile_field(self, user_id: UserID, field_name: str) -> None:
+        # Record updates in the profile updates stream
+        stream_id = self._record_profile_updates_txn(
+            txn,
+            user_id,
+            field_name,
+            target_users,
+        )
+
+        return stream_id
+
+    def _record_profile_updates_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: UserID,
+        field_name: str,
+        target_users: set[str],
+    ) -> int | None:
+        """
+        Record updates into the profile updates stream tables.
+
+        Args:
+            txn: Transaction to use
+            user_id: User ID that made the profile update
+            field_name: The field to set the value for
+            target_users: Set of users to create profile update stream rows for
+
+        Returns:
+            The stream ID created in this transaction
+        """
+        if not self._msc4429_enabled:
+            return None
+
+        # Record the profile update
+        stream_id = self._profile_updates_id_gen.get_next_txn(txn)
+        self.db_pool.simple_insert_txn(
+            txn,
+            table="profile_updates",
+            values={
+                "stream_id": stream_id,
+                "instance_name": self._instance_name,
+                "user_id": user_id.to_string(),
+                "action": ProfileUpdateAction.UPDATE.value,
+                "field_name": field_name,
+                "inserted_ts": self.clock.time_msec(),
+            },
+        )
+
+        # Add per user tracking rows
+        inserted_ts = self.clock.time_msec()
+        values = [(stream_id, user_id, inserted_ts) for user_id in target_users]
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            table="profile_updates_per_user",
+            keys=[
+                "stream_id",
+                "user_id",
+                "inserted_ts",
+            ],
+            values=values,
+        )
+        return stream_id
+
+    async def set_profile_field(
+        self,
+        user_id: UserID,
+        field_name: str,
+        new_value: JsonValue | dict[str, JsonValue],
+        target_users: set[str],
+    ) -> int | None:
+        """
+        Set a custom profile field for a user.
+
+        Args:
+            user_id: The user's ID.
+            field_name: The name of the custom profile field.
+            new_value: The value of the custom profile field.
+            target_users: Set of users to trigger profile updates for.
+        """
+        return await self.db_pool.runInteraction(
+            "set_profile_field",
+            self._set_profile_field_txn,
+            user_id,
+            field_name,
+            new_value,
+            target_users,
+        )
+
+    async def delete_profile_field(
+        self, user_id: UserID, field_name: str, target_users: set[str]
+    ) -> int | None:
         """
         Remove a custom profile field for a user.
 
@@ -902,7 +947,10 @@ class ProfileWorkerStore(SQLBaseStore):
             field_name: The name of the custom profile field.
         """
 
-        def delete_profile_field(txn: LoggingTransaction) -> None:
+        if self._msc4429_enabled:
+            assert self._can_write_to_profile_updates
+
+        def delete_profile_field(txn: LoggingTransaction) -> int | None:
             if isinstance(self.database_engine, PostgresEngine):
                 sql = """
                 UPDATE profiles SET fields = fields - ?
@@ -923,7 +971,20 @@ class ProfileWorkerStore(SQLBaseStore):
                     (f'$."{field_name}"', user_id.localpart),
                 )
 
-        await self.db_pool.runInteraction("delete_profile_field", delete_profile_field)
+            if not self._msc4429_enabled:
+                return None
+
+            stream_id = self._record_profile_updates_txn(
+                txn,
+                user_id,
+                field_name,
+                target_users,
+            )
+            return stream_id
+
+        return await self.db_pool.runInteraction(
+            "delete_profile_field", delete_profile_field
+        )
 
     async def delete_profile(self, user_id: UserID) -> None:
         """

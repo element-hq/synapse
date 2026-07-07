@@ -2027,10 +2027,11 @@ class ModuleApi:
                 deactivation,
             )
 
-        await self._hs.get_profile_handler().set_displayname(
+        await self._hs.get_profile_handler().dispatch_set_profile_field(
             target_user=user_id,
             requester=requester,
-            new_displayname=new_displayname,
+            field_name=ProfileFields.DISPLAYNAME,
+            new_value=new_displayname,
             by_admin=True,
         )
 

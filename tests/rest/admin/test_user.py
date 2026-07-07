@@ -40,6 +40,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     LoginType,
+    ProfileFields,
     UserTypes,
 )
 from synapse.api.errors import Codes, HttpResponseException, ResourceLimitError
@@ -944,18 +945,27 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         # Set avatar URL to all users, that no user has a NULL value to avoid
         # different sort order between SQlite and PostreSQL
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user1:test"), "mxc://url3"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user1:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://url3",
+                target_users=set(),
             )
         )
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user2:test"), "mxc://url2"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user2:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://url2",
+                target_users=set(),
             )
         )
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@admin:test"), "mxc://url1"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@admin:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://url1",
+                target_users=set(),
             )
         )
 
@@ -1547,8 +1557,11 @@ class DeactivateAccountTestCase(unittest.HomeserverTestCase):
 
         # set attributes for user
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user:test"), "mxc://servername/mediaid"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://servername/mediaid",
+                target_users=set(),
             )
         )
         self.get_success(
@@ -1680,7 +1693,12 @@ class DeactivateAccountTestCase(unittest.HomeserverTestCase):
         """
         # Patch `self.other_user` to have an empty string as their avatar.
         self.get_success(
-            self.store.set_profile_avatar_url(UserID.from_string("@user:test"), "")
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="",
+                target_users=set(),
+            )
         )
 
         # Check we can still erase them.
@@ -2759,8 +2777,11 @@ class UserRestTestCase(unittest.HomeserverTestCase):
 
         # set attributes for user
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user:test"), "mxc://servername/mediaid"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://servername/mediaid",
+                target_users=set(),
             )
         )
         self.get_success(

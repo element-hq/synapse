@@ -209,7 +209,7 @@ class ProfileFieldRestServlet(RestServlet):
                 Codes.USER_ACCOUNT_SUSPENDED,
             )
 
-        await self.profile_handler.set_field(
+        await self.profile_handler.dispatch_set_profile_field(
             target_user=user,
             requester=requester,
             field_name=field_name,
@@ -263,7 +263,7 @@ class ProfileFieldRestServlet(RestServlet):
             )
 
         if field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL):
-            await self.profile_handler.set_field(
+            await self.profile_handler.dispatch_set_profile_field(
                 target_user=user,
                 requester=requester,
                 field_name=field_name,
@@ -272,7 +272,7 @@ class ProfileFieldRestServlet(RestServlet):
                 propagate=propagate,
             )
         else:
-            await self.profile_handler.delete_profile_field(
+            await self.profile_handler.dispatch_delete_profile_field(
                 target_user=user,
                 requester=requester,
                 field_name=field_name,

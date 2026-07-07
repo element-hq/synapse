@@ -26,7 +26,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 import synapse.types
-from synapse.api.constants import EventTypes, ProfileUpdateAction
+from synapse.api.constants import EventTypes, ProfileFields, ProfileUpdateAction
 from synapse.api.errors import AuthError, SynapseError
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -89,7 +89,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.on_new_event = self.mock_hs_notifier.on_new_event
 
     def test_get_my_name(self) -> None:
-        self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
 
         displayname = self.get_success(self.handler.get_displayname(self.frank))
 
@@ -97,8 +104,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_set_my_name(self) -> None:
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
             )
         )
 
@@ -109,8 +119,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set displayname again
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
             )
         )
 
@@ -121,8 +134,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set displayname to an empty string
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), ""
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="",
             )
         )
 
@@ -134,8 +150,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """Test that `set_displayname` updates membership events in rooms."""
 
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
             )
         )
 
@@ -153,8 +172,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
 
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
             )
         )
 
@@ -694,8 +716,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """Test that `set_displayname` returns immediately and that room membership updates are still done in background."""
 
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
             )
         )
 
@@ -716,8 +741,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         ):
             state_tuple = (EventTypes.Member, self.frank.to_string())
             self.get_success(
-                self.handler.set_displayname(
-                    self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+                self.handler.set_field(
+                    target_user=self.frank,
+                    requester=synapse.types.create_requester(self.frank),
+                    field_name=ProfileFields.DISPLAYNAME,
+                    new_value="Frank Jr.",
                 )
             )
 
@@ -744,8 +772,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """Test that room membership updates triggered by changing the avatar or the display name are resumed after a restart."""
 
         self.get_success(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
             )
         )
 
@@ -782,8 +813,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         ):
             state_tuple = (EventTypes.Member, self.frank.to_string())
             self.get_success(
-                self.handler.set_displayname(
-                    self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+                self.handler.set_field(
+                    target_user=self.frank,
+                    requester=synapse.types.create_requester(self.frank),
+                    field_name=ProfileFields.DISPLAYNAME,
+                    new_value="Frank Jr.",
                 )
             )
 
@@ -847,7 +881,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     @override_config({"enable_set_displayname": False})
     def test_set_my_name_if_disabled(self) -> None:
         # Setting displayname for the first time is allowed
-        self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+                target_users=set(),
+            )
+        )
 
         self.assertEqual(
             (self.get_success(self.store.get_profile_displayname(self.frank))),
@@ -856,16 +897,22 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Setting displayname a second time is forbidden
         self.get_failure(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
             ),
             SynapseError,
         )
 
     def test_set_my_name_noauth(self) -> None:
         self.get_failure(
-            self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.bob), "Frank Jr."
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.bob),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank Jr.",
             ),
             AuthError,
         )
@@ -888,8 +935,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.store.create_profile(UserID.from_string("@caroline:test"))
         )
         self.get_success(
-            self.store.set_profile_displayname(
-                UserID.from_string("@caroline:test"), "Caroline"
+            self.handler.set_field(
+                target_user=UserID.from_string("@caroline:test"),
+                requester=synapse.types.create_requester("@caroline:test"),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Caroline",
             )
         )
 
@@ -907,16 +957,33 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_get_my_avatar(self) -> None:
         self.get_success(
-            self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
+            )
         )
         avatar_url = self.get_success(self.handler.get_avatar_url(self.frank))
 
         self.assertEqual("http://my.server/me.png", avatar_url)
 
     def test_get_profile_empty_displayname(self) -> None:
-        self.get_success(self.store.set_profile_displayname(self.frank, None))
         self.get_success(
-            self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
+            self.store.set_profile_field(
+                user_id=self.frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=None,
+                target_users=set(),
+            )
+        )
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.frank,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
+                target_users=set(),
+            )
         )
 
         profile = self.get_success(self.handler.get_profile(self.frank.to_string()))
@@ -925,10 +992,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     def test_set_my_avatar(self) -> None:
         self.get_success(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "http://my.server/pic.gif",
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/pic.gif",
             )
         )
 
@@ -939,10 +1007,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set avatar again
         self.get_success(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "http://my.server/me.png",
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
             )
         )
 
@@ -953,10 +1022,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set avatar to an empty string
         self.get_success(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "",
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="",
             )
         )
 
@@ -968,7 +1038,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     def test_set_my_avatar_if_disabled(self) -> None:
         # Setting displayname for the first time is allowed
         self.get_success(
-            self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/me.png",
+            )
         )
 
         self.assertEqual(
@@ -978,10 +1053,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         # Set avatar a second time is forbidden
         self.get_failure(
-            self.handler.set_avatar_url(
-                self.frank,
-                synapse.types.create_requester(self.frank),
-                "http://my.server/pic.gif",
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.server/pic.gif",
             ),
             SynapseError,
         )

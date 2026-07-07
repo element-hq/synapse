@@ -1180,6 +1180,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 user_id=UserID.from_string(self.user),
                 field_name="m.status",
                 new_value={"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
+                target_users=set(),
             )
         )
         self.helper.join(

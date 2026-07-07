@@ -17,6 +17,7 @@ from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import ProfileFields
 from synapse.api.errors import StoreError
 from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
@@ -54,9 +55,11 @@ class MasQueryUserResource(BaseTestCase):
             )
         )
         self.get_success(
-            store.set_profile_avatar_url(
+            store.set_profile_field(
                 user_id=alice,
-                new_avatar_url="mxc://example.com/avatar",
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://example.com/avatar",
+                target_users=set(),
             )
         )
 
@@ -729,7 +732,14 @@ class MasDeleteUserResource(BaseTestCase):
         store = self.hs.get_datastores().main
 
         # Add custom profile field
-        self.get_success(store.set_profile_field(alice, "io.element.example", "hello"))
+        self.get_success(
+            store.set_profile_field(
+                user_id=alice,
+                field_name="io.element.example",
+                new_value="hello",
+                target_users=set(),
+            )
+        )
 
         # Ensure we're testing what we think we are:
         # check the user has profile data at the start of the test

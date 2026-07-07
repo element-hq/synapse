@@ -555,18 +555,27 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                                     )
 
                 elif self._msc4429_enabled and event.membership == Membership.JOIN:
-                    # Notify the profile handler. We only want to do this once
-                    # in a multi-worker setup, so we can't dispatch a hook to all workers.
-                    if self._is_profile_worker:
-                        await self.profile_handler.user_joined_room(target, room_id)
-                    else:
-                        # Offload to the right worker via http replication
-                        await self._profile_user_room_membership_change_client(
-                            instance_name=self._profile_updates_writer_instance,
-                            user_id=target.to_string(),
-                            room_id=room_id,
-                            membership=Membership.JOIN,
+                    prev_member_event = None
+                    if prev_member_event_id:
+                        prev_member_event = await self.store.get_event(
+                            prev_member_event_id
                         )
+                    if (
+                        not prev_member_event
+                        or prev_member_event.membership == Membership.LEAVE
+                    ):
+                        # Notify the profile handler. We only want to do this once
+                        # in a multi-worker setup, so we can't dispatch a hook to all workers.
+                        if self._is_profile_worker:
+                            await self.profile_handler.user_joined_room(target, room_id)
+                        else:
+                            # Offload to the right worker via http replication
+                            await self._profile_user_room_membership_change_client(
+                                instance_name=self._profile_updates_writer_instance,
+                                user_id=target.to_string(),
+                                room_id=room_id,
+                                membership=Membership.JOIN,
+                            )
 
                 break
             except PartialStateConflictError as e:
@@ -1570,14 +1579,14 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             ratelimit=ratelimit,
         )
 
-        if event.membership == Membership.LEAVE:
-            prev_state_ids = await context.get_prev_state_ids(
-                StateFilter.from_types([(EventTypes.Member, event.state_key)])
-            )
-            prev_member_event_id = prev_state_ids.get(
-                (EventTypes.Member, event.state_key), None
-            )
+        prev_state_ids = await context.get_prev_state_ids(
+            StateFilter.from_types([(EventTypes.Member, event.state_key)])
+        )
+        prev_member_event_id = prev_state_ids.get(
+            (EventTypes.Member, event.state_key), None
+        )
 
+        if event.membership == Membership.LEAVE:
             if prev_member_event_id:
                 prev_member_event = await self.store.get_event(prev_member_event_id)
                 if prev_member_event.membership == Membership.JOIN:
@@ -1599,18 +1608,25 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                                 membership=Membership.LEAVE,
                             )
         elif self._msc4429_enabled and event.membership == Membership.JOIN:
-            # Notify the profile handler. We only want to do this once
-            # in a multi-worker setup, so we can't dispatch a hook to all workers.
-            if self._is_profile_worker:
-                await self.profile_handler.user_joined_room(target_user, room_id)
-            else:
-                # Offload to the right worker via http replication
-                await self._profile_user_room_membership_change_client(
-                    instance_name=self._profile_updates_writer_instance,
-                    user_id=target_user.to_string(),
-                    room_id=room_id,
-                    membership=Membership.JOIN,
-                )
+            prev_member_event = None
+            if prev_member_event_id:
+                prev_member_event = await self.store.get_event(prev_member_event_id)
+            if (
+                not prev_member_event
+                or prev_member_event.membership == Membership.LEAVE
+            ):
+                # Notify the profile handler. We only want to do this once
+                # in a multi-worker setup, so we can't dispatch a hook to all workers.
+                if self._is_profile_worker:
+                    await self.profile_handler.user_joined_room(target_user, room_id)
+                else:
+                    # Offload to the right worker via http replication
+                    await self._profile_user_room_membership_change_client(
+                        instance_name=self._profile_updates_writer_instance,
+                        user_id=target_user.to_string(),
+                        room_id=room_id,
+                        membership=Membership.JOIN,
+                    )
 
     async def _can_guest_join(self, partial_current_state_ids: StateMap[str]) -> bool:
         """

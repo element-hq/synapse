@@ -30,7 +30,7 @@ from twisted.internet.interfaces import IReactorTCP
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import LoginType, Membership
+from synapse.api.constants import LoginType, Membership, ProfileFields
 from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest import admin
@@ -514,13 +514,19 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
 
         # Set some profile data that can be checked for after the user is erased
         self.get_success(
-            profile_handler.set_displayname(
-                user_id, create_requester(user_id), "Kermit the Frog"
+            profile_handler.set_field(
+                target_user=user_id,
+                requester=create_requester(user_id),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Kermit the Frog",
             )
         )
         self.get_success(
-            profile_handler.set_avatar_url(
-                user_id, create_requester(user_id), "http://test/Kermit.jpg"
+            profile_handler.set_field(
+                target_user=user_id,
+                requester=create_requester(user_id),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://test/Kermit.jpg",
             )
         )
         # Verify it is set
@@ -572,9 +578,21 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         # Can not use the profile handler to set a display name when it is disabled. Use
         # the database directly
         store = self.hs.get_datastores().main
-        self.get_success(store.set_profile_displayname(user_id, "Kermit the Frog"))
         self.get_success(
-            store.set_profile_avatar_url(user_id, "http://test/Kermit.jpg")
+            store.set_profile_field(
+                user_id=user_id,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Kermit the Frog",
+                target_users=set(),
+            )
+        )
+        self.get_success(
+            store.set_profile_field(
+                user_id=user_id,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://test/Kermit.jpg",
+                target_users=set(),
+            )
         )
 
         # Verify it is set
