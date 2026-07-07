@@ -85,13 +85,15 @@ jobs:
       - name: Build the packages
         # see https://github.com/docker/build-push-action/issues/252
         # for the cache magic here
+        env:
+          DISTRO: ${{ matrix.distro }}
         run: |
           ./src/scripts-dev/build_debian_packages.py \
             --docker-build-arg=--cache-from=type=local,src=/tmp/.buildx-cache \
             --docker-build-arg=--cache-to=type=local,mode=max,dest=/tmp/.buildx-cache-new \
             --docker-build-arg=--progress=plain \
             --docker-build-arg=--load \
-            "${{ matrix.distro }}"
+            "$DISTRO"
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
@@ -212,4 +214,4 @@ jobs:
             Sdist/* \
             Wheel*/* \
             debs.tar.xz \
-            --repo ${{ github.repository }}
+            --repo "$GITHUB_REPOSITORY"
