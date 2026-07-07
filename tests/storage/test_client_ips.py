@@ -782,7 +782,11 @@ class ClientIpAuthTestCase(unittest.HomeserverTestCase):
                 device_id=device_id,
                 ip=expected_ip,
                 user_agent="Mozzila pizza",
-                last_seen=123456100,
+                # Note: The extra 1ms is from `make_request(...)` -> `await_result(...)`
+                #
+                # FIXME: This test shouldn't care about this internal detail (don't
+                # assert exact timing)
+                last_seen=123456001,
             ),
             r,
         )
