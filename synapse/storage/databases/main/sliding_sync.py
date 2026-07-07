@@ -216,7 +216,7 @@ class SlidingSyncStore(SQLBaseStore):
             # The `previous_connection_position` is a user-supplied value, so we
             # need to make sure that the one they supplied is actually theirs.
             sql = f"""
-                SELECT connection_key
+                SELECT connection_key, last_used_ts
                 FROM sliding_sync_connection_positions
                 INNER JOIN sliding_sync_connections USING (connection_key)
                 WHERE
@@ -231,7 +231,25 @@ class SlidingSyncStore(SQLBaseStore):
             if row is None:
                 raise SlidingSyncUnknownPosition()
 
-            (connection_key,) = row
+            (connection_key, last_used_ts) = row
+
+            # Update the `last_used_ts` if it's due to be updated. This is
+            # also done when a position is first used (in
+            # `_get_and_clear_connection_positions_txn`), but that read is
+            # cached, so for a client that repeatedly retries from the same
+            # position this is the only place the connection gets marked as
+            # in use (and thus protected from expiry).
+            now = self.clock.time_msec()
+            if (
+                last_used_ts is None
+                or now - last_used_ts > UPDATE_INTERVAL_LAST_USED_TS.as_millis()
+            ):
+                self.db_pool.simple_update_txn(
+                    txn,
+                    table="sliding_sync_connections",
+                    keyvalues={"connection_key": connection_key},
+                    updatevalues={"last_used_ts": now},
+                )
         else:
             # We're restarting the connection, so we clear the previous existing data we
             # used to track it. We do this here to ensure that if we get lots of
@@ -271,6 +289,35 @@ class SlidingSyncStore(SQLBaseStore):
             },
             returning=("connection_position",),
         )
+
+        if previous_connection_position is not None:
+            # Delete all other positions for this connection. The only
+            # positions the client can validly send from now on are the
+            # previous position (it hasn't seen the response containing the
+            # new position yet, so may retry from it) and the new position.
+            #
+            # We can't rely on `_get_and_clear_connection_positions_txn` to do
+            # this: it only runs when a position is *first* used (the result is
+            # cached), so a client that repeatedly retries from the same
+            # position (e.g. because it never successfully processes our
+            # responses) would accumulate unboundedly many positions, plus
+            # their associated per-room state in the dependent tables.
+            #
+            # Note this means that if two requests concurrently fork from the
+            # same position, the later one to persist wins and the other fork
+            # dies before it is ever used. A client that somehow processed the
+            # losing response will get `SlidingSyncUnknownPosition` and start a
+            # new connection, which was already the outcome once one of the
+            # forks got used.
+            sql = """
+                DELETE FROM sliding_sync_connection_positions
+                WHERE connection_key = ?
+                    AND connection_position != ? AND connection_position != ?
+            """
+            txn.execute(
+                sql,
+                (connection_key, previous_connection_position, connection_position),
+            )
 
         # We need to deduplicate the `required_state` JSON. We do this by
         # fetching all JSON associated with the connection and comparing that

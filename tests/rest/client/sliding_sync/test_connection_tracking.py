@@ -503,3 +503,183 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
         channel = self.make_sync_request(sync_body, since=from_token, tok=user1_tok)
         self.assertEqual(channel.code, 400)
         self.assertEqual(channel.json_body["errcode"], Codes.UNKNOWN_POS)
+
+    def _get_connection_positions_in_db(self) -> set[int]:
+        """Fetch all rows in `sliding_sync_connection_positions`."""
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="sliding_sync_connection_positions",
+                keyvalues={},
+                retcols=("connection_position",),
+                desc="_get_connection_positions_in_db",
+            )
+        )
+        return {connection_position for (connection_position,) in rows}
+
+    @staticmethod
+    def _connection_position_from_token(token: str) -> int:
+        """Extract the connection position from a sliding sync token."""
+        return int(token.split("/", 1)[0])
+
+    def test_replaying_connection_position_does_not_accumulate_state(self) -> None:
+        """
+        Test that repeatedly syncing from the same connection position does not
+        accumulate per-connection state in the database.
+
+        Clients are allowed to resend a position many times (e.g. if they never
+        successfully process our responses), and each such request records a
+        new connection position. We check that the old, unused positions get
+        deleted.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        # Initial sync to create the connection.
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Repeatedly sync from the same position. We use a higher
+        # `timeline_limit` than the state persisted at the replayed position,
+        # which counts as a per-connection state update, ensuring that every
+        # request has something to persist (and so records a new connection
+        # position). Otherwise, requests without updates simply return the
+        # position they were given.
+        replay_sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 2,
+                }
+            }
+        }
+        first_replay_token: str | None = None
+        latest_token = from_token
+        for _ in range(5):
+            self.helper.send(room_id, "msg", tok=user2_tok)
+            _, latest_token = self.do_sync(
+                replay_sync_body, since=from_token, tok=user1_tok
+            )
+            if first_replay_token is None:
+                first_replay_token = latest_token
+        assert first_replay_token is not None
+
+        # Sanity check that the replayed requests did indeed create new
+        # connection positions.
+        self.assertNotEqual(
+            self._connection_position_from_token(latest_token),
+            self._connection_position_from_token(from_token),
+        )
+        self.assertNotEqual(
+            self._connection_position_from_token(latest_token),
+            self._connection_position_from_token(first_replay_token),
+        )
+
+        # Only the position the client keeps sending and the most recently
+        # issued position should remain (rather than one position per request).
+        self.assertEqual(
+            self._get_connection_positions_in_db(),
+            {
+                self._connection_position_from_token(from_token),
+                self._connection_position_from_token(latest_token),
+            },
+        )
+
+        # The per-position state should not have accumulated either.
+        stream_rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="sliding_sync_connection_streams",
+                keyvalues={},
+                retcols=("connection_position",),
+                desc="get_connection_streams",
+            )
+        )
+        self.assertLessEqual(
+            {connection_position for (connection_position,) in stream_rows},
+            self._get_connection_positions_in_db(),
+        )
+
+        # Positions from replayed requests that the client never used are gone.
+        channel = self.make_sync_request(
+            replay_sync_body, since=first_replay_token, tok=user1_tok
+        )
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], Codes.UNKNOWN_POS)
+
+        # The client can continue from the most recently issued position, and
+        # doing so cleans up the position it had been replaying.
+        _, next_token = self.do_sync(
+            replay_sync_body, since=latest_token, tok=user1_tok
+        )
+        self.assertEqual(
+            self._get_connection_positions_in_db(),
+            {
+                self._connection_position_from_token(latest_token),
+                self._connection_position_from_token(next_token),
+            },
+        )
+
+    def test_replaying_connection_position_does_not_expire_connection(self) -> None:
+        """
+        Test that a connection that is in constant use, but only ever from the
+        same connection position, does not get expired as unused.
+
+        The `last_used_ts` of a connection is normally updated when a position
+        is first used, but that read is cached, so replayed requests must
+        update it when persisting their state instead.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        # Initial sync to create the connection.
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Keep replaying the same position, with a higher `timeline_limit` so
+        # that each request has per-connection state updates to persist. The
+        # gap between any two requests is well below CONNECTION_EXPIRY, but the
+        # total time elapsed is well above it, so the connection only survives
+        # if the replayed requests keep `last_used_ts` up to date.
+        replay_sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 2,
+                }
+            }
+        }
+        for _ in range(15):
+            self.reactor.advance(CONNECTION_EXPIRY.as_secs() / 10)
+            self.helper.send(room_id, "msg", tok=user2_tok)
+            self.do_sync(replay_sync_body, since=from_token, tok=user1_tok)
