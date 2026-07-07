@@ -16,7 +16,6 @@ jobs:
     name: Build and push image for ${{ matrix.platform }}
     runs-on: ${{ matrix.runs_on }}
     permissions:
-      contents: read
       packages: write # needed to push the image to ghcr.io
       id-token: write # needed for the vault and tailscale OIDC auth
     strategy:
@@ -35,6 +34,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Extract version from pyproject.toml
         # Note: explicitly requesting bash will mean bash is invoked with `-eo pipefail`, see

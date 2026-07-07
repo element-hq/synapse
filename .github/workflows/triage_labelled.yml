@@ -25,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           # Only clone the script file we care about, instead of the whole repo.
           sparse-checkout: .ci/scripts/triage_labelled_issue.sh
 
