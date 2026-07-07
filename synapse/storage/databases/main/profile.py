@@ -580,106 +580,6 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return results
 
-    async def add_profile_updates(
-        self,
-        user_id: UserID,
-        action: ProfileUpdateAction,
-        updated_fields: set[str] | None,
-    ) -> int:
-        """Persist profile update markers and return the last stream ID."""
-        assert self._can_write_to_profile_updates
-
-        if action == ProfileUpdateAction.UPDATE and not updated_fields:
-            return self._profile_updates_id_gen.get_current_token()
-        elif action == ProfileUpdateAction.LEFT_ROOM:
-            assert not updated_fields
-
-        user_id_str = user_id.to_string()
-
-        def _add_profile_updates_txn(txn: LoggingTransaction) -> int:
-            values = []
-            inserted_ts = self.clock.time_msec()
-            if updated_fields:
-                stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
-                    txn, len(updated_fields)
-                )
-                for stream_id, field_name in zip(stream_ids, updated_fields):
-                    values.append(
-                        [
-                            stream_id,
-                            self._instance_name,
-                            user_id_str,
-                            action.value,
-                            field_name,
-                            inserted_ts,
-                        ]
-                    )
-            else:
-                stream_ids = [self._profile_updates_id_gen.get_next_txn(txn)]
-                values.append(
-                    [
-                        stream_ids[0],
-                        self._instance_name,
-                        user_id_str,
-                        action.value,
-                        None,
-                        inserted_ts,
-                    ]
-                )
-            self.db_pool.simple_insert_many_txn(
-                txn,
-                table="profile_updates",
-                keys=[
-                    "stream_id",
-                    "instance_name",
-                    "user_id",
-                    "action",
-                    "field_name",
-                    "inserted_ts",
-                ],
-                values=values,
-            )
-
-            return stream_ids[-1]
-
-        return await self.db_pool.runInteraction(
-            "add_profile_updates", _add_profile_updates_txn
-        )
-
-    async def track_profile_updates_per_user(
-        self,
-        stream_id: int,
-        user_ids: set[str],
-    ) -> None:
-        """
-        Create tracking rows for profile updater per target user interested in profile
-        updates for the user triggering one, including themselves.
-
-        Args:
-            stream_id: Stream ID referencing a `profile_updates` stream ID.
-            user_ids: A set of the full user IDs of the target users interested in
-                this change.
-        """
-
-        def _track_profile_updates_per_user_txn(txn: LoggingTransaction) -> None:
-            inserted_ts = self.clock.time_msec()
-            values = [(stream_id, user_id, inserted_ts) for user_id in user_ids]
-            self.db_pool.simple_insert_many_txn(
-                txn,
-                table="profile_updates_per_user",
-                keys=[
-                    "stream_id",
-                    "user_id",
-                    "inserted_ts",
-                ],
-                values=values,
-            )
-
-        return await self.db_pool.runInteraction(
-            "track_profile_updates_per_user",
-            _track_profile_updates_per_user_txn,
-        )
-
     async def create_profile(self, user_id: UserID) -> None:
         """
         Create a blank profile for a user.
@@ -851,19 +751,22 @@ class ProfileWorkerStore(SQLBaseStore):
 
         # Record updates in the profile updates stream
         stream_id = self._record_profile_updates_txn(
-            txn,
-            user_id,
-            field_name,
-            target_users,
+            txn=txn,
+            user_id=user_id,
+            action=ProfileUpdateAction.UPDATE,
+            field_name=field_name,
+            target_users=target_users,
         )
 
         return stream_id
 
     def _record_profile_updates_txn(
         self,
+        *,
         txn: LoggingTransaction,
         user_id: UserID,
-        field_name: str,
+        action: ProfileUpdateAction,
+        field_name: str | None,
         target_users: set[str],
     ) -> int | None:
         """
@@ -872,7 +775,9 @@ class ProfileWorkerStore(SQLBaseStore):
         Args:
             txn: Transaction to use
             user_id: User ID that made the profile update
-            field_name: The field to set the value for
+            action: The profile update action, either `update`, `left_room` or
+                `joined_room`
+            field_name: The field to set the value for, if ProfileUpdateAction.UPDATE
             target_users: Set of users to create profile update stream rows for
 
         Returns:
@@ -880,6 +785,11 @@ class ProfileWorkerStore(SQLBaseStore):
         """
         if not self._msc4429_enabled:
             return None
+
+        if action == ProfileUpdateAction.UPDATE:
+            assert field_name is not None
+        else:
+            assert field_name is None
 
         # Record the profile update
         stream_id = self._profile_updates_id_gen.get_next_txn(txn)
@@ -890,7 +800,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 "stream_id": stream_id,
                 "instance_name": self._instance_name,
                 "user_id": user_id.to_string(),
-                "action": ProfileUpdateAction.UPDATE.value,
+                "action": action.value,
                 "field_name": field_name,
                 "inserted_ts": self.clock.time_msec(),
             },
@@ -975,10 +885,11 @@ class ProfileWorkerStore(SQLBaseStore):
                 return None
 
             stream_id = self._record_profile_updates_txn(
-                txn,
-                user_id,
-                field_name,
-                target_users,
+                txn=txn,
+                user_id=user_id,
+                action=ProfileUpdateAction.UPDATE,
+                field_name=field_name,
+                target_users=target_users,
             )
             return stream_id
 
@@ -996,6 +907,115 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="delete_profile",
             table="profiles",
             keyvalues={"full_user_id": user_id.to_string()},
+        )
+
+    async def record_profile_updates_for_user_left_room(
+        self,
+        user_id: UserID,
+        users_to_update: set[str],
+    ) -> int | None:
+        """
+        Record updates into the profile updates stream for when a user leaves
+        the last room with a set of users.
+
+        Doing this clears all old rows from the `profile_updates_per_user` table,
+        to avoid exposing any profile field changes past the point of not being
+        in any common rooms with the user.
+
+        Args:
+            user_id: The user who left the last common room with a set of users.
+            users_to_update: The set of users who no longer share rooms with the user.
+
+        Returns:
+            Stream ID for the profile update stream update.
+        """
+        if not users_to_update:
+            return None
+        assert self._can_write_to_profile_updates
+
+        def _record_profile_updates_for_user_left_room_txn(
+            txn: LoggingTransaction,
+        ) -> int | None:
+            # First clear the previous rows from the table
+            txn.execute(
+                """
+                SELECT stream_id FROM profile_updates
+                WHERE user_id = ?
+                """,
+                (user_id.to_string(),),
+            )
+            res = txn.fetchall()
+            if res:
+                stream_ids = [row[0] for row in res]
+
+                user_clause, user_args = make_in_list_sql_clause(
+                    txn.database_engine,
+                    "user_id",
+                    users_to_update,
+                )
+                stream_id_clause, stream_id_args = make_in_list_sql_clause(
+                    txn.database_engine,
+                    "stream_id",
+                    stream_ids,
+                )
+                txn.execute(
+                    f"""
+                        DELETE FROM profile_updates_per_user
+                            WHERE {user_clause}
+                            AND {stream_id_clause}
+                    """,
+                    (*user_args, *stream_id_args),
+                )
+
+            # Now record the "left room" action in the stream
+            stream_id = self._record_profile_updates_txn(
+                txn=txn,
+                user_id=user_id,
+                action=ProfileUpdateAction.LEFT_ROOM,
+                field_name=None,
+                target_users=users_to_update,
+            )
+            return stream_id
+
+        return await self.db_pool.runInteraction(
+            "record_profile_updates_for_user_left_room",
+            _record_profile_updates_for_user_left_room_txn,
+        )
+
+    async def record_profile_updates_for_user_joined_room(
+        self,
+        user_id: UserID,
+        users_to_update: set[str],
+    ) -> int | None:
+        """
+        Record updates into the profile updates stream for when a user joins a room.
+
+        Args:
+            user_id: The user who joined a room.
+            users_to_update: A set of the other users in the room.
+
+        Returns:
+            Stream ID for the profile update stream update.
+        """
+        if not users_to_update:
+            return None
+        assert self._can_write_to_profile_updates
+
+        def _record_profile_updates_for_user_joined_room_txn(
+            txn: LoggingTransaction,
+        ) -> int | None:
+            stream_id = self._record_profile_updates_txn(
+                txn=txn,
+                user_id=user_id,
+                action=ProfileUpdateAction.JOINED_ROOM,
+                field_name=None,
+                target_users=users_to_update,
+            )
+            return stream_id
+
+        return await self.db_pool.runInteraction(
+            "record_profile_updates_for_user_joined_room",
+            _record_profile_updates_for_user_joined_room_txn,
         )
 
     async def clear_profile_updates_for_user(

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from twisted.internet.defer import CancelledError
 
-from synapse.api.constants import ProfileFields, ProfileUpdateAction
+from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -477,6 +477,9 @@ class ProfileHandler:
         """
         if not self._msc4429_enabled:
             return
+        # We should never be called without being a profile worker
+        assert self._is_profile_worker
+
         user_id_str = user_id.to_string()
 
         users_in_left_room = set(await self.store.get_local_users_in_room(room_id))
@@ -490,22 +493,16 @@ class ProfileHandler:
 
         users_to_update = users_in_left_room - users_still_sharing_rooms
         if users_to_update:
-            # First clear any old profile updates for these users
-            await self.store.clear_profile_updates_for_user(
+            stream_id = await self.store.record_profile_updates_for_user_left_room(
                 user_id=user_id,
-                users_to_remove=users_to_update,
+                users_to_update=users_to_update,
             )
-
-            # Record our leave
-            stream_id = await self.store.add_profile_updates(
-                user_id=user_id,
-                action=ProfileUpdateAction.LEFT_ROOM,
-                updated_fields=None,
-            )
-            await self.store.track_profile_updates_per_user(
-                stream_id=stream_id,
-                user_ids=users_to_update,
-            )
+            if stream_id:
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    rooms=set(room_id),
+                )
 
     async def user_joined_room(self, user_id: UserID, room_id: str) -> None:
         """
@@ -522,6 +519,9 @@ class ProfileHandler:
         """
         if not self._msc4429_enabled:
             return
+        # We should never be called without being a profile worker
+        assert self._is_profile_worker
+
         user_id_str = user_id.to_string()
 
         users_in_room = set(await self.store.get_local_users_in_room(room_id))
@@ -529,16 +529,17 @@ class ProfileHandler:
         if not users_in_room:
             return
 
-        stream_id = await self.store.add_profile_updates(
-            user_id=user_id,
-            action=ProfileUpdateAction.JOINED_ROOM,
-            updated_fields=None,
-        )
-
-        await self.store.track_profile_updates_per_user(
-            stream_id=stream_id,
-            user_ids=users_in_room,
-        )
+        if users_in_room:
+            stream_id = await self.store.record_profile_updates_for_user_joined_room(
+                user_id=user_id,
+                users_to_update=users_in_room,
+            )
+            if stream_id:
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    rooms=set(room_id),
+                )
 
     async def delete_profile_upon_deactivation(
         self,
