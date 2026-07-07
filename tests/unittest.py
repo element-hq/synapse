@@ -773,7 +773,7 @@ class HomeserverTestCase(TestCase):
             #
             # Note: Python has a default thread switch interval (5ms for cpython) (see
             # `sys.setswitchinterval(interval)`) but we still want this here as we're
-            # able to preempt and cause the thread context swtich to happen faster.
+            # able to preempt and cause the thread context switch to happen faster.
             # Also, without any real-time sleeping, this function would complete before
             # the 5ms switch ever happened.
             #
@@ -781,7 +781,7 @@ class HomeserverTestCase(TestCase):
             # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
             # and may starve out other threads. 10 is arbitrary but many cases will have
             # none or only a few round-trips so we can just try to go as fast as
-            # posssible.
+            # possible.
             if loop_count < 10:
                 time.sleep(0)
             else:

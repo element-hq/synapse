@@ -306,7 +306,8 @@ class FakeChannel:
         Advances the Twisted reactor clock by 0.1s and suspending execution of the
         Python thread (to allow other threads to do work) in a loop until we see a
         result. We timeout when both the Twisted reactor clock has been advanced enough
-        AND we've waited the 1s of real-time before giving up.
+        AND we've done at-least 100 iterations (round-trips for other threads to get
+        work done).
 
         The loop 1) allows `clock.call_later` scheduled callbacks to run if they are
         scheduled to run now and 2) will also allow other threads to make progress. This
@@ -317,20 +318,34 @@ class FakeChannel:
             timeout_ms: The Twisted reactor time we wait until we raise a `TimedOutException`
         """
         timeout = Duration(milliseconds=timeout_ms)
-        start_time_seconds = self._reactor.seconds()
-
-        # 1s is an arbitrary small number so we don't have to wait that long when
-        # something is stuck and because we assume any task on another thread will be
-        # fast enough.
-        #
-        # We don't use the same `timeout_ms` passed in because some tests specify 20s
-        # and we don't want to be waiting that long unnecessarily.
-        real_time_timeout = Duration(seconds=1)
-        start_real_time_seconds = time.time()
 
         # TODO: Why?
         self._reactor.run()
 
+        # First, run anything that's scheduled now before we start looping and advancing
+        # non-zero time increments.
+        #
+        # Without this, if some request handler had some database queries followed by
+        # `self.hs.get_clock().sleep(Duration(seconds=1))`, and called
+        # `channel.await_result(timeout_ms=1000)`, it wouldn't be called because the
+        # first `self._reactor.advance(0.1)` would be first spent driving the database
+        # queries, and only leaving 0.9s remaining (0.1s shy of the sleep finishing) so
+        # the request would timeout.
+        #
+        # The goal is to remove the foot-guns and having to think about this for the
+        # standard cases.
+        #
+        # FIXME: Ideally, we'd advance by `0` but there is a handful of tests that
+        # assume that time advances in between requests and many requests complete from
+        # a single advance. Second best, we'd just advance by minuscule amount of time
+        # (`CLOCK_SCHEDULE_EPSILON`) but some tests assume at-least a millisecond in
+        # between as our timestamps are often recorded at the millisecond granularity
+        # (`origin_server_ts`, etc). It's a balance between test convenience of this
+        # helper and materializing test expectations so we may never fix this.
+        self._reactor.advance(Duration(milliseconds=1).as_secs())
+
+        # We only count the looping time (record the start after we advance once above)
+        start_time_seconds = self._reactor.seconds()
         loop_count = 0
         while not self.is_finished():
             if (
@@ -340,8 +355,10 @@ class FakeChannel:
                 # exactly the `timeout` amount and we don't want to get stuck in an
                 # infinite loop
                 self._reactor.seconds() >= start_time_seconds + timeout.as_secs()
-                # And exceeded the real-time timeout
-                and time.time() > start_real_time_seconds + real_time_timeout.as_secs()
+                # 100 loops is arbitrary. This also makes the assumption that any work
+                # on other threads will finish before we give up after sleeping ~0.1s of
+                # real-time (100 * 0.001).
+                and loop_count > 100
             ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
@@ -349,17 +366,17 @@ class FakeChannel:
             # could be things spawned on the Twisted reactor threadpool or Tokio thread
             # pool (async Rust code).
             #
-            # Note: Since we're waiting real-time (`timeout` duration), the tests also
-            # pass with `time.sleep(0)` commented out because Python has a default
-            # thread switch interval (5ms for cpython) (see
-            # `sys.setswitchinterval(interval)`). We still want this here as we're able
-            # to preempt and cause the thread context swtich to happen faster.
+            # Note: Python has a default thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`) but we still want this here as we're
+            # able to preempt and cause the thread context switch to happen faster.
+            # Also, without any real-time sleeping, this function would complete before
+            # the 5ms switch ever happened.
             #
             # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
             # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
             # and may starve out other threads. 10 is arbitrary but many cases will have
             # none or only a few round-trips so we can just try to go as fast as
-            # posssible.
+            # possible.
             if loop_count < 10:
                 time.sleep(0)
             else:

@@ -26,6 +26,7 @@ from synapse.rest.client import delayed_events, login, room, sync, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -89,6 +90,10 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.helper.join(
             room=self.room_id, user=self.user2_user_id, tok=self.user2_access_token
         )
+
+        # Advance enough time where any requests we made during `prepare(...)` doesn't
+        # affect the rate-limits in the test itself
+        self.reactor.advance(Duration(days=1).as_secs())
 
     def test_delayed_events_empty_on_startup(self) -> None:
         self.assertListEqual([], self._get_delayed_events())
