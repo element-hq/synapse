@@ -261,6 +261,8 @@ class ProfileHandler:
           updates into rooms, which could cause rooms to be accidentally joined
           after the deactivated user has left them.
 
+          FIXME: This precondition seems to lack a test.
+
         Args:
             target_user: the user whose displayname is to be changed.
             requester: The user attempting to make this change.
@@ -384,6 +386,8 @@ class ProfileHandler:
           to user deactivation and we will also (if `propagate=True`) send
           updates into rooms, which could cause rooms to be accidentally joined
           after the deactivated user has left them.
+
+          FIXME: This precondition seems to lack a test.
 
         Args:
             target_user: the user whose avatar URL is to be changed.
@@ -829,6 +833,8 @@ class ProfileHandler:
           notify modules about the change whilst claiming it is not related
           to user deactivation.
 
+          FIXME: This precondition seems to lack a test.
+
         Args:
             target_user: the user whose profile is to be changed.
             requester: The user attempting to make this change.
@@ -913,6 +919,8 @@ class ProfileHandler:
         - This must NOT be called as part of deactivating the user, because we will
           notify modules about the change whilst claiming it is not related
           to user deactivation.
+
+          FIXME: This precondition seems to lack a test.
 
         Args:
             target_user: the user whose profile is to be changed.
