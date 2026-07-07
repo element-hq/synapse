@@ -4,13 +4,14 @@ on:
   issues:
     types: [ labeled ]
 
+permissions:
+  contents: read
+
 jobs:
   move_needs_info:
     runs-on: ubuntu-latest
     if: >
       contains(github.event.issue.labels.*.name, 'X-Needs-Info')
-    permissions:
-      contents: read
     env:
       # This token must have the following scopes: ["repo:public_repo", "admin:org->read:org", "user->read:user", "project"]
       GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
