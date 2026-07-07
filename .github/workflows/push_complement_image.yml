@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write # needed to push the image to ghcr.io
     steps:
       - name: Checkout specific branch (debug build)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

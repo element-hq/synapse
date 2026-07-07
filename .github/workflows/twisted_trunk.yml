@@ -181,8 +181,8 @@ jobs:
       - complement
 
     permissions:
-      contents: read
-      issues: write
+      contents: read # needed to check out the issue template
+      issues: write # needed for opening/editing an issue upon build failure
 
     runs-on: ubuntu-latest
 
