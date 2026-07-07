@@ -152,45 +152,6 @@ class ProfileHandler:
             ),
         }
 
-    async def record_profile_updates(
-        self, user_id: UserID, updated_fields: set[str]
-    ) -> None:
-        """
-        Record user profile updates to our stream updates table.
-
-        Args:
-            user_id: The user whose profile has had updates.
-            updated_fields: A set of the names of the fields that were updated.
-
-        Returns:
-            None
-        """
-        if not self._msc4429_enabled or not updated_fields:
-            return
-
-        stream_id = await self.store.add_profile_updates(
-            user_id=user_id,
-            updated_fields=updated_fields,
-            action=ProfileUpdateAction.UPDATE,
-        )
-        room_ids = await self.store.get_rooms_for_user(user_id.to_string())
-        if not room_ids:
-            return
-
-        users_who_share_rooms = (
-            await self.store.get_local_users_who_share_room_with_user(
-                user_id.to_string()
-            )
-        )
-        await self.store.track_profile_updates_per_user(
-            stream_id=stream_id,
-            user_ids=users_who_share_rooms,
-        )
-
-        self._notifier.on_new_event(
-            StreamKeyType.PROFILE_UPDATES, stream_id, rooms=room_ids
-        )
-
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
         Get a user's profile as a JSON dictionary.
@@ -308,6 +269,9 @@ class ProfileHandler:
                 updates for.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
+
+        Returns:
+            Stream ID of the profile updates stream that was just inserted.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -429,6 +393,9 @@ class ProfileHandler:
                 updates for.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
+
+        Returns:
+            Stream ID of the profile updates stream that was just inserted.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -681,36 +648,6 @@ class ProfileHandler:
                 new_value=new_value,
                 by_admin=by_admin,
                 propagate=propagate,
-            )
-
-    async def _dispatch_record_profile_updates(
-        self, user_id: UserID, updated_fields: set[str]
-    ) -> None:
-        """
-        Dispatch the recording of profile updates, either directly via the current
-        instance, if we're a profile worker, otherwise push via replication.
-
-        Args:
-            user_id: The user whose profile has had updates.
-            updated_fields: A set of the names of the fields that were updated.
-
-        Returns:
-            None
-        """
-        if not self._msc4429_enabled:
-            return
-
-        if self._is_profile_worker:
-            await self.record_profile_updates(
-                user_id,
-                updated_fields,
-            )
-        else:
-            # Offload to the right worker via http replication
-            await self._set_profile_field_client(
-                instance_name=self._profile_updates_writer_instance,
-                user_id=user_id.to_string(),
-                updated_fields=updated_fields,
             )
 
     @cached()
