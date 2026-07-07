@@ -211,7 +211,7 @@ jobs:
         with:
           path: |
             .mypy_cache
-          key: mypy-cache-${{ github.context.sha }}
+          key: mypy-cache-${{ github.sha }}
           restore-keys: mypy-cache-
 
       - name: Run mypy
