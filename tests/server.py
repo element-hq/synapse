@@ -100,7 +100,7 @@ from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
-from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
+from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
