@@ -36,6 +36,7 @@ from synapse.api.errors import (
 )
 from synapse.replication.http.profile import (
     ReplicationProfileDeleteField,
+    ReplicationProfileDeleteUponDeactivation,
     ReplicationProfileSetField,
 )
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
@@ -110,6 +111,9 @@ class ProfileHandler:
         )
         self._delete_profile_field_client = ReplicationProfileDeleteField.make_client(
             self.hs
+        )
+        self._delete_profile_upon_deactivation_client = (
+            ReplicationProfileDeleteUponDeactivation.make_client(self.hs)
         )
         self._set_profile_field_client = ReplicationProfileSetField.make_client(self.hs)
         self._profile_updates_writer_instance = (
@@ -540,6 +544,36 @@ class ProfileHandler:
                     stream_id,
                     rooms=set(room_id),
                 )
+
+    async def dispatch_delete_profile_upon_deactivation(
+        self,
+        target_user: UserID,
+        requester: Requester,
+        by_admin: bool = False,
+    ) -> None:
+        """
+        Dispatch profile deletion upon deactivation to the right instance that
+        can write to profiles, or handle it ourselves, if we're a profile worker.
+
+        Args:
+            target_user: User ID who'se profile is being deactivated.
+            requester: The requesting user.
+            by_admin: Whether the action is being done by an admin.
+        """
+        if self._is_profile_worker:
+            await self.delete_profile_upon_deactivation(
+                target_user=target_user,
+                requester=requester,
+                by_admin=by_admin,
+            )
+        else:
+            # Offload to the right worker via http replication
+            await self._delete_profile_upon_deactivation_client(
+                instance_name=self._profile_updates_writer_instance,
+                user_id=target_user.to_string(),
+                requester=requester,
+                by_admin=by_admin,
+            )
 
     async def delete_profile_upon_deactivation(
         self,

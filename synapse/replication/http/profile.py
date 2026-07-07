@@ -207,8 +207,61 @@ class ReplicationProfileDeleteField(ReplicationEndpoint):
         return (200, {})
 
 
+class ReplicationProfileDeleteUponDeactivation(ReplicationEndpoint):
+    """Delete a profile for a user during deactivation.
+
+    The POST looks like:
+
+        POST /_synapse/replication/profile_delete_upon_deactivation/<user_id>
+
+        {
+            "target_user": "@user:hs",
+            "requester": "@admin:hs",
+            "by_admin": true
+        }
+
+        200 OK
+
+        {}
+    """
+
+    NAME = "profile_delete_upon_deactivation"
+    PATH_ARGS = ("user_id",)
+    METHOD = "POST"
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self._profile_handler = hs.get_profile_handler()
+
+    @staticmethod
+    async def _serialize_payload(  # type: ignore[override]
+        user_id: UserID,
+        requester: Requester,
+        by_admin: bool,
+    ) -> JsonDict:
+        return {
+            "target_user": user_id.to_string(),
+            "requester": requester.user.to_string(),
+            "by_admin": by_admin,
+        }
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, user_id: str
+    ) -> tuple[int, JsonDict]:
+        await self._profile_handler.delete_profile_upon_deactivation(
+            target_user=UserID.from_string(user_id),
+            requester=create_requester(content["requester"]),
+            by_admin=content["by_admin"],
+        )
+
+        return (200, {})
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.server.include_profile_updates_in_sync:
         ReplicationProfileUserRoomMembershipChange(hs).register(http_server)
         ReplicationProfileSetField(hs).register(http_server)
         ReplicationProfileDeleteField(hs).register(http_server)
+        ReplicationProfileDeleteUponDeactivation(hs).register(http_server)

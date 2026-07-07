@@ -172,7 +172,7 @@ class DeactivateAccountHandler:
             # Note that displayname and avatar URL may persist as historical state events
             # in rooms, but these cases behave like message history, following
             # https://spec.matrix.org/v1.17/client-server-api/#post_matrixclientv3accountdeactivate
-            await self._profile_handler.delete_profile_upon_deactivation(
+            await self._profile_handler.dispatch_delete_profile_upon_deactivation(
                 user, requester, by_admin
             )
 
