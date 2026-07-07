@@ -59,8 +59,12 @@ from . import EventBase, StrippedStateEvent
 
 # These are imported only to re-export them (callers import them from this
 # module); listing them in __all__ stops the unused-import lint flagging them
-# and re-exports them for `import *`. The `format_event_*` functions are kept
-# for backwards compatibility with modules that import them from here.
+# and re-exports them for `import *`.
+#
+# The `format_event_*` functions are a backwards compatibility hack: they have
+# never been part of the module API and modules shouldn't be pulling them in,
+# but some in the wild import them from here anyway. They may be removed in
+# the future; nothing in Synapse itself should use them.
 __all__ = [
     "EventFormat",
     "SerializeEventConfig",

@@ -585,10 +585,14 @@ fn format_for_client_v2(d: &mut Map<String, Value>) {
 }
 
 // Standalone versions of the client format transforms, re-exported from
-// `synapse.events.utils` for backwards compatibility with modules that
-// imported them from there. Unlike [`apply_event_format`], these mutate a
-// Python dict in place and return it, matching the original Python
-// implementations that used to live in `synapse/events/utils.py`.
+// `synapse.events.utils` purely as a backwards compatibility hack: they have
+// never been part of the module API and modules shouldn't be pulling them in,
+// but some in the wild import them from there anyway. They may be removed in
+// the future; nothing in Synapse itself should use them.
+//
+// Unlike [`apply_event_format`], these mutate a Python dict in place and
+// return it, matching the original Python implementations that used to live
+// in `synapse/events/utils.py`.
 
 /// Return the event dict unchanged (federation format).
 #[pyfunction]

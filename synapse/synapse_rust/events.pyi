@@ -442,32 +442,38 @@ def serialize_events(
         The serialized events, in the same order as `events`.
     """
 
+# The standalone `format_event_*` transforms below are a backwards
+# compatibility hack: they have never been part of the module API and modules
+# shouldn't be pulling them in, but some in the wild import them (via
+# `synapse.events.utils`) anyway. They may be removed in the future; nothing
+# in Synapse itself should use them.
+
 def format_event_raw(d: JsonDict) -> JsonDict:
     """Return the event dict unchanged (federation format).
 
-    Standalone client-format transform kept for backwards compatibility with
-    modules importing it from `synapse.events.utils`.
+    Deprecated backwards compatibility hack for modules importing it from
+    `synapse.events.utils`; don't use this in new code.
     """
 
 def format_event_for_client_v1(d: JsonDict) -> JsonDict:
     """Apply the legacy `/events`-style v1 client format to `d` in place.
 
-    Standalone client-format transform kept for backwards compatibility with
-    modules importing it from `synapse.events.utils`.
+    Deprecated backwards compatibility hack for modules importing it from
+    `synapse.events.utils`; don't use this in new code.
     """
 
 def format_event_for_client_v2(d: JsonDict) -> JsonDict:
     """Apply the `/sync`-style v2 client format to `d` in place.
 
-    Standalone client-format transform kept for backwards compatibility with
-    modules importing it from `synapse.events.utils`.
+    Deprecated backwards compatibility hack for modules importing it from
+    `synapse.events.utils`; don't use this in new code.
     """
 
 def format_event_for_client_v2_without_room_id(d: JsonDict) -> JsonDict:
     """Apply the v2 client format to `d` in place, additionally stripping `room_id`.
 
-    Standalone client-format transform kept for backwards compatibility with
-    modules importing it from `synapse.events.utils`.
+    Deprecated backwards compatibility hack for modules importing it from
+    `synapse.events.utils`; don't use this in new code.
     """
 
 def redact_event(event: Event) -> Event:

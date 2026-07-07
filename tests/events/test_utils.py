@@ -1006,9 +1006,11 @@ class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
 class FormatEventForClientTestCase(stdlib_unittest.TestCase):
     """Tests for the standalone `format_event_*` transforms.
 
-    These are Rust reimplementations kept for backwards compatibility with
-    modules that import them from `synapse.events.utils`; like the original
-    Python implementations they must mutate the dict in place and return it.
+    These are Rust reimplementations kept purely as a backwards compatibility
+    hack for modules in the wild that import them from `synapse.events.utils`
+    (they were never part of the module API, and nothing in Synapse itself uses
+    them); like the original Python implementations they must mutate the dict
+    in place and return it.
     """
 
     def make_event(self) -> JsonDict:
