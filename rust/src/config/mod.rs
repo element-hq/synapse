@@ -48,6 +48,7 @@ pub struct AuthConfig {
 #[derive(FromPyObject, Clone)]
 pub struct ServerConfig {
     pub max_event_delay_ms: Option<u64>,
+    pub include_profile_updates_in_sync: bool,
 }
 
 #[derive(FromPyObject, Clone)]
