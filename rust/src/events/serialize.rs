@@ -52,7 +52,7 @@ use crate::{
     types::Requester,
 };
 
-/// The user_id field copied from `sender` by the v1 client format.
+/// The top-level `user_id` field copied from `sender` by the v1 client format.
 const USER_ID: &str = "user_id";
 
 /// Keys dropped by the v2 client event format.
