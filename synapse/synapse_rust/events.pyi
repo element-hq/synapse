@@ -442,6 +442,34 @@ def serialize_events(
         The serialized events, in the same order as `events`.
     """
 
+def format_event_raw(d: JsonDict) -> JsonDict:
+    """Return the event dict unchanged (federation format).
+
+    Standalone client-format transform kept for backwards compatibility with
+    modules importing it from `synapse.events.utils`.
+    """
+
+def format_event_for_client_v1(d: JsonDict) -> JsonDict:
+    """Apply the legacy `/events`-style v1 client format to `d` in place.
+
+    Standalone client-format transform kept for backwards compatibility with
+    modules importing it from `synapse.events.utils`.
+    """
+
+def format_event_for_client_v2(d: JsonDict) -> JsonDict:
+    """Apply the `/sync`-style v2 client format to `d` in place.
+
+    Standalone client-format transform kept for backwards compatibility with
+    modules importing it from `synapse.events.utils`.
+    """
+
+def format_event_for_client_v2_without_room_id(d: JsonDict) -> JsonDict:
+    """Apply the v2 client format to `d` in place, additionally stripping `room_id`.
+
+    Standalone client-format transform kept for backwards compatibility with
+    modules importing it from `synapse.events.utils`.
+    """
+
 def redact_event(event: Event) -> Event:
     """Returns a pruned version of the given event, which removes all keys we
     don't know about or think could potentially be dodgy.

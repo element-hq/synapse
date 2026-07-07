@@ -45,6 +45,10 @@ from synapse.synapse_rust.events import (
     EventFormat,
     SerializeEventConfig,
     Unsigned,
+    format_event_for_client_v1,
+    format_event_for_client_v2,
+    format_event_for_client_v2_without_room_id,
+    format_event_raw,
     redact_event,
     serialize_events,
 )
@@ -55,8 +59,16 @@ from . import EventBase, StrippedStateEvent
 
 # These are imported only to re-export them (callers import them from this
 # module); listing them in __all__ stops the unused-import lint flagging them
-# and re-exports them for `import *`.
-__all__ = ["EventFormat", "SerializeEventConfig"]
+# and re-exports them for `import *`. The `format_event_*` functions are kept
+# for backwards compatibility with modules that import them from here.
+__all__ = [
+    "EventFormat",
+    "SerializeEventConfig",
+    "format_event_for_client_v1",
+    "format_event_for_client_v2",
+    "format_event_for_client_v2_without_room_id",
+    "format_event_raw",
+]
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
