@@ -1,5 +1,9 @@
 name: Tests
 
+# NOTE: .github/zizmor.yml carries a cache-poisoning exception for this entire
+# file because this step doesn't publish anything at the moment. If this
+# changes, the exception should be removed.
+
 on:
   push:
     branches: ["develop", "release-*"]
