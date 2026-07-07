@@ -13,7 +13,7 @@
 from typing import Any, Iterator, Mapping
 
 from synapse.synapse_rust.room_versions import RoomVersion
-from synapse.types import JsonDict, JsonMapping, StrSequence
+from synapse.types import JsonDict, JsonMapping, Requester, StrSequence
 from synapse.util.duration import Duration
 
 class EventInternalMetadata:
@@ -308,6 +308,139 @@ class Event:
         """If this event has the ``msc4354_sticky`` top-level field, returns a
         ``SynapseDuration`` representing the sticky duration. Otherwise returns
         ``None``."""
+
+class ThreadAggregation:
+    """The bundled thread summary for an event."""
+
+    def __init__(
+        self,
+        latest_event: Event,
+        count: int,
+        current_user_participated: bool,
+    ) -> None: ...
+    @property
+    def latest_event(self) -> Event:
+        """The latest event in the thread."""
+
+    @property
+    def count(self) -> int:
+        """The total number of events in the thread."""
+
+    @property
+    def current_user_participated(self) -> bool:
+        """Whether the requesting user has sent an event to the thread."""
+
+class BundledAggregations:
+    """The bundled aggregations for an event.
+
+    Some values require additional processing during serialization.
+    """
+
+    def __init__(
+        self,
+        references: JsonMapping | None = None,
+        replace: Event | None = None,
+        thread: ThreadAggregation | None = None,
+    ) -> None: ...
+    @property
+    def references(self) -> JsonMapping | None: ...
+    @property
+    def replace(self) -> Event | None: ...
+    @property
+    def thread(self) -> ThreadAggregation | None: ...
+    def __bool__(self) -> bool: ...
+
+class EventFormat:
+    """The format used to convert an event to the shape sent to clients."""
+
+    Raw: EventFormat
+    ClientV1: EventFormat
+    ClientV2: EventFormat
+    ClientV2WithoutRoomId: EventFormat
+
+class SerializeEventConfig:
+    """Configuration for serializing an event for clients."""
+
+    def __init__(
+        self,
+        *,
+        as_client_event: bool,
+        event_format: EventFormat,
+        requester: Requester | None,
+        event_field_allowlist: list[str] | None,
+        include_stripped_room_state: bool,
+        include_admin_metadata: bool,
+        msc4354_enabled: bool,
+    ) -> None: ...
+    @property
+    def as_client_event(self) -> bool:
+        """Whether to apply the client event format transform (v1/v2/raw). When
+        ``False``, the federation-format event is returned as-is."""
+
+    @property
+    def event_format(self) -> EventFormat:
+        """Which client event format variant to apply (only used when
+        ``as_client_event`` is ``True``)."""
+
+    @property
+    def requester(self) -> Requester | None:
+        """The entity requesting the event. Used to gate sender-only fields such
+        as ``transaction_id`` and ``delay_id``."""
+
+    @property
+    def event_field_allowlist(self) -> list[str] | None:
+        """If set, only include these field paths in the output. An empty list
+        returns an empty event; ``None`` returns all fields.
+
+        The fields can be "dotted" fields, e.g. ``content.body``."""
+
+    @property
+    def include_stripped_room_state(self) -> bool:
+        """Whether to include ``invite_room_state`` / ``knock_room_state`` in
+        ``unsigned``. These are stripped by default and only included for
+        specific endpoints (e.g. ``/sync`` invite/knock handling)."""
+
+    @property
+    def include_admin_metadata(self) -> bool:
+        """When ``True``, add server-admin-only metadata to ``unsigned``
+        (``io.element.synapse.soft_failed``,
+        ``io.element.synapse.policy_server_spammy``)."""
+
+    @property
+    def msc4354_enabled(self) -> bool:
+        """Whether MSC4354 (sticky events) is enabled. When ``True``, the
+        remaining stickiness TTL is computed and added to ``unsigned``."""
+
+def serialize_events(
+    events: list[tuple[Event, str | None]],
+    time_now_ms: int,
+    config: SerializeEventConfig,
+    *,
+    bundle_aggregations: Mapping[str, BundledAggregations] | None = None,
+    redaction_map: Mapping[str, Event] | None = None,
+    unsigned_additions: Mapping[str, JsonDict] | None = None,
+) -> list[JsonDict]:
+    """Synchronously serialize a batch of events for clients using pre-fetched data.
+
+    All DB/IO must already have been done by the caller; the keyword maps below
+    are all keyed by event ID and shared across the whole batch.
+
+    Args:
+        events: The events to serialize, as `(event, membership)` pairs.
+            `membership` is the requesting user's membership at the time of the
+            event, injected into `unsigned.membership` (MSC4115).
+        time_now_ms: The current time in milliseconds.
+        config: The serialization config.
+        bundle_aggregations: Map from event_id to the `BundledAggregations` to
+            bundle into the event's `unsigned.m.relations`.
+        redaction_map: Map from redaction event_id to the redaction `Event`,
+            used to populate `unsigned.redacted_because` for redacted events.
+        unsigned_additions: Map from event_id to extra `unsigned` fields
+            contributed by module callbacks.
+
+    Returns:
+        The serialized events, in the same order as `events`.
+    """
 
 def redact_event(event: Event) -> Event:
     """Returns a pruned version of the given event, which removes all keys we

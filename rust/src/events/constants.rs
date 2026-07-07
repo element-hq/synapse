@@ -74,6 +74,40 @@ pub mod unsigned_field {
     pub const AGE_TS: &str = "age_ts";
     /// Unsigned field: redacted_because
     pub const REDACTED_BECAUSE: &str = "redacted_because";
+    /// Unsigned field: redacted_by
+    pub const REDACTED_BY: &str = "redacted_by";
+    /// Unsigned field: transaction_id
+    pub const TRANSACTION_ID: &str = "transaction_id";
+    /// Unsigned field: org.matrix.msc4140.delay_id
+    pub const DELAY_ID: &str = "org.matrix.msc4140.delay_id";
+    /// Unsigned field: membership (MSC4115)
+    pub const MEMBERSHIP: &str = "membership";
+    /// Unsigned field: msc4354_sticky_duration_ttl_ms (MSC4354)
+    pub const STICKY_TTL: &str = "msc4354_sticky_duration_ttl_ms";
+    /// Unsigned field: io.element.synapse.soft_failed (admin metadata)
+    pub const SOFT_FAILED: &str = "io.element.synapse.soft_failed";
+    /// Unsigned field: io.element.synapse.policy_server_spammy (admin metadata)
+    pub const POLICY_SERVER_SPAMMY: &str = "io.element.synapse.policy_server_spammy";
+    /// Unsigned field: invite_room_state
+    pub const INVITE_ROOM_STATE: &str = "invite_room_state";
+    /// Unsigned field: knock_room_state
+    pub const KNOCK_ROOM_STATE: &str = "knock_room_state";
+    /// Unsigned field: m.relations
+    pub const M_RELATIONS: &str = "m.relations";
+    /// Unsigned field: replaces_state
+    pub const REPLACES_STATE: &str = "replaces_state";
+    /// Unsigned field: prev_content
+    pub const PREV_CONTENT: &str = "prev_content";
+}
+
+/// Relation types (the `rel_type` of an `m.relates_to`).
+pub mod relation_type {
+    /// Relation type: m.reference
+    pub const REFERENCE: &str = "m.reference";
+    /// Relation type: m.replace
+    pub const REPLACE: &str = "m.replace";
+    /// Relation type: m.thread
+    pub const THREAD: &str = "m.thread";
 }
 
 /// Membership Event Fields
