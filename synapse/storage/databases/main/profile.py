@@ -582,15 +582,17 @@ class ProfileWorkerStore(SQLBaseStore):
 
     async def create_profile(self, user_id: UserID) -> None:
         """
-        Create a blank profile for a user.
+        Create a blank profile for a user, if one does not already exist.
 
         Args:
             user_id: The user to create the profile for.
         """
         user_localpart = user_id.localpart
-        await self.db_pool.simple_insert(
+        await self.db_pool.simple_upsert(
             table="profiles",
-            values={"user_id": user_localpart, "full_user_id": user_id.to_string()},
+            keyvalues={"full_user_id": user_id.to_string()},
+            values={},
+            insertion_values={"user_id": user_localpart},
             desc="create_profile",
         )
 

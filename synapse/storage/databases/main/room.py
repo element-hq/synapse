@@ -245,6 +245,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         last_remote_media_id = progress.get("last_remote_media_id", "")
         last_remote_origin = progress.get("last_remote_origin", "")
 
+        # Once a table has been fully processed we record it in the progress so that
+        # we stop re-running its (now empty) query on every subsequent iteration while
+        # the other table is still being worked through.
+        local_done = progress.get("local_done", False)
+        remote_done = progress.get("remote_done", False)
+
         # The `ORDER BY` here would normally miss records if the admin (un)quarantined a
         # record, but that doesn't affect the background update because we also insert
         # into the stream table upon quarantine status changing. Worst case is the admin
@@ -266,54 +272,75 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # is further reinforced by not all changes being captured by the table anyway.
         # See https://github.com/element-hq/synapse/issues/19672 for more details.
         def flag_quarantined(txn: LoggingTransaction) -> int:
-            # It doesn't matter which order we do these in, as long as we do both of them.
-            txn.execute(
-                """
-                SELECT NULL AS media_origin, media_id
-                FROM local_media_repository
-                WHERE quarantined_by IS NOT NULL
-                    AND media_id > ?
-                ORDER BY media_id
-                LIMIT ?
-            """,
-                (last_local_media_id, batch_size),
-            )
-            local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
-            if len(local_media_result) > 0:
-                self._insert_quarantine_changes_txn(txn, local_media_result, True)
+            local_media_result: list[tuple[str | None, str]] = []
+            remote_media_result: list[tuple[str | None, str]] = []
 
-            # We use a >= ? on the media origin to avoid missing records when media IDs
-            # collide between origins (the table's unique constraint is on `(media_origin, media_id)`).
-            # Filtering by `(media_origin, media_id)` also makes sure we're using an index.
-            txn.execute(
-                """
-                SELECT media_origin, media_id
-                FROM remote_media_cache
-                WHERE quarantined_by IS NOT NULL
-                    AND media_origin >= ? AND media_id > ?
-                ORDER BY media_origin, media_id
-                LIMIT ?
-            """,
-                (last_remote_origin, last_remote_media_id, batch_size),
-            )
-            remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
-            if len(remote_media_result) > 0:
-                self._insert_quarantine_changes_txn(txn, remote_media_result, True)
+            # It doesn't matter which order we do these in, as long as we do both of
+            # them. We skip a table once it's been fully processed so we don't keep
+            # running an empty query for it every iteration until the other finishes.
+            if not local_done:
+                txn.execute(
+                    """
+                    SELECT NULL AS media_origin, media_id
+                    FROM local_media_repository
+                    WHERE quarantined_by IS NOT NULL
+                        AND media_id > ?
+                    ORDER BY media_id
+                    LIMIT ?
+                """,
+                    (last_local_media_id, batch_size),
+                )
+                local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+                if len(local_media_result) > 0:
+                    self._insert_quarantine_changes_txn(txn, local_media_result, True)
+
+            # We page through `remote_media_cache` with a tuple comparison on
+            # `(media_origin, media_id)`. This matches a unique index, and so
+            # will a) page through all rows, and b) will be fast.
+            #
+            # Comparing the columns independently (e.g. `media_origin >= ? AND
+            # media_id > ?`) would incorrectly skip rows in a newly-reached
+            # origin whose media_id is <= the last processed media_id.
+            if not remote_done:
+                txn.execute(
+                    """
+                    SELECT media_origin, media_id
+                    FROM remote_media_cache
+                    WHERE quarantined_by IS NOT NULL
+                        AND (media_origin, media_id) > (?, ?)
+                    ORDER BY media_origin, media_id
+                    LIMIT ?
+                """,
+                    (last_remote_origin, last_remote_media_id, batch_size),
+                )
+                remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+                if len(remote_media_result) > 0:
+                    self._insert_quarantine_changes_txn(txn, remote_media_result, True)
+
+            # Carry the previous progress forward, then for each table advance its
+            # cursor to the last row we fetched, or mark it done if its query (which
+            # only runs while it isn't already done) came back empty.
+            new_progress = {
+                "last_local_media_id": last_local_media_id,
+                "last_remote_media_id": last_remote_media_id,
+                "last_remote_origin": last_remote_origin,
+                "local_done": local_done,
+                "remote_done": remote_done,
+            }
+            if local_media_result:
+                new_progress["last_local_media_id"] = local_media_result[-1][1]
+            else:
+                new_progress["local_done"] = True
+            if remote_media_result:
+                new_progress["last_remote_origin"] = remote_media_result[-1][0]
+                new_progress["last_remote_media_id"] = remote_media_result[-1][1]
+            else:
+                new_progress["remote_done"] = True
 
             self.db_pool.updates._background_update_progress_txn(
                 txn,
                 _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA,
-                {
-                    "last_local_media_id": local_media_result[-1][1]
-                    if len(local_media_result) > 0
-                    else last_local_media_id,
-                    "last_remote_media_id": remote_media_result[-1][1]
-                    if len(remote_media_result) > 0
-                    else last_remote_media_id,
-                    "last_remote_origin": remote_media_result[-1][0]
-                    if len(remote_media_result) > 0
-                    else last_remote_origin,
-                },
+                new_progress,
             )
 
             return len(local_media_result) + len(remote_media_result)

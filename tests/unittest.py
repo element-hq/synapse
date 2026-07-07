@@ -48,6 +48,7 @@ import signedjson.key
 import unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 
+from twisted.internet import defer
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from twisted.python.failure import Failure
@@ -76,7 +77,7 @@ from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
-from synapse.util.clock import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -474,27 +475,13 @@ class HomeserverTestCase(TestCase):
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False
 
-    def wait_on_thread(self, deferred: Deferred, timeout: int = 10) -> None:
-        """
-        Wait until a Deferred is done, where it's waiting on a real thread.
-        """
-        start_time = time.time()
-
-        while not deferred.called:
-            if start_time + timeout < time.time():
-                raise ValueError("Timed out waiting for threadpool")
-            self.reactor.advance(0.01)
-            time.sleep(0.01)
-
     def wait_for_background_updates(self) -> None:
         """Block until all background database updates have completed."""
         store = self.hs.get_datastores().main
         while not self.get_success(
             store.db_pool.updates.has_completed_background_updates()
         ):
-            self.get_success(
-                store.db_pool.updates.do_next_background_update(False), by=0.1
-            )
+            self.get_success(store.db_pool.updates.do_next_background_update(False))
 
     def make_homeserver(
         self, reactor: ThreadedMemoryReactorClock, clock: Clock
@@ -584,6 +571,7 @@ class HomeserverTestCase(TestCase):
         await_result: bool = True,
         custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
+        timeout_ms: int = 1000,
     ) -> FakeChannel:
         """
         Create a SynapseRequest at the path using the method and containing the
@@ -612,6 +600,8 @@ class HomeserverTestCase(TestCase):
 
             client_ip: The IP to use as the requesting IP. Useful for testing
                 ratelimiting.
+            timeout_ms: if `await_result` is `True`, the amount of time to wait on
+                the request before timing out. Ignored otherwise.
 
         Returns:
             The FakeChannel object which stores the result of the request.
@@ -631,6 +621,7 @@ class HomeserverTestCase(TestCase):
             await_result,
             custom_headers,
             client_ip,
+            timeout_ms,
         )
 
     def setup_test_homeserver(
@@ -736,21 +727,165 @@ class HomeserverTestCase(TestCase):
         # whole chain to completion.
         self.reactor.pump([by] * 100)
 
-    def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
+    def _wait_for_deferred(
+        self,
+        d: "Deferred[Any]",
+    ) -> None:
+        """
+        Wait for the deferred to finish or raise.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        Args:
+            d: Twisted Deferred
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the deferred completes.
+        """
+        # Wait until the deferred has a result
+        #
+        # Checking `d.called` by itself is not sufficient by itself as this is possible:
+        #
+        # If you have a first `Deferred` `D1`, you can add a callback which returns
+        # another `Deferred` `D2`, and `D2` must then complete before any further
+        # callbacks on `D1` will execute (and later callbacks on `D1` get the *result*
+        # of `D2` rather than `D2` itself).
+        #
+        # So, `D1` might have `called=True` (as in, it has started running its
+        # callbacks), but any new callbacks added to `D1` won't get run until `D2`
+        # completes. Fortunately, we can detect this by checking `d.paused`.
+        loop_count = 0
+        while not d.called or d.paused:
+            # 100 loops is arbitrary but based on previous code which used to "pump" and
+            # advance the reactor 100 times. This also makes the assumption that any
+            # work on other threads will finish before we give up after sleeping ~0.1s
+            # of real-time (100 * 0.001).
+            if loop_count > 100:
+                raise defer.TimeoutError("Timed out waiting for deferred to finish")
+
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # Note: Python has a default thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`) but we still want this here as we're
+            # able to preempt and cause the thread context switch to happen faster.
+            # Also, without any real-time sleeping, this function would complete before
+            # the 5ms switch ever happened.
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # possible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # In terms of other threads, they may have scheduled something on the
+            # reactor to run (like `reactor.callFromThread(...)`)
+            #
+            # Ideally, we'd advance by `0` but the `Cooperator` used in our HTTP clients
+            # use `CLOCK_SCHEDULE_EPSILON` and we want to make usage in downstream tests
+            # as simple as possible. A common use case this helps with is anything that
+            # needs to make a HTTP request (like a replication requests)
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
+
+            loop_count += 1
+
+    def get_success(
+        self,
+        d: Awaitable[TV],
+    ) -> TV:
+        """
+        Get the success result of an awaitable.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
+
+        Args:
+            d: awaitable
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a failure result or has no result
+                (although you would probably run into `defer.TimeoutError` in that case).
+        """
         deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by=by)
+        self._wait_for_deferred(deferred)
+
         return self.successResultOf(deferred)
 
     def get_failure(
-        self, d: Awaitable[Any], exc: type[_ExcType], by: float = 0.0
+        self,
+        d: Awaitable[Any],
+        exc: type[_ExcType],
     ) -> _TypedFailure[_ExcType]:
         """
-        Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
+        Get the failure result of an awaitable. The failure must be of the type `exc`.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
+
+        Args:
+            d: awaitable
+            exc: Exception type to expect
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a success result,
+                or has an unexpected failure result, or has no result (although you would
+                probably run into `defer.TimeoutError` in that case).
         """
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by)
+        self._wait_for_deferred(deferred)
+
         return self.failureResultOf(deferred, exc)
 
+    # FIXME: Remove as this has the exact same semantics as `get_success()`. In
+    # https://github.com/matrix-org/synapse/pull/8402#discussion_r495992506 where it was
+    # introduced, it was claimed that "get_success fails the test if the deferred fails
+    # rather than raising, which I find a bit unintuitive." but `get_success()` actually
+    # does raise "@raise SynchronousTestCase.failureException : If the
+    # L{Deferred<twisted.internet.defer.Deferred>} has no result or has a failure
+    # result." at-least in today's world.
+    #
+    # As another alternative, we could also just update `get_success(...)` to have this
+    # behavior as the default, see
+    # https://github.com/element-hq/synapse/pull/19871#discussion_r3483616710
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Drive deferred to completion and return result or raise exception
         on failure.

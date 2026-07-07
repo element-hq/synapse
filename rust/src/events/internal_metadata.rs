@@ -498,6 +498,44 @@ impl EventInternalMetadata {
             .write()
             .map_err(|_| PyRuntimeError::new_err("EventInternalMetadata lock poisoned"))
     }
+
+    /// The event ID of the redaction event, if this event has been redacted.
+    pub fn redacted_by(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.redacted_by.clone())
+    }
+
+    /// The transaction ID, if set when the event was created.
+    ///
+    /// The transaction ID comes from the `txn_id` path parameter of the
+    /// client-server API request used to send the event.
+    pub fn txn_id(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.get_txn_id().map(|s| s.to_owned()))
+    }
+
+    /// The device ID of the sender, if set.
+    pub fn device_id(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.get_device_id().map(|s| s.to_owned()))
+    }
+
+    /// The access token ID of the sender, if set.
+    pub fn token_id(&self) -> PyResult<Option<i64>> {
+        Ok(self.read_inner()?.get_token_id())
+    }
+
+    /// The delay ID, set only if the event was a delayed event.
+    pub fn delay_id(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.get_delay_id().map(|s| s.to_owned()))
+    }
+
+    /// Whether the event has been soft failed.
+    pub fn soft_failed(&self) -> PyResult<bool> {
+        Ok(self.read_inner()?.is_soft_failed())
+    }
+
+    /// Whether the policy server marked this event as spammy.
+    pub fn policy_server_spammy(&self) -> PyResult<bool> {
+        Ok(self.read_inner()?.get_policy_server_spammy())
+    }
 }
 
 /// Helper to convert `None` to an `AttributeError` for a property getter.

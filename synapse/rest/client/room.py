@@ -53,9 +53,9 @@ from synapse.api.errors import (
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
     EventClientSerializer,
+    EventFormat,
     FilteredEvent,
     SerializeEventConfig,
-    format_event_for_client_v2,
 )
 from synapse.handlers.pagination import GetMessagesResult
 from synapse.http.server import HttpServer
@@ -289,8 +289,8 @@ class RoomStateEventRestServlet(RestServlet):
             event = await self._event_serializer.serialize_event(
                 FilteredEvent.state(data),
                 self.clock.time_msec(),
-                config=SerializeEventConfig(
-                    event_format=format_event_for_client_v2,
+                config=await self._event_serializer.create_config(
+                    event_format=EventFormat.ClientV2,
                     requester=requester,
                 ),
             )
@@ -925,7 +925,7 @@ class RoomMessageListRestServlet(RestServlet):
         ):
             as_client_event = False
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self.event_serializer.create_config(
             as_client_event=as_client_event, requester=requester
         )
 
@@ -1114,7 +1114,7 @@ class RoomEventServlet(RestServlet):
                 event,
                 self.clock.time_msec(),
                 bundle_aggregations=aggregations,
-                config=SerializeEventConfig(requester=requester),
+                config=await self._event_serializer.create_config(requester=requester),
             )
             return 200, event_dict
 
@@ -1154,7 +1154,9 @@ class RoomEventContextServlet(RestServlet):
             raise SynapseError(404, "Event not found.", errcode=Codes.NOT_FOUND)
 
         time_now = self.clock.time_msec()
-        serializer_options = SerializeEventConfig(requester=requester)
+        serializer_options = await self._event_serializer.create_config(
+            requester=requester
+        )
         results = {
             "events_before": await self._event_serializer.serialize_events(
                 event_context.events_before,
