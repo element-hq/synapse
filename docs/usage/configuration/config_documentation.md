@@ -4290,6 +4290,16 @@ exclude_rooms_from_sync:
 - '!foo:example.com'
 ```
 ---
+### `exclude_rooms_from_device_list_updates`
+
+*(array)* A list of rooms to exclude from device-list update fan-out. A device-list change (login/logout, new device, key rotation) is normally sent to every user sharing a room with the affected user and federated to every server in those rooms, which is expensive in very large rooms. Only *unencrypted* rooms can be excluded: device-list tracking exists to serve end-to-end encryption, so any encrypted room listed here is ignored and keeps receiving updates. Defaults to `[]`.
+
+Example configuration:
+```yaml
+exclude_rooms_from_device_list_updates:
+- '!foo:example.com'
+```
+---
 ## Opentracing
 
 Configuration options related to Opentracing support.

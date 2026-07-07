@@ -896,6 +896,10 @@ class ServerConfig(Config):
             config.get("exclude_rooms_from_sync") or []
         )
 
+        self.rooms_to_exclude_from_device_list_updates: list[str] = (
+            config.get("exclude_rooms_from_device_list_updates") or []
+        )
+
         delete_stale_devices_after: str | None = (
             config.get("delete_stale_devices_after") or None
         )
