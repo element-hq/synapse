@@ -1,0 +1,1 @@
+Add note to 3PID email token request unit tests that the endpoint being tested can have an expected, artificial delay of up to 1s.
