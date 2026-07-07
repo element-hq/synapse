@@ -73,6 +73,11 @@ jobs:
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Set up docker layer caching
+        # Skip the cache when building from a tag so that the released debs
+        # cannot be influenced by a poisoned cache. The lint cannot see the
+        # `if` condition, hence the ignore.
+        # zizmor: ignore[cache-poisoning]
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/.buildx-cache
