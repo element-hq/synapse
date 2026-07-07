@@ -38,7 +38,9 @@ jobs:
       should_run_workflow: ${{ steps.check_condition.outputs.should_run_workflow }}
     steps:
       - id: check_condition
-        run: echo "should_run_workflow=${{ github.repository == 'element-hq/synapse' }}" >> "$GITHUB_OUTPUT"
+        env:
+          SHOULD_RUN_WORKFLOW: ${{ github.repository == 'element-hq/synapse' }}
+        run: echo "should_run_workflow=$SHOULD_RUN_WORKFLOW" >> "$GITHUB_OUTPUT"
 
   mypy:
     needs: check_repo
@@ -95,11 +97,13 @@ jobs:
       - run: sudo apt-get -qq install xmlsec1
       - name: Set up PostgreSQL ${{ matrix.postgres-version }}
         if: ${{ matrix.postgres-version }}
+        env:
+          POSTGRES_VERSION: ${{ matrix.postgres-version }}
         run: |
           docker run -d -p 5432:5432 \
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
-            postgres:${{ matrix.postgres-version }}
+            "postgres:$POSTGRES_VERSION"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.x"

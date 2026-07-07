@@ -456,13 +456,15 @@ jobs:
         if: ${{ matrix.job.postgres-version }}
         # 1. Mount postgres data files onto a tmpfs in-memory filesystem to reduce overhead of docker's overlayfs layer.
         # 2. Expose the unix socket for postgres. This removes latency of using docker-proxy for connections.
+        env:
+          POSTGRES_VERSION: ${{ matrix.job.postgres-version }}
         run: |
           docker run -d -p 5432:5432 \
             --tmpfs /var/lib/postgres:rw,size=6144m \
             --mount 'type=bind,src=/var/run/postgresql,dst=/var/run/postgresql' \
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
-            postgres:${{ matrix.job.postgres-version }}
+            "postgres:$POSTGRES_VERSION"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master

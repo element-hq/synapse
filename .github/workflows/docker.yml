@@ -67,7 +67,7 @@ jobs:
       - name: Compute vault jwt role name
         id: vault-jwt-role
         run: |
-           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
+           echo "role_name=github_service_management_$( echo "$GITHUB_REPOSITORY" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
 
       - name: Get team registry token
         id: import-secrets
@@ -168,7 +168,7 @@ jobs:
       - name: Compute vault jwt role name
         id: vault-jwt-role
         run: |
-           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
+           echo "role_name=github_service_management_$( echo "$GITHUB_REPOSITORY" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
 
       - name: Get team registry token
         id: import-secrets
