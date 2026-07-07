@@ -32,7 +32,9 @@ use std::collections::HashMap;
 
 use pyo3::{
     exceptions::{PyTypeError, PyValueError},
-    pyclass, pyfunction, pymethods, Bound, PyAny, PyResult, Python,
+    pyclass, pyfunction, pymethods,
+    types::{PyAnyMethods, PyDict, PyDictMethods},
+    Bound, PyAny, PyResult, Python,
 };
 use pythonize::pythonize;
 use serde_json::{Map, Number, Value};
@@ -580,6 +582,69 @@ fn format_for_client_v2(d: &mut Map<String, Value>) {
     for key in V2_DROP_KEYS {
         d.remove(key);
     }
+}
+
+// Standalone versions of the client format transforms, re-exported from
+// `synapse.events.utils` purely as a backwards compatibility hack: they have
+// never been part of the module API and modules shouldn't be pulling them in,
+// but some in the wild import them from there anyway. They may be removed in
+// the future; nothing in Synapse itself should use them.
+//
+// Unlike [`apply_event_format`], these mutate a Python dict in place and
+// return it, matching the original Python implementations that used to live
+// in `synapse/events/utils.py`.
+
+/// Return the event dict unchanged (federation format).
+#[pyfunction]
+pub fn format_event_raw(d: Bound<'_, PyDict>) -> Bound<'_, PyDict> {
+    d
+}
+
+/// Apply the legacy `/events`-style v1 client format to `d` in place.
+#[pyfunction]
+pub fn format_event_for_client_v1(d: Bound<'_, PyDict>) -> PyResult<Bound<'_, PyDict>> {
+    let d = format_event_for_client_v2(d)?;
+
+    if let Some(sender) = d.get_item(SENDER)? {
+        if !sender.is_none() {
+            d.set_item(USER_ID, sender)?;
+        }
+    }
+
+    // As in the original Python (`d["unsigned"]`), a missing `unsigned` key
+    // raises `KeyError`.
+    let unsigned = d.as_any().get_item(UNSIGNED)?;
+    for key in V1_COPY_KEYS {
+        if unsigned.contains(key)? {
+            d.set_item(key, unsigned.get_item(key)?)?;
+        }
+    }
+
+    Ok(d)
+}
+
+/// Apply the `/sync`-style v2 client format to `d` in place.
+#[pyfunction]
+pub fn format_event_for_client_v2(d: Bound<'_, PyDict>) -> PyResult<Bound<'_, PyDict>> {
+    for key in V2_DROP_KEYS {
+        // Equivalent to `d.pop(key, None)`.
+        if d.contains(key)? {
+            d.del_item(key)?;
+        }
+    }
+    Ok(d)
+}
+
+/// Apply the v2 client format to `d` in place, additionally stripping `room_id`.
+#[pyfunction]
+pub fn format_event_for_client_v2_without_room_id(
+    d: Bound<'_, PyDict>,
+) -> PyResult<Bound<'_, PyDict>> {
+    let d = format_event_for_client_v2(d)?;
+    if d.contains(ROOM_ID)? {
+        d.del_item(ROOM_ID)?;
+    }
+    Ok(d)
 }
 
 /// Return a mutable reference to `map["unsigned"]`, creating it as an empty

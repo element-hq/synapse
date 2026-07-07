@@ -30,6 +30,10 @@ from synapse.events.utils import (
     PowerLevelsContent,
     clone_event,
     copy_and_fixup_power_levels_contents,
+    format_event_for_client_v1,
+    format_event_for_client_v2,
+    format_event_for_client_v2_without_room_id,
+    format_event_raw,
     maybe_upsert_event_field,
     prune_event,
 )
@@ -997,3 +1001,99 @@ class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
     def test_invalid_nesting_raises_type_error(self) -> None:
         with self.assertRaises(TypeError):
             copy_and_fixup_power_levels_contents({"a": {"b": {"c": 1}}})  # type: ignore[dict-item]
+
+
+class FormatEventForClientTestCase(stdlib_unittest.TestCase):
+    """Tests for the standalone `format_event_*` transforms.
+
+    These are Rust reimplementations kept purely as a backwards compatibility
+    hack for modules in the wild that import them from `synapse.events.utils`
+    (they were never part of the module API, and nothing in Synapse itself uses
+    them); like the original Python implementations they must mutate the dict
+    in place and return it.
+    """
+
+    def make_event(self) -> JsonDict:
+        return {
+            "event_id": "$event_id",
+            "room_id": "!room:test",
+            "sender": "@sender:test",
+            "type": "m.room.message",
+            "content": {"body": "hello"},
+            "auth_events": [],
+            "prev_events": [],
+            "hashes": {},
+            "signatures": {},
+            "depth": 5,
+            "origin": "test",
+            "prev_state": [],
+            "unsigned": {"age": 100, "replaces_state": "$old", "other": 1},
+        }
+
+    def test_raw(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_raw(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertEqual(result, self.make_event())
+
+    def test_v2_drops_federation_keys(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_for_client_v2(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertEqual(
+            result,
+            {
+                "event_id": "$event_id",
+                "room_id": "!room:test",
+                "sender": "@sender:test",
+                "type": "m.room.message",
+                "content": {"body": "hello"},
+                "unsigned": {"age": 100, "replaces_state": "$old", "other": 1},
+            },
+        )
+
+    def test_v2_without_room_id(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_for_client_v2_without_room_id(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertNotIn("room_id", result)
+
+    def test_v1_copies_unsigned_keys(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_for_client_v1(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertEqual(
+            result,
+            {
+                "event_id": "$event_id",
+                "room_id": "!room:test",
+                "sender": "@sender:test",
+                "user_id": "@sender:test",
+                "type": "m.room.message",
+                "content": {"body": "hello"},
+                "age": 100,
+                "replaces_state": "$old",
+                "unsigned": {"age": 100, "replaces_state": "$old", "other": 1},
+            },
+        )
+
+    def test_v1_no_sender(self) -> None:
+        event_dict = self.make_event()
+        del event_dict["sender"]
+        result = format_event_for_client_v1(event_dict)
+        self.assertNotIn("user_id", result)
+
+    def test_non_json_values_pass_through(self) -> None:
+        # The transforms only move keys around; values that aren't
+        # JSON-serializable must survive untouched.
+        marker = object()
+        event_dict = {
+            "sender": "@sender:test",
+            "auth_events": marker,
+            "content": marker,
+            "unsigned": {"age": marker},
+        }
+        result = format_event_for_client_v1(event_dict)
+        self.assertIs(result["content"], marker)
+        self.assertIs(result["age"], marker)
+        self.assertNotIn("auth_events", result)
