@@ -1,3 +1,9 @@
+matrix-synapse-py3 (1.156.0) stable; urgency=medium
+
+  * New Synapse release 1.156.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 07 Jul 2026 14:20:22 +0100
+
 matrix-synapse-py3 (1.156.0~rc1) stable; urgency=medium
 
   * Bump poetry from 2.2.1 to 2.4.1.
