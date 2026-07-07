@@ -10,12 +10,15 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write # needed for signing the images with GitHub OIDC Token
+
 jobs:
   build:
     name: Build and push image for ${{ matrix.platform }}
     runs-on: ${{ matrix.runs_on }}
+    permissions:
+      contents: read
+      packages: write # needed to push the image to ghcr.io
+      id-token: write # needed for the vault and tailscale OIDC auth
     strategy:
       matrix:
         include:
@@ -118,6 +121,9 @@ jobs:
   merge:
     name: Push merged images to ${{ matrix.repository }}
     runs-on: ubuntu-latest
+    permissions:
+      packages: write # needed to push the image to ghcr.io
+      id-token: write # needed for signing the images with GitHub OIDC Token, and for the vault and tailscale OIDC auth
     strategy:
       matrix:
         repository:
