@@ -19,7 +19,6 @@
 #
 #
 import json
-import logging
 from typing import TYPE_CHECKING, Collection, Iterable, cast
 
 import attr
@@ -27,7 +26,6 @@ from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import ProfileFields, ProfileUpdateAction
 from synapse.api.errors import Codes, StoreError
-from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.tcp.streams._base import ProfileUpdatesStream
 from synapse.storage._base import SQLBaseStore, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -39,23 +37,13 @@ from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonValue, UserID
-from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-logger = logging.getLogger(__name__)
 
 # The number of bytes that the serialized profile can have.
 MAX_PROFILE_SIZE = 65536
-
-# Prunes entries out of the `profile_updates` and `profile_updates_per_user` tables
-# that are more than this old.
-PRUNE_PROFILE_UPDATES_AGE = Duration(days=30)
-
-# The number of rows to delete at once when pruning old entries out of the
-# `profile_updates` and `profile_updates_per_user` tables.
-PRUNE_PROFILE_UPDATES_BATCH_SIZE = 1000
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -107,11 +95,6 @@ class ProfileWorkerStore(SQLBaseStore):
             sequence_name="profile_updates_sequence",
             writers=hs.config.worker.writers.profile_updates,
         )
-        if hs.config.worker.run_background_tasks:
-            self.clock.looping_call(
-                self._prune_profile_updates,
-                Duration(hours=1),
-            )
 
     async def populate_full_user_id_profiles(
         self, progress: JsonDict, batch_size: int
@@ -1018,130 +1001,6 @@ class ProfileWorkerStore(SQLBaseStore):
             "clear_profile_updates_for_user",
             _clear_profile_updates_for_user_txn,
         )
-
-    @wrap_as_background_process("prune_profile_updates")
-    async def _prune_profile_updates(self) -> None:
-        """Delete old entries out of the `profile_updates` and
-        `profile_updates_per_user` tables, so that the tables don't grow indefinitely.
-        """
-        prune_before_ts = self.clock.time_msec() - PRUNE_PROFILE_UPDATES_AGE.as_millis()
-
-        def get_prune_before_stream_id_txn(txn: LoggingTransaction) -> int | None:
-            txn.execute(
-                """
-                SELECT stream_id FROM profile_updates
-                WHERE inserted_ts <= ?
-                ORDER BY inserted_ts DESC
-                LIMIT 1
-            """,
-                (prune_before_ts,),
-            )
-            row = txn.fetchone()
-            return row[0] if row else None
-
-        prune_before_stream_id = await self.db_pool.runInteraction(
-            "prune_profile_updates_get_stream_id",
-            get_prune_before_stream_id_txn,
-        )
-
-        if prune_before_stream_id is None:
-            return
-
-        # Get the max stream ID in the table so we avoid deleting it. We need
-        # to keep the latest row so that we can calculate the maximum stream ID
-        # used.
-        max_stream_id = await self.db_pool.simple_select_one_onecol(
-            table="profile_updates",
-            keyvalues={},
-            retcol="MAX(stream_id)",
-            desc="prune_profile_updates_get_max_stream_id",
-        )
-        if prune_before_stream_id >= max_stream_id:
-            prune_before_stream_id = max_stream_id - 1
-
-        logger.debug(
-            "Pruning profile_updates before stream ID %d (timestamp %d)",
-            prune_before_stream_id,
-            prune_before_ts,
-        )
-        # Now delete all rows with stream_id less than the
-        # prune_before_stream_id.
-        #
-        # We also delete in batches to avoid massive churn when initially
-        # clearing out all the old entries.
-        #
-        # We set a minimum stream ID so that when we delete in batches the
-        # database doesn't have to scan through all the (dead) tuples that were just
-        # deleted to find the next batch to delete.
-
-        # The minimum stream ID to delete in the next batch, c.f. comment above.
-        # We default to 0 here as that is less than all possible stream IDs.
-        min_stream_id = 0
-
-        def prune_profile_updates_txn(txn: LoggingTransaction) -> int:
-            nonlocal min_stream_id
-
-            assert table in ("profile_updates", "profile_updates_per_user")
-            txn.execute(
-                f"""
-                DELETE FROM {table}
-                WHERE stream_id IN (
-                    SELECT stream_id FROM {table}
-                    WHERE ? < stream_id AND stream_id <= ?
-                    ORDER BY stream_id ASC
-                    LIMIT ?
-                )
-                RETURNING stream_id
-                """,
-                (
-                    min_stream_id,
-                    prune_before_stream_id,
-                    PRUNE_PROFILE_UPDATES_BATCH_SIZE,
-                ),
-            )
-
-            # We can't use rowcount as that is incorrect on SQLite when using
-            # RETURNING.
-            num_deleted = 0
-            for (deleted_stream_id,) in txn:
-                num_deleted += 1
-                min_stream_id = max(min_stream_id, deleted_stream_id)
-
-            return num_deleted
-
-        # Do this twice, first for the per_user table, then for the main table
-        for table in ("profile_updates_per_user", "profile_updates"):
-            progress_num_rows_deleted = 0
-            while True:
-                batch_deleted = await self.db_pool.runInteraction(
-                    f"prune_{table}",
-                    prune_profile_updates_txn,
-                )
-
-                finished = batch_deleted < PRUNE_PROFILE_UPDATES_BATCH_SIZE
-
-                progress_num_rows_deleted += batch_deleted
-
-                # Periodically report progress in the logs. We do this either when
-                # we've deleted a significant number of rows or when we've finished
-                # deleting all rows in this round.
-                if finished or progress_num_rows_deleted > 10000:
-                    logger.info(
-                        "Pruned %d rows from %s",
-                        progress_num_rows_deleted,
-                        table,
-                    )
-                    progress_num_rows_deleted = 0
-
-                if finished:
-                    break
-
-                # Sleep for a short time to avoid hammering the database too much if
-                # there are a lot of rows to delete.
-                await self.clock.sleep(Duration(milliseconds=100))
-
-            # Reset the minimum stream id for our next table
-            min_stream_id = 0
 
 
 class ProfileStore(ProfileWorkerStore):
