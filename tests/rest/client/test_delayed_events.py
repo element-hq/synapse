@@ -127,6 +127,48 @@ class DelayedEventsTestCase(HomeserverTestCase):
     def test_delayed_events_empty_on_startup(self) -> None:
         self.assertListEqual([], self._get_delayed_events())
 
+    def test_delayed_event_lookup(self) -> None:
+        channel = self.make_request(
+            "POST",
+            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
+            {},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body["delay_id"]
+
+        # Test that the scheduled delayed event can be retrieved
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        event = channel.json_body
+        self.assertEqual(delay_id, event["delay_id"])
+
+        # Test that the list lookup retrieves the same item
+        events = self._get_delayed_events()
+        self.assertEqual(1, len(events), events)
+        self.assertDictEqual(events[0], event)
+
+        # Test that a non-existent delayed event cannot be found
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}-fake",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+
+        # Test that other users cannot access this delayed event
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}",
+            access_token=self.user2_access_token,
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+
     def test_delayed_state_events_are_sent_on_timeout(self) -> None:
         state_key = "to_send_on_timeout"
 

@@ -225,6 +225,39 @@ class DelayedEventsStore(SQLBaseStore):
             _get_count_of_delayed_events,
         )
 
+    async def get_delayed_event_for_user(
+        self,
+        delay_id: str,
+        user_localpart: str,
+    ) -> JsonDict:
+        """
+        Returns the specified pending delayed event owned by the given user.
+
+        Raises:
+            NotFoundError: if there is no matching delayed event.
+        """
+        row = await self.db_pool.simple_select_one(
+            table="delayed_events",
+            keyvalues={
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+                "is_processed": False,
+            },
+            retcols=(
+                "room_id",
+                "event_type",
+                "state_key",
+                "delay",
+                "send_ts",
+                "content",
+            ),
+            allow_none=True,
+            desc="get_delayed_event_for_user",
+        )
+        if row is None:
+            raise NotFoundError("Delayed event not found")
+        return _row_to_delayed_event_dict((delay_id, *row))
+
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,
@@ -248,18 +281,7 @@ class DelayedEventsStore(SQLBaseStore):
             """,
             user_localpart,
         )
-        return [
-            {
-                "delay_id": DelayID(row[0]),
-                "room_id": str(RoomID.from_string(row[1])),
-                "type": EventType(row[2]),
-                **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
-                "delay": Delay(row[4]),
-                "running_since": Timestamp(row[5] - row[4]),
-                "content": db_to_json(row[6]),
-            }
-            for row in rows
-        ]
+        return [_row_to_delayed_event_dict(row) for row in rows]
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp, reprocess_events: bool = False
@@ -571,6 +593,18 @@ class DelayedEventsStore(SQLBaseStore):
             allow_none=True,
         )
         return Timestamp(result) if result is not None else None
+
+
+def _row_to_delayed_event_dict(row: tuple) -> JsonDict:
+    return {
+        "delay_id": DelayID(row[0]),
+        "room_id": str(RoomID.from_string(row[1])),
+        "type": EventType(row[2]),
+        **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
+        "delay": Delay(row[4]),
+        "running_since": Timestamp(row[5] - row[4]),
+        "content": db_to_json(row[6]),
+    }
 
 
 def _generate_delay_id() -> DelayID:

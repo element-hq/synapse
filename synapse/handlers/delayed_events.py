@@ -530,6 +530,19 @@ class DelayedEventsHandler:
         else:
             self._next_delayed_event_call.reset(delay_duration.as_secs())
 
+    async def get_for_user(self, requester: Requester, delay_id: str) -> JsonDict:
+        """
+        Return the specified pending delayed event requested by the given user.
+
+        Raises:
+            NotFoundError: if no matching delayed event could be found.
+        """
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
+        return await self._store.get_delayed_event_for_user(
+            delay_id,
+            requester.user.localpart,
+        )
+
     async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
