@@ -204,8 +204,9 @@ jobs:
       - name: Attach to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          gh release upload "${{ github.ref_name }}" \
+          gh release upload "$REF_NAME" \
             Sdist/* \
             Wheel*/* \
             debs.tar.xz \
