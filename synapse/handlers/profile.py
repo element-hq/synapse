@@ -599,29 +599,38 @@ class ProfileHandler:
             # have it.
             raise AuthError(400, "Cannot remove another user's profile")
 
-        profile_updates: list[tuple[str, JsonValue | None]] = []
-        current_profile: ProfileInfo | None = None
+        current_profile = await self.store.get_profileinfo(target_user)
 
-        if self._msc4429_enabled:
-            if current_profile is None:
-                current_profile = await self.store.get_profileinfo(target_user)
-
-            if current_profile.display_name is not None:
-                profile_updates.append((ProfileFields.DISPLAYNAME, None))
-            if current_profile.avatar_url is not None:
-                profile_updates.append((ProfileFields.AVATAR_URL, None))
-
-            custom_fields = await self.store.get_profile_fields(target_user)
-            for field_name in custom_fields.keys():
-                profile_updates.append((field_name, None))
-
-        await self.store.delete_profile(target_user)
-
-        # Record profile updates for the profile update stream
-        if len(profile_updates):
-            await self._dispatch_record_profile_updates(
-                target_user, {field_name for field_name, _value in profile_updates}
+        # First delete the profile fields individually.
+        # This ensures we also populate the profile update stream correctly.
+        if current_profile.display_name is not None:
+            await self.dispatch_set_profile_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="",
+                by_admin=by_admin,
             )
+        if current_profile.avatar_url is not None:
+            await self.dispatch_set_profile_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="",
+                by_admin=by_admin,
+            )
+
+        custom_fields = await self.store.get_profile_fields(target_user)
+        for field_name in custom_fields.keys():
+            await self.dispatch_delete_profile_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=field_name,
+                by_admin=by_admin,
+            )
+
+        # Remove the whole profile from the database
+        await self.store.delete_profile(target_user)
 
         await self._third_party_rules.on_profile_update(
             target_user.to_string(),
