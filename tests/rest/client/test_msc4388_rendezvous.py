@@ -204,7 +204,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         new_sequence_token = channel.json_body["sequence_token"]
 
         # If we try to update it again with the old etag, it should fail
-        # Advances clock by 100ms
         channel = self.make_request(
             "PUT",
             session_endpoint,
