@@ -781,7 +781,7 @@ class HomeserverTestCase(TestCase):
             # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
             # and may starve out other threads. 10 is arbitrary but many cases will have
             # none or only a few round-trips so we can just try to go as fast as
-            # posssible.
+            # possible.
             if loop_count < 10:
                 time.sleep(0)
             else:
