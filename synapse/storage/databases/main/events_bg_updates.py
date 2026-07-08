@@ -20,9 +20,11 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 import attr
+from signedjson.key import decode_verify_key_base64, get_verify_key
+from signedjson.sign import SignatureVerifyException, verify_signed_json
 
 from synapse.api.constants import (
     MAX_DEPTH,
@@ -31,6 +33,10 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.crypto.event_signing import (
+    event_needs_resigning,
+    resign_event,
+)
 from synapse.events import EventBase, make_event_from_dict
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -39,6 +45,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_comparison_clause,
 )
+from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events import (
     SLIDING_SYNC_RELEVANT_STATE_SET,
     PersistEventsStore,
@@ -48,18 +55,20 @@ from synapse.storage.databases.main.events import (
 )
 from synapse.storage.databases.main.events_worker import (
     DatabaseCorruptionError,
+    EventRedactBehaviour,
     InvalidEventError,
 )
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
+from synapse.synapse_rust.events import redact_event
 from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import json_encoder
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -97,7 +106,7 @@ class _CalculateChainCover:
     # Map from room_id to last depth/stream processed for each room that we have
     # processed all events for (i.e. the rooms we can flip the
     # `has_auth_chain_index` for)
-    finished_room_map: Dict[str, Tuple[int, int]]
+    finished_room_map: dict[str, tuple[int, int]]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -109,10 +118,12 @@ class _JoinedRoomStreamOrderingUpdate:
     # The most recent event stream_ordering for the room
     most_recent_event_stream_ordering: int
     # The most recent event `bump_stamp` for the room
-    most_recent_bump_stamp: Optional[int]
+    most_recent_bump_stamp: int | None
 
 
-class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
+class EventsBackgroundUpdatesStore(
+    StreamWorkerStore, StateDeltasStore, CacheInvalidationWorkerStore, SQLBaseStore
+):
     def __init__(
         self,
         database: DatabasePool,
@@ -157,6 +168,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         self.db_pool.updates.register_background_update_handler(
             "redactions_received_ts", self._redactions_received_ts
+        )
+
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.REDACTIONS_RECHECK_BG_UPDATE,
+            self._redactions_recheck_bg_update,
         )
 
         # This index gets deleted in `event_fix_redactions_bytes` update
@@ -341,6 +357,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             _BackgroundUpdates.FIXUP_MAX_DEPTH_CAP, self.fixup_max_depth_cap_bg_update
         )
 
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.EVENT_RESIGN,
+            self._resign_events,
+        )
+
         # We want this to run on the main database at startup before we start processing
         # events.
         #
@@ -451,7 +472,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             chunks = [event_ids[i : i + 100] for i in range(0, len(event_ids), 100)]
             for chunk in chunks:
                 ev_rows = cast(
-                    List[Tuple[str, str]],
+                    list[tuple[str, str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="event_json",
@@ -527,8 +548,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # The set of extremity event IDs that we're checking this round
             original_set = set()
 
-            # A dict[str, Set[str]] of event ID to their prev events.
-            graph: Dict[str, Set[str]] = {}
+            # A dict[str, set[str]] of event ID to their prev events.
+            graph: dict[str, set[str]] = {}
 
             # The set of descendants of the original set that are not rejected
             # nor soft-failed. Ancestors of these events should be removed
@@ -647,7 +668,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             if deleted:
                 # We now need to invalidate the caches of these rooms
                 rows = cast(
-                    List[Tuple[str]],
+                    list[tuple[str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="events",
@@ -730,7 +751,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE ? <= event_id AND event_id <= ?
             """
 
-            txn.execute(sql, (self._clock.time_msec(), last_event_id, upper_event_id))
+            txn.execute(sql, (self.clock.time_msec(), last_event_id, upper_event_id))
 
             self.db_pool.updates._background_update_progress_txn(
                 txn, "redactions_received_ts", {"last_event_id": upper_event_id}
@@ -744,6 +765,66 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         if not count:
             await self.db_pool.updates._end_background_update("redactions_received_ts")
+
+        return count
+
+    async def _redactions_recheck_bg_update(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """Fills in the `recheck` column of the `redactions` table based on
+        the `recheck_redaction` field in each event's internal metadata."""
+        last_event_id = progress.get("last_event_id", "")
+
+        def _txn(txn: LoggingTransaction) -> int:
+            sql = """
+                SELECT r.event_id, ej.internal_metadata
+                FROM redactions AS r
+                LEFT JOIN event_json AS ej USING (event_id)
+                WHERE r.event_id > ?
+                ORDER BY r.event_id ASC
+                LIMIT ?
+            """
+            txn.execute(sql, (last_event_id, batch_size))
+            rows = txn.fetchall()
+            if not rows:
+                return 0
+
+            updates = []
+            for event_id, internal_metadata_json in rows:
+                if internal_metadata_json is not None:
+                    internal_metadata = db_to_json(internal_metadata_json)
+                    recheck = bool(internal_metadata.get("recheck_redaction", False))
+                else:
+                    recheck = False
+                if not recheck:
+                    # Column defaults to true, so we only need to update rows
+                    # where recheck should be false.
+                    updates.append((event_id, recheck))
+
+            self.db_pool.simple_update_many_txn(
+                txn,
+                table="redactions",
+                key_names=("event_id",),
+                key_values=[(event_id,) for event_id, _ in updates],
+                value_names=("recheck",),
+                value_values=[(recheck,) for _, recheck in updates],
+            )
+
+            upper_event_id = rows[-1][0]
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.REDACTIONS_RECHECK_BG_UPDATE,
+                {"last_event_id": upper_event_id},
+            )
+
+            return len(rows)
+
+        count = await self.db_pool.runInteraction("_redactions_recheck_bg_update", _txn)
+
+        if not count:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.REDACTIONS_RECHECK_BG_UPDATE
+            )
 
         return count
 
@@ -851,7 +932,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def get_rejected_events(
             txn: Cursor,
-        ) -> List[Tuple[str, str, JsonDict, bool, bool]]:
+        ) -> list[tuple[str, str, JsonDict, bool, bool]]:
             # Fetch rejected event json, their room version and whether we have
             # inserted them into the state_events or auth_events tables.
             #
@@ -883,7 +964,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             return cast(
-                List[Tuple[str, str, JsonDict, bool, bool]],
+                list[tuple[str, str, JsonDict, bool, bool]],
                 [(row[0], row[1], db_to_json(row[2]), row[3], row[4]) for row in txn],
             )
 
@@ -1038,7 +1119,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         last_room_id: str,
         last_depth: int,
         last_stream: int,
-        batch_size: Optional[int],
+        batch_size: int | None,
         single_room: bool,
     ) -> _CalculateChainCover:
         """Calculate the chain cover for `batch_size` events, ordered by
@@ -1126,7 +1207,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         # We also need to fetch the auth events for them.
         auth_events = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 table="event_auth",
@@ -1137,7 +1218,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             ),
         )
 
-        event_to_auth_chain: Dict[str, List[str]] = {}
+        event_to_auth_chain: dict[str, list[str]] = {}
         for event_id, auth_id in auth_events:
             event_to_auth_chain.setdefault(event_id, []).append(auth_id)
 
@@ -1151,7 +1232,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             self.event_chain_id_gen,
             event_to_room_id,
             event_to_types,
-            cast(Dict[str, StrCollection], event_to_auth_chain),
+            cast(dict[str, StrCollection], event_to_auth_chain),
         )
 
         return _CalculateChainCover(
@@ -1256,7 +1337,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
             results = list(txn)
             # (event_id, parent_id, rel_type) for each relation
-            relations_to_insert: List[Tuple[str, str, str, str]] = []
+            relations_to_insert: list[tuple[str, str, str, str]] = []
             for event_id, event_json_raw in results:
                 try:
                     event_json = db_to_json(event_json_raw)
@@ -1305,7 +1386,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
 
                 # Iterate the parent IDs and invalidate caches.
-                self._invalidate_cache_and_stream_bulk(  # type: ignore[attr-defined]
+                self._invalidate_cache_and_stream_bulk(
                     txn,
                     self.get_relations_for_event,  # type: ignore[attr-defined]
                     {
@@ -1316,7 +1397,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         for r in relations_to_insert
                     },
                 )
-                self._invalidate_cache_and_stream_bulk(  # type: ignore[attr-defined]
+                self._invalidate_cache_and_stream_bulk(
                     txn,
                     self.get_thread_summary,  # type: ignore[attr-defined]
                     {(r[1],) for r in relations_to_insert},
@@ -1636,7 +1717,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # We don't need to fetch any progress state because we just grab the next N
         # events in `sliding_sync_joined_rooms_to_recalculate`
 
-        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[Tuple[str]]:
+        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> list[tuple[str]]:
             """
             Returns:
                 A list of room ID's to update along with the progress value
@@ -1658,7 +1739,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (batch_size,),
             )
 
-            rooms_to_update_rows = cast(List[Tuple[str]], txn.fetchall())
+            rooms_to_update_rows = cast(list[tuple[str]], txn.fetchall())
 
             return rooms_to_update_rows
 
@@ -1674,9 +1755,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return 0
 
         # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
-        joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
+        joined_room_updates: dict[str, SlidingSyncStateInsertValues] = {}
         # Map from room_id to stream_ordering/bump_stamp, etc values
-        joined_room_stream_ordering_updates: Dict[
+        joined_room_stream_ordering_updates: dict[
             str, _JoinedRoomStreamOrderingUpdate
         ] = {}
         # As long as we get this value before we fetch the current state, we can use it
@@ -1886,17 +1967,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_memberships_to_update_txn(
             txn: LoggingTransaction,
-        ) -> List[
-            Tuple[
+        ) -> list[
+            tuple[
                 str,
-                Optional[str],
-                Optional[str],
+                str | None,
+                str | None,
                 str,
                 str,
                 str,
                 str,
                 int,
-                Optional[str],
+                str | None,
                 bool,
             ]
         ]:
@@ -1979,17 +2060,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 raise Exception("last_event_stream_ordering should not be None")
 
             memberships_to_update_rows = cast(
-                List[
-                    Tuple[
+                list[
+                    tuple[
                         str,
-                        Optional[str],
-                        Optional[str],
+                        str | None,
+                        str | None,
                         str,
                         str,
                         str,
                         str,
                         int,
-                        Optional[str],
+                        str | None,
                         bool,
                     ]
                 ],
@@ -2023,7 +2104,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_previous_invite_or_knock_membership_txn(
             txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
-        ) -> Optional[Tuple[str, str]]:
+        ) -> tuple[str, str] | None:
             # Find the previous invite/knock event before the leave event
             #
             # Here are some notes on how we landed on this query:
@@ -2085,11 +2166,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return event_id, membership
 
         # Map from (room_id, user_id) to ...
-        to_insert_membership_snapshots: Dict[
-            Tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
+        to_insert_membership_snapshots: dict[
+            tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
         ] = {}
-        to_insert_membership_infos: Dict[
-            Tuple[str, str], SlidingSyncMembershipInfoWithEventPos
+        to_insert_membership_infos: dict[
+            tuple[str, str], SlidingSyncMembershipInfoWithEventPos
         ] = {}
         for (
             room_id,
@@ -2510,7 +2591,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             memberships_to_update_rows = cast(
-                List[Tuple[str, str, str, int, int]],
+                list[tuple[str, str, str, int, int]],
                 txn.fetchall(),
             )
             if not memberships_to_update_rows:
@@ -2519,9 +2600,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Assemble the values to update
             #
             # (room_id, user_id)
-            key_values: List[Tuple[str, str]] = []
+            key_values: list[tuple[str, str]] = []
             # (forgotten,)
-            value_values: List[Tuple[int]] = []
+            value_values: list[tuple[int]] = []
             for (
                 room_id,
                 user_id,
@@ -2585,7 +2666,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         room_id_bound = progress.get("room_id", "")
 
-        def redo_max_depth_bg_update_txn(txn: LoggingTransaction) -> Tuple[bool, int]:
+        def redo_max_depth_bg_update_txn(txn: LoggingTransaction) -> tuple[bool, int]:
             txn.execute(
                 """
                 SELECT room_id, room_version FROM rooms
@@ -2597,8 +2678,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             # Find the next room ID to process, with a relevant room version.
-            room_ids: List[str] = []
-            max_room_id: Optional[str] = None
+            room_ids: list[str] = []
+            max_room_id: str | None = None
             for room_id, room_version_str in txn:
                 max_room_id = room_id
 
@@ -2647,6 +2728,177 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
         return num_rooms
+
+    async def _resign_events(self, progress: dict, batch_size: int) -> int:
+        """Retroactively re-sign events signed with a different key than the
+        current signing key.
+
+        Optional progress parameters:
+            old_key: If set, only re-sign events whose signature can be
+                verified with this key. Format: "algorithm:key_id base64key"
+                (e.g. "ed25519:my_old_key XGX0JRS2Af3be3k...").
+            before_ts: If set, only re-sign events with a received_ts less
+                than this value (milliseconds since epoch).
+        """
+
+        # Read optional filter parameters from progress. These are set once
+        # when the job is created and preserved across batches.
+        old_key_str: str | None = progress.get("old_key")
+        before_ts: int | None = progress.get("before_ts")
+
+        # Parse the old verify key if provided.
+        old_verify_key = None
+        if old_key_str is not None:
+            parts = old_key_str.split(" ", 1)
+            if len(parts) == 2:
+                key_id, key_base64 = parts
+                alg, _, version = key_id.partition(":")
+                old_verify_key = decode_verify_key_base64(alg, version, key_base64)
+            else:
+                raise ValueError(
+                    f"Invalid old_key format: expected 'algorithm:version base64key', got {old_key_str!r}"
+                )
+
+        # Load the next set of candidate events to re-sign.
+        # Returns the event IDs and the highest stream position for those events.
+        # If no event IDs are returned, this signals the background update is complete.
+        def _fetch_next_events_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[list[str], int]:
+            # Start from the minimum 32-bit integer to ensure we cover events
+            # with negative stream orderings (e.g. from backfill).
+            last_stream_pos: int = progress.get("last_stream_pos", -(1 << 31))
+
+            sql = """
+                SELECT event_id, stream_ordering FROM events
+                WHERE stream_ordering > ? AND sender LIKE ?
+            """
+            args: list[object] = [
+                last_stream_pos,
+                f"%:{self.hs.hostname}",
+            ]
+
+            if before_ts is not None:
+                sql += " AND received_ts < ?"
+                args.append(before_ts)
+
+            sql += " ORDER BY stream_ordering ASC LIMIT ?"
+            args.append(batch_size)
+
+            txn.execute(sql, args)
+            event_rows: list[tuple[str, int]] = txn.fetchall()
+            if not event_rows:
+                return [], last_stream_pos
+
+            last_stream_pos = event_rows[-1][1]
+            return [row[0] for row in event_rows], last_stream_pos
+
+        next_event_ids, max_stream_pos = await self.db_pool.runInteraction(
+            "_resign_events._fetch_next_events",
+            _fetch_next_events_txn,
+        )
+        logger.debug(
+            "Resign[num_checking=%d,sp=%d]", len(next_event_ids), max_stream_pos
+        )
+
+        if not next_event_ids:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.EVENT_RESIGN
+            )
+            return 0
+
+        next_events = await self.get_events_as_list(
+            next_event_ids,
+            redact_behaviour=EventRedactBehaviour.as_is,
+        )
+        current_verify_key = get_verify_key(self.hs.signing_key)
+
+        # Re-sign any events that need it.
+        # A list of event IDs and their newly signed event dicts.
+        resigned_events: list[tuple[str, JsonDict]] = []
+        for event in next_events:
+            if not event_needs_resigning(event, self.hs.hostname, current_verify_key):
+                continue
+
+            # If old_key is set, only re-sign events whose signature verifies
+            # with the provided old key.
+            if old_verify_key is not None:
+                old_key_id = f"{old_verify_key.alg}:{old_verify_key.version}"
+                old_sig = event.signatures.get_signature(self.hs.hostname, old_key_id)
+                if old_sig is None:
+                    # Event wasn't signed with this key ID at all, skip.
+                    continue
+
+                # Verify the signature is genuinely from this key. We prune
+                # first since signatures are computed over the redacted form.
+                pruned = redact_event(event).get_pdu_json()
+                try:
+                    verify_signed_json(pruned, self.hs.hostname, old_verify_key)
+                except SignatureVerifyException:
+                    # In this case, the key ID was right but the signature doesn't match
+                    # the public key we had. We definitely need to log about this.
+                    logger.warning(
+                        "Event %s has a signature for key %s that does not "
+                        "verify — skipping",
+                        event.event_id,
+                        old_key_id,
+                    )
+                    continue
+
+            event_dict = resign_event(event, self.hs.hostname, self.hs.signing_key)
+            resigned_events.append((event.event_id, event_dict))
+
+        # Atomically write the new stream pos progress with the new signatures,
+        # else we may update the pos and crash before writing the new
+        # signatures, thus not re-signing at all!
+        def _write_events_txn(
+            txn: LoggingTransaction,
+            events_to_write: list[tuple[str, JsonDict]],
+            max_stream_pos: int,
+        ) -> None:
+            if events_to_write:
+                self.db_pool.simple_update_many_txn(
+                    txn,
+                    "event_json",
+                    key_names=["event_id"],
+                    key_values=[[event_id] for event_id, _ in events_to_write],
+                    value_names=["json"],
+                    value_values=[
+                        [json_encoder.encode(event_dict)]
+                        for _, event_dict in events_to_write
+                    ],
+                )
+            # Always update the progress even if we re-sign nothing.
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.EVENT_RESIGN,
+                progress={
+                    "last_stream_pos": max_stream_pos,
+                    "old_key": old_key_str,
+                    "before_ts": before_ts,
+                },
+            )
+
+            # Invalidate the event cache for re-signed events so that other
+            # workers also pick up the new signatures.
+            for event_id, _ in events_to_write:
+                self.invalidate_get_event_cache_after_txn(txn, event_id)
+                self._send_invalidation_to_replication(
+                    txn, "_get_event_cache", (event_id,)
+                )
+
+        await self.db_pool.runInteraction(
+            "_resign_events._write_events_txn",
+            _write_events_txn,
+            resigned_events,
+            max_stream_pos,
+        )
+
+        logger.info("Re-signed %d events", len(resigned_events))
+
+        # Even if we don't re-sign them, we need to let the background updater
+        # know we're still churning through the events.
+        return len(next_event_ids)
 
 
 def _resolve_stale_data_in_sliding_sync_tables(
@@ -2704,7 +2956,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
 
     # If we have nothing written to the `sliding_sync_joined_rooms` table, there is
     # nothing to clean up
-    row = cast(Optional[Tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_joined_rooms_table = None
     depends_on = None
     if row is not None:
@@ -2830,7 +3082,7 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
 
     # If we have nothing written to the `sliding_sync_membership_snapshots` table,
     # there is nothing to clean up
-    row = cast(Optional[Tuple[int]], txn.fetchone())
+    row = cast(tuple[int] | None, txn.fetchone())
     max_stream_ordering_sliding_sync_membership_snapshots_table = None
     if row is not None:
         (max_stream_ordering_sliding_sync_membership_snapshots_table,) = row

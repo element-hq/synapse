@@ -20,8 +20,9 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Generic, List, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import DatabasePool, make_conn
 from synapse.storage.databases.main.events import PersistEventsStore
@@ -40,6 +41,13 @@ logger = logging.getLogger(__name__)
 DataStoreT = TypeVar("DataStoreT", bound=SQLBaseStore, covariant=True)
 
 
+background_update_status = LaterGauge(
+    name="synapse_background_update_status",
+    desc="Background update status",
+    labelnames=["database_name", SERVER_NAME_LABEL],
+)
+
+
 class Databases(Generic[DataStoreT]):
     """The various databases.
 
@@ -53,27 +61,34 @@ class Databases(Generic[DataStoreT]):
         state_deletion
     """
 
-    databases: List[DatabasePool]
+    databases: list[DatabasePool]
     main: "DataStore"  # FIXME: https://github.com/matrix-org/synapse/issues/11165: actually an instance of `main_store_class`
     state: StateGroupDataStore
-    persist_events: Optional[PersistEventsStore]
+    persist_events: PersistEventsStore | None
     state_deletion: StateDeletionDataStore
 
-    def __init__(self, main_store_class: Type[DataStoreT], hs: "HomeServer"):
+    def __init__(self, main_store_class: type[DataStoreT], hs: "HomeServer"):
         # Note we pass in the main store class here as workers use a different main
         # store.
 
         self.databases = []
-        main: Optional[DataStoreT] = None
-        state: Optional[StateGroupDataStore] = None
-        state_deletion: Optional[StateDeletionDataStore] = None
-        persist_events: Optional[PersistEventsStore] = None
+        main: DataStoreT | None = None
+        state: StateGroupDataStore | None = None
+        state_deletion: StateDeletionDataStore | None = None
+        persist_events: PersistEventsStore | None = None
+
+        server_name = hs.hostname
 
         for database_config in hs.config.database.databases:
             db_name = database_config.name
             engine = create_engine(database_config.config)
 
-            with make_conn(database_config, engine, "startup") as db_conn:
+            with make_conn(
+                db_config=database_config,
+                engine=engine,
+                default_txn_name="startup",
+                server_name=server_name,
+            ) as db_conn:
                 logger.info("[database config %r]: Checking database server", db_name)
                 engine.check_database(db_conn)
 
@@ -135,6 +150,15 @@ class Databases(Generic[DataStoreT]):
             # [1]: https://github.com/psycopg/psycopg2/blob/2_8_5/psycopg/connection_type.c#L1378
 
             db_conn.close()
+
+        # Track the background update status for each database
+        background_update_status.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (database.name(), server_name): database.updates.get_status()
+                for database in self.databases
+            },
+        )
 
         # Sanity check that we have actually configured all the required stores.
         if not main:

@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import List, Mapping, Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 from twisted.internet import defer, task
 
@@ -34,6 +34,7 @@ from synapse.config._base import ConfigError
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.logger import setup_logging
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.admin import ExfiltrationWriter
 from synapse.server import HomeServer
 from synapse.storage.database import DatabasePool, LoggingDatabaseConnection
@@ -64,8 +65,7 @@ from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
-from synapse.types import JsonMapping, StateMap
-from synapse.util import SYNAPSE_VERSION
+from synapse.types import ISynapseReactor, JsonMapping, StateMap
 from synapse.util.logcontext import LoggingContext
 
 logger = logging.getLogger("synapse.app.admin_cmd")
@@ -137,7 +137,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
             to a temporary directory.
     """
 
-    def __init__(self, user_id: str, directory: Optional[str] = None):
+    def __init__(self, user_id: str, directory: str | None = None):
         self.user_id = user_id
 
         if directory:
@@ -151,14 +151,14 @@ class FileExfiltrationWriter(ExfiltrationWriter):
         if list(os.listdir(self.base_directory)):
             raise Exception("Directory must be empty")
 
-    def write_events(self, room_id: str, events: List[EventBase]) -> None:
+    def write_events(self, room_id: str, filtered_events: list[FilteredEvent]) -> None:
         room_directory = os.path.join(self.base_directory, "rooms", room_id)
         os.makedirs(room_directory, exist_ok=True)
         events_file = os.path.join(room_directory, "events")
 
         with open(events_file, "a") as f:
-            for event in events:
-                json.dump(event.get_pdu_json(), fp=f)
+            for filtered_event in filtered_events:
+                json.dump(filtered_event.event.get_pdu_json(), fp=f)
 
     def write_state(
         self, room_id: str, event_id: str, state: StateMap[EventBase]
@@ -176,7 +176,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
     def write_invite(
         self, room_id: str, event: EventBase, state: StateMap[EventBase]
     ) -> None:
-        self.write_events(room_id, [event])
+        self.write_events(room_id, [FilteredEvent.state(event)])
 
         # We write the invite state somewhere else as they aren't full events
         # and are only a subset of the state at the event.
@@ -192,7 +192,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
     def write_knock(
         self, room_id: str, event: EventBase, state: StateMap[EventBase]
     ) -> None:
-        self.write_events(room_id, [event])
+        self.write_events(room_id, [FilteredEvent.state(event)])
 
         # We write the knock state somewhere else as they aren't full events
         # and are only a subset of the state at the event.
@@ -256,7 +256,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
         return self.base_directory
 
 
-def start(config_options: List[str]) -> None:
+def load_config(argv_options: list[str]) -> tuple[HomeServerConfig, argparse.Namespace]:
     parser = argparse.ArgumentParser(description="Synapse Admin Command")
     HomeServerConfig.add_arguments_to_parser(parser)
 
@@ -282,11 +282,29 @@ def start(config_options: List[str]) -> None:
     export_data_parser.set_defaults(func=export_data_command)
 
     try:
-        config, args = HomeServerConfig.load_config_with_parser(parser, config_options)
+        config, args = HomeServerConfig.load_config_with_parser(parser, argv_options)
     except ConfigError as e:
         sys.stderr.write("\n" + str(e) + "\n")
         sys.exit(1)
 
+    return config, args
+
+
+def create_homeserver(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+) -> AdminCmdServer:
+    """
+    Create a homeserver instance for the Synapse admin command process.
+
+    Args:
+        config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+
+    Returns:
+        A homeserver instance.
+    """
     if config.worker.worker_app is not None:
         assert config.worker.worker_app == "synapse.app.admin_cmd"
 
@@ -309,33 +327,63 @@ def start(config_options: List[str]) -> None:
 
     synapse.events.USE_FROZEN_DICTS = config.server.use_frozen_dicts
 
-    ss = AdminCmdServer(
+    admin_command_server = AdminCmdServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{SYNAPSE_VERSION}",
+        reactor=reactor,
     )
 
-    setup_logging(ss, config, use_worker_options=True)
+    return admin_command_server
 
-    ss.setup()
 
-    # We use task.react as the basic run command as it correctly handles tearing
-    # down the reactor when the deferreds resolve and setting the return value.
-    # We also make sure that `_base.start` gets run before we actually run the
-    # command.
+def setup(admin_command_server: AdminCmdServer) -> None:
+    """
+    Setup a `AdminCmdServer` instance.
 
-    async def run() -> None:
-        with LoggingContext("command"):
-            await _base.start(ss)
-            await args.func(ss, args)
-
-    _base.start_worker_reactor(
-        "synapse-admin-cmd",
-        config,
-        run_command=lambda: task.react(lambda _reactor: defer.ensureDeferred(run())),
+    Args:
+        admin_command_server: The homeserver to setup.
+    """
+    setup_logging(
+        admin_command_server, admin_command_server.config, use_worker_options=True
     )
+
+    admin_command_server.setup()
+
+
+async def start(admin_command_server: AdminCmdServer, args: argparse.Namespace) -> None:
+    """
+    Should be called once the reactor is running.
+
+    Args:
+        admin_command_server: The homeserver to setup.
+        args: Command line arguments.
+    """
+    # This needs a logcontext unlike other entrypoints because we're not using
+    # `register_start(...)` to run this function.
+    with LoggingContext(name="start", server_name=admin_command_server.hostname):
+        # We make sure that `_base.start` gets run before we actually run the command.
+        await _base.start(admin_command_server)
+        # Run the command
+        await args.func(admin_command_server, args)
+
+
+def main() -> None:
+    homeserver_config, args = load_config(sys.argv[1:])
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+        # Initialize and setup the homeserver
+        admin_command_server = create_homeserver(homeserver_config)
+        setup(admin_command_server)
+
+        _base.start_worker_reactor(
+            "synapse-admin-cmd",
+            admin_command_server.config,
+            # We use task.react as the basic run command as it correctly handles tearing
+            # down the reactor when the deferreds resolve and setting the return value.
+            run_command=lambda: task.react(
+                lambda _reactor: defer.ensureDeferred(start(admin_command_server, args))
+            ),
+        )
 
 
 if __name__ == "__main__":
-    with LoggingContext("main"):
-        start(sys.argv[1:])
+    main()

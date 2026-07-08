@@ -19,15 +19,14 @@
 #
 #
 
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, cast
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
-from synapse.events import FrozenEvent, make_event_from_dict
 from synapse.push.bulk_push_rule_evaluator import _flatten_dict
 from synapse.push.httppusher import tweaks_for_actions
 from synapse.rest import admin
@@ -36,10 +35,11 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.synapse_rust.push import PushRuleEvaluator
 from synapse.types import JsonDict, JsonMapping, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import create_event, inject_member_event
 
 
@@ -60,7 +60,7 @@ class FlattenDictTestCase(unittest.TestCase):
 
     def test_non_string(self) -> None:
         """String, booleans, ints, nulls and list of those should be kept while other items are dropped."""
-        input: Dict[str, Any] = {
+        input: dict[str, Any] = {
             "woo": "woo",
             "foo": True,
             "bar": 1,
@@ -81,7 +81,7 @@ class FlattenDictTestCase(unittest.TestCase):
 
     def test_event(self) -> None:
         """Events can also be flattened."""
-        event = make_event_from_dict(
+        event = make_test_event(
             {
                 "room_id": "!test:test",
                 "type": "m.room.message",
@@ -103,6 +103,10 @@ class FlattenDictTestCase(unittest.TestCase):
             "room_id": "!test:test",
             "sender": "@alice:test",
             "type": "m.room.message",
+            "depth": 1,
+            "origin_server_ts": 1,
+            "auth_events": [],
+            "prev_events": [],
         }
         self.assertEqual(expected, _flatten_dict(event))
 
@@ -121,24 +125,32 @@ class FlattenDictTestCase(unittest.TestCase):
         }
 
         # For a current room version, there's no special behavior.
-        event = make_event_from_dict(event_dict, room_version=RoomVersions.V8)
+        event = make_test_event(event_dict, room_version=RoomVersions.V8)
         expected = {
             "room_id": "!test:test",
             "sender": "@alice:test",
             "type": "m.room.message",
             "content.org\\.matrix\\.msc1767\\.markup": [],
+            "depth": 1,
+            "origin_server_ts": 1,
+            "auth_events": [],
+            "prev_events": [],
         }
         self.assertEqual(expected, _flatten_dict(event))
 
         # For a room version with extensible events, they parse out the text/plain
         # to a content.body property.
-        event = make_event_from_dict(event_dict, room_version=RoomVersions.MSC1767v10)
+        event = make_test_event(event_dict, room_version=RoomVersions.MSC1767v10)
         expected = {
             "content.body": "hello world!",
             "room_id": "!test:test",
             "sender": "@alice:test",
             "type": "m.room.message",
             "content.org\\.matrix\\.msc1767\\.markup": [],
+            "depth": 1,
+            "origin_server_ts": 1,
+            "auth_events": [],
+            "prev_events": [],
         }
         self.assertEqual(expected, _flatten_dict(event))
 
@@ -148,10 +160,11 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         self,
         content: JsonMapping,
         *,
-        related_events: Optional[JsonDict] = None,
+        related_events: JsonDict | None = None,
         msc4210: bool = False,
+        msc4306: bool = False,
     ) -> PushRuleEvaluator:
-        event = FrozenEvent(
+        event = make_test_event(
             {
                 "event_id": "$event_id",
                 "type": "m.room.history_visibility",
@@ -164,18 +177,19 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         )
         room_member_count = 0
         sender_power_level = 0
-        power_levels: Dict[str, Union[int, Dict[str, int]]] = {}
+        power_levels: dict[str, int | dict[str, int]] = {}
         return PushRuleEvaluator(
             _flatten_dict(event),
             False,
             room_member_count,
             sender_power_level,
-            cast(Dict[str, int], power_levels.get("notifications", {})),
+            cast(dict[str, int], power_levels.get("notifications", {})),
             {} if related_events is None else related_events,
             related_event_match_enabled=True,
             room_version_feature_flags=event.room_version.msc3931_push_features,
             msc3931_enabled=True,
             msc4210_enabled=msc4210,
+            msc4306_enabled=msc4306,
         )
 
     def test_display_name(self) -> None:
@@ -203,13 +217,13 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         self.assertTrue(evaluator.matches(condition, "@user:test", "foo bar"))
 
     def _assert_matches(
-        self, condition: JsonDict, content: JsonMapping, msg: Optional[str] = None
+        self, condition: JsonDict, content: JsonMapping, msg: str | None = None
     ) -> None:
         evaluator = self._get_evaluator(content)
         self.assertTrue(evaluator.matches(condition, "@user:test", "display_name"), msg)
 
     def _assert_not_matches(
-        self, condition: JsonDict, content: JsonDict, msg: Optional[str] = None
+        self, condition: JsonDict, content: JsonDict, msg: str | None = None
     ) -> None:
         evaluator = self._get_evaluator(content)
         self.assertFalse(
@@ -586,7 +600,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         This tests the behaviour of tweaks_for_actions.
         """
 
-        actions: List[Union[Dict[str, str], str]] = [
+        actions: list[dict[str, str] | str] = [
             {"set_tweak": "sound", "value": "default"},
             {"set_tweak": "highlight"},
             "notify",
@@ -806,6 +820,112 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             )
         )
 
+    def test_thread_subscription_subscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in a subscribed thread.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=True,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=True,
+            )
+        )
+
+    def test_thread_subscription_unsubscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in an unsubscribed thread.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=False,
+            )
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=False,
+            )
+        )
+
+    def test_thread_subscription_unthreaded(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an unthreaded event.
+        """
+        evaluator = self._get_evaluator(
+            {"msgtype": "m.text", "body": "Squawk"}, msc4306=True
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=None,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=None,
+            )
+        )
+
 
 class TestBulkPushRuleEvaluator(unittest.HomeserverTestCase):
     """Tests for the bulk push rule evaluator"""
@@ -823,9 +943,9 @@ class TestBulkPushRuleEvaluator(unittest.HomeserverTestCase):
         # Define an application service so that we can register appservice users
         self._service_token = "some_token"
         self._service = ApplicationService(
-            self._service_token,
-            "as1",
-            "@as.sender:test",
+            token=self._service_token,
+            id="as1",
+            sender=UserID.from_string("@as.sender:test"),
             namespaces={
                 "users": [
                     {"regex": "@_as_.*:test", "exclusive": True},

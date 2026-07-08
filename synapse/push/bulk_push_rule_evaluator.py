@@ -24,13 +24,8 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
-    Union,
     cast,
 )
 
@@ -48,14 +43,15 @@ from synapse.api.constants import (
 from synapse.api.room_versions import PushRuleRoomFlag
 from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import ProfileInfo
 from synapse.synapse_rust.push import FilteredPushRules, PushRuleEvaluator
-from synapse.types import JsonValue
+from synapse.types import JsonMapping, JsonValue
 from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
@@ -68,11 +64,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# FIXME: Unused metric, remove if not needed.
 push_rules_invalidation_counter = Counter(
-    "synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter", ""
+    "synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
+# FIXME: Unused metric, remove if not needed.
 push_rules_state_size_counter = Counter(
-    "synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter", ""
+    "synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -128,18 +130,21 @@ class BulkPushRuleEvaluator:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self._event_auth_handler = hs.get_event_auth_handler()
         self.should_calculate_push_rules = self.hs.config.push.enable_push
 
         self._related_event_match_enabled = self.hs.config.experimental.msc3664_enabled
 
         self.room_push_rule_cache_metrics = register_cache(
-            "cache",
-            "room_push_rule_cache",
+            cache_type="cache",
+            cache_name="room_push_rule_cache",
             cache=[],  # Meaningless size, as this isn't a cache that stores values,
             resizable=False,
+            server_name=self.server_name,
         )
 
     async def _get_rules_for_event(
@@ -226,7 +231,7 @@ class BulkPushRuleEvaluator:
         event: EventBase,
         context: EventContext,
         event_id_to_event: Mapping[str, EventBase],
-    ) -> Tuple[dict, Optional[int]]:
+    ) -> tuple[JsonMapping, int | None]:
         """
         Given an event and an event context, get the power level event relevant to the event
         and the power level of the sender of the event.
@@ -298,13 +303,13 @@ class BulkPushRuleEvaluator:
 
     async def _related_events(
         self, event: EventBase
-    ) -> Dict[str, Dict[str, JsonValue]]:
+    ) -> dict[str, dict[str, JsonValue]]:
         """Fetches the related events for 'event'. Sets the im.vector.is_falling_back key if the event is from a fallback relation
 
         Returns:
             Mapping of relation type to flattened events.
         """
-        related_events: Dict[str, Dict[str, JsonValue]] = {}
+        related_events: dict[str, dict[str, JsonValue]] = {}
         if self._related_event_match_enabled:
             related_event_id = event.content.get("m.relates_to", {}).get("event_id")
             relation_type = event.content.get("m.relates_to", {}).get("rel_type")
@@ -341,7 +346,7 @@ class BulkPushRuleEvaluator:
         return related_events
 
     async def action_for_events_by_user(
-        self, events_and_context: List[Tuple[EventBase, EventContext]]
+        self, events_and_context: list[EventPersistencePair]
     ) -> None:
         """Given a list of events and their associated contexts, evaluate the push rules
         for each event, check if the message should increment the unread count, and
@@ -383,7 +388,7 @@ class BulkPushRuleEvaluator:
             count_as_unread = _should_count_as_unread(event, context)
 
         rules_by_user = await self._get_rules_for_event(event)
-        actions_by_user: Dict[str, Collection[Union[Mapping, str]]] = {}
+        actions_by_user: dict[str, Collection[Mapping | str]] = {}
 
         # Gather a bunch of info in parallel.
         #
@@ -398,7 +403,7 @@ class BulkPushRuleEvaluator:
             profiles,
         ) = await make_deferred_yieldable(
             cast(
-                "Deferred[Tuple[int, Tuple[dict, Optional[int]], Dict[str, Dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
+                "Deferred[tuple[int, tuple[dict, int | None], dict[str, dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
                 gather_results(
                     (
                         run_in_background(  # type: ignore[call-overload]
@@ -467,7 +472,17 @@ class BulkPushRuleEvaluator:
             event.room_version.msc3931_push_features,
             self.hs.config.experimental.msc1767_enabled,  # MSC3931 flag
             self.hs.config.experimental.msc4210_enabled,
+            self.hs.config.experimental.msc4306_enabled,
         )
+
+        msc4306_thread_subscribers: frozenset[str] | None = None
+        if self.hs.config.experimental.msc4306_enabled and thread_id != MAIN_TIMELINE:
+            # pull out, in batch, all local subscribers to this thread
+            # (in the common case, they will all be getting processed for push
+            # rules right now)
+            msc4306_thread_subscribers = await self.store.get_subscribers_to_thread(
+                event.room_id, thread_id
+            )
 
         for uid, rules in rules_by_user.items():
             if event.sender == uid:
@@ -493,7 +508,13 @@ class BulkPushRuleEvaluator:
                 # current user, it'll be added to the dict later.
                 actions_by_user[uid] = []
 
-            actions = evaluator.run(rules, uid, display_name)
+            msc4306_thread_subscription_state: bool | None = None
+            if msc4306_thread_subscribers is not None:
+                msc4306_thread_subscription_state = uid in msc4306_thread_subscribers
+
+            actions = evaluator.run(
+                rules, uid, display_name, msc4306_thread_subscription_state
+            )
             if "notify" in actions:
                 # Push rules say we should notify the user of this event
                 actions_by_user[uid] = actions
@@ -529,10 +550,10 @@ class BulkPushRuleEvaluator:
         )
 
 
-MemberMap = Dict[str, Optional[EventIdMembership]]
-Rule = Dict[str, dict]
-RulesByUser = Dict[str, List[Rule]]
-StateGroup = Union[object, int]
+MemberMap = dict[str, EventIdMembership | None]
+Rule = dict[str, dict]
+RulesByUser = dict[str, list[Rule]]
+StateGroup = object | int
 
 
 def _is_simple_value(value: Any) -> bool:
@@ -544,10 +565,10 @@ def _is_simple_value(value: Any) -> bool:
 
 
 def _flatten_dict(
-    d: Union[EventBase, Mapping[str, Any]],
-    prefix: Optional[List[str]] = None,
-    result: Optional[Dict[str, JsonValue]] = None,
-) -> Dict[str, JsonValue]:
+    d: EventBase | Mapping[str, Any],
+    prefix: list[str] | None = None,
+    result: dict[str, JsonValue] | None = None,
+) -> dict[str, JsonValue]:
     """
     Given a JSON dictionary (or event) which might contain sub dictionaries,
     flatten it into a single layer dictionary by combining the keys & sub-keys.

@@ -20,12 +20,11 @@
 #
 
 import logging
-from typing import List, Tuple
 from unittest.mock import AsyncMock, patch
 
 from immutabledict import immutabledict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     Direction,
@@ -36,7 +35,7 @@ from synapse.api.constants import (
 )
 from synapse.api.filtering import Filter
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import FrozenEventV3
+from synapse.events import make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -49,7 +48,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
 from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase
@@ -150,7 +149,7 @@ class PaginationTestCase(HomeserverTestCase):
         )
         self.event_id_none = res["event_id"]
 
-    def _filter_messages(self, filter: JsonDict) -> List[str]:
+    def _filter_messages(self, filter: JsonDict) -> list[str]:
         """Make a request to /messages with a filter, returns the chunk of events."""
 
         events, next_key, _ = self.get_success(
@@ -324,7 +323,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
     def _send_event_on_instance(
         self, instance_name: str, room_id: str, access_token: str
-    ) -> Tuple[JsonDict, PersistedEventPosition]:
+    ) -> tuple[JsonDict, PersistedEventPosition]:
         """
         Send an event in a room and mimic that it was persisted by a specific
         instance/worker.
@@ -1386,7 +1385,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             create_event_source,
             self.hs.config.server.default_room_version,
         )
-        create_event = FrozenEventV3(
+        create_event = make_event_from_dict(
             create_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -1409,7 +1408,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             creator_join_event_source,
             self.hs.config.server.default_room_version,
         )
-        creator_join_event = FrozenEventV3(
+        creator_join_event = make_event_from_dict(
             creator_join_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -1434,7 +1433,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = FrozenEventV3(
+        join_event = make_event_from_dict(
             join_event_source,
             self.hs.config.server.default_room_version,
             {},

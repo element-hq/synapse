@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Sequence, Tuple
+from typing import TYPE_CHECKING, Sequence
 
 import attr
 
@@ -33,7 +33,6 @@ from synapse.logging.opentracing import trace
 from synapse.streams import EventSource
 from synapse.types import (
     AbstractMultiWriterStreamToken,
-    MultiWriterStreamToken,
     StreamKeyType,
     StreamToken,
 )
@@ -53,7 +52,7 @@ class _EventSourcesInner:
     receipt: ReceiptEventSource
     account_data: AccountDataEventSource
 
-    def get_sources(self) -> Sequence[Tuple[StreamKeyType, EventSource]]:
+    def get_sources(self) -> Sequence[tuple[StreamKeyType, EventSource]]:
         return [
             (StreamKeyType.ROOM, self.room),
             (StreamKeyType.PRESENCE, self.presence),
@@ -84,6 +83,9 @@ class EventSources:
         un_partial_stated_rooms_key = self.store.get_un_partial_stated_rooms_token(
             self._instance_name
         )
+        thread_subscriptions_key = self.store.get_max_thread_subscriptions_stream_id()
+        sticky_events_key = self.store.get_max_sticky_events_stream_id()
+        quarantined_media_key = self.store.get_quarantined_media_stream_token()
 
         token = StreamToken(
             room_key=self.sources.room.get_current_key(),
@@ -97,6 +99,9 @@ class EventSources:
             # Groups key is unused.
             groups_key=0,
             un_partial_stated_rooms_key=un_partial_stated_rooms_key,
+            thread_subscriptions_key=thread_subscriptions_key,
+            sticky_events_key=sticky_events_key,
+            quarantined_media_key=quarantined_media_key,
         )
         return token
 
@@ -123,6 +128,9 @@ class EventSources:
             StreamKeyType.TO_DEVICE: self.store.get_to_device_id_generator(),
             StreamKeyType.DEVICE_LIST: self.store.get_device_stream_id_generator(),
             StreamKeyType.UN_PARTIAL_STATED_ROOMS: self.store.get_un_partial_stated_rooms_id_generator(),
+            StreamKeyType.THREAD_SUBSCRIPTIONS: self.store.get_thread_subscriptions_stream_id_generator(),
+            StreamKeyType.STICKY_EVENTS: self.store.get_sticky_events_stream_id_generator(),
+            StreamKeyType.QUARANTINED_MEDIA: self.store.get_quarantined_media_stream_id_generator(),
         }
 
         for _, key in StreamKeyType.__members__.items():
@@ -144,6 +152,16 @@ class EventSources:
                     ].get_max_allocated_token()
 
                     if max_token < token_value.get_max_stream_pos():
+                        # Log *something* as we consider this as a Synapse programming error
+                        # (assuming no malicious user manipulation of the token) (we shouldn't be
+                        # handing out future tokens).
+                        #
+                        # We don't assert as the whole point of bounding is so that we can recover
+                        # gracefully.
+                        #
+                        # Old versions of Synapse could advance streams without persisting anything in
+                        # the DB (fixed in https://github.com/element-hq/synapse/pull/17229) and on
+                        # restart, those updates would be lost.
                         logger.error(
                             "Bounding token from the future '%s': token: %s, bound: %s",
                             key,
@@ -195,16 +213,7 @@ class EventSources:
         Returns:
             The current token for pagination.
         """
-        token = StreamToken(
-            room_key=await self.sources.room.get_current_key_for_room(room_id),
-            presence_key=0,
-            typing_key=0,
-            receipt_key=MultiWriterStreamToken(stream=0),
-            account_data_key=0,
-            push_rules_key=0,
-            to_device_key=0,
-            device_list_key=0,
-            groups_key=0,
-            un_partial_stated_rooms_key=0,
+        return StreamToken.START.copy_and_replace(
+            StreamKeyType.ROOM,
+            await self.sources.room.get_current_key_for_room(room_id),
         )
-        return token

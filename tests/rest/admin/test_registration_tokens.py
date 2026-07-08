@@ -20,15 +20,14 @@
 #
 import random
 import string
-from typing import Optional
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.rest.client import login
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -51,11 +50,11 @@ class ManageRegistrationTokensTestCase(unittest.HomeserverTestCase):
 
     def _new_token(
         self,
-        token: Optional[str] = None,
-        uses_allowed: Optional[int] = None,
+        token: str | None = None,
+        uses_allowed: int | None = None,
         pending: int = 0,
         completed: int = 0,
-        expiry_time: Optional[int] = None,
+        expiry_time: int | None = None,
     ) -> str:
         """Helper function to create a token."""
         if token is None:

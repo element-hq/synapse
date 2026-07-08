@@ -20,7 +20,6 @@
 #
 
 import json
-from typing import List, Optional
 from unittest.mock import Mock
 
 import ijson.common
@@ -37,7 +36,16 @@ class SendJoinParserTestCase(TestCase):
     def test_two_writes(self) -> None:
         """Test that the parser can sensibly deserialise an input given in two slices."""
         parser = SendJoinParser(RoomVersions.V1, True)
+        common_event_fields = {
+            "sender": "@user:example.org",
+            "depth": 1,
+            "origin_server_ts": 1,
+            "hashes": {},
+            "auth_events": [],
+            "prev_events": [],
+        }
         parent_event = {
+            **common_event_fields,
             "content": {
                 "see_room_version_spec": "The event format changes depending on the room version."
             },
@@ -46,6 +54,7 @@ class SendJoinParserTestCase(TestCase):
             "type": "m.room.minimal_pdu",
         }
         state = {
+            **common_event_fields,
             "content": {
                 "see_room_version_spec": "The event format changes depending on the room version."
             },
@@ -98,7 +107,7 @@ class SendJoinParserTestCase(TestCase):
     def test_servers_in_room(self) -> None:
         """Check that the servers_in_room field is correctly parsed"""
 
-        def parse(response: JsonDict) -> Optional[List[str]]:
+        def parse(response: JsonDict) -> list[str] | None:
             parser = SendJoinParser(RoomVersions.V1, False)
             serialised_response = json.dumps(response).encode()
 

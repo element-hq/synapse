@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
@@ -37,7 +36,7 @@ class FederationRateLimiterTestCase(TestCase):
         """A simple test with the default values"""
         reactor, clock = get_clock()
         rc_config = build_rc_config()
-        ratelimiter = FederationRateLimiter(clock, rc_config)
+        ratelimiter = FederationRateLimiter("test_server", clock, rc_config)
 
         with ratelimiter.ratelimit("testhost") as d1:
             # shouldn't block
@@ -47,7 +46,7 @@ class FederationRateLimiterTestCase(TestCase):
         """Test what happens when we hit the concurrent limit"""
         reactor, clock = get_clock()
         rc_config = build_rc_config({"rc_federation": {"concurrent": 2}})
-        ratelimiter = FederationRateLimiter(clock, rc_config)
+        ratelimiter = FederationRateLimiter("test_server", clock, rc_config)
 
         with ratelimiter.ratelimit("testhost") as d1:
             # shouldn't block
@@ -74,7 +73,7 @@ class FederationRateLimiterTestCase(TestCase):
         rc_config = build_rc_config(
             {"rc_federation": {"sleep_limit": 2, "sleep_delay": 500}}
         )
-        ratelimiter = FederationRateLimiter(clock, rc_config)
+        ratelimiter = FederationRateLimiter("test_server", clock, rc_config)
 
         with ratelimiter.ratelimit("testhost") as d1:
             # shouldn't block
@@ -105,7 +104,7 @@ class FederationRateLimiterTestCase(TestCase):
                 }
             }
         )
-        ratelimiter = FederationRateLimiter(clock, rc_config)
+        ratelimiter = FederationRateLimiter("test_server", clock, rc_config)
 
         with ratelimiter.ratelimit("testhost") as d:
             # shouldn't block
@@ -139,8 +138,8 @@ def _await_resolution(reactor: ThreadedMemoryReactorClock, d: Deferred) -> float
     return (reactor.seconds() - start_time) * 1000
 
 
-def build_rc_config(settings: Optional[dict] = None) -> FederationRatelimitSettings:
-    config_dict = default_config("test")
+def build_rc_config(settings: dict | None = None) -> FederationRatelimitSettings:
+    config_dict = default_config(server_name="test")
     config_dict.update(settings or {})
     config = HomeServerConfig()
     config.parse_config_dict(config_dict, "", "")

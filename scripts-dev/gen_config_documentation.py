@@ -4,7 +4,7 @@
 import json
 import re
 import sys
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -259,17 +259,17 @@ def indent(text: str, first_line: bool = True) -> str:
     return text
 
 
-def em(s: Optional[str]) -> str:
+def em(s: str | None) -> str:
     """Add emphasis to text."""
     return f"*{s}*" if s else ""
 
 
-def a(s: Optional[str], suffix: str = " ") -> str:
+def a(s: str | None, suffix: str = " ") -> str:
     """Appends a space if the given string is not empty."""
     return s + suffix if s else ""
 
 
-def p(s: Optional[str], prefix: str = " ") -> str:
+def p(s: str | None, prefix: str = " ") -> str:
     """Prepend a space if the given string is not empty."""
     return prefix + s if s else ""
 
@@ -473,6 +473,10 @@ def section(prop: str, values: dict) -> str:
 
 
 def main() -> None:
+    # For Windows: reconfigure the terminal to be UTF-8 for `print()` calls.
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8")
+
     def usage(err_msg: str) -> int:
         script_name = (sys.argv[:1] or ["__main__.py"])[0]
         print(err_msg, file=sys.stderr)
@@ -485,7 +489,10 @@ def main() -> None:
             exit(usage("Too many arguments."))
         if not (filepath := (sys.argv[1:] or [""])[0]):
             exit(usage("No schema file provided."))
-        with open(filepath) as f:
+        with open(filepath, "r", encoding="utf-8") as f:
+            # Note: Windows requires that we specify the encoding otherwise it uses
+            # things like CP-1251, which can cause explosions.
+            # See https://github.com/yaml/pyyaml/issues/123 for more info.
             return yaml.safe_load(f)
 
     schema = read_json_file_arg()

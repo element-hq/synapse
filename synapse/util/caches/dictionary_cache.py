@@ -22,21 +22,17 @@ import enum
 import logging
 import threading
 from typing import (
-    Dict,
     Generic,
     Iterable,
     Literal,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
-    Union,
 )
 
 import attr
 
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +60,8 @@ class DictionaryEntry(Generic[DKT, DV]):
     """
 
     full: bool
-    known_absent: Set[DKT]
-    value: Dict[DKT, DV]
+    known_absent: set[DKT]
+    value: dict[DKT, DV]
 
     def __len__(self) -> int:
         return len(self.value)
@@ -90,7 +86,7 @@ class _PerKeyValue(Generic[DV]):
 
     __slots__ = ["value"]
 
-    def __init__(self, value: Union[DV, Literal[_Sentinel.sentinel]]) -> None:
+    def __init__(self, value: DV | Literal[_Sentinel.sentinel]) -> None:
         self.value = value
 
     def __len__(self) -> int:
@@ -127,7 +123,18 @@ class DictionaryCache(Generic[KT, DKT, DV]):
     for the '2' dict key.
     """
 
-    def __init__(self, name: str, max_entries: int = 1000):
+    def __init__(
+        self, *, name: str, clock: Clock, server_name: str, max_entries: int = 1000
+    ):
+        """
+        Args:
+            name
+            clock: The homeserver `Clock` instance
+            server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
+            max_entries
+        """
+
         # We use a single LruCache to store two different types of entries:
         #   1. Map from (key, dict_key) -> dict value (or sentinel, indicating
         #      the key doesn't exist in the dict); and
@@ -148,10 +155,12 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         #     * A key of `(KT, DKT)` has a value of `_PerKeyValue`
         #     * A key of `(KT, _FullCacheKey.KEY)` has a value of `Dict[DKT, DV]`
         self.cache: LruCache[
-            Tuple[KT, Union[DKT, Literal[_FullCacheKey.KEY]]],
-            Union[_PerKeyValue, Dict[DKT, DV]],
+            tuple[KT, DKT | Literal[_FullCacheKey.KEY]],
+            _PerKeyValue | dict[DKT, DV],
         ] = LruCache(
             max_size=max_entries,
+            clock=clock,
+            server_name=server_name,
             cache_name=name,
             cache_type=TreeCache,
             size_callback=len,
@@ -159,7 +168,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
 
         self.name = name
         self.sequence = 0
-        self.thread: Optional[threading.Thread] = None
+        self.thread: threading.Thread | None = None
 
     def check_thread(self) -> None:
         expected_thread = self.thread
@@ -171,9 +180,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
                     "Cache objects can only be accessed from the main thread"
                 )
 
-    def get(
-        self, key: KT, dict_keys: Optional[Iterable[DKT]] = None
-    ) -> DictionaryEntry:
+    def get(self, key: KT, dict_keys: Iterable[DKT] | None = None) -> DictionaryEntry:
         """Fetch an entry out of the cache
 
         Args:
@@ -283,8 +290,8 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         self,
         sequence: int,
         key: KT,
-        value: Dict[DKT, DV],
-        fetched_keys: Optional[Iterable[DKT]] = None,
+        value: dict[DKT, DV],
+        fetched_keys: Iterable[DKT] | None = None,
     ) -> None:
         """Updates the entry in the cache.
 
@@ -318,7 +325,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
                 self._update_subset(key, value, fetched_keys)
 
     def _update_subset(
-        self, key: KT, value: Dict[DKT, DV], fetched_keys: Iterable[DKT]
+        self, key: KT, value: dict[DKT, DV], fetched_keys: Iterable[DKT]
     ) -> None:
         """Add the given dictionary values as explicit keys in the cache.
 

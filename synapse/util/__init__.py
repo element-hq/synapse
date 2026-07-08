@@ -20,83 +20,30 @@
 #
 
 import collections.abc
-import json
 import logging
+import os
 import typing
 from typing import (
     Any,
-    Callable,
-    Dict,
-    Generator,
     Iterator,
     Mapping,
-    Optional,
     Sequence,
-    Set,
     TypeVar,
 )
 
 import attr
-from immutabledict import immutabledict
+from canonicaljson import encode_canonical_json
 from matrix_common.versionstring import get_distribution_version_string
-from typing_extensions import ParamSpec
 
-from twisted.internet import defer, task
-from twisted.internet.defer import Deferred
-from twisted.internet.interfaces import IDelayedCall, IReactorTime
-from twisted.internet.task import LoopingCall
+from twisted.internet import defer
 from twisted.python.failure import Failure
 
-from synapse.logging import context
+from synapse.types import JsonDict
 
 if typing.TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
-
-
-class Duration:
-    """Helper class that holds constants for common time durations in
-    milliseconds."""
-
-    MINUTE_MS = 60 * 1000
-    HOUR_MS = 60 * MINUTE_MS
-    DAY_MS = 24 * HOUR_MS
-
-
-def _reject_invalid_json(val: Any) -> None:
-    """Do not allow Infinity, -Infinity, or NaN values in JSON."""
-    raise ValueError("Invalid JSON value: '%s'" % val)
-
-
-def _handle_immutabledict(obj: Any) -> Dict[Any, Any]:
-    """Helper for json_encoder. Makes immutabledicts serializable by returning
-    the underlying dict
-    """
-    if type(obj) is immutabledict:
-        # fishing the protected dict out of the object is a bit nasty,
-        # but we don't really want the overhead of copying the dict.
-        try:
-            # Safety: we catch the AttributeError immediately below.
-            return obj._dict
-        except AttributeError:
-            # If all else fails, resort to making a copy of the immutabledict
-            return dict(obj)
-    raise TypeError(
-        "Object of type %s is not JSON serializable" % obj.__class__.__name__
-    )
-
-
-# A custom JSON encoder which:
-#   * handles immutabledicts
-#   * produces valid JSON (no NaNs etc)
-#   * reduces redundant whitespace
-json_encoder = json.JSONEncoder(
-    allow_nan=False, separators=(",", ":"), default=_handle_immutabledict
-)
-
-# Create a custom decoder to reject Python extensions to JSON.
-json_decoder = json.JSONDecoder(parse_constant=_reject_invalid_json)
 
 
 def unwrapFirstError(failure: Failure) -> Failure:
@@ -107,134 +54,9 @@ def unwrapFirstError(failure: Failure) -> Failure:
     return failure.value.subFailure
 
 
-P = ParamSpec("P")
-
-
-@attr.s(slots=True)
-class Clock:
-    """
-    A Clock wraps a Twisted reactor and provides utilities on top of it.
-
-    Args:
-        reactor: The Twisted reactor to use.
-    """
-
-    _reactor: IReactorTime = attr.ib()
-
-    @defer.inlineCallbacks
-    def sleep(self, seconds: float) -> "Generator[Deferred[float], Any, Any]":
-        d: defer.Deferred[float] = defer.Deferred()
-        with context.PreserveLoggingContext():
-            self._reactor.callLater(seconds, d.callback, seconds)
-            res = yield d
-        return res
-
-    def time(self) -> float:
-        """Returns the current system time in seconds since epoch."""
-        return self._reactor.seconds()
-
-    def time_msec(self) -> int:
-        """Returns the current system time in milliseconds since epoch."""
-        return int(self.time() * 1000)
-
-    def looping_call(
-        self,
-        f: Callable[P, object],
-        msec: float,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> LoopingCall:
-        """Call a function repeatedly.
-
-        Waits `msec` initially before calling `f` for the first time.
-
-        If the function given to `looping_call` returns an awaitable/deferred, the next
-        call isn't scheduled until after the returned awaitable has finished. We get
-        this functionality thanks to this function being a thin wrapper around
-        `twisted.internet.task.LoopingCall`.
-
-        Note that the function will be called with no logcontext, so if it is anything
-        other than trivial, you probably want to wrap it in run_as_background_process.
-
-        Args:
-            f: The function to call repeatedly.
-            msec: How long to wait between calls in milliseconds.
-            *args: Positional arguments to pass to function.
-            **kwargs: Key arguments to pass to function.
-        """
-        return self._looping_call_common(f, msec, False, *args, **kwargs)
-
-    def looping_call_now(
-        self,
-        f: Callable[P, object],
-        msec: float,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> LoopingCall:
-        """Call a function immediately, and then repeatedly thereafter.
-
-        As with `looping_call`: subsequent calls are not scheduled until after the
-        the Awaitable returned by a previous call has finished.
-
-        Also as with `looping_call`: the function is called with no logcontext and
-        you probably want to wrap it in `run_as_background_process`.
-
-        Args:
-            f: The function to call repeatedly.
-            msec: How long to wait between calls in milliseconds.
-            *args: Positional arguments to pass to function.
-            **kwargs: Key arguments to pass to function.
-        """
-        return self._looping_call_common(f, msec, True, *args, **kwargs)
-
-    def _looping_call_common(
-        self,
-        f: Callable[P, object],
-        msec: float,
-        now: bool,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> LoopingCall:
-        """Common functionality for `looping_call` and `looping_call_now`"""
-        call = task.LoopingCall(f, *args, **kwargs)
-        call.clock = self._reactor
-        d = call.start(msec / 1000.0, now=now)
-        d.addErrback(log_failure, "Looping call died", consumeErrors=False)
-        return call
-
-    def call_later(
-        self, delay: float, callback: Callable, *args: Any, **kwargs: Any
-    ) -> IDelayedCall:
-        """Call something later
-
-        Note that the function will be called with no logcontext, so if it is anything
-        other than trivial, you probably want to wrap it in run_as_background_process.
-
-        Args:
-            delay: How long to wait in seconds.
-            callback: Function to call
-            *args: Postional arguments to pass to function.
-            **kwargs: Key arguments to pass to function.
-        """
-
-        def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            with context.PreserveLoggingContext():
-                callback(*args, **kwargs)
-
-        with context.PreserveLoggingContext():
-            return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
-
-    def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
-        try:
-            timer.cancel()
-        except Exception:
-            if not ignore_errs:
-                raise
-
-
 def log_failure(
     failure: Failure, msg: str, consumeErrors: bool = True
-) -> Optional[Failure]:
+) -> Failure | None:
     """Creates a function suitable for passing to `Deferred.addErrback` that
     logs any failures that occur.
 
@@ -257,9 +79,15 @@ def log_failure(
     return None
 
 
-# Version string with git info. Computed here once so that we don't invoke git multiple
-# times.
-SYNAPSE_VERSION = get_distribution_version_string("matrix-synapse", __file__)
+SYNAPSE_VERSION = os.getenv(
+    "SYNAPSE_VERSION_STRING"
+) or get_distribution_version_string("matrix-synapse", __file__)
+"""
+Version string with git info.
+
+This can be overridden via the `SYNAPSE_VERSION_STRING` environment variable or is
+computed here once so that we don't invoke git multiple times.
+"""
 
 
 class ExceptionBundle(Exception):
@@ -290,8 +118,8 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
     """
 
     _underlying_map: Mapping[K, V]
-    _mutable_map: Dict[K, V] = attr.ib(factory=dict)
-    _deletions: Set[K] = attr.ib(factory=set)
+    _mutable_map: dict[K, V] = attr.ib(factory=dict)
+    _deletions: set[K] = attr.ib(factory=set)
 
     def __getitem__(self, key: K) -> V:
         if key in self._deletions:
@@ -341,3 +169,107 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
         self._underlying_map = {}
         self._mutable_map.clear()
         self._deletions.clear()
+
+
+@attr.s(slots=True, auto_attribs=True)
+class _DictSplitterState:
+    """State for splitting a dict into multiple dicts, c.f.
+    `split_dict_to_fit_to_size`."""
+
+    subset: dict[str, Any]
+    """A subset of the original dict."""
+
+    estimated_size: int
+    """Estimated size of the JSON encoding of the current payload, including any
+    wrapping structure."""
+
+
+def split_dict_to_fit_to_size(
+    original_dict: dict[str, Any],
+    *,
+    soft_max_size: int,
+    wrapping_object_size: int = 2,
+) -> Iterator[tuple[dict[str, JsonDict], int]]:
+    """Splits a dict up into a list of dicts, each of which is small enough to
+    fit into the given size when encoded as JSON. Every entry in the original
+    dict is in exactly one of the resulting dicts.
+
+    The `wrapping_object_size` can be used if the resulting dicts are going to
+    be wrapped in some additional JSON structure, to account for the additional
+    size of that structure. The default assumes no wrapping, and just accounts
+    for the two curly braces of the dict itself.
+
+    Note that if an individual entry in the original dict is larger than
+    `soft_max_size` then this will emit a dict containing just that entry, which
+    will be larger than `soft_max_size` when encoded as JSON.
+
+    Args:
+        original_dict: The dict to split.
+        soft_max_size: The maximum size of each dict when encoded as JSON.
+        wrapping_object_size: The estimated size of the JSON encoding of the
+            payload when empty.
+
+    Returns:
+        An iterator of (dict, size) pairs, where dict is a subset of the
+        original dict and size is the estimated size of the JSON encoding of
+        that dict, including any wrapping structure.
+    """
+
+    if not original_dict:
+        return
+
+    # Check if the whole dict fits within the size limit. If it does, we can
+    # skip the splitting logic and just return the original dict.
+    full_size = _len_with_wrapping_object(original_dict, wrapping_object_size)
+    if full_size <= soft_max_size:
+        yield (original_dict, full_size)
+        return
+
+    # The current payload being built up. We keep track of the estimated size of
+    # the JSON encoding of this payload so that we can decide when to start a
+    # new one.
+    current_payload = _DictSplitterState(subset={}, estimated_size=wrapping_object_size)
+
+    for key, payload in original_dict.items():
+        current_payload.subset[key] = payload
+        current_size = _len_with_wrapping_object(
+            current_payload.subset, wrapping_object_size
+        )
+
+        if current_size > soft_max_size:
+            # We've exceeded the size limit, so we need to start a new payload. We pop
+            # the current entry from the payload and yield the previous payload, then
+            # start a new payload with just the current entry.
+            if len(current_payload.subset) > 1:
+                current_payload.subset.pop(key)
+                yield current_payload.subset, current_payload.estimated_size
+
+                current_payload = _DictSplitterState(
+                    subset={},
+                    estimated_size=wrapping_object_size,
+                )
+
+                # Recalculate the current size with just the current entry.
+                current_size = _len_with_wrapping_object(
+                    {key: payload}, wrapping_object_size
+                )
+
+        current_payload.subset[key] = payload
+        current_payload.estimated_size = current_size
+
+    if current_payload.subset:
+        # yield the final payload if it's non-empty
+        yield current_payload.subset, current_payload.estimated_size
+
+
+def _len_with_wrapping_object(payload: Any, wrapping_object_size: int) -> int:
+    """Helper function to calculate the size of a payload when encoded as JSON,
+    including any wrapping structure."""
+    return (
+        len(encode_canonical_json(payload))
+        + wrapping_object_size
+        # account for the curly braces of the dict itself, which are
+        # included in the size of the subset but not in the size of the
+        # payload
+        - 2
+    )

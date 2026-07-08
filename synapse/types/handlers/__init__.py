@@ -19,7 +19,7 @@
 #
 
 
-from typing import List, Optional, TypedDict
+from typing import TypedDict
 
 from synapse.api.constants import EventTypes
 
@@ -66,10 +66,10 @@ class ShutdownRoomParams(TypedDict):
             even if there are still users joined to the room.
     """
 
-    requester_user_id: Optional[str]
-    new_room_user_id: Optional[str]
-    new_room_name: Optional[str]
-    message: Optional[str]
+    requester_user_id: str | None
+    new_room_user_id: str | None
+    new_room_name: str | None
+    message: str | None
     block: bool
     purge: bool
     force_purge: bool
@@ -87,7 +87,7 @@ class ShutdownRoomResponse(TypedDict):
         new_room_id: A string representing the room ID of the new room.
     """
 
-    kicked_users: List[str]
-    failed_to_kick_users: List[str]
-    local_aliases: List[str]
-    new_room_id: Optional[str]
+    kicked_users: list[str]
+    failed_to_kick_users: list[str]
+    local_aliases: list[str]
+    new_room_id: str | None

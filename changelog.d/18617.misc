@@ -1,1 +1,0 @@
-Unbreak "Latest dependencies" workflow by using the `--without dev` poetry option instead of removed `--no-dev`.

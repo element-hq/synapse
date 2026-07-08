@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth_blocking import AuthBlocking
@@ -39,10 +39,9 @@ from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
 from synapse.storage.databases.main.registration import TokenLookupResult
 from synapse.types import Requester, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.unittest import override_config
 from tests.utils import mock_getRawHeaders
 
 
@@ -60,7 +59,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         # modify its config instead of the hs'
         self.auth_blocking = AuthBlocking(hs)
 
-        self.test_user = "@foo:bar"
+        self.test_user_id = UserID.from_string("@foo:bar")
         self.test_token = b"_test_token_"
 
         # this is overridden for the appservice tests
@@ -71,7 +70,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
     def test_get_user_by_req_user_valid_token(self) -> None:
         user_info = TokenLookupResult(
-            user_id=self.test_user, token_id=5, device_id="device"
+            user_id=self.test_user_id.to_string(), token_id=5, device_id="device"
         )
         self.store.get_user_by_access_token = AsyncMock(return_value=user_info)
         self.store.mark_access_token_as_used = AsyncMock(return_value=None)
@@ -81,7 +80,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.args[b"access_token"] = [self.test_token]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
-        self.assertEqual(requester.user.to_string(), self.test_user)
+        self.assertEqual(requester.user, self.test_user_id)
 
     def test_get_user_by_req_user_bad_token(self) -> None:
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
@@ -96,7 +95,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         self.assertEqual(f.errcode, "M_UNKNOWN_TOKEN")
 
     def test_get_user_by_req_user_missing_token(self) -> None:
-        user_info = TokenLookupResult(user_id=self.test_user, token_id=5)
+        user_info = TokenLookupResult(user_id=self.test_user_id.to_string(), token_id=5)
         self.store.get_user_by_access_token = AsyncMock(return_value=user_info)
 
         request = Mock(args={})
@@ -109,7 +108,11 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
     def test_get_user_by_req_appservice_valid_token(self) -> None:
         app_service = Mock(
-            token="foobar", url="a_url", sender=self.test_user, ip_range_whitelist=None
+            id="as_id",
+            token="foobar",
+            url="a_url",
+            sender=self.test_user_id,
+            ip_range_whitelist=None,
         )
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
@@ -119,7 +122,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.args[b"access_token"] = [self.test_token]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
-        self.assertEqual(requester.user.to_string(), self.test_user)
+        self.assertEqual(requester.user, self.test_user_id)
 
     def test_get_user_by_req_appservice_valid_token_good_ip(self) -> None:
         from netaddr import IPSet
@@ -127,9 +130,10 @@ class AuthTestCase(unittest.HomeserverTestCase):
         app_service = Mock(
             token="foobar",
             url="a_url",
-            sender=self.test_user,
+            sender=self.test_user_id.to_string(),
             ip_range_whitelist=IPSet(["192.168.0.0/16"]),
         )
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -138,7 +142,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.args[b"access_token"] = [self.test_token]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
-        self.assertEqual(requester.user.to_string(), self.test_user)
+        self.assertEqual(requester.user, self.test_user_id)
 
     def test_get_user_by_req_appservice_valid_token_bad_ip(self) -> None:
         from netaddr import IPSet
@@ -146,9 +150,10 @@ class AuthTestCase(unittest.HomeserverTestCase):
         app_service = Mock(
             token="foobar",
             url="a_url",
-            sender=self.test_user,
+            sender=self.test_user_id,
             ip_range_whitelist=IPSet(["192.168.0.0/16"]),
         )
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -176,7 +181,8 @@ class AuthTestCase(unittest.HomeserverTestCase):
         self.assertEqual(f.errcode, "M_UNKNOWN_TOKEN")
 
     def test_get_user_by_req_appservice_missing_token(self) -> None:
-        app_service = Mock(token="foobar", url="a_url", sender=self.test_user)
+        app_service = Mock(token="foobar", url="a_url", sender=self.test_user_id)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -191,9 +197,13 @@ class AuthTestCase(unittest.HomeserverTestCase):
     def test_get_user_by_req_appservice_valid_token_valid_user_id(self) -> None:
         masquerading_user_id = b"@doppelganger:matrix.org"
         app_service = Mock(
-            token="foobar", url="a_url", sender=self.test_user, ip_range_whitelist=None
+            token="foobar",
+            url="a_url",
+            sender=self.test_user_id,
+            ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=True)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
 
         class FakeUserInfo:
@@ -215,9 +225,13 @@ class AuthTestCase(unittest.HomeserverTestCase):
     def test_get_user_by_req_appservice_valid_token_bad_user_id(self) -> None:
         masquerading_user_id = b"@doppelganger:matrix.org"
         app_service = Mock(
-            token="foobar", url="a_url", sender=self.test_user, ip_range_whitelist=None
+            token="foobar",
+            url="a_url",
+            sender=self.test_user_id,
+            ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=False)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
 
@@ -228,7 +242,6 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), AuthError)
 
-    @override_config({"experimental_features": {"msc3202_device_masquerading": True}})
     def test_get_user_by_req_appservice_valid_token_valid_device_id(self) -> None:
         """
         Tests that when an application service passes the device_id URL parameter
@@ -238,9 +251,13 @@ class AuthTestCase(unittest.HomeserverTestCase):
         masquerading_user_id = b"@doppelganger:matrix.org"
         masquerading_device_id = b"DOPPELDEVICE"
         app_service = Mock(
-            token="foobar", url="a_url", sender=self.test_user, ip_range_whitelist=None
+            token="foobar",
+            url="a_url",
+            sender=self.test_user_id,
+            ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=True)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         # This just needs to return a truth-y value.
         self.store.get_user_by_id = AsyncMock(return_value={"is_guest": False})
@@ -252,7 +269,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.getClientAddress.return_value.host = "127.0.0.1"
         request.args[b"access_token"] = [self.test_token]
         request.args[b"user_id"] = [masquerading_user_id]
-        request.args[b"org.matrix.msc3202.device_id"] = [masquerading_device_id]
+        request.args[b"device_id"] = [masquerading_device_id]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
         self.assertEqual(
@@ -260,7 +277,6 @@ class AuthTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(requester.device_id, masquerading_device_id.decode("utf8"))
 
-    @override_config({"experimental_features": {"msc3202_device_masquerading": True}})
     def test_get_user_by_req_appservice_valid_token_invalid_device_id(self) -> None:
         """
         Tests that when an application service passes the device_id URL parameter
@@ -270,9 +286,13 @@ class AuthTestCase(unittest.HomeserverTestCase):
         masquerading_user_id = b"@doppelganger:matrix.org"
         masquerading_device_id = b"NOT_A_REAL_DEVICE_ID"
         app_service = Mock(
-            token="foobar", url="a_url", sender=self.test_user, ip_range_whitelist=None
+            token="foobar",
+            url="a_url",
+            sender=self.test_user_id,
+            ip_range_whitelist=None,
         )
         app_service.is_interested_in_user = Mock(return_value=True)
+        app_service.id = "as_id"
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         # This just needs to return a truth-y value.
         self.store.get_user_by_id = AsyncMock(return_value={"is_guest": False})
@@ -284,12 +304,12 @@ class AuthTestCase(unittest.HomeserverTestCase):
         request.getClientAddress.return_value.host = "127.0.0.1"
         request.args[b"access_token"] = [self.test_token]
         request.args[b"user_id"] = [masquerading_user_id]
-        request.args[b"org.matrix.msc3202.device_id"] = [masquerading_device_id]
+        request.args[b"device_id"] = [masquerading_device_id]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
 
         failure = self.get_failure(self.auth.get_user_by_req(request), AuthError)
         self.assertEqual(failure.value.code, 400)
-        self.assertEqual(failure.value.errcode, Codes.EXCLUSIVE)
+        self.assertEqual(failure.value.errcode, Codes.UNKNOWN_DEVICE)
 
     def test_get_user_by_req__puppeted_token__not_tracking_puppeted_mau(self) -> None:
         self.store.get_user_by_access_token = AsyncMock(
@@ -436,7 +456,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             namespaces={
                 "users": [{"regex": "@_appservice.*:sender", "exclusive": True}]
             },
-            sender="@appservice:sender",
+            sender=UserID.from_string("@appservice:server"),
         )
         requester = Requester(
             user=UserID.from_string("@appservice:server"),
@@ -445,7 +465,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             is_guest=False,
             scope=set(),
             shadow_banned=False,
-            app_service=appservice,
+            app_service_id=appservice.id,
             authenticated_entity="@appservice:server",
         )
         self.get_success(self.auth_blocking.check_auth_blocking(requester=requester))
@@ -467,7 +487,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             namespaces={
                 "users": [{"regex": "@_appservice.*:sender", "exclusive": True}]
             },
-            sender="@appservice:sender",
+            sender=UserID.from_string("@appservice:server"),
         )
         requester = Requester(
             user=UserID.from_string("@appservice:server"),
@@ -476,7 +496,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             is_guest=False,
             scope=set(),
             shadow_banned=False,
-            app_service=appservice,
+            app_service_id=appservice.id,
             authenticated_entity="@appservice:server",
         )
         self.get_failure(

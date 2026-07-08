@@ -24,12 +24,7 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
     Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -53,10 +48,11 @@ from synapse.storage.database import (
 )
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Duration, json_encoder
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
@@ -66,10 +62,10 @@ logger = logging.getLogger(__name__)
 
 
 # How long to keep messages in the device federation inbox before deleting them.
-DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS = 7 * Duration.DAY_MS
+DEVICE_FEDERATION_INBOX_CLEANUP_DELAY = Duration(days=7)
 
 # How often to run the task to clean up old device_federation_inbox rows.
-DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS = 5 * Duration.MINUTE_MS
+DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL = Duration(minutes=5)
 
 # Update name for the device federation inbox received timestamp index.
 DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE = (
@@ -90,13 +86,15 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         # Map of (user_id, device_id) to the last stream_id that has been
         # deleted up to. This is so that we can no op deletions.
-        self._last_device_delete_cache: ExpiringCache[
-            Tuple[str, Optional[str]], int
-        ] = ExpiringCache(
-            cache_name="last_device_delete_cache",
-            clock=self._clock,
-            max_len=10000,
-            expiry_ms=30 * 60 * 1000,
+        self._last_device_delete_cache: ExpiringCache[tuple[str, str | None], int] = (
+            ExpiringCache(
+                cache_name="last_device_delete_cache",
+                server_name=self.server_name,
+                hs=hs,
+                clock=self.clock,
+                max_len=10000,
+                expiry_ms=30 * 60 * 1000,
+            )
         )
 
         self._can_write_to_device = (
@@ -108,6 +106,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="to_device",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("device_inbox", "instance_name", "stream_id"),
@@ -127,8 +126,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_inbox_stream_cache = StreamChangeCache(
-            "DeviceInboxStreamChangeCache",
-            min_device_inbox_id,
+            name="DeviceInboxStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_inbox_id,
             prefilled_cache=device_inbox_prefill,
         )
 
@@ -143,16 +143,18 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_federation_outbox_stream_cache = StreamChangeCache(
-            "DeviceFederationOutboxStreamChangeCache",
-            min_device_outbox_id,
+            name="DeviceFederationOutboxStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_outbox_id,
             prefilled_cache=device_outbox_prefill,
         )
 
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 run_as_background_process,
-                DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
+                DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL,
                 "_delete_old_federation_inbox_rows",
+                self.server_name,
                 self._delete_old_federation_inbox_rows,
             )
 
@@ -196,7 +198,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         user_ids: Collection[str],
         from_stream_id: int,
         to_stream_id: int,
-    ) -> Dict[Tuple[str, str], List[JsonDict]]:
+    ) -> dict[tuple[str, str], list[JsonDict]]:
         """
         Retrieve to-device messages for a given set of users.
 
@@ -235,7 +237,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         from_stream_id: int,
         to_stream_id: int,
         limit: int = 100,
-    ) -> Tuple[List[JsonDict], int]:
+    ) -> tuple[list[JsonDict], int]:
         """
         Retrieve to-device messages for a single user device.
 
@@ -264,7 +266,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def get_device_messages_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[JsonDict], int]:
+        ) -> tuple[list[JsonDict], int]:
             sql = """
                 SELECT stream_id, message_json FROM device_inbox
                 WHERE user_id = ? AND device_id = ?
@@ -277,7 +279,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # Create and fill a dictionary of (user ID, device ID) -> list of messages
             # intended for each device.
             last_processed_stream_pos = to_stream_id
-            to_device_messages: List[JsonDict] = []
+            to_device_messages: list[JsonDict] = []
             rowcount = 0
             for row in txn:
                 rowcount += 1
@@ -324,7 +326,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         user_ids: Collection[str],
         from_stream_id: int,
         to_stream_id: int,
-    ) -> Tuple[Dict[Tuple[str, str], List[JsonDict]], int]:
+    ) -> tuple[dict[tuple[str, str], list[JsonDict]], int]:
         """
         Retrieve pending to-device messages for a collection of user devices.
 
@@ -356,7 +358,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             logger.warning("No users provided upon querying for device IDs")
             return {}, to_stream_id
 
-        user_ids_to_query: Set[str] = set()
+        user_ids_to_query: set[str] = set()
 
         # Determine which users have devices with pending messages
         for user_id in user_ids:
@@ -371,7 +373,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def get_device_messages_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[Dict[Tuple[str, str], List[JsonDict]], int]:
+        ) -> tuple[dict[tuple[str, str], list[JsonDict]], int]:
             # Build a query to select messages from any of the given devices that
             # are between the given stream id bounds.
 
@@ -382,7 +384,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # since device_inbox has an index on `(user_id, device_id, stream_id)`
 
             user_device_dicts = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_many_txn(
                     txn,
                     table="devices",
@@ -429,7 +431,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # Create and fill a dictionary of (user ID, device ID) -> list of messages
             # intended for each device.
-            recipient_device_to_messages: Dict[Tuple[str, str], List[JsonDict]] = {}
+            recipient_device_to_messages: dict[tuple[str, str], list[JsonDict]] = {}
             rowcount = 0
             for row in txn:
                 rowcount += 1
@@ -466,7 +468,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
     async def delete_messages_for_device(
         self,
         user_id: str,
-        device_id: Optional[str],
+        device_id: str | None,
         up_to_stream_id: int,
     ) -> int:
         """
@@ -524,11 +526,11 @@ class DeviceInboxWorkerStore(SQLBaseStore):
     async def delete_messages_for_device_between(
         self,
         user_id: str,
-        device_id: Optional[str],
-        from_stream_id: Optional[int],
+        device_id: str | None,
+        from_stream_id: int | None,
         to_stream_id: int,
         limit: int,
-    ) -> Tuple[Optional[int], int]:
+    ) -> tuple[int | None, int]:
         """Delete N device messages between the stream IDs, returning the
         highest stream ID deleted (or None if all messages in the range have
         been deleted) and the number of messages deleted.
@@ -548,7 +550,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def delete_messages_for_device_between_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[Optional[int], int]:
+        ) -> tuple[int | None, int]:
             txn.execute(
                 """
                 SELECT MAX(stream_id) FROM (
@@ -591,7 +593,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
     @trace
     async def get_new_device_msgs_for_remote(
         self, destination: str, last_stream_id: int, current_stream_id: int, limit: int
-    ) -> Tuple[List[JsonDict], int]:
+    ) -> tuple[list[JsonDict], int]:
         """
         Args:
             destination: The name of the remote server.
@@ -621,7 +623,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         @trace
         def get_new_messages_for_remote_destination_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[JsonDict], int]:
+        ) -> tuple[list[JsonDict], int]:
             sql = (
                 "SELECT stream_id, messages_json FROM device_federation_outbox"
                 " WHERE destination = ?"
@@ -677,7 +679,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
     async def get_all_new_device_messages(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get updates for to device replication stream.
 
         Args:
@@ -704,7 +706,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def get_all_new_device_messages_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple]], int, bool]:
             # We limit like this as we might have multiple rows per stream_id, and
             # we want to make sure we always get all entries for any stream_id
             # we return.
@@ -737,18 +739,15 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         )
 
     @trace
-    async def add_messages_to_device_inbox(
+    async def add_local_messages_from_client_to_device_inbox(
         self,
-        local_messages_by_user_then_device: Dict[str, Dict[str, JsonDict]],
-        remote_messages_by_destination: Dict[str, JsonDict],
+        local_messages_by_user_then_device: dict[str, dict[str, JsonDict]],
     ) -> int:
-        """Used to send messages from this server.
+        """Queue local device messages that will be sent to devices of local users.
 
         Args:
             local_messages_by_user_then_device:
                 Dictionary of recipient user_id to recipient device_id to message.
-            remote_messages_by_destination:
-                Dictionary of destination server_name to the EDU JSON to send.
 
         Returns:
             The new stream_id.
@@ -764,6 +763,39 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 txn, stream_id, local_messages_by_user_then_device
             )
 
+        async with self._to_device_msg_id_gen.get_next() as stream_id:
+            now_ms = self.clock.time_msec()
+            await self.db_pool.runInteraction(
+                "add_local_messages_from_client_to_device_inbox",
+                add_messages_txn,
+                now_ms,
+                stream_id,
+            )
+            for user_id in local_messages_by_user_then_device.keys():
+                self._device_inbox_stream_cache.entity_has_changed(user_id, stream_id)
+
+        return self._to_device_msg_id_gen.get_current_token()
+
+    @trace
+    async def add_remote_messages_from_client_to_device_inbox(
+        self,
+        remote_messages_by_destination: dict[str, JsonDict],
+    ) -> int:
+        """Queue device messages that will be sent to remote servers.
+
+        Args:
+            remote_messages_by_destination:
+                Dictionary of destination server_name to the EDU JSON to send.
+
+        Returns:
+            The new stream_id.
+        """
+
+        assert self._can_write_to_device
+
+        def add_messages_txn(
+            txn: LoggingTransaction, now_ms: int, stream_id: int
+        ) -> None:
             # Add the remote messages to the federation outbox.
             # We'll send them to a remote server when we next send a
             # federation transaction to that destination.
@@ -820,12 +852,13 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                             )
 
         async with self._to_device_msg_id_gen.get_next() as stream_id:
-            now_ms = self._clock.time_msec()
+            now_ms = self.clock.time_msec()
             await self.db_pool.runInteraction(
-                "add_messages_to_device_inbox", add_messages_txn, now_ms, stream_id
+                "add_remote_messages_from_client_to_device_inbox",
+                add_messages_txn,
+                now_ms,
+                stream_id,
             )
-            for user_id in local_messages_by_user_then_device.keys():
-                self._device_inbox_stream_cache.entity_has_changed(user_id, stream_id)
             for destination in remote_messages_by_destination.keys():
                 self._device_federation_outbox_stream_cache.entity_has_changed(
                     destination, stream_id
@@ -837,7 +870,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         self,
         origin: str,
         message_id: str,
-        local_messages_by_user_then_device: Dict[str, Dict[str, JsonDict]],
+        local_messages_by_user_then_device: dict[str, dict[str, JsonDict]],
     ) -> int:
         assert self._can_write_to_device
 
@@ -875,7 +908,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             )
 
         async with self._to_device_msg_id_gen.get_next() as stream_id:
-            now_ms = self._clock.time_msec()
+            now_ms = self.clock.time_msec()
             await self.db_pool.runInteraction(
                 "add_messages_from_remote_to_device_inbox",
                 add_messages_txn,
@@ -891,14 +924,24 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         stream_id: int,
-        messages_by_user_then_device: Dict[str, Dict[str, JsonDict]],
+        messages_by_user_then_device: dict[str, dict[str, JsonDict]],
     ) -> None:
         assert self._can_write_to_device
 
-        local_by_user_then_device = {}
+        # A map from user id, to device id, to a pair of (serialized message, msgid).
+        local_by_user_then_device: dict[str, dict[str, tuple[str, str]]] = {}
+
         for user_id, messages_by_device in messages_by_user_then_device.items():
-            messages_json_for_user = {}
+            # Mesages to send to this specific user. A map
+            # from device id, to a pair of (serialized message, msgid).
+            messages_json_for_user: dict[str, tuple[str, str]] = {}
+
             devices = list(messages_by_device.keys())
+            if not devices:
+                # No to-device messages for this user. (For example, someone has
+                # hit `/sendToDevice` with an empty {device: message} dict.)
+                continue
+
             if len(devices) == 1 and devices[0] == "*":
                 # Handle wildcard device_ids.
                 # We exclude hidden devices (such as cross-signing keys) here as they are
@@ -910,19 +953,32 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                     retcol="device_id",
                 )
 
-                message_json = json_encoder.encode(messages_by_device["*"])
+                # Don't bother to serialize if there are no devices for this user
+                if not devices:
+                    if issue9533_logger.isEnabledFor(logging.DEBUG):
+                        msgid = _get_msgid_for_message(messages_by_device["*"])
+                        issue9533_logger.debug(
+                            "Dropping wildcard to-device message for user %s with no devices (msgid %s)",
+                            user_id,
+                            msgid,
+                        )
+                    continue
+
+                message_json, msgid = _serialize_to_device_message(
+                    user_id=user_id, device_id="*", msg=messages_by_device["*"]
+                )
                 for device_id in devices:
                     # Add the message for all devices for this user on this
                     # server.
-                    messages_json_for_user[device_id] = message_json
+                    messages_json_for_user[device_id] = (message_json, msgid)
             else:
-                if not devices:
-                    continue
-
+                # Query the database to determine which of the target devices actually
+                # exist.
+                #
                 # We exclude hidden devices (such as cross-signing keys) here as they are
                 # not expected to receive to-device messages.
                 rows = cast(
-                    List[Tuple[str]],
+                    list[tuple[str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="devices",
@@ -936,19 +992,25 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 for (device_id,) in rows:
                     # Only insert into the local inbox if the device exists on
                     # this server
-                    with start_active_span("serialise_to_device_message"):
-                        msg = messages_by_device[device_id]
-                        set_tag(SynapseTags.TO_DEVICE_TYPE, msg["type"])
-                        set_tag(SynapseTags.TO_DEVICE_SENDER, msg["sender"])
-                        set_tag(SynapseTags.TO_DEVICE_RECIPIENT, user_id)
-                        set_tag(SynapseTags.TO_DEVICE_RECIPIENT_DEVICE, device_id)
-                        set_tag(
-                            SynapseTags.TO_DEVICE_MSGID,
-                            msg["content"].get(EventContentFields.TO_DEVICE_MSGID),
-                        )
-                        message_json = json_encoder.encode(msg)
+                    msg = messages_by_device[device_id]
+                    message_json, msgid = _serialize_to_device_message(
+                        user_id=user_id, device_id=device_id, msg=msg
+                    )
+                    messages_json_for_user[device_id] = (message_json, msgid)
 
-                    messages_json_for_user[device_id] = message_json
+                if issue9533_logger.isEnabledFor(logging.DEBUG):
+                    # Log any messages we are dropping
+                    unmapped_devices = (
+                        messages_by_device.keys() - messages_json_for_user.keys()
+                    )
+                    if unmapped_devices:
+                        issue9533_logger.debug(
+                            "Dropping to-device messages for unknown devices: %s",
+                            [
+                                f"{user_id}/{device_id} (msgid {_get_msgid_for_message(messages_by_device[device_id])})"
+                                for device_id in unmapped_devices
+                            ],
+                        )
 
             if messages_json_for_user:
                 local_by_user_then_device[user_id] = messages_json_for_user
@@ -963,22 +1025,21 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             values=[
                 (user_id, device_id, stream_id, message_json, self._instance_name)
                 for user_id, messages_by_device in local_by_user_then_device.items()
-                for device_id, message_json in messages_by_device.items()
+                for device_id, (message_json, _msgid) in messages_by_device.items()
             ],
         )
 
         if issue9533_logger.isEnabledFor(logging.DEBUG):
             issue9533_logger.debug(
-                "Stored to-device messages with stream_id %i: %s",
+                "Storing to-device messages with stream_id %i: %s",
                 stream_id,
                 [
-                    f"{user_id}/{device_id} (msgid "
-                    f"{msg['content'].get(EventContentFields.TO_DEVICE_MSGID)})"
+                    f"{user_id}/{device_id} (msgid {msgid})"
                     for (
                         user_id,
                         messages_by_device,
-                    ) in messages_by_user_then_device.items()
-                    for (device_id, msg) in messages_by_device.items()
+                    ) in local_by_user_then_device.items()
+                    for (device_id, (_msg, msgid)) in messages_by_device.items()
                 ],
             )
 
@@ -994,9 +1055,10 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def _delete_old_federation_inbox_rows_txn(txn: LoggingTransaction) -> bool:
             # We delete at most 100 rows that are older than
-            # DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
+            # DEVICE_FEDERATION_INBOX_CLEANUP_DELAY
             delete_before_ts = (
-                self._clock.time_msec() - DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
+                self.clock.time_msec()
+                - DEVICE_FEDERATION_INBOX_CLEANUP_DELAY.as_millis()
             )
             sql = """
                 WITH to_delete AS (
@@ -1026,7 +1088,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # We sleep a bit so that we don't hammer the database in a tight
             # loop first time we run this.
-            self._clock.sleep(1)
+            await self.clock.sleep(Duration(seconds=1))
 
     async def get_devices_with_messages(
         self, user_id: str, device_ids: StrCollection
@@ -1048,7 +1110,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             txn.execute(sql, args)
             return {row[0] for row in txn}
 
-        results: Set[str] = set()
+        results: set[str] = set()
         for batch_device_ids in batch_iter(device_ids, 1000):
             batch_results = await self.db_pool.runInteraction(
                 "get_devices_with_messages",
@@ -1061,6 +1123,29 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             results.update(batch_results)
 
         return results
+
+
+def _serialize_to_device_message(
+    *, user_id: str, device_id: str, msg: JsonDict
+) -> tuple[str, str]:
+    """Serialiize a to-device message, ready to add to the device_inbox table.
+
+    Returns a tuple (message_json, msgid).
+    """
+    with start_active_span("serialise_to_device_message"):
+        msgid = _get_msgid_for_message(msg)
+        set_tag(SynapseTags.TO_DEVICE_TYPE, msg["type"])
+        set_tag(SynapseTags.TO_DEVICE_SENDER, msg["sender"])
+        set_tag(SynapseTags.TO_DEVICE_RECIPIENT, user_id)
+        set_tag(SynapseTags.TO_DEVICE_RECIPIENT_DEVICE, device_id)
+        set_tag(SynapseTags.TO_DEVICE_MSGID, msgid)
+        message_json = json_encoder.encode(msg)
+    return message_json, msgid
+
+
+def _get_msgid_for_message(msg: JsonDict) -> str:
+    """Extract the message ID from a to-device message."""
+    return str(msg["content"].get(EventContentFields.TO_DEVICE_MSGID, ""))
 
 
 class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
@@ -1136,7 +1221,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
 
         def _remove_dead_devices_from_device_inbox_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[int, bool]:
+        ) -> tuple[int, bool]:
             if "max_stream_id" in progress:
                 max_stream_id = progress["max_stream_id"]
             else:
@@ -1144,7 +1229,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
                 # There's a type mismatch here between how we want to type the row and
                 # what fetchone says it returns, but we silence it because we know that
                 # res can't be None.
-                res = cast(Tuple[Optional[int]], txn.fetchone())
+                res = cast(tuple[int | None], txn.fetchone())
                 if res[0] is None:
                     # this can only happen if the `device_inbox` table is empty, in which
                     # case we have no work to do.
@@ -1207,7 +1292,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
                 max_stream_id = progress["max_stream_id"]
             else:
                 txn.execute("SELECT max(stream_id) FROM device_federation_outbox")
-                res = cast(Tuple[Optional[int]], txn.fetchone())
+                res = cast(tuple[int | None], txn.fetchone())
                 if res[0] is None:
                     # this can only happen if the `device_inbox` table is empty, in which
                     # case we have no work to do.

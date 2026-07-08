@@ -19,16 +19,21 @@
 #
 from http import HTTPStatus
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.rest.client import capabilities, login
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.unittest import override_config
+from tests.unittest import override_config, skip_unless
+
+try:
+    import lxml
+except ImportError:
+    lxml = None  # type: ignore[assignment]
 
 
 class CapabilitiesTestCase(unittest.HomeserverTestCase):
@@ -130,6 +135,10 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_displayname"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(
+            capabilities["m.profile_fields"]["disallowed"], ["displayname"]
+        )
 
     @override_config({"enable_set_avatar_url": False})
     def test_get_set_avatar_url_capabilities_avatar_url_disabled(self) -> None:
@@ -141,6 +150,8 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_avatar_url"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(capabilities["m.profile_fields"]["disallowed"], ["avatar_url"])
 
     @override_config(
         {
@@ -159,6 +170,10 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_displayname"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(
+            capabilities["m.profile_fields"]["disallowed"], ["displayname"]
+        )
         self.assertTrue(capabilities["uk.tcpip.msc4133.profile_fields"]["enabled"])
         self.assertEqual(
             capabilities["uk.tcpip.msc4133.profile_fields"]["disallowed"],
@@ -180,6 +195,8 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_avatar_url"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(capabilities["m.profile_fields"]["disallowed"], ["avatar_url"])
         self.assertTrue(capabilities["uk.tcpip.msc4133.profile_fields"]["enabled"])
         self.assertEqual(
             capabilities["uk.tcpip.msc4133.profile_fields"]["disallowed"],
@@ -196,46 +213,6 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.3pid_changes"]["enabled"])
-
-    @override_config({"experimental_features": {"msc3244_enabled": False}})
-    def test_get_does_not_include_msc3244_fields_when_disabled(self) -> None:
-        access_token = self.get_success(
-            self.auth_handler.create_access_token_for_user_id(
-                self.user, device_id=None, valid_until_ms=None
-            )
-        )
-
-        channel = self.make_request("GET", self.url, access_token=access_token)
-        capabilities = channel.json_body["capabilities"]
-
-        self.assertEqual(channel.code, 200)
-        self.assertNotIn(
-            "org.matrix.msc3244.room_capabilities", capabilities["m.room_versions"]
-        )
-
-    def test_get_does_include_msc3244_fields_when_enabled(self) -> None:
-        access_token = self.get_success(
-            self.auth_handler.create_access_token_for_user_id(
-                self.user, device_id=None, valid_until_ms=None
-            )
-        )
-
-        channel = self.make_request("GET", self.url, access_token=access_token)
-        capabilities = channel.json_body["capabilities"]
-
-        self.assertEqual(channel.code, 200)
-        for details in capabilities["m.room_versions"][
-            "org.matrix.msc3244.room_capabilities"
-        ].values():
-            if details["preferred"] is not None:
-                self.assertTrue(
-                    details["preferred"] in KNOWN_ROOM_VERSIONS,
-                    str(details["preferred"]),
-                )
-
-            self.assertGreater(len(details["support"]), 0)
-            for room_version in details["support"]:
-                self.assertTrue(room_version in KNOWN_ROOM_VERSIONS, str(room_version))
 
     def test_get_get_token_login_fields_when_disabled(self) -> None:
         """By default login via an existing session is disabled."""
@@ -304,3 +281,39 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertFalse(
             capabilities["org.matrix.msc4267.forget_forced_upon_leave"]["enabled"]
         )
+
+    @override_config(
+        {
+            "url_preview_enabled": False,
+            "experimental_features": {"msc4452_enabled": True},
+        }
+    )
+    def test_url_previews_disabled(self) -> None:
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertFalse(capabilities["io.element.msc4452.preview_url"]["enabled"])
+
+    @skip_unless(lxml is not None, "Requires lxml")
+    @override_config(
+        {
+            "url_preview_enabled": True,
+            "url_preview_ip_range_blacklist": ["127.0.0.1"],
+            "experimental_features": {"msc4452_enabled": True},
+        },
+    )
+    def test_url_previews_enabled(self) -> None:
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertTrue(capabilities["io.element.msc4452.preview_url"]["enabled"])

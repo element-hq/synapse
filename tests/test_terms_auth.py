@@ -20,13 +20,12 @@
 
 from unittest.mock import Mock
 
-from twisted.internet.interfaces import IReactorTime
-from twisted.test.proto_helpers import MemoryReactor, MemoryReactorClock
+from twisted.internet.testing import MemoryReactor
 
 from synapse.rest.client.register import register_servlets
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -49,13 +48,7 @@ class TermsTestCase(unittest.HomeserverTestCase):
         )
         return config
 
-    def prepare(
-        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
-    ) -> None:
-        # type-ignore: mypy-zope doesn't seem to recognise that MemoryReactorClock
-        # implements IReactorTime, via inheritance from twisted.internet.testing.Clock
-        self.clock: IReactorTime = MemoryReactorClock()  # type: ignore[assignment]
-        self.hs_clock = Clock(self.clock)
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.url = "/_matrix/client/r0/register"
         self.registration_handler = Mock()
         self.auth_handler = Mock()

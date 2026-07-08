@@ -19,11 +19,11 @@
 #
 #
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, cast
 from unittest import mock
 from unittest.mock import Mock, patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, UserTypes
 from synapse.appservice import ApplicationService
@@ -36,7 +36,8 @@ from synapse.storage.databases.main.user_directory import (
     _parse_words_with_icu,
 )
 from synapse.storage.roommember import ProfileInfo
-from synapse.util import Clock
+from synapse.types import UserID
+from synapse.util.clock import Clock
 
 from tests.server import ThreadedMemoryReactorClock
 from tests.test_utils.event_injection import inject_member_event
@@ -55,21 +56,21 @@ class GetUserDirectoryTables:
     def __init__(self, store: DataStore):
         self.store = store
 
-    async def get_users_in_public_rooms(self) -> Set[Tuple[str, str]]:
+    async def get_users_in_public_rooms(self) -> set[tuple[str, str]]:
         """Fetch the entire `users_in_public_rooms` table.
 
         Returns a list of tuples (user_id, room_id) where room_id is public and
         contains the user with the given id.
         """
         r = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.store.db_pool.simple_select_list(
                 "users_in_public_rooms", None, ("user_id", "room_id")
             ),
         )
         return set(r)
 
-    async def get_users_who_share_private_rooms(self) -> Set[Tuple[str, str, str]]:
+    async def get_users_who_share_private_rooms(self) -> set[tuple[str, str, str]]:
         """Fetch the entire `users_who_share_private_rooms` table.
 
         Returns a set of tuples (user_id, other_user_id, room_id) corresponding
@@ -77,7 +78,7 @@ class GetUserDirectoryTables:
         """
 
         rows = cast(
-            List[Tuple[str, str, str]],
+            list[tuple[str, str, str]],
             await self.store.db_pool.simple_select_list(
                 "users_who_share_private_rooms",
                 None,
@@ -86,13 +87,13 @@ class GetUserDirectoryTables:
         )
         return set(rows)
 
-    async def get_users_in_user_directory(self) -> Set[str]:
+    async def get_users_in_user_directory(self) -> set[str]:
         """Fetch the set of users in the `user_directory` table.
 
         This is useful when checking we've correctly excluded users from the directory.
         """
         result = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.store.db_pool.simple_select_list(
                 "user_directory",
                 None,
@@ -101,7 +102,7 @@ class GetUserDirectoryTables:
         )
         return {row[0] for row in result}
 
-    async def get_profiles_in_user_directory(self) -> Dict[str, ProfileInfo]:
+    async def get_profiles_in_user_directory(self) -> dict[str, ProfileInfo]:
         """Fetch users and their profiles from the `user_directory` table.
 
         This is useful when we want to inspect display names and avatars.
@@ -109,7 +110,7 @@ class GetUserDirectoryTables:
         thing missing is an unused room_id column.
         """
         rows = cast(
-            List[Tuple[str, Optional[str], Optional[str]]],
+            list[tuple[str, str | None, str | None]],
             await self.store.db_pool.simple_select_list(
                 "user_directory",
                 None,
@@ -123,7 +124,7 @@ class GetUserDirectoryTables:
 
     async def get_tables(
         self,
-    ) -> Tuple[Set[str], Set[Tuple[str, str]], Set[Tuple[str, str, str]]]:
+    ) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str, str]]]:
         """Multiple tests want to inspect these tables, so expose them together."""
         return (
             await self.get_users_in_user_directory(),
@@ -153,7 +154,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
             token="i_am_an_app_service",
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
         )
 
         mock_load_appservices = Mock(return_value=[self.appservice])
@@ -276,7 +277,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
     def _create_rooms_and_inject_memberships(
         self, creator: str, token: str, joiner: str
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Create a public and private room as a normal user.
         Then get the `joiner` into those rooms.
         """
@@ -378,7 +379,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
         # Join the AS sender to rooms owned by the normal user.
         public, private = self._create_rooms_and_inject_memberships(
-            user, token, self.appservice.sender
+            user, token, self.appservice.sender.to_string()
         )
 
         # Rebuild the directory.

@@ -1,0 +1,24 @@
+--
+-- This file is licensed under the Affero General Public License (AGPL) version 3.
+--
+-- Copyright (C) 2025 New Vector, Ltd
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- See the GNU Affero General Public License for more details:
+-- <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+COMMENT ON COLUMN threads.latest_event_id IS
+    'the ID of the event that is latest, ordered by (topological_ordering, stream_ordering)';
+
+COMMENT ON COLUMN threads.topological_ordering IS
+    $$the topological ordering of the thread''s LATEST event.
+Used as the primary way of ordering threads by recency in a room.$$;
+
+COMMENT ON COLUMN threads.stream_ordering IS
+    $$the stream ordering of the thread's LATEST event.
+Used as a tie-breaker for ordering threads by recency in a room, when the topological order is a tie.
+Also used for recency ordering in sliding sync.$$;

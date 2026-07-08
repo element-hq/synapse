@@ -18,13 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.events import EventBase
 from synapse.rest import admin, login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

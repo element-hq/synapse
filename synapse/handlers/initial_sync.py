@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import (
     AccountDataTypes,
@@ -30,7 +30,7 @@ from synapse.api.constants import (
     Membership,
 )
 from synapse.api.errors import SynapseError
-from synapse.events.utils import SerializeEventConfig
+from synapse.events.utils import FilteredEvent
 from synapse.events.validator import EventValidator
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.receipts import ReceiptEventSource
@@ -49,7 +49,7 @@ from synapse.types import (
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 
 class InitialSyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.state_handler = hs.get_state_handler()
@@ -68,16 +69,20 @@ class InitialSyncHandler:
         self.clock = hs.get_clock()
         self.validator = EventValidator()
         self.snapshot_cache: ResponseCache[
-            Tuple[
+            tuple[
                 str,
-                Optional[StreamToken],
-                Optional[StreamToken],
+                StreamToken | None,
+                StreamToken | None,
                 Direction,
                 int,
                 bool,
                 bool,
             ]
-        ] = ResponseCache(hs.get_clock(), "initial_sync_cache")
+        ] = ResponseCache(
+            clock=hs.get_clock(),
+            name="initial_sync_cache",
+            server_name=self.server_name,
+        )
         self._event_serializer = hs.get_event_client_serializer()
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
@@ -164,7 +169,9 @@ class InitialSyncHandler:
 
         public_room_ids = await self.store.get_public_room_ids()
 
-        serializer_options = SerializeEventConfig(as_client_event=as_client_event)
+        serializer_options = await self._event_serializer.create_config(
+            as_client_event=as_client_event
+        )
 
         async def handle_room(event: RoomsForUser) -> None:
             d: JsonDict = {
@@ -181,7 +188,7 @@ class InitialSyncHandler:
 
                 invite_event = await self.store.get_event(event.event_id)
                 d["invite"] = await self._event_serializer.serialize_event(
-                    invite_event,
+                    FilteredEvent.state(event=invite_event),
                     time_now,
                     config=serializer_options,
                 )
@@ -220,7 +227,7 @@ class InitialSyncHandler:
                     )
                 ).addErrback(unwrapFirstError)
 
-                messages = await filter_events_for_client(
+                filtered_messages = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     user_id,
                     messages,
@@ -235,7 +242,7 @@ class InitialSyncHandler:
                 d["messages"] = {
                     "chunk": (
                         await self._event_serializer.serialize_events(
-                            messages,
+                            filtered_messages,
                             time_now=time_now,
                             config=serializer_options,
                         )
@@ -245,7 +252,7 @@ class InitialSyncHandler:
                 }
 
                 d["state"] = await self._event_serializer.serialize_events(
-                    current_state.values(),
+                    [FilteredEvent.state(e) for e in current_state.values()],
                     time_now=time_now,
                     config=serializer_options,
                 )
@@ -377,7 +384,9 @@ class InitialSyncHandler:
             room_id, limit=pagin_config.limit, end_token=stream_token
         )
 
-        messages = await filter_events_for_client(
+        filtered_messages: list[
+            FilteredEvent
+        ] = await filter_and_transform_events_for_client(
             self._storage_controllers,
             requester.user.to_string(),
             messages,
@@ -388,7 +397,9 @@ class InitialSyncHandler:
         end_token = StreamToken.START.copy_and_replace(StreamKeyType.ROOM, stream_token)
 
         time_now = self.clock.time_msec()
-        serialize_options = SerializeEventConfig(requester=requester)
+        serialize_options = await self._event_serializer.create_config(
+            requester=requester
+        )
 
         return {
             "membership": membership,
@@ -397,7 +408,7 @@ class InitialSyncHandler:
                 "chunk": (
                     # Don't bundle aggregations as this is a deprecated API.
                     await self._event_serializer.serialize_events(
-                        messages, time_now, config=serialize_options
+                        filtered_messages, time_now, config=serialize_options
                     )
                 ),
                 "start": await start_token.to_string(self.store),
@@ -406,7 +417,9 @@ class InitialSyncHandler:
             "state": (
                 # Don't bundle aggregations as this is a deprecated API.
                 await self._event_serializer.serialize_events(
-                    room_state.values(), time_now, config=serialize_options
+                    [FilteredEvent.state(e) for e in room_state.values()],
+                    time_now,
+                    config=serialize_options,
                 )
             ),
             "presence": [],
@@ -427,10 +440,12 @@ class InitialSyncHandler:
 
         # TODO: These concurrently
         time_now = self.clock.time_msec()
-        serialize_options = SerializeEventConfig(requester=requester)
+        serialize_options = await self._event_serializer.create_config(
+            requester=requester
+        )
         # Don't bundle aggregations as this is a deprecated API.
         state = await self._event_serializer.serialize_events(
-            current_state.values(),
+            [FilteredEvent.state(e) for e in current_state.values()],
             time_now,
             config=serialize_options,
         )
@@ -446,14 +461,12 @@ class InitialSyncHandler:
 
         presence_handler = self.hs.get_presence_handler()
 
-        async def get_presence() -> List[JsonDict]:
+        async def get_presence() -> list[JsonDict]:
             # If presence is disabled, return an empty list
             if not self.hs.config.server.presence_enabled:
                 return []
 
-            states = await presence_handler.get_states(
-                [m.user_id for m in room_members]
-            )
+            states = await presence_handler.get_states([m.sender for m in room_members])
 
             return [
                 {
@@ -463,7 +476,7 @@ class InitialSyncHandler:
                 for s in states
             ]
 
-        async def get_receipts() -> List[JsonMapping]:
+        async def get_receipts() -> list[JsonMapping]:
             receipts = await self.store.get_linearized_receipts_for_room(
                 room_id, to_key=now_token.receipt_key
             )
@@ -491,7 +504,9 @@ class InitialSyncHandler:
             ).addErrback(unwrapFirstError)
         )
 
-        messages = await filter_events_for_client(
+        filtered_messages: list[
+            FilteredEvent
+        ] = await filter_and_transform_events_for_client(
             self._storage_controllers,
             requester.user.to_string(),
             messages,
@@ -507,7 +522,7 @@ class InitialSyncHandler:
                 "chunk": (
                     # Don't bundle aggregations as this is a deprecated API.
                     await self._event_serializer.serialize_events(
-                        messages, time_now, config=serialize_options
+                        filtered_messages, time_now, config=serialize_options
                     )
                 ),
                 "start": await start_token.to_string(self.store),

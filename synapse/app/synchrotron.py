@@ -19,15 +19,11 @@
 #
 #
 
-import sys
-
-from synapse.app.generic_worker import start
-from synapse.util.logcontext import LoggingContext
+from synapse.app.generic_worker import main as worker_main
 
 
 def main() -> None:
-    with LoggingContext("main"):
-        start(sys.argv[1:])
+    worker_main()
 
 
 if __name__ == "__main__":

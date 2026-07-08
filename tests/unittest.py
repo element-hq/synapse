@@ -33,18 +33,13 @@ from typing import (
     Awaitable,
     Callable,
     ClassVar,
-    Dict,
     Generic,
     Iterable,
-    List,
     Mapping,
     NoReturn,
     Optional,
     Protocol,
-    Tuple,
-    Type,
     TypeVar,
-    Union,
 )
 from unittest.mock import Mock, patch
 
@@ -53,10 +48,11 @@ import signedjson.key
 import unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 
+from twisted.internet import defer
 from twisted.internet.defer import Deferred, ensureDeferred
+from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from twisted.python.failure import Failure
 from twisted.python.threadpool import ThreadPool
-from twisted.test.proto_helpers import MemoryReactor, MemoryReactorClock
 from twisted.trial import unittest
 from twisted.web.resource import Resource
 from twisted.web.server import Request
@@ -80,8 +76,8 @@ from synapse.logging.context import (
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
-from synapse.types import JsonDict, Requester, UserID, create_requester
-from synapse.util import Clock
+from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -98,6 +94,8 @@ from tests.utils import checked_cast, default_config, setupdb
 
 setupdb()
 setup_logging()
+
+logger = logging.getLogger(__name__)
 
 TV = TypeVar("TV")
 _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
@@ -135,7 +133,7 @@ def around(target: TV) -> Callable[[Callable[Concatenate[S, P], R]], None]:
     return _around
 
 
-_TConfig = TypeVar("_TConfig", Config, RootConfig)
+_TConfig = TypeVar("_TConfig", Config, HomeServerConfig)
 
 
 def deepcopy_config(config: _TConfig) -> _TConfig:
@@ -161,13 +159,13 @@ def deepcopy_config(config: _TConfig) -> _TConfig:
 
 
 @functools.lru_cache(maxsize=8)
-def _parse_config_dict(config: str) -> RootConfig:
+def _parse_config_dict(config: str) -> HomeServerConfig:
     config_obj = HomeServerConfig()
     config_obj.parse_config_dict(json.loads(config), "", "")
     return config_obj
 
 
-def make_homeserver_config_obj(config: Dict[str, Any]) -> RootConfig:
+def make_homeserver_config_obj(config: dict[str, Any]) -> HomeServerConfig:
     """Creates a :class:`HomeServerConfig` instance with the given configuration dict.
 
     This is equivalent to::
@@ -248,7 +246,7 @@ class TestCase(unittest.TestCase):
 
             return ret
 
-    def assertObjectHasAttributes(self, attrs: Dict[str, object], obj: object) -> None:
+    def assertObjectHasAttributes(self, attrs: dict[str, object], obj: object) -> None:
         """Asserts that the given object has each of the attributes given, and
         that the value of each matches according to assertEqual."""
         for key in attrs.keys():
@@ -276,7 +274,7 @@ class TestCase(unittest.TestCase):
         actual_items: AbstractSet[TV],
         expected_items: AbstractSet[TV],
         exact: bool = False,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> None:
         """
         Assert that all of the `expected_items` are included in the `actual_items`.
@@ -297,14 +295,14 @@ class TestCase(unittest.TestCase):
         elif not exact and actual_items >= expected_items:
             return
 
-        expected_lines: List[str] = []
+        expected_lines: list[str] = []
         for expected_item in expected_items:
             is_expected_in_actual = expected_item in actual_items
             expected_lines.append(
                 "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
             )
 
-        actual_lines: List[str] = []
+        actual_lines: list[str] = []
         for actual_item in actual_items:
             is_actual_in_expected = actual_item in expected_items
             actual_lines.append(
@@ -343,6 +341,9 @@ def logcontext_clean(target: TV) -> TV:
     """
 
     def logcontext_error(msg: str) -> NoReturn:
+        # Log so we can still see it in the logs like normal
+        logger.warning(msg)
+        # But also fail the test
         raise AssertionError("logcontext error: %s" % (msg))
 
     patcher = patch("synapse.logging.context.logcontext_error", new=logcontext_error)
@@ -377,7 +378,7 @@ class HomeserverTestCase(TestCase):
 
     hijack_auth: ClassVar[bool] = True
     needs_threadpool: ClassVar[bool] = False
-    servlets: ClassVar[List[RegisterServletsFunc]] = []
+    servlets: ClassVar[list[RegisterServletsFunc]] = []
 
     def __init__(self, methodName: str):
         super().__init__(methodName)
@@ -392,8 +393,8 @@ class HomeserverTestCase(TestCase):
         hijacking the authentication system to return a fixed user, and then
         calling the prepare function.
         """
+        # We need to share the reactor between the homeserver and all of our test utils.
         self.reactor, self.clock = get_clock()
-        self._hs_args = {"clock": self.clock, "reactor": self.reactor}
         self.hs = self.make_homeserver(self.reactor, self.clock)
 
         self.hs.get_datastores().main.tests_allow_no_chain_cover_index = False
@@ -474,27 +475,13 @@ class HomeserverTestCase(TestCase):
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False
 
-    def wait_on_thread(self, deferred: Deferred, timeout: int = 10) -> None:
-        """
-        Wait until a Deferred is done, where it's waiting on a real thread.
-        """
-        start_time = time.time()
-
-        while not deferred.called:
-            if start_time + timeout < time.time():
-                raise ValueError("Timed out waiting for threadpool")
-            self.reactor.advance(0.01)
-            time.sleep(0.01)
-
     def wait_for_background_updates(self) -> None:
         """Block until all background database updates have completed."""
         store = self.hs.get_datastores().main
         while not self.get_success(
             store.db_pool.updates.has_completed_background_updates()
         ):
-            self.get_success(
-                store.db_pool.updates.do_next_background_update(False), by=0.1
-            )
+            self.get_success(store.db_pool.updates.do_next_background_update(False))
 
     def make_homeserver(
         self, reactor: ThreadedMemoryReactorClock, clock: Clock
@@ -511,7 +498,7 @@ class HomeserverTestCase(TestCase):
 
         Function to be overridden in subclasses.
         """
-        hs = self.setup_test_homeserver()
+        hs = self.setup_test_homeserver(reactor=reactor, clock=clock)
         return hs
 
     def create_test_resource(self) -> Resource:
@@ -525,7 +512,7 @@ class HomeserverTestCase(TestCase):
         create_resource_tree(self.create_resource_dict(), root_resource)
         return root_resource
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         """Create a resource tree for the test server
 
         A resource tree is a mapping from path to twisted.web.resource.
@@ -545,7 +532,7 @@ class HomeserverTestCase(TestCase):
         """
         Get a default HomeServer config dict.
         """
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         # apply any additional config which was specified via the override_config
         # decorator.
@@ -572,18 +559,19 @@ class HomeserverTestCase(TestCase):
 
     def make_request(
         self,
-        method: Union[bytes, str],
-        path: Union[bytes, str],
-        content: Union[bytes, str, JsonDict] = b"",
-        access_token: Optional[str] = None,
-        request: Type[Request] = SynapseRequest,
+        method: bytes | str,
+        path: bytes | str,
+        content: bytes | str | JsonDict = b"",
+        access_token: str | None = None,
+        request: type[Request] = SynapseRequest,
         shorthand: bool = True,
-        federation_auth_origin: Optional[bytes] = None,
-        content_type: Optional[bytes] = None,
+        federation_auth_origin: bytes | None = None,
+        content_type: bytes | None = None,
         content_is_form: bool = False,
         await_result: bool = True,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
+        timeout_ms: int = 1000,
     ) -> FakeChannel:
         """
         Create a SynapseRequest at the path using the method and containing the
@@ -612,6 +600,8 @@ class HomeserverTestCase(TestCase):
 
             client_ip: The IP to use as the requesting IP. Useful for testing
                 ratelimiting.
+            timeout_ms: if `await_result` is `True`, the amount of time to wait on
+                the request before timing out. Ignored otherwise.
 
         Returns:
             The FakeChannel object which stores the result of the request.
@@ -631,10 +621,16 @@ class HomeserverTestCase(TestCase):
             await_result,
             custom_headers,
             client_ip,
+            timeout_ms,
         )
 
     def setup_test_homeserver(
-        self, name: Optional[str] = None, **kwargs: Any
+        self,
+        server_name: str | None = None,
+        config: JsonDict | None = None,
+        reactor: Optional[ISynapseReactor] = None,
+        clock: Clock | None = None,
+        **extra_homeserver_attributes: Any,
     ) -> HomeServer:
         """
         Set up the test homeserver, meant to be called by the overridable
@@ -647,32 +643,41 @@ class HomeserverTestCase(TestCase):
         Returns:
             synapse.server.HomeServer
         """
-        kwargs = dict(kwargs)
-        kwargs.update(self._hs_args)
-        if "config" not in kwargs:
+        if config is None:
             config = self.default_config()
-        else:
-            config = kwargs["config"]
+
+        # The sane default is to use the same reactor and clock as our other test utils
+        if reactor is None:
+            reactor = self.reactor
+
+        if clock is None:
+            clock = self.clock
 
         # The server name can be specified using either the `name` argument or a config
         # override. The `name` argument takes precedence over any config overrides.
-        if name is not None:
-            config["server_name"] = name
+        if server_name is not None:
+            config["server_name"] = server_name
 
         # Parse the config from a config dict into a HomeServerConfig
         config_obj = make_homeserver_config_obj(config)
-        kwargs["config"] = config_obj
 
         # The server name in the config is now `name`, if provided, or the `server_name`
         # from a config override, or the default of "test". Whichever it is, we
         # construct a homeserver with a matching name.
-        kwargs["name"] = config_obj.server.server_name
+        server_name = config_obj.server.server_name
 
         async def run_bg_updates() -> None:
-            with LoggingContext("run_bg_updates"):
+            with LoggingContext(name="run_bg_updates", server_name=server_name):
                 self.get_success(stor.db_pool.updates.run_background_updates(False))
 
-        hs = setup_test_homeserver(self.addCleanup, **kwargs)
+        hs = setup_test_homeserver(
+            cleanup_func=self.addCleanup,
+            server_name=server_name,
+            config=config_obj,
+            reactor=reactor,
+            clock=clock,
+            **extra_homeserver_attributes,
+        )
         stor = hs.get_datastores().main
 
         # Run the database background updates, when running against "master".
@@ -683,25 +688,204 @@ class HomeserverTestCase(TestCase):
 
     def pump(self, by: float = 0.0) -> None:
         """
-        Pump the reactor enough that Deferreds will fire.
+        XXX: Deprecated: This method is deprecated. Use `self.reactor.advance(...)`
+        directly instead.
+
+        Pump the reactor enough that `clock.call_later` scheduled callbacks will fire.
+
+        To demystify this function, it simply advances time by the number of seconds
+        specified (defaults to `0`, we also multiply by 100, so `pump(1)` is 100 seconds
+        in 1 second steps/increments) whilst calling any pending callbacks, allowing any
+        queued/pending tasks to run because enough time has passed.
+
+        So for example, if you have some Synapse code that does
+        `clock.call_later(Duration(seconds=2), callback)`, then calling
+        `self.pump(by=0.02)` will advance time by 2 seconds, which is enough for that
+        callback to be ready to run now. Same for `clock.sleep(...)` ,
+        `clock.looping_call(...)`, and whatever other clock utilities that use
+        `clock.call_later` under the hood for scheduling tasks. Trying to use
+        `pump(by=...)` with exact math to meet a specific deadline feels pretty dirty
+        though which is why we recommend using `self.reactor.advance(...)` directly
+        nowadays.
+
+        We don't have any exact historical context for why `pump()` was introduced into
+        the codebase beyond the code itself. We assume that we multiply by 100 so that
+        when you use the clock to schedule something that schedules more things, it
+        tries to run the whole chain to completion.
+
+        XXX: If you're having to call this function, please call out in comments, which
+        scheduled thing you're aiming to trigger. Please also check whether the
+        `pump(...)` is even necessary as it was often misused.
+
+        Args:
+            by: The time increment in seconds to advance time by. We will advance time
+                in 100 steps, each step by this value.
         """
+        # We multiply by 100, so `pump(1)` actually advances time by 100 seconds in 1
+        # second steps/increments. We assume this was done so that when you use the
+        # clock to schedule something that schedules more things, it tries to run the
+        # whole chain to completion.
         self.reactor.pump([by] * 100)
 
-    def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
+    def _wait_for_deferred(
+        self,
+        d: "Deferred[Any]",
+    ) -> None:
+        """
+        Wait for the deferred to finish or raise.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        Args:
+            d: Twisted Deferred
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the deferred completes.
+        """
+        # Wait until the deferred has a result
+        #
+        # Checking `d.called` by itself is not sufficient by itself as this is possible:
+        #
+        # If you have a first `Deferred` `D1`, you can add a callback which returns
+        # another `Deferred` `D2`, and `D2` must then complete before any further
+        # callbacks on `D1` will execute (and later callbacks on `D1` get the *result*
+        # of `D2` rather than `D2` itself).
+        #
+        # So, `D1` might have `called=True` (as in, it has started running its
+        # callbacks), but any new callbacks added to `D1` won't get run until `D2`
+        # completes. Fortunately, we can detect this by checking `d.paused`.
+        loop_count = 0
+        while not d.called or d.paused:
+            # 100 loops is arbitrary but based on previous code which used to "pump" and
+            # advance the reactor 100 times. This also makes the assumption that any
+            # work on other threads will finish before we give up after sleeping ~0.1s
+            # of real-time (100 * 0.001).
+            if loop_count > 100:
+                raise defer.TimeoutError("Timed out waiting for deferred to finish")
+
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # Note: Python has a default thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`) but we still want this here as we're
+            # able to preempt and cause the thread context switch to happen faster.
+            # Also, without any real-time sleeping, this function would complete before
+            # the 5ms switch ever happened.
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # possible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # In terms of other threads, they may have scheduled something on the
+            # reactor to run (like `reactor.callFromThread(...)`)
+            #
+            # Ideally, we'd advance by `0` but the `Cooperator` used in our HTTP clients
+            # use `CLOCK_SCHEDULE_EPSILON` and we want to make usage in downstream tests
+            # as simple as possible. A common use case this helps with is anything that
+            # needs to make a HTTP request (like a replication requests)
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
+
+            loop_count += 1
+
+    def get_success(
+        self,
+        d: Awaitable[TV],
+    ) -> TV:
+        """
+        Get the success result of an awaitable.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
+
+        Args:
+            d: awaitable
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a failure result or has no result
+                (although you would probably run into `defer.TimeoutError` in that case).
+        """
         deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by=by)
+        self._wait_for_deferred(deferred)
+
         return self.successResultOf(deferred)
 
     def get_failure(
-        self, d: Awaitable[Any], exc: Type[_ExcType], by: float = 0.0
+        self,
+        d: Awaitable[Any],
+        exc: type[_ExcType],
     ) -> _TypedFailure[_ExcType]:
         """
-        Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
+        Get the failure result of an awaitable. The failure must be of the type `exc`.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
+
+        Args:
+            d: awaitable
+            exc: Exception type to expect
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a success result,
+                or has an unexpected failure result, or has no result (although you would
+                probably run into `defer.TimeoutError` in that case).
         """
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by)
+        self._wait_for_deferred(deferred)
+
         return self.failureResultOf(deferred, exc)
 
+    # FIXME: Remove as this has the exact same semantics as `get_success()`. In
+    # https://github.com/matrix-org/synapse/pull/8402#discussion_r495992506 where it was
+    # introduced, it was claimed that "get_success fails the test if the deferred fails
+    # rather than raising, which I find a bit unintuitive." but `get_success()` actually
+    # does raise "@raise SynchronousTestCase.failureException : If the
+    # L{Deferred<twisted.internet.defer.Deferred>} has no result or has a failure
+    # result." at-least in today's world.
+    #
+    # As another alternative, we could also just update `get_success(...)` to have this
+    # behavior as the default, see
+    # https://github.com/element-hq/synapse/pull/19871#discussion_r3483616710
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Drive deferred to completion and return result or raise exception
         on failure.
@@ -731,8 +915,8 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         password: str,
-        admin: Optional[bool] = False,
-        displayname: Optional[str] = None,
+        admin: bool | None = False,
+        displayname: str | None = None,
     ) -> str:
         """
         Register a user. Requires the Admin API be registered.
@@ -782,7 +966,8 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         appservice_token: str,
-    ) -> Tuple[str, Optional[str]]:
+        inhibit_login: bool = False,
+    ) -> tuple[str, str | None]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
 
@@ -802,6 +987,7 @@ class HomeserverTestCase(TestCase):
             {
                 "username": username,
                 "type": "m.login.application_service",
+                "inhibit_login": inhibit_login,
             },
             access_token=appservice_token,
         )
@@ -812,9 +998,9 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         password: str,
-        device_id: Optional[str] = None,
-        additional_request_fields: Optional[Dict[str, str]] = None,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        device_id: str | None = None,
+        additional_request_fields: dict[str, str] | None = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
     ) -> str:
         """
         Log in a user, and get an access token. Requires the Login API be registered.
@@ -853,7 +1039,7 @@ class HomeserverTestCase(TestCase):
         room_id: str,
         user: UserID,
         soft_failed: bool = False,
-        prev_event_ids: Optional[List[str]] = None,
+        prev_event_ids: list[str] | None = None,
     ) -> str:
         """
         Create and send an event.
@@ -945,7 +1131,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
             )
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d["/_matrix/federation"] = TransportLayerServer(self.hs)
         return d
@@ -954,9 +1140,9 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
         self,
         method: str,
         path: str,
-        content: Optional[JsonDict] = None,
+        content: JsonDict | None = None,
         await_result: bool = True,
-        custom_headers: Optional[Iterable[CustomHeaderType]] = None,
+        custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
     ) -> FakeChannel:
         """Make an inbound signed federation request to this server
@@ -1021,7 +1207,7 @@ def _auth_header_for_request(
     signing_key: signedjson.key.SigningKey,
     method: str,
     path: str,
-    content: Optional[JsonDict],
+    content: JsonDict | None,
 ) -> str:
     """Build a suitable Authorization header for an outgoing federation request"""
     request_description: JsonDict = {

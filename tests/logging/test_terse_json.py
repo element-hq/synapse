@@ -28,7 +28,11 @@ from twisted.web.http import HTTPChannel
 from twisted.web.server import Request
 
 from synapse.http.site import SynapseRequest
-from synapse.logging._terse_json import JsonFormatter, TerseJsonFormatter
+from synapse.logging._terse_json import (
+    GcpJsonFormatter,
+    JsonFormatter,
+    TerseJsonFormatter,
+)
 from synapse.logging.context import LoggingContext, LoggingContextFilter
 from synapse.types import JsonDict
 
@@ -63,13 +67,13 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "time",
             "level",
             "namespace",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
 
     def test_extra_data(self) -> None:
@@ -87,7 +91,7 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "time",
             "level",
@@ -96,8 +100,8 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
             "foo",
             "int",
             "bool",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
 
         # Check the values of the extra fields.
         self.assertEqual(log["foo"], "bar")
@@ -117,12 +121,12 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
 
     def test_with_context(self) -> None:
@@ -134,19 +138,20 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         handler.addFilter(LoggingContextFilter())
         logger = self.get_logger(handler)
 
-        with LoggingContext("name"):
+        with LoggingContext(name="name", server_name="test_server"):
             logger.info("Hello there, %s!", "wally")
 
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
             "request",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+            "server_name",
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
         self.assertEqual(log["request"], "name")
 
@@ -171,8 +176,9 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         site.site_tag = "test-site"
         site.server_version_string = "Server v1"
         site.reactor = Mock()
+
         request = SynapseRequest(
-            cast(HTTPChannel, FakeChannel(site, self.reactor)), site
+            cast(HTTPChannel, FakeChannel(site, self.reactor)), site, "test_server"
         )
         # Call requestReceived to finish instantiating the object.
         request.content = BytesIO()
@@ -186,14 +192,16 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         request.requester = "@foo:test"
 
         with LoggingContext(
-            request.get_request_id(), parent_context=request.logcontext
+            name=request.get_request_id(),
+            server_name="test_server",
+            parent_context=request.logcontext,
         ):
             logger.info("Hello there, %s!", "wally")
 
         log = self.get_log_line()
 
         # The terse logger includes additional request information, if possible.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
@@ -206,8 +214,9 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
             "url",
             "protocol",
             "user_agent",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+            "server_name",
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
         self.assertTrue(log["request"].startswith("POST-"))
         self.assertEqual(log["ip_address"], "127.0.0.1")
@@ -235,14 +244,88 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
             "exc_type",
             "exc_value",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
         self.assertEqual(log["exc_type"], "ValueError")
         self.assertEqual(log["exc_value"], "That's wrong, you wally!")
+
+
+class GcpJsonFormatterTestCase(LoggerCleanupMixin, TestCase):
+    def setUp(self) -> None:
+        self.output = StringIO()
+
+    def get_log_line(self) -> JsonDict:
+        data = self.output.getvalue()
+        logs = data.splitlines()
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(data.count("\n"), 1)
+        return json.loads(logs[0])
+
+    def test_gcp_json_output(self) -> None:
+        """
+        GcpJsonFormatter produces exactly the four fields GCL expects.
+        """
+        handler = logging.StreamHandler(self.output)
+        handler.setFormatter(GcpJsonFormatter())
+        logger = self.get_logger(handler)
+
+        logger.info("Hello there, %s!", "wally")
+
+        log = self.get_log_line()
+
+        self.assertIncludes(
+            log.keys(), {"severity", "message", "logger", "time"}, exact=True
+        )
+        self.assertEqual(log["message"], "Hello there, wally!")
+        self.assertEqual(log["severity"], "INFO")
+        self.assertTrue(log["time"].endswith("Z"))
+
+    def test_severity_levels(self) -> None:
+        """
+        Python log levels are mapped to their GCL severity equivalents.
+        """
+        cases = [
+            (logging.DEBUG, "DEBUG"),
+            (logging.INFO, "INFO"),
+            (logging.WARNING, "WARNING"),
+            (logging.ERROR, "ERROR"),
+            (logging.CRITICAL, "CRITICAL"),
+        ]
+        for level, expected_severity in cases:
+            self.output = StringIO()
+            handler = logging.StreamHandler(self.output)
+            handler.setFormatter(GcpJsonFormatter())
+            logger = self.get_logger(handler)
+            logger.setLevel(level)
+            logger.log(level, "test")
+            log = self.get_log_line()
+            self.assertEqual(log["severity"], expected_severity, f"level={level}")
+
+    def test_gcp_json_with_exception(self) -> None:
+        """
+        Exception info is appended to the message field, not separate keys.
+        """
+        handler = logging.StreamHandler(self.output)
+        handler.setFormatter(GcpJsonFormatter())
+        logger = self.get_logger(handler)
+
+        try:
+            raise ValueError("That's wrong, you wally!")
+        except ValueError:
+            logger.exception("Hello there, %s!", "wally")
+
+        log = self.get_log_line()
+
+        self.assertIncludes(
+            log.keys(), {"severity", "message", "logger", "time"}, exact=True
+        )
+        self.assertIn("Hello there, wally!", log["message"])
+        self.assertIn("ValueError", log["message"])
+        self.assertIn("That's wrong, you wally!", log["message"])

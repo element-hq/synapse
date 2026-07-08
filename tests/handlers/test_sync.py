@@ -18,13 +18,13 @@
 #
 #
 from http import HTTPStatus
-from typing import Collection, ContextManager, List, Optional
+from typing import Collection, ContextManager
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
 from synapse.api.errors import Codes, ResourceLimitError
@@ -32,12 +32,10 @@ from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
-from synapse.federation.federation_base import event_from_pdu_json
 from synapse.handlers.sync import (
     SyncConfig,
     SyncRequestKey,
     SyncResult,
-    SyncVersion,
     TimelineBatch,
 )
 from synapse.rest import admin
@@ -51,10 +49,12 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 import tests.unittest
 import tests.utils
+from tests.test_utils.event_builders import make_test_pdu_event
 
 _request_key = 0
 
@@ -113,7 +113,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -124,7 +123,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             ),
             ResourceLimitError,
@@ -142,7 +140,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             ),
             ResourceLimitError,
@@ -167,7 +164,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -203,7 +199,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -218,7 +213,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
@@ -252,7 +246,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -267,7 +260,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
@@ -310,14 +302,13 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(owner),
                 generate_sync_config(owner, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         self.assertEqual(len(alice_sync_result.joined), 1)
         self.assertEqual(alice_sync_result.joined[0].room_id, room_id)
         last_room_creation_event_id = (
-            alice_sync_result.joined[0].timeline.events[-1].event_id
+            alice_sync_result.joined[0].timeline.events[-1].event.event_id
         )
 
         # Eve, a ne'er-do-well, registers.
@@ -336,7 +327,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -363,7 +353,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=eve_sync_after_ban.next_batch,
             )
@@ -376,7 +365,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=None,
             )
@@ -411,12 +399,11 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
-            initial_sync_result.joined[0].timeline.events[-1].event_id
+            initial_sync_result.joined[0].timeline.events[-1].event.event_id
         )
 
         # Send a state event, and a regular event, both using the same prev ID
@@ -441,7 +428,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -452,7 +438,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(room_sync.room_id, room_id)
         self.assertTrue(room_sync.timeline.limited)
         self.assertEqual(
-            [e.event_id for e in room_sync.timeline.events],
+            [e.event.event_id for e in room_sync.timeline.events],
             [e3_event, e4_event],
         )
         self.assertEqual(
@@ -487,12 +473,11 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
-            initial_sync_result.joined[0].timeline.events[-1].event_id
+            initial_sync_result.joined[0].timeline.events[-1].event.event_id
         )
 
         # Send a state event, and a regular event, both using the same prev ID
@@ -527,7 +512,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -538,7 +522,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(room_sync.room_id, room_id)
         self.assertTrue(room_sync.timeline.limited)
         self.assertEqual(
-            [e.event_id for e in room_sync.timeline.events],
+            [e.event.event_id for e in room_sync.timeline.events],
             [e3_event],
         )
         self.assertEqual(
@@ -576,12 +560,11 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
-            initial_sync_result.joined[0].timeline.events[-1].event_id
+            initial_sync_result.joined[0].timeline.events[-1].event.event_id
         )
 
         # Send a state event, and a regular event, both using the same prev ID
@@ -603,7 +586,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -612,7 +594,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(room_sync.room_id, room_id)
         self.assertTrue(room_sync.timeline.limited)
         self.assertEqual(
-            [e.event_id for e in room_sync.timeline.events],
+            [e.event.event_id for e in room_sync.timeline.events],
             [e3_event],
         )
 
@@ -643,7 +625,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=incremental_sync.next_batch,
             )
@@ -652,7 +633,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(room_sync.room_id, room_id)
         self.assertFalse(room_sync.timeline.limited)
         self.assertEqual(
-            [e.event_id for e in room_sync.timeline.events],
+            [e.event.event_id for e in room_sync.timeline.events],
             [e4_event],
         )
 
@@ -717,12 +698,11 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
-            initial_sync_result.joined[0].timeline.events[-1].event_id
+            initial_sync_result.joined[0].timeline.events[-1].event.event_id
         )
 
         # Send a state event, and a regular event, both using the same prev ID
@@ -743,14 +723,13 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         room_sync = initial_sync_result.joined[0]
         self.assertEqual(room_sync.room_id, room_id)
         self.assertEqual(
-            [e.event_id for e in room_sync.timeline.events],
+            [e.event.event_id for e in room_sync.timeline.events],
             [e3_event],
         )
         if self.use_state_after:
@@ -769,7 +748,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -780,7 +758,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(room_sync.room_id, room_id)
         self.assertFalse(room_sync.timeline.limited)
         self.assertEqual(
-            [e.event_id for e in room_sync.timeline.events],
+            [e.event.event_id for e in room_sync.timeline.events],
             [e4_event, e5_event],
         )
 
@@ -833,7 +811,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 bob_requester,
                 generate_sync_config(bob, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -867,7 +844,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     filter_collection=FilterCollection(self.hs, filter_dict),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=None if initial_sync else initial_sync_result.next_batch,
             )
@@ -880,7 +856,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             # The last three events in the timeline should be those leading up to the
             # leave
             self.assertEqual(
-                [e.event_id for e in sync_room_result.timeline.events[-3:]],
+                [e.event.event_id for e in sync_room_result.timeline.events[-3:]],
                 [before_message_event, before_state_event, leave_event],
             )
 
@@ -897,7 +873,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             # ... And the state should be empty
             self.assertEqual(sync_room_result.state, {})
 
-    def _patch_get_latest_events(self, latest_events: List[str]) -> ContextManager:
+    def _patch_get_latest_events(self, latest_events: list[str]) -> ContextManager:
         """Monkey-patch `get_prev_events_for_room`
 
         Returns a context manager which will replace the implementation of
@@ -918,7 +894,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         federation_event_handler = self.hs.get_federation_event_handler()
 
         async def _check_event_auth(
-            origin: Optional[str], event: EventBase, context: EventContext
+            origin: str | None, event: EventBase, context: EventContext
         ) -> None:
             pass
 
@@ -927,7 +903,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
         async def _check_sigs_and_hash_for_pulled_events_and_fetch(
             dest: str, pdus: Collection[EventBase], room_version: RoomVersion
-        ) -> List[EventBase]:
+        ) -> list[EventBase]:
             return list(pdus)
 
         self.client._check_sigs_and_hash_for_pulled_events_and_fetch = (  # type: ignore[method-assign]
@@ -937,7 +913,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         prev_events = self.get_success(self.store.get_prev_events_for_room(room_id))
 
         # create a call invite event
-        call_event = event_from_pdu_json(
+        call_event = make_test_pdu_event(
             {
                 "type": EventTypes.CallInvite,
                 "content": {},
@@ -967,13 +943,12 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         event_ids = []
         for event in sync_result.joined[0].timeline.events:
-            event_ids.append(event.event_id)
+            event_ids.append(event.event.event_id)
         self.assertNotIn(call_event.event_id, event_ids)
 
         # it will come down in a private room, though
@@ -986,7 +961,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         priv_prev_events = self.get_success(
             self.store.get_prev_events_for_room(private_room_id)
         )
-        private_call_event = event_from_pdu_json(
+        private_call_event = make_test_pdu_event(
             {
                 "type": EventTypes.CallInvite,
                 "content": {},
@@ -1016,13 +991,12 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user2),
                 generate_sync_config(user2, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
         priv_event_ids = []
         for event in private_sync_result.joined[0].timeline.events:
-            priv_event_ids.append(event.event_id)
+            priv_event_ids.append(event.event.event_id)
 
         self.assertIn(private_call_event.event_id, priv_event_ids)
 
@@ -1042,7 +1016,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -1079,7 +1052,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=since_token,
                 timeout=0,
@@ -1087,13 +1059,22 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         )
 
         # This should block waiting for the presence stream to update
-        self.pump()
+        #
+        # Advance time a little bit to make the
+        # `wait_for_stream_token(...)` sleep loop iterate.
+        self.reactor.advance(Duration(seconds=2).as_secs())
+        # It should still not be done yet
         self.assertFalse(sync_d.called)
 
         # Marking the stream ID as persisted should unblock the request.
         self.get_success(ctx_mgr.__aexit__(None, None, None))
 
-        self.get_success(sync_d, by=1.0)
+        # Advance time to make another iteration of `wait_for_stream_token(...)` sleep
+        # loop so it sees that we're finally caught up now.
+        self.reactor.advance(Duration(seconds=1).as_secs())
+
+        # Done waiting
+        self.get_success(sync_d)
 
     @parameterized.expand(
         [(key,) for key in StreamKeyType.__members__.values()],
@@ -1134,7 +1115,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=since_token,
                 timeout=0,
@@ -1147,8 +1127,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
 def generate_sync_config(
     user_id: str,
-    device_id: Optional[str] = "device_id",
-    filter_collection: Optional[FilterCollection] = None,
+    device_id: str | None = "device_id",
+    filter_collection: FilterCollection | None = None,
     use_state_after: bool = False,
 ) -> SyncConfig:
     """Generate a sync config (with a unique request key).

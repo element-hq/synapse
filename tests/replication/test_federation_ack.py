@@ -21,14 +21,14 @@
 
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.replication.tcp.commands import FederationAckCommand
 from synapse.replication.tcp.protocol import IReplicationConnection
 from synapse.replication.tcp.streams.federation import FederationStream
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -80,6 +80,14 @@ class FederationAckTestCase(HomeserverTestCase):
                 ],
             )
         )
+
+        # Wait for the FEDERATION_ACK to be sent
+        #
+        # `on_rdata` handles this as part of a fire-and-forget background process (see
+        # `FederationSenderHandler.update_token`)
+        #
+        # We're specifically waiting for the database queries in the background process
+        self.reactor.advance(0)
 
         # now check that the FEDERATION_ACK was sent
         mock_connection.send_command.assert_called_once()

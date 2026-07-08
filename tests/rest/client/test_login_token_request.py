@@ -19,12 +19,13 @@
 #
 #
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, login_token_request, versions
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.synapse_rust.http_client import HttpClient
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -47,7 +48,30 @@ class LoginTokenRequestServletTestCase(unittest.HomeserverTestCase):
         self.hs.config.registration.auto_join_rooms = []
         self.hs.config.captcha.enable_registration_captcha = False
 
+        # XXX: We must create the Rust HTTP client before we call `reactor.run()` below.
+        # Twisted's `MemoryReactor` doesn't invoke `callWhenRunning` callbacks if it's
+        # already running and we rely on that to start the Tokio thread pool in Rust. In
+        # the future, this may not matter, see https://github.com/twisted/twisted/pull/12514
+        self._http_client = self.hs.get_proxied_http_client()
+        _ = HttpClient(
+            reactor=self.hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
+        )
+
+        # This triggers the server startup hooks, which starts the Tokio thread pool
+        reactor.run()
+
         return self.hs
+
+    def tearDown(self) -> None:
+        # MemoryReactor doesn't trigger the shutdown phases, and we want the
+        # Tokio thread pool to be stopped
+        # XXX: This logic should probably get moved somewhere else
+        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
+        for phase in ["before", "during", "after"]:
+            triggers = shutdown_triggers.get(phase, [])
+            for callbable, args, kwargs in triggers:
+                callbable(*args, **kwargs)
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.user = "user123"

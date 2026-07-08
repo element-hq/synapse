@@ -18,16 +18,16 @@
 #
 #
 from http import HTTPStatus
-from typing import BinaryIO, Callable, Dict, List, Optional, Tuple
+from typing import BinaryIO, Callable
 from unittest.mock import Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.http_headers import Headers
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.client import RawHeaders
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG, FakeResponse
@@ -117,10 +117,10 @@ class TestSSOHandler(unittest.HomeserverTestCase):
 async def mock_get_file(
     url: str,
     output_stream: BinaryIO,
-    max_size: Optional[int] = None,
-    headers: Optional[RawHeaders] = None,
-    is_allowed_content_type: Optional[Callable[[str], bool]] = None,
-) -> Tuple[int, Dict[bytes, List[bytes]], str, int]:
+    max_size: int | None = None,
+    headers: RawHeaders | None = None,
+    is_allowed_content_type: Callable[[str], bool] | None = None,
+) -> tuple[int, dict[bytes, list[bytes]], str, int]:
     fake_response = FakeResponse(code=404)
     if url == "http://my.server/me.png":
         fake_response = FakeResponse(

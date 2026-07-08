@@ -20,12 +20,13 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Optional
 
 from twisted.web.server import Request
 
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.constants import LoginType
-from synapse.api.errors import LoginError, SynapseError
+from synapse.api.errors import Codes, LoginError, SynapseError
 from synapse.api.urls import CLIENT_API_PREFIX
 from synapse.http.server import HttpServer, respond_with_html, respond_with_redirect
 from synapse.http.servlet import RestServlet, parse_string
@@ -60,28 +61,41 @@ class AuthRestServlet(RestServlet):
             hs.config.registration.registration_token_template
         )
         self.success_template = hs.config.registration.fallback_success_template
+        self._msc4450_enabled = hs.config.experimental.msc4450_enabled
 
     async def on_GET(self, request: SynapseRequest, stagetype: str) -> None:
         session = parse_string(request, "session")
         if not session:
             raise SynapseError(400, "No session supplied")
 
-        if (
-            self.hs.config.experimental.msc3861.enabled
-            and stagetype == "org.matrix.cross_signing_reset"
-        ):
-            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
-            # We import lazily here because of the authlib requirement
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+        # MSC4450 query parameter which allows clients to specify the Identity Provider
+        # they wish to use for legacy SSO during User-Interactive Authentication.
+        idp_id: Optional[str] = None
 
-            auth = cast(MSC3861DelegatedAuth, self.auth)
+        if self._msc4450_enabled:
+            idp_id = parse_string(request, "io.element.idp_id")
 
-            url = await auth.account_management_url()
-            if url is not None:
+            if idp_id is not None and stagetype != LoginType.SSO:
+                raise SynapseError(
+                    400,
+                    Codes.INVALID_PARAM,
+                    "idp_id can only be specified for the `m.login.sso` auth type",
+                )
+
+        # We support the unstable (`org.matrix.cross_signing_reset`) name from MSC4312 until
+        # enough clients have adopted the stable name (`m.oauth`).
+        # Note: `org.matrix.cross_signing_reset` *is* the stable name of the *action* in the
+        # authorization server metadata. The unstable status only applies to the UIA stage name.
+        if stagetype == "m.oauth" or stagetype == "org.matrix.cross_signing_reset":
+            if self.hs.config.mas.enabled:
+                assert isinstance(self.auth, MasDelegatedAuth)
+
+                url = await self.auth.account_management_url()
                 url = f"{url}?action=org.matrix.cross_signing_reset"
-            else:
-                url = await auth.issuer()
-            respond_with_redirect(request, str.encode(url))
+                return respond_with_redirect(
+                    request,
+                    url.encode(),
+                )
 
         if stagetype == LoginType.RECAPTCHA:
             html = self.recaptcha_template.render(
@@ -105,7 +119,7 @@ class AuthRestServlet(RestServlet):
         elif stagetype == LoginType.SSO:
             # Display a confirmation page which prompts the user to
             # re-authenticate with their SSO provider.
-            html = await self.auth_handler.start_sso_ui_auth(request, session)
+            html = await self.auth_handler.start_sso_ui_auth(request, session, idp_id)
 
         elif stagetype == LoginType.REGISTRATION_TOKEN:
             html = self.registration_token_template.render(

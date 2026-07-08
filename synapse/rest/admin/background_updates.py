@@ -18,9 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import json
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import SynapseError
 from synapse.http.servlet import (
@@ -47,7 +48,7 @@ class BackgroundUpdateEnabledRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._data_stores = hs.get_datastores()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         # We need to check that all configured databases have updates enabled.
@@ -56,7 +57,7 @@ class BackgroundUpdateEnabledRestServlet(RestServlet):
 
         return HTTPStatus.OK, {"enabled": enabled}
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         body = parse_json_object_from_request(request)
@@ -88,7 +89,7 @@ class BackgroundUpdateRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._data_stores = hs.get_datastores()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         # We need to check that all configured databases have updates enabled.
@@ -121,7 +122,7 @@ class BackgroundUpdateStartJobRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         body = parse_json_object_from_request(request)
@@ -150,6 +151,24 @@ class BackgroundUpdateStartJobRestServlet(RestServlet):
                     "populate_user_directory_process_users",
                 ),
             ]
+        elif job_name == "event_resign":
+            old_key = body.get("old_key")
+            if old_key is not None and not isinstance(old_key, str):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "'old_key' must be a string",
+                )
+            before_ts = body.get("before_ts")
+            if before_ts is not None and not isinstance(before_ts, int):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "'before_ts' must be an integer",
+                )
+            progress = {
+                "old_key": old_key,
+                "before_ts": before_ts,
+            }
+            jobs = [("event_resign", json.dumps(progress), "")]
         else:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Invalid job_name")
 

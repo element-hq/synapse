@@ -18,15 +18,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes, SynapseError
 from synapse.rest.client import login
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -44,8 +43,8 @@ class UsernameAvailableTestCase(unittest.HomeserverTestCase):
 
         async def check_username(
             localpart: str,
-            guest_access_token: Optional[str] = None,
-            assigned_user_id: Optional[str] = None,
+            guest_access_token: str | None = None,
+            assigned_user_id: str | None = None,
             inhibit_user_in_use_error: bool = False,
         ) -> None:
             if localpart == "allowed":

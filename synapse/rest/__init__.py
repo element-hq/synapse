@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from synapse.http.server import HttpServer, JsonResource
 from synapse.rest import admin
@@ -42,6 +42,7 @@ from synapse.rest.client import (
     login,
     login_token_request,
     logout,
+    matrixrtc,
     mutual_rooms,
     notifications,
     openid,
@@ -56,6 +57,7 @@ from synapse.rest.client import (
     relations,
     rendezvous,
     reporting,
+    retention,
     room,
     room_keys,
     room_upgrade_rest_servlet,
@@ -63,6 +65,7 @@ from synapse.rest.client import (
     sync,
     tags,
     thirdparty,
+    thread_subscriptions,
     tokenrefresh,
     user_directory,
     versions,
@@ -76,7 +79,7 @@ if TYPE_CHECKING:
 
 RegisterServletsFunc = Callable[["HomeServer", HttpServer], None]
 
-CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
+CLIENT_SERVLET_FUNCTIONS: tuple[RegisterServletsFunc, ...] = (
     versions.register_servlets,
     initial_sync.register_servlets,
     room.register_deprecated_servlets,
@@ -88,6 +91,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     presence.register_servlets,
     directory.register_servlets,
     voip.register_servlets,
+    matrixrtc.register_servlets,
     pusher.register_servlets,
     push_rule.register_servlets,
     logout.register_servlets,
@@ -104,6 +108,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     tags.register_servlets,
     account_data.register_servlets,
     reporting.register_servlets,
+    retention.register_servlets,
     openid.register_servlets,
     notifications.register_servlets,
     devices.register_servlets,
@@ -122,9 +127,10 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     login_token_request.register_servlets,
     rendezvous.register_servlets,
     auth_metadata.register_servlets,
+    thread_subscriptions.register_servlets,
 )
 
-SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
+SERVLET_GROUPS: dict[str, Iterable[RegisterServletsFunc]] = {
     "client": CLIENT_SERVLET_FUNCTIONS,
 }
 
@@ -139,7 +145,7 @@ class ClientRestResource(JsonResource):
        * etc
     """
 
-    def __init__(self, hs: "HomeServer", servlet_groups: Optional[List[str]] = None):
+    def __init__(self, hs: "HomeServer", servlet_groups: list[str] | None = None):
         JsonResource.__init__(self, hs, canonical_json=False)
         if hs.config.media.can_load_media_repo:
             # This import is here to prevent a circular import failure
@@ -152,7 +158,7 @@ class ClientRestResource(JsonResource):
     def register_servlets(
         client_resource: HttpServer,
         hs: "HomeServer",
-        servlet_groups: Optional[Iterable[str]] = None,
+        servlet_groups: Iterable[str] | None = None,
     ) -> None:
         # Some servlets are only registered on the main process (and not worker
         # processes).

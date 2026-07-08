@@ -31,7 +31,15 @@ class RetryLimiterTestCase(HomeserverTestCase):
     def test_new_destination(self) -> None:
         """A happy-path case with a new destination and a successful operation"""
         store = self.hs.get_datastores().main
-        limiter = self.get_success(get_retry_limiter("test_dest", self.clock, store))
+        limiter = self.get_success(
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            )
+        )
 
         # advance the clock a bit before making the request
         self.pump(1)
@@ -46,7 +54,15 @@ class RetryLimiterTestCase(HomeserverTestCase):
         """General test case which walks through the process of a failing request"""
         store = self.hs.get_datastores().main
 
-        limiter = self.get_success(get_retry_limiter("test_dest", self.clock, store))
+        limiter = self.get_success(
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            )
+        )
 
         min_retry_interval_ms = (
             self.hs.config.federation.destination_min_retry_interval_ms
@@ -72,7 +88,14 @@ class RetryLimiterTestCase(HomeserverTestCase):
 
         # now if we try again we should get a failure
         self.get_failure(
-            get_retry_limiter("test_dest", self.clock, store), NotRetryingDestination
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            ),
+            NotRetryingDestination,
         )
 
         #
@@ -80,7 +103,15 @@ class RetryLimiterTestCase(HomeserverTestCase):
         #
 
         self.pump(min_retry_interval_ms)
-        limiter = self.get_success(get_retry_limiter("test_dest", self.clock, store))
+        limiter = self.get_success(
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            )
+        )
 
         self.pump(1)
         try:
@@ -108,7 +139,15 @@ class RetryLimiterTestCase(HomeserverTestCase):
         # one more go, with success
         #
         self.reactor.advance(min_retry_interval_ms * retry_multiplier * 2.0)
-        limiter = self.get_success(get_retry_limiter("test_dest", self.clock, store))
+        limiter = self.get_success(
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            )
+        )
 
         self.pump(1)
         with limiter:
@@ -129,9 +168,11 @@ class RetryLimiterTestCase(HomeserverTestCase):
 
         limiter = self.get_success(
             get_retry_limiter(
-                "test_dest",
-                self.clock,
-                store,
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
                 notifier=notifier,
                 replication_client=replication_client,
             )
@@ -199,7 +240,15 @@ class RetryLimiterTestCase(HomeserverTestCase):
             self.hs.config.federation.destination_max_retry_interval_ms
         )
 
-        self.get_success(get_retry_limiter("test_dest", self.clock, store))
+        self.get_success(
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            )
+        )
         self.pump(1)
 
         failure_ts = self.clock.time_msec()
@@ -216,12 +265,27 @@ class RetryLimiterTestCase(HomeserverTestCase):
 
         # Check it fails
         self.get_failure(
-            get_retry_limiter("test_dest", self.clock, store), NotRetryingDestination
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            ),
+            NotRetryingDestination,
         )
 
         # Get past retry_interval and we can try again, and still throw an error to continue the backoff
         self.reactor.advance(destination_max_retry_interval_ms / 1000 + 1)
-        limiter = self.get_success(get_retry_limiter("test_dest", self.clock, store))
+        limiter = self.get_success(
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            )
+        )
         self.pump(1)
         try:
             with limiter:
@@ -239,5 +303,12 @@ class RetryLimiterTestCase(HomeserverTestCase):
 
         # Check it fails
         self.get_failure(
-            get_retry_limiter("test_dest", self.clock, store), NotRetryingDestination
+            get_retry_limiter(
+                destination="test_dest",
+                our_server_name=self.hs.hostname,
+                hs=self.hs,
+                clock=self.clock,
+                store=store,
+            ),
+            NotRetryingDestination,
         )

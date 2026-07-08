@@ -21,7 +21,7 @@
 
 from unittest.mock import Mock, patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EduTypes, EventTypes
@@ -34,7 +34,7 @@ from synapse.rest.client import (
 )
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

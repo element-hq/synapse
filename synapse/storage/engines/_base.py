@@ -20,7 +20,7 @@
 #
 import abc
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any, Generic, Mapping, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Mapping, TypeVar
 
 from synapse.storage.types import Connection, Cursor, DBAPI2Module
 
@@ -34,9 +34,9 @@ AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER = "$%AUTO_INCREMENT_PRIMARY_KEY%$"
 
 
 class IsolationLevel(IntEnum):
-    READ_COMMITTED: int = 1
-    REPEATABLE_READ: int = 2
-    SERIALIZABLE: int = 3
+    READ_COMMITTED = 1
+    REPEATABLE_READ = 2
+    SERIALIZABLE = 3
 
 
 class IncorrectDatabaseSetup(RuntimeError):
@@ -61,12 +61,6 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
         """
         Do we support using `a = ANY(?)` and passing a list
         """
-        ...
-
-    @property
-    @abc.abstractmethod
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
         ...
 
     @abc.abstractmethod
@@ -129,7 +123,7 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
 
     @abc.abstractmethod
     def attempt_to_set_isolation_level(
-        self, conn: ConnectionType, isolation_level: Optional[int]
+        self, conn: ConnectionType, isolation_level: int | None
     ) -> None:
         """Attempt to set the connections isolation level.
 

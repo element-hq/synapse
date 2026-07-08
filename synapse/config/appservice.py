@@ -21,7 +21,7 @@
 #
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 from urllib import parse as urlparse
 
 import yaml
@@ -61,13 +61,13 @@ class AppServiceConfig(Config):
 
 
 def load_appservices(
-    hostname: str, config_files: List[str]
-) -> List[ApplicationService]:
+    hostname: str, config_files: list[str]
+) -> list[ApplicationService]:
     """Returns a list of Application Services from the config files."""
 
     # Dicts of value -> filename
-    seen_as_tokens: Dict[str, str] = {}
-    seen_ids: Dict[str, str] = {}
+    seen_as_tokens: dict[str, str] = {}
+    seen_ids: dict[str, str] = {}
 
     appservices = []
 
@@ -122,8 +122,7 @@ def _load_appservice(
     localpart = as_info["sender_localpart"]
     if urlparse.quote(localpart) != localpart:
         raise ValueError("sender_localpart needs characters which are not URL encoded.")
-    user = UserID(localpart, hostname)
-    user_id = user.to_string()
+    user_id = UserID(localpart, hostname)
 
     # Rate limiting for users of this AS is on by default (excludes sender)
     rate_limited = as_info.get("rate_limited")
@@ -170,7 +169,12 @@ def _load_appservice(
     if as_info.get("ip_range_whitelist"):
         ip_range_whitelist = IPSet(as_info.get("ip_range_whitelist"))
 
-    supports_ephemeral = as_info.get("de.sorunome.msc2409.push_ephemeral", False)
+    # TODO: remove push_ephemeral handling at some point in the future. It was part of
+    #  MSC2409 which changed the identifier near the end of the review cycle.
+    supports_unstable_ephemeral = as_info.get(
+        "de.sorunome.msc2409.push_ephemeral", False
+    )
+    supports_ephemeral = as_info.get("receive_ephemeral", False)
 
     # Opt-in flag for the MSC3202-specific transactional behaviour.
     # When enabled, appservice transactions contain the following information:
@@ -205,6 +209,7 @@ def _load_appservice(
         protocols=protocols,
         rate_limited=rate_limited,
         ip_range_whitelist=ip_range_whitelist,
+        supports_unstable_ephemeral=supports_unstable_ephemeral,
         supports_ephemeral=supports_ephemeral,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
         msc4190_device_management=msc4190_enabled,

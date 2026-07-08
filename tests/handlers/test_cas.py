@@ -18,14 +18,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.cas import CasResponse
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 
@@ -35,7 +35,7 @@ SERVER_URL = "https://issuer/"
 
 
 class CasHandlerTestCase(HomeserverTestCase):
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         cas_config = {

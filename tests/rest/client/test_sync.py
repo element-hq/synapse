@@ -20,28 +20,29 @@
 #
 import json
 import logging
-from typing import List
 
-from parameterized import parameterized, parameterized_class
+from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
+    JoinRules,
     ReceiptTypes,
     RelationTypes,
 )
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
+from tests.rest.client.test_rooms import make_request_with_cancellation_test
 from tests.server import TimedOutException
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ class SyncFilterTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(events), 1, [event["content"] for event in events])
         self.assertEqual(events[0]["content"]["body"], "with wrong label", events[0])
 
-    def _test_sync_filter_labels(self, sync_filter: str) -> List[JsonDict]:
+    def _test_sync_filter_labels(self, sync_filter: str) -> list[JsonDict]:
         user_id = self.register_user("kermit", "test")
         tok = self.login("kermit", "test")
 
@@ -392,6 +393,69 @@ class SyncKnockTestCase(KnockingStrippedStateEventHelperMixin):
         self.check_knock_room_state_against_room_state(
             room_state_events, self.expected_room_state
         )
+
+
+class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
+    """MSC4311: Tests that m.room.create is present in invite_state and knock_state"""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        knock.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        return config
+
+    def test_create_event_present_in_invite_state(self) -> None:
+        """m.room.create must appear in invite_state."""
+        inviter = self.register_user("inviter", "pass")
+        inviter_tok = self.login("inviter", "pass")
+        invitee = self.register_user("invitee", "pass")
+        invitee_tok = self.login("invitee", "pass")
+
+        room_id = self.helper.create_room_as(inviter, tok=inviter_tok)
+        self.helper.invite(room=room_id, src=inviter, targ=invitee, tok=inviter_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=invitee_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        invite_state_events = channel.json_body["rooms"]["invite"][room_id][
+            "invite_state"
+        ]["events"]
+        event_types = {stripped_event["type"] for stripped_event in invite_state_events}
+        self.assertIn(EventTypes.Create, event_types)
+
+    def test_create_event_present_in_knock_state(self) -> None:
+        """m.room.create must appear in knock_state."""
+        host = self.register_user("host", "pass")
+        host_tok = self.login("host", "pass")
+        knocker = self.register_user("knocker", "pass")
+        knocker_tok = self.login("knocker", "pass")
+
+        room_id = self.helper.create_room_as(
+            host, is_public=False, room_version="7", tok=host_tok
+        )
+        self.helper.send_state(
+            room_id,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=host_tok,
+        )
+
+        self.helper.knock(room_id, knocker, tok=knocker_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=knocker_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        knock_state_events = channel.json_body["rooms"]["knock"][room_id][
+            "knock_state"
+        ]["events"]
+        event_types = {stripped_event["type"] for stripped_event in knock_state_events}
+        self.assertIn(EventTypes.Create, event_types)
 
 
 class UnreadMessagesTestCase(unittest.HomeserverTestCase):
@@ -702,28 +766,10 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
-@parameterized_class(
-    ("sync_endpoint", "experimental_features"),
-    [
-        ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
-    ],
-)
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device list (`device_lists`) changes.
-
-    Attributes:
-        sync_endpoint: The endpoint under test to use for syncing.
-        experimental_features: The experimental features homeserver config to use.
     """
-
-    sync_endpoint: str
-    experimental_features: JsonDict
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -732,11 +778,6 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        config["experimental_features"] = self.experimental_features
-        return config
 
     def test_receiving_local_device_list_changes(self) -> None:
         """Tests that a local users that share a room receive each other's device list
@@ -767,7 +808,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # Now have Bob initiate an initial sync (in order to get a since token)
         channel = self.make_request(
             "GET",
-            self.sync_endpoint,
+            "/sync",
             access_token=bob_access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -777,7 +818,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # which we hope will happen as a result of Alice updating their device list.
         bob_sync_channel = self.make_request(
             "GET",
-            f"{self.sync_endpoint}?since={next_batch_token}&timeout=30000",
+            f"/sync?since={next_batch_token}&timeout=30000",
             access_token=bob_access_token,
             # Start the request, then continue on.
             await_result=False,
@@ -824,7 +865,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # Have Bob initiate an initial sync (in order to get a since token)
         channel = self.make_request(
             "GET",
-            self.sync_endpoint,
+            "/sync",
             access_token=bob_access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -834,7 +875,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # which we hope will happen as a result of Alice updating their device list.
         bob_sync_channel = self.make_request(
             "GET",
-            f"{self.sync_endpoint}?since={next_batch_token}&timeout=1000",
+            f"/sync?since={next_batch_token}&timeout=1000",
             access_token=bob_access_token,
             # Start the request, then continue on.
             await_result=False,
@@ -873,9 +914,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
         next_batch = channel.json_body["next_batch"]
 
@@ -883,7 +922,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # It won't return until something has happened
         incremental_sync_channel = self.make_request(
             "GET",
-            f"{self.sync_endpoint}?since={next_batch}&timeout=30000",
+            f"/sync?since={next_batch}&timeout=30000",
             access_token=alice_access_token,
             await_result=False,
         )
@@ -913,17 +952,6 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         )
 
 
-@parameterized_class(
-    ("sync_endpoint", "experimental_features"),
-    [
-        ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
-    ],
-)
 class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device one time keys (`device_one_time_keys_count`) changes.
@@ -933,20 +961,12 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         experimental_features: The experimental features homeserver config to use.
     """
 
-    sync_endpoint: str
-    experimental_features: JsonDict
-
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        config["experimental_features"] = self.experimental_features
-        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
@@ -964,9 +984,7 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for those one time key counts
@@ -1011,9 +1029,7 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for those one time key counts
@@ -1024,17 +1040,6 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         )
 
 
-@parameterized_class(
-    ("sync_endpoint", "experimental_features"),
-    [
-        ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
-    ],
-)
 class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device one time keys (`device_unused_fallback_key_types`) changes.
@@ -1044,20 +1049,12 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
         experimental_features: The experimental features homeserver config to use.
     """
 
-    sync_endpoint: str
-    experimental_features: JsonDict
-
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        config["experimental_features"] = self.experimental_features
-        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = self.hs.get_datastores().main
@@ -1078,9 +1075,7 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for those one time key counts
@@ -1122,9 +1117,7 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(fallback_res, ["alg1"], fallback_res)
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for the unused fallback key types
@@ -1217,3 +1210,65 @@ class ExcludeRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertNotIn(self.excluded_room_id, channel.json_body["rooms"]["join"])
         self.assertIn(self.included_room_id, channel.json_body["rooms"]["join"])
+
+
+class SyncCancellationTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        room.register_servlets,
+    ]
+
+    def test_initial_sync(self) -> None:
+        """Tests that an initial sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_initial_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            "/_matrix/client/v3/sync",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+    def test_incremental_sync(self) -> None:
+        """Tests that an incremental sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        room_ids = []
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+            room_ids.append(room_id)
+
+        # Do an initial sync to get a since token.
+        channel = self.make_request("GET", "/sync", access_token=tok)
+        self.assertEqual(200, channel.code, msg=channel.result)
+        since = channel.json_body["next_batch"]
+
+        # Send some more messages to generate activity in the rooms.
+        for room_id in room_ids:
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_incremental_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            f"/_matrix/client/v3/sync?since={since}&timeout=10000",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])

@@ -21,13 +21,8 @@
 import itertools
 from typing import (
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
 )
 
@@ -38,16 +33,19 @@ from twisted.internet import defer
 from synapse.api.constants import EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.event_auth import auth_types_for_event
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.state.v2 import (
     _get_auth_chain_difference,
     _get_power_level_for_sender,
     lexicographical_topological_sort,
     resolve_events_with_store,
 )
+from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import EventID, StateMap
+from synapse.util.duration import Duration
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 
 ALICE = "@alice:example.com"
 BOB = "@bob:example.com"
@@ -65,8 +63,8 @@ ORIGIN_SERVER_TS = 0
 
 
 class FakeClock:
-    def sleep(self, msec: float) -> "defer.Deferred[None]":
-        return defer.succeed(None)
+    async def sleep(self, duration: Duration) -> None:
+        return None
 
 
 class FakeEvent:
@@ -82,7 +80,7 @@ class FakeEvent:
         id: str,
         sender: str,
         type: str,
-        state_key: Optional[str],
+        state_key: str | None,
         content: Mapping[str, object],
     ):
         self.node_id = id
@@ -93,15 +91,12 @@ class FakeEvent:
         self.content = content
         self.room_id = ROOM_ID
 
-    def to_event(self, auth_events: List[str], prev_events: List[str]) -> EventBase:
+    def to_event(self, auth_events: list[str], prev_events: list[str]) -> EventBase:
         """Given the auth_events and prev_events, convert to a Frozen Event
 
         Args:
             auth_events: list of event_ids
             prev_events: list of event_ids
-
-        Returns:
-            FrozenEvent
         """
         global ORIGIN_SERVER_TS
 
@@ -122,7 +117,7 @@ class FakeEvent:
         if self.state_key is not None:
             event_dict["state_key"] = self.state_key
 
-        return make_event_from_dict(event_dict)
+        return make_test_event(event_dict)
 
 
 # All graphs start with this set of events
@@ -460,9 +455,9 @@ class StateTestCase(unittest.TestCase):
 
     def do_check(
         self,
-        events: List[FakeEvent],
-        edges: List[List[str]],
-        expected_state_ids: List[str],
+        events: list[FakeEvent],
+        edges: list[list[str]],
+        expected_state_ids: list[str],
     ) -> None:
         """Take a list of events and edges and calculate the state of the
         graph at END, and asserts it matches `expected_state_ids`
@@ -475,9 +470,9 @@ class StateTestCase(unittest.TestCase):
                 the keys that haven't changed since START).
         """
         # We want to sort the events into topological order for processing.
-        graph: Dict[str, Set[str]] = {}
+        graph: dict[str, set[str]] = {}
 
-        fake_event_map: Dict[str, FakeEvent] = {}
+        fake_event_map: dict[str, FakeEvent] = {}
 
         for ev in itertools.chain(INITIAL_EVENTS, events):
             graph[ev.node_id] = set()
@@ -490,8 +485,8 @@ class StateTestCase(unittest.TestCase):
             for a, b in pairwise(edge_list):
                 graph[a].add(b)
 
-        event_map: Dict[str, EventBase] = {}
-        state_at_event: Dict[str, StateMap[str]] = {}
+        event_map: dict[str, EventBase] = {}
+        state_at_event: dict[str, StateMap[str]] = {}
 
         # We copy the map as the sort consumes the graph
         graph_copy = {k: set(v) for k, v in graph.items()}
@@ -528,7 +523,7 @@ class StateTestCase(unittest.TestCase):
             #    EventBuilder. But this is Hard because the relevant attributes are
             #    DictProperty[T] descriptors on EventBase but normal Ts on FakeEvent.
             # 2. Define a `GenericEvent` Protocol describing `FakeEvent` only, and
-            #    change this function to accept Union[Event, EventBase, EventBuilder].
+            #    change this function to accept Event | EventBase | EventBuilder.
             #    This seems reasonable to me, but mypy isn't happy. I think that's
             #    a mypy bug, see https://github.com/python/mypy/issues/5570
             # Instead, resort to a type-ignore.
@@ -567,7 +562,7 @@ class StateTestCase(unittest.TestCase):
 
 class LexicographicalTestCase(unittest.TestCase):
     def test_simple(self) -> None:
-        graph: Dict[str, Set[str]] = {
+        graph: dict[str, set[str]] = {
             "l": {"o"},
             "m": {"n", "o"},
             "n": {"o"},
@@ -734,7 +729,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -791,7 +790,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -858,7 +861,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -869,7 +876,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         on room version"""
         store = TestStateResolutionStore({})
         for room_version in [RoomVersions.V10, RoomVersions.V11]:
-            create_event = make_event_from_dict(
+            create_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -885,9 +892,9 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         else {}
                     ),
                 },
-                room_version,
+                room_version=room_version,
             )
-            member_event = make_event_from_dict(
+            member_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -899,9 +906,9 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                     "auth_events": [create_event.event_id],
                     "prev_events": [create_event.event_id],
                 },
-                room_version,
+                room_version=room_version,
             )
-            pl_event = make_event_from_dict(
+            pl_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -917,7 +924,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                     "auth_events": [create_event.event_id, member_event.event_id],
                     "prev_events": [member_event.event_id],
                 },
-                room_version,
+                room_version=room_version,
             )
 
             event_map = {
@@ -931,7 +938,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                 CHARLIE: 10,
             }
             for user_id, want_pl in want_pls.items():
-                test_event = make_event_from_dict(
+                test_event = make_test_event(
                     {
                         "room_id": ROOM_ID,
                         "sender": user_id,
@@ -945,7 +952,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         ],
                         "prev_events": [pl_event.event_id],
                     },
-                    room_version,
+                    room_version=room_version,
                 )
                 event_map[test_event.event_id] = test_event
                 got_pl = self.successResultOf(
@@ -968,7 +975,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                 CHARLIE: 0,
             }
             for user_id, want_pl in want_pls.items():
-                test_event = make_event_from_dict(
+                test_event = make_test_event(
                     {
                         "room_id": ROOM_ID,
                         "sender": user_id,
@@ -982,7 +989,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         ],
                         "prev_events": [pl_event.event_id],
                     },
-                    room_version,
+                    room_version=room_version,
                 )
                 got_pl = self.successResultOf(
                     defer.ensureDeferred(
@@ -1007,7 +1014,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
 T = TypeVar("T")
 
 
-def pairwise(iterable: Iterable[T]) -> Iterable[Tuple[T, T]]:
+def pairwise(iterable: Iterable[T]) -> Iterable[tuple[T, T]]:
     "s -> (s0,s1), (s1,s2), (s2, s3), ..."
     a, b = itertools.tee(iterable)
     next(b, None)
@@ -1016,11 +1023,11 @@ def pairwise(iterable: Iterable[T]) -> Iterable[Tuple[T, T]]:
 
 @attr.s
 class TestStateResolutionStore:
-    event_map: Dict[str, EventBase] = attr.ib()
+    event_map: dict[str, EventBase] = attr.ib()
 
     def get_events(
         self, event_ids: Collection[str], allow_rejected: bool = False
-    ) -> "defer.Deferred[Dict[str, EventBase]]":
+    ) -> "defer.Deferred[dict[str, EventBase]]":
         """Get events from the database
 
         Args:
@@ -1035,7 +1042,7 @@ class TestStateResolutionStore:
             {eid: self.event_map[eid] for eid in event_ids if eid in self.event_map}
         )
 
-    def _get_auth_chain(self, event_ids: Iterable[str]) -> List[str]:
+    def _get_auth_chain(self, event_ids: Iterable[str]) -> list[str]:
         """Gets the full auth chain for a set of events (including rejected
         events).
 
@@ -1070,9 +1077,18 @@ class TestStateResolutionStore:
         return list(result)
 
     def get_auth_chain_difference(
-        self, room_id: str, auth_sets: List[Set[str]]
-    ) -> "defer.Deferred[Set[str]]":
+        self,
+        room_id: str,
+        auth_sets: list[set[str]],
+        conflicted_state: set[str] | None,
+        additional_backwards_reachable_conflicted_events: set[str] | None,
+    ) -> "defer.Deferred[StateDifference]":
         chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 
         common = set(chains[0]).intersection(*chains[1:])
-        return defer.succeed(set(chains[0]).union(*chains[1:]) - common)
+        return defer.succeed(
+            StateDifference(
+                auth_difference=set(chains[0]).union(*chains[1:]) - common,
+                conflicted_subgraph=set(),
+            ),
+        )

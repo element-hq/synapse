@@ -22,14 +22,14 @@ import urllib.parse
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import MAX_DEVICE_DISPLAY_NAME_LEN, DeviceWriterHandler
 from synapse.rest.client import devices, login
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -42,7 +42,7 @@ class DeviceRestTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
+        assert isinstance(handler, DeviceWriterHandler)
         self.handler = handler
 
         self.admin_user = self.register_user("admin", "pass", admin=True)
@@ -175,10 +175,7 @@ class DeviceRestTestCase(unittest.HomeserverTestCase):
         )
 
         # Request to update a device display name with a new value that is longer than allowed.
-        update = {
-            "display_name": "a"
-            * (synapse.handlers.device.MAX_DEVICE_DISPLAY_NAME_LEN + 1)
-        }
+        update = {"display_name": "a" * (MAX_DEVICE_DISPLAY_NAME_LEN + 1)}
 
         channel = self.make_request(
             "PUT",
@@ -391,9 +388,7 @@ class DevicesRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(0, channel.json_body["total"])
         self.assertEqual(0, len(channel.json_body["devices"]))
 
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_get_devices(self) -> None:
         """
         Tests that a normal lookup for devices is successfully

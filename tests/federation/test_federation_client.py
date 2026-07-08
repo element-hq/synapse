@@ -23,14 +23,14 @@ from unittest import mock
 
 import twisted.web.client
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils import FakeResponse, event_injection
 from tests.unittest import FederatingHomeserverTestCase
@@ -73,6 +73,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {"creator": self.creator},
                 "prev_events": [],
                 "auth_events": [],
+                "depth": 1,
                 "origin_server_ts": 500,
             }
         )
@@ -85,6 +86,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {"membership": "join"},
                 "prev_events": [],
                 "auth_events": [],
+                "depth": 2,
                 "origin_server_ts": 600,
             }
         )
@@ -97,6 +99,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 "content": {},
                 "prev_events": [],
                 "auth_events": [],
+                "depth": 3,
                 "origin_server_ts": 700,
             }
         )

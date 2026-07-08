@@ -30,13 +30,7 @@ from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
-    Dict,
     Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Union,
 )
 
 import attr
@@ -71,13 +65,14 @@ from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.visibility import filter_events_for_server
 
@@ -90,7 +85,7 @@ logger = logging.getLogger(__name__)
 backfill_processing_before_timer = Histogram(
     "synapse_federation_backfill_processing_before_time_seconds",
     "sec",
-    [],
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(
         0.1,
         0.5,
@@ -108,6 +103,12 @@ backfill_processing_before_timer = Histogram(
         "+Inf",
     ),
 )
+
+
+NUMBER_OF_EVENTS_TO_BACKFILL = 100
+"""
+The number of events we try to backfill from other servers in a single request.
+"""
 
 
 # TODO: We can refactor this away now that there is only one backfill point again
@@ -159,7 +160,7 @@ class FederationHandler:
         self._notifier = hs.get_notifier()
         self._worker_locks = hs.get_worker_locks_handler()
 
-        self._room_backfill = Linearizer("room_backfill")
+        self._room_backfill = Linearizer(name="room_backfill", clock=self.clock)
 
         self._third_party_event_rules = (
             hs.get_module_api_callbacks().third_party_event_rules
@@ -168,26 +169,28 @@ class FederationHandler:
         # Tracks running partial state syncs by room ID.
         # Partial state syncs currently only run on the main process, so it's okay to
         # track them in-memory for now.
-        self._active_partial_state_syncs: Set[str] = set()
+        self._active_partial_state_syncs: set[str] = set()
         # Tracks partial state syncs we may want to restart.
         # A dictionary mapping room IDs to (initial destination, other destinations)
         # tuples.
-        self._partial_state_syncs_maybe_needing_restart: Dict[
-            str, Tuple[Optional[str], AbstractSet[str]]
+        self._partial_state_syncs_maybe_needing_restart: dict[
+            str, tuple[str | None, AbstractSet[str]]
         ] = {}
         # A lock guarding the partial state flag for rooms.
         # When the lock is held for a given room, no other concurrent code may
         # partial state or un-partial state the room.
         self._is_partial_state_room_linearizer = Linearizer(
-            name="_is_partial_state_room_linearizer"
+            name="_is_partial_state_room_linearizer",
+            clock=self.clock,
         )
 
         # if this is the main process, fire off a background process to resume
         # any partial-state-resync operations which were in flight when we
         # were shut down.
         if not hs.config.worker.worker_app:
-            run_as_background_process(
-                "resume_sync_partial_state_room", self._resume_partial_state_room_sync
+            self.hs.run_as_background_process(
+                "resume_sync_partial_state_room",
+                self._resume_partial_state_room_sync,
             )
 
     @trace
@@ -234,7 +237,7 @@ class FederationHandler:
         current_depth: int,
         limit: int,
         *,
-        processing_start_time: Optional[int],
+        processing_start_time: int | None,
     ) -> bool:
         """
         Checks whether the `current_depth` is at or approaching any backfill
@@ -245,7 +248,9 @@ class FederationHandler:
         Args:
             room_id: The room to backfill in.
             current_depth: The depth to check at for any upcoming backfill points.
-            limit: The max number of events to request from the remote federated server.
+            limit: The number of events that the pagination request will
+                return. This is used as part of the heuristic to decide if we
+                should back paginate.
             processing_start_time: The time when `maybe_backfill` started processing.
                 Only used for timing. If `None`, no timing observation will be made.
 
@@ -256,7 +261,9 @@ class FederationHandler:
             _BackfillPoint(event_id, depth, _BackfillPointType.BACKWARDS_EXTREMITY)
             for event_id, depth in await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=current_depth,
+                # Per the docstring, it's best to pad the `current_depth` by the
+                # number of messages you plan to backfill from these points.
+                nearby_depth=current_depth + NUMBER_OF_EVENTS_TO_BACKFILL,
                 # We only need to end up with 5 extremities combined with the
                 # insertion event extremities to make the `/backfill` request
                 # but fetch an order of magnitude more to make sure there is
@@ -268,11 +275,22 @@ class FederationHandler:
             )
         ]
 
-        # we now have a list of potential places to backpaginate from. We prefer to
-        # start with the most recent (ie, max depth), so let's sort the list.
-        sorted_backfill_points: List[_BackfillPoint] = sorted(
+        # we now have a list of potential places to backpaginate from. Figure out which
+        # ones we should prefer, so let's sort the list.
+        sorted_backfill_points: list[_BackfillPoint] = sorted(
             backwards_extremities,
-            key=lambda e: -int(e.depth),
+            key=lambda e: (
+                # Prefer backfill points that are closer to the `current_depth`
+                # (absolute distance)
+                abs(current_depth - e.depth),
+                # For the tie-break, we care about events that are actually in the past
+                # as they're more likely to reveal history that we can return (something
+                # absolutely in the past is better than something can potentially extend
+                # into the past).
+                #
+                # This sorts ascending so 0 sorts before 1
+                0 if current_depth >= e.depth else 1,
+            ),
         )
 
         logger.debug(
@@ -293,19 +311,20 @@ class FederationHandler:
             str(len(sorted_backfill_points)),
         )
 
-        # If we have no backfill points lower than the `current_depth` then either we
+        # If we have no backfill points lower than the `nearby_depth` then either we
         # can a) bail or b) still attempt to backfill. We opt to try backfilling anyway
         # just in case we do get relevant events. This is good for eventual consistency
         # sake but we don't need to block the client for something that is just as
         # likely not to return anything relevant so we backfill in the background. The
         # only way, this could return something relevant is if we discover a new branch
         # of history that extends all the way back to where we are currently paginating
-        # and it's within the 100 events that are returned from `/backfill`.
+        # and it's within the `NUMBER_OF_EVENTS_TO_BACKFILL` events that are returned
+        # from `/backfill`.
         if not sorted_backfill_points and current_depth != MAX_DEPTH:
             # Check that we actually have later backfill points, if not just return.
             have_later_backfill_points = await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=MAX_DEPTH,
+                nearby_depth=MAX_DEPTH,
                 limit=1,
             )
             if not have_later_backfill_points:
@@ -314,7 +333,7 @@ class FederationHandler:
             logger.debug(
                 "_maybe_backfill_inner: all backfill points are *after* current depth. Trying again with later backfill points."
             )
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "_maybe_backfill_inner_anyway_with_max_depth",
                 self.maybe_backfill,
                 room_id=room_id,
@@ -378,7 +397,7 @@ class FederationHandler:
         # there is it's often sufficiently long ago that clients would stop
         # attempting to paginate before backfill reached the visible history.
 
-        extremities_to_request: List[str] = []
+        extremities_to_request: list[str] = []
         for bp in sorted_backfill_points:
             if len(extremities_to_request) >= 5:
                 break
@@ -465,7 +484,10 @@ class FederationHandler:
 
                 try:
                     await self._federation_event_handler.backfill(
-                        dom, room_id, limit=100, extremities=extremities_to_request
+                        dom,
+                        room_id,
+                        limit=NUMBER_OF_EVENTS_TO_BACKFILL,
+                        extremities=extremities_to_request,
                     )
                     # If this succeeded then we probably already have the
                     # appropriate stuff.
@@ -530,9 +552,9 @@ class FederationHandler:
         # backfill points regardless of `current_depth`.
         if processing_start_time is not None:
             processing_end_time = self.clock.time_msec()
-            backfill_processing_before_timer.observe(
-                (processing_end_time - processing_start_time) / 1000
-            )
+            backfill_processing_before_timer.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe((processing_end_time - processing_start_time) / 1000)
 
         success = await try_backfill(likely_domains)
         if success:
@@ -560,7 +582,7 @@ class FederationHandler:
 
         return pdu
 
-    async def on_event_auth(self, event_id: str) -> List[EventBase]:
+    async def on_event_auth(self, event_id: str) -> list[EventBase]:
         event = await self.store.get_event(event_id)
         auth = await self.store.get_auth_chain(
             event.room_id, list(event.auth_event_ids()), include_given=True
@@ -569,7 +591,7 @@ class FederationHandler:
 
     async def do_invite_join(
         self, target_hosts: Iterable[str], room_id: str, joinee: str, content: JsonDict
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Attempts to join the `joinee` to the room `room_id` via the
         servers contained in `target_hosts`.
 
@@ -698,10 +720,19 @@ class FederationHandler:
                     #     We may want to reset the partial state info if it's from an
                     #     old, failed partial state join.
                     #     https://github.com/matrix-org/synapse/issues/13000
+
+                    # FIXME: Ideally, we would store the full stream token here
+                    # not just the minimum stream ID, so that we can compute an
+                    # accurate list of device changes when un-partial-ing the
+                    # room. The only side effect of this is that we may send
+                    # extra unecessary device list outbound pokes through
+                    # federation, which is harmless.
+                    device_lists_stream_id = self.store.get_device_stream_token().stream
+
                     await self.store.store_partial_state_room(
                         room_id=room_id,
                         servers=ret.servers_in_room,
-                        device_lists_stream_id=self.store.get_device_stream_token(),
+                        device_lists_stream_id=device_lists_stream_id,
                         joined_via=origin,
                     )
 
@@ -788,17 +819,19 @@ class FederationHandler:
             # lots of requests for missing prev_events which we do actually
             # have. Hence we fire off the background task, but don't wait for it.
 
-            run_as_background_process(
-                "handle_queued_pdus", self._handle_queued_pdus, room_queue
+            self.hs.run_as_background_process(
+                "handle_queued_pdus",
+                self._handle_queued_pdus,
+                room_queue,
             )
 
     async def do_knock(
         self,
-        target_hosts: List[str],
+        target_hosts: list[str],
         room_id: str,
         knockee: str,
         content: JsonDict,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Sends the knock to the remote server.
 
         This first triggers a make_knock request that returns a partial
@@ -827,7 +860,7 @@ class FederationHandler:
 
         # Ask the remote server to create a valid knock event for us. Once received,
         # we sign the event
-        params: Dict[str, Iterable[str]] = {"ver": supported_room_versions}
+        params: dict[str, Iterable[str]] = {"ver": supported_room_versions}
         origin, event, event_format_version = await self._make_and_verify_event(
             target_hosts, room_id, knockee, Membership.KNOCK, content, params=params
         )
@@ -876,7 +909,7 @@ class FederationHandler:
         return event.event_id, stream_id
 
     async def _handle_queued_pdus(
-        self, room_queue: List[Tuple[EventBase, str]]
+        self, room_queue: list[tuple[EventBase, str]]
     ) -> None:
         """Process PDUs which got queued up while we were busy send_joining.
 
@@ -1131,7 +1164,7 @@ class FederationHandler:
 
     async def do_remotely_reject_invite(
         self, target_hosts: Iterable[str], room_id: str, user_id: str, content: JsonDict
-    ) -> Tuple[EventBase, int]:
+    ) -> tuple[EventBase, int]:
         origin, event, room_version = await self._make_and_verify_event(
             target_hosts, room_id, user_id, "leave", content=content
         )
@@ -1165,8 +1198,8 @@ class FederationHandler:
         user_id: str,
         membership: str,
         content: JsonDict,
-        params: Optional[Dict[str, Union[str, Iterable[str]]]] = None,
-    ) -> Tuple[str, EventBase, RoomVersion]:
+        params: dict[str, str | Iterable[str]] | None = None,
+    ) -> tuple[str, EventBase, RoomVersion]:
         (
             origin,
             event,
@@ -1180,7 +1213,7 @@ class FederationHandler:
         # We should assert some things.
         # FIXME: Do this in a nicer way
         assert event.type == EventTypes.Member
-        assert event.user_id == user_id
+        assert event.sender == user_id
         assert event.state_key == user_id
         assert event.room_id == room_id
         return origin, event, room_version
@@ -1293,7 +1326,7 @@ class FederationHandler:
 
     @trace
     @tag_args
-    async def get_state_ids_for_pdu(self, room_id: str, event_id: str) -> List[str]:
+    async def get_state_ids_for_pdu(self, room_id: str, event_id: str) -> list[str]:
         """Returns the state at the event. i.e. not including said event."""
         event = await self.store.get_event(event_id, check_room_id=room_id)
         if event.internal_metadata.outlier:
@@ -1326,8 +1359,8 @@ class FederationHandler:
         return list(state_map.values())
 
     async def on_backfill_request(
-        self, origin: str, room_id: str, pdu_list: List[str], limit: int
-    ) -> List[EventBase]:
+        self, origin: str, room_id: str, pdu_list: list[str], limit: int
+    ) -> list[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
         await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
@@ -1362,9 +1395,7 @@ class FederationHandler:
 
         return events
 
-    async def get_persisted_pdu(
-        self, origin: str, event_id: str
-    ) -> Optional[EventBase]:
+    async def get_persisted_pdu(self, origin: str, event_id: str) -> EventBase | None:
         """Get an event from the database for the given server.
 
         Args:
@@ -1403,10 +1434,10 @@ class FederationHandler:
         self,
         origin: str,
         room_id: str,
-        earliest_events: List[str],
-        latest_events: List[str],
+        earliest_events: list[str],
+        latest_events: list[str],
         limit: int,
-    ) -> List[EventBase]:
+    ) -> list[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
         await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
@@ -1589,7 +1620,7 @@ class FederationHandler:
         event_dict: JsonDict,
         event: EventBase,
         context: UnpersistedEventContextBase,
-    ) -> Tuple[EventBase, UnpersistedEventContextBase]:
+    ) -> tuple[EventBase, UnpersistedEventContextBase]:
         key = (
             EventTypes.ThirdPartyInvite,
             event.content["third_party_invite"]["signed"]["token"],
@@ -1661,7 +1692,7 @@ class FederationHandler:
 
         logger.debug("Checking auth on event %r", event.content)
 
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
 
         # for each public key in the 3pid invite event
         for public_key_object in event_auth.get_public_keys(invite_event):
@@ -1745,8 +1776,8 @@ class FederationHandler:
             raise AuthError(403, "Third party certificate was invalid")
 
     async def get_room_complexity(
-        self, remote_room_hosts: List[str], room_id: str
-    ) -> Optional[dict]:
+        self, remote_room_hosts: list[str], room_id: str
+    ) -> dict | None:
         """
         Fetch the complexity of a remote room over federation.
 
@@ -1782,9 +1813,13 @@ class FederationHandler:
                 room_id=room_id,
             )
 
+            # We don't start all the partial state room syncs at once, to avoid
+            # overloading the process.
+            await self.clock.sleep(Duration(milliseconds=10))
+
     def _start_partial_state_room_sync(
         self,
-        initial_destination: Optional[str],
+        initial_destination: str | None,
         other_destinations: AbstractSet[str],
         room_id: str,
     ) -> None:
@@ -1860,13 +1895,14 @@ class FederationHandler:
                             room_id=room_id,
                         )
 
-        run_as_background_process(
-            desc="sync_partial_state_room", func=_sync_partial_state_room_wrapper
+        self.hs.run_as_background_process(
+            desc="sync_partial_state_room",
+            func=_sync_partial_state_room_wrapper,
         )
 
     async def _sync_partial_state_room(
         self,
-        initial_destination: Optional[str],
+        initial_destination: str | None,
         other_destinations: AbstractSet[str],
         room_id: str,
     ) -> None:
@@ -1966,7 +2002,9 @@ class FederationHandler:
                                 logger.warning(
                                     "%s; waiting for %d ms...", e, e.retry_after_ms
                                 )
-                                await self.clock.sleep(e.retry_after_ms / 1000)
+                                await self.clock.sleep(
+                                    Duration(milliseconds=e.retry_after_ms)
+                                )
 
                         # Success, no need to try the rest of the destinations.
                         break
@@ -2008,7 +2046,7 @@ class FederationHandler:
 
 
 def _prioritise_destinations_for_partial_state_resync(
-    initial_destination: Optional[str],
+    initial_destination: str | None,
     other_destinations: AbstractSet[str],
     room_id: str,
 ) -> StrCollection:

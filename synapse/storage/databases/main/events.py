@@ -27,14 +27,9 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Collection,
-    Dict,
     Generator,
     Iterable,
-    List,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
     TypedDict,
     cast,
 )
@@ -51,10 +46,18 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, StrippedStateEvent, relation_from_event
-from synapse.events.snapshot import EventContext
+from synapse.events import (
+    EventBase,
+    StrippedStateEvent,
+    event_exists_in_state_dag,
+    is_creator,
+    relation_from_event,
+)
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
+from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -73,13 +76,12 @@ from synapse.types import (
     MutableStateMap,
     StateMap,
     StrCollection,
-    get_domain_from_id,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
-from synapse.util import json_encoder
 from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import non_null_str_or_none
 
 if TYPE_CHECKING:
@@ -89,12 +91,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-persist_event_counter = Counter("synapse_storage_events_persisted_events", "")
+persist_event_counter = Counter(
+    "synapse_storage_events_persisted_events", "", labelnames=[SERVER_NAME_LABEL]
+)
 event_counter = Counter(
     "synapse_storage_events_persisted_events_sep",
     "",
-    ["type", "origin_type", "origin_entity"],
+    labelnames=[
+        "type",  # The event type or "*other*" for types we don't track
+        "origin_type",
+        SERVER_NAME_LABEL,
+    ],
 )
+
+# Event types that we track in the `events_counter` metric above.
+#
+# This list is chosen to balance tracking the most common event types that are
+# useful to monitor (and are likely to spike), while keeping the cardinality of
+# the metric low enough to avoid wasted resources.
+TRACKED_EVENT_TYPES = {
+    EventTypes.Message,
+    EventTypes.Encrypted,
+    EventTypes.Member,
+    EventTypes.ThirdPartyInvite,
+    EventTypes.Redaction,
+    EventTypes.Create,
+    EventTypes.Tombstone,
+}
 
 # State event type/key pairs that we need to gather to fill in the
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
@@ -121,7 +144,7 @@ class DeltaState:
             should e.g. be removed from `current_state_events` table.
     """
 
-    to_delete: List[Tuple[str, str]]
+    to_delete: list[tuple[str, str]]
     to_insert: StateMap[str]
     no_longer_in_room: bool = False
 
@@ -137,10 +160,10 @@ class SlidingSyncStateInsertValues(TypedDict, total=False):
     `sliding_sync_membership_snapshots` database tables.
     """
 
-    room_type: Optional[str]
-    is_encrypted: Optional[bool]
-    room_name: Optional[str]
-    tombstone_successor_room_id: Optional[str]
+    room_type: str | None
+    is_encrypted: bool | None
+    room_name: str | None
+    tombstone_successor_room_id: str | None
 
 
 class SlidingSyncMembershipSnapshotSharedInsertValues(
@@ -151,7 +174,7 @@ class SlidingSyncMembershipSnapshotSharedInsertValues(
     multiple memberships
     """
 
-    has_known_state: Optional[bool]
+    has_known_state: bool | None
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -189,7 +212,7 @@ class SlidingSyncTableChanges:
     # foreground update for
     # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
     # https://github.com/element-hq/synapse/issues/17623)
-    joined_room_bump_stamp_to_fully_insert: Optional[int]
+    joined_room_bump_stamp_to_fully_insert: int | None
     # Values to upsert into `sliding_sync_joined_rooms`
     joined_room_updates: SlidingSyncStateInsertValues
 
@@ -199,9 +222,9 @@ class SlidingSyncTableChanges:
         SlidingSyncMembershipSnapshotSharedInsertValues
     )
     # List of membership to insert into `sliding_sync_membership_snapshots`
-    to_insert_membership_snapshots: List[SlidingSyncMembershipInfo]
+    to_insert_membership_snapshots: list[SlidingSyncMembershipInfo]
     # List of user_id to delete from `sliding_sync_membership_snapshots`
-    to_delete_membership_snapshots: List[str]
+    to_delete_membership_snapshots: list[str]
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -218,7 +241,7 @@ class NewEventChainLinks:
     chain_id: int
     sequence_number: int
 
-    links: List[Tuple[int, int]] = attr.Factory(list)
+    links: list[tuple[int, int]] = attr.Factory(list)
 
 
 class PersistEventsStore:
@@ -237,11 +260,13 @@ class PersistEventsStore:
         db_conn: LoggingDatabaseConnection,
     ):
         self.hs = hs
+        self.server_name = hs.hostname
         self.db_pool = db
         self.store = main_data_store
         self.database_engine = db.engine
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -265,13 +290,14 @@ class PersistEventsStore:
     async def _persist_events_and_state_updates(
         self,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
         *,
-        state_delta_for_room: Optional[DeltaState],
-        new_forward_extremities: Optional[Set[str]],
-        new_event_links: Dict[str, NewEventChainLinks],
+        state_delta_for_room: DeltaState | None,
+        new_forward_extremities: set[str] | None,
+        new_event_links: dict[str, NewEventChainLinks],
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
+        new_state_dag_forward_extremities: set[str] | None = None,
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -292,6 +318,8 @@ class PersistEventsStore:
                 from being updated by these events. This should be set to True
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
+            new_state_dag_forward_extremities: A set of event IDs that are the new forward
+                extremities for the state DAG for this room. MSC4242 only.
 
         Returns:
             Resolves when the events have been persisted
@@ -356,36 +384,177 @@ class PersistEventsStore:
                 new_forward_extremities=new_forward_extremities,
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
+                new_state_dag_forward_extremities=new_state_dag_forward_extremities,
             )
-            persist_event_counter.inc(len(events_and_contexts))
+            persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+                len(events_and_contexts)
+            )
 
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
                 # stream_ordering.
-                synapse.metrics.event_persisted_position.set(stream)
+                synapse.metrics.event_persisted_position.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).set(stream)
 
             for event, context in events_and_contexts:
                 if context.app_service:
-                    origin_type = "local"
-                    origin_entity = context.app_service.id
+                    origin_type = "application_service"
                 elif self.hs.is_mine_id(event.sender):
                     origin_type = "local"
-                    origin_entity = "*client*"
                 else:
                     origin_type = "remote"
-                    origin_entity = get_domain_from_id(event.sender)
 
-                event_counter.labels(event.type, origin_type, origin_entity).inc()
+                # We only track a subset of event types, to avoid high
+                # cardinality in the metrics.
+                metrics_event_type = (
+                    event.type if event.type in TRACKED_EVENT_TYPES else "*other*"
+                )
+
+                event_counter.labels(
+                    type=metrics_event_type,
+                    origin_type=origin_type,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc()
+
+                if (
+                    not self.hs.config.experimental.msc4293_enabled
+                    or event.type != EventTypes.Member
+                    or event.state_key is None
+                ):
+                    continue
+
+                # check if this is an unban/join that will undo a ban/kick redaction for
+                # a user in the room
+                if event.membership in [Membership.LEAVE, Membership.JOIN]:
+                    if (
+                        event.membership == Membership.LEAVE
+                        and event.sender == event.state_key
+                    ):
+                        # self-leave, ignore
+                        continue
+
+                    # if there is an existing ban/leave causing redactions for
+                    # this user/room combination update the entry with the stream
+                    # ordering when the redactions should stop - in the case of a backfilled
+                    # event where the stream ordering is negative, use the current max stream
+                    # ordering
+                    stream_ordering = event.internal_metadata.stream_ordering
+                    assert stream_ordering is not None
+                    if stream_ordering < 0:
+                        stream_ordering = self._stream_id_gen.get_current_token()
+                    await self.db_pool.simple_update(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        {"redact_end_ordering": stream_ordering},
+                        desc="room_ban_redactions update redact_end_ordering",
+                    )
+
+                # check for msc4293 redact_events flag and apply if found
+                if event.membership not in [Membership.LEAVE, Membership.BAN]:
+                    continue
+                redact = event.content.get("org.matrix.msc4293.redact_events", False)
+                if not redact or not isinstance(redact, bool):
+                    continue
+                # self-bans currently are not authorized so we don't check for that
+                # case
+                if (
+                    event.membership == Membership.BAN
+                    and event.sender == event.state_key
+                ):
+                    continue
+
+                # check that sender can redact
+                redact_allowed = await self._can_sender_redact(event)
+
+                # Signal that this user's past events in this room
+                # should be redacted by adding an entry to
+                # `room_ban_redactions`.
+                if redact_allowed:
+                    await self.db_pool.simple_upsert(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        {
+                            "redacting_event_id": event.event_id,
+                            "redact_end_ordering": None,
+                        },
+                        {
+                            "room_id": event.room_id,
+                            "user_id": event.state_key,
+                            "redacting_event_id": event.event_id,
+                            "redact_end_ordering": None,
+                        },
+                    )
+
+                    # normally the cache entry for a redacted event would be invalidated
+                    # by an arriving redaction event, but since we are not creating redaction
+                    # events we invalidate manually
+                    self.store._invalidate_local_get_event_cache_room_id(event.room_id)
+
+                    self.store._invalidate_async_get_event_cache_room_id(event.room_id)
 
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
                     (room_id,), frozenset(new_forward_extremities)
                 )
 
+    async def _can_sender_redact(self, event: EventBase) -> bool:
+        state_filter = StateFilter.from_types(
+            [(EventTypes.PowerLevels, ""), (EventTypes.Create, "")]
+        )
+        state = await self.store.get_partial_filtered_current_state_ids(
+            event.room_id, state_filter
+        )
+        pl_id = state[(EventTypes.PowerLevels, "")]
+        pl_event = await self.store.get_event(pl_id, allow_none=True)
+
+        create_id = state[(EventTypes.Create, "")]
+        create_event = await self.store.get_event(create_id, allow_none=True)
+
+        if create_event is None:
+            # not sure how this would happen but if it does then just deny the redaction
+            logger.warning("No create event found for room %s", event.room_id)
+            return False
+
+        if create_event.room_version.msc4289_creator_power_enabled:
+            # per the spec, grant the creator infinite power level and all other users 0
+            if is_creator(create_event, event.sender):
+                return True
+            if pl_event is None:
+                # per the spec, users other than the room creator have power level
+                # 0, which is less than the default to redact events (50).
+                return False
+        else:
+            # per the spec, if a power level event isn't in the room, grant the creator
+            # level 100 (the default redaction level is 50) and all other users 0
+            if pl_event is None:
+                return create_event.sender == event.sender
+
+        assert pl_event is not None
+        sender_level = pl_event.content.get("users", {}).get(event.sender)
+        if sender_level is None:
+            sender_level = pl_event.content.get("users_default", 0)
+
+        redact_level = pl_event.content.get("redact")
+        if redact_level is None:
+            redact_level = pl_event.content.get("events_default", 0)
+
+        room_redaction_level = pl_event.content.get("events", {}).get(
+            "m.room.redaction"
+        )
+        if room_redaction_level is not None:
+            if sender_level < room_redaction_level:
+                return False
+
+        if sender_level >= redact_level:
+            return True
+
+        return False
+
     async def _calculate_sliding_sync_table_changes(
         self,
         room_id: str,
-        events_and_contexts: Sequence[Tuple[EventBase, EventContext]],
+        events_and_contexts: Sequence[EventPersistencePair],
         delta_state: DeltaState,
     ) -> SlidingSyncTableChanges:
         """
@@ -438,21 +607,21 @@ class PersistEventsStore:
         ]
 
         membership_snapshot_shared_insert_values: SlidingSyncMembershipSnapshotSharedInsertValues = {}
-        membership_infos_to_insert_membership_snapshots: List[
+        membership_infos_to_insert_membership_snapshots: list[
             SlidingSyncMembershipInfo
         ] = []
         if to_insert:
-            membership_event_id_to_user_id_map: Dict[str, str] = {}
+            membership_event_id_to_user_id_map: dict[str, str] = {}
             for state_key, event_id in to_insert.items():
                 if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
-            membership_event_map: Dict[str, EventBase] = {}
+            membership_event_map: dict[str, EventBase] = {}
             # In normal event persist scenarios, we should be able to find the
             # membership events in the `events_and_contexts` given to us but it's
             # possible a state reset happened which added us to the room without a
             # corresponding new membership event (reset back to a previous membership).
-            missing_membership_event_ids: Set[str] = set()
+            missing_membership_event_ids: set[str] = set()
             for membership_event_id in membership_event_id_to_user_id_map.keys():
                 membership_event = event_map.get(membership_event_id)
                 if membership_event:
@@ -521,7 +690,7 @@ class PersistEventsStore:
                 # these state events in `events_and_contexts` since we don't generally
                 # batch up local membership changes with other events, but it can
                 # happen.
-                missing_state_event_ids: Set[str] = set()
+                missing_state_event_ids: set[str] = set()
                 for state_key, event_id in current_state_ids_map.items():
                     event = event_map.get(event_id)
                     if event:
@@ -574,7 +743,7 @@ class PersistEventsStore:
         # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
         #
         joined_room_updates: SlidingSyncStateInsertValues = {}
-        bump_stamp_to_fully_insert: Optional[int] = None
+        bump_stamp_to_fully_insert: int | None = None
         if not delta_state.no_longer_in_room:
             current_state_ids_map = {}
 
@@ -633,7 +802,7 @@ class PersistEventsStore:
             # events in the `events_and_contexts` given to us but it's possible a state
             # reset happened which that reset back to a previous state.
             current_state_map = {}
-            missing_event_ids: Set[str] = set()
+            missing_event_ids: set[str] = set()
             for state_key, event_id in current_state_ids_map.items():
                 event = event_map.get(event_id)
                 if event:
@@ -679,7 +848,7 @@ class PersistEventsStore:
 
     async def calculate_chain_cover_index_for_events(
         self, room_id: str, events: Collection[EventBase]
-    ) -> Dict[str, NewEventChainLinks]:
+    ) -> dict[str, NewEventChainLinks]:
         # Filter to state events, and ensure there are no duplicates.
         state_events = []
         seen_events = set()
@@ -702,7 +871,7 @@ class PersistEventsStore:
 
     def calculate_chain_cover_index_for_events_txn(
         self, txn: LoggingTransaction, room_id: str, state_events: Collection[EventBase]
-    ) -> Dict[str, NewEventChainLinks]:
+    ) -> dict[str, NewEventChainLinks]:
         # We now calculate chain ID/sequence numbers for any state events we're
         # persisting. We ignore out of band memberships as we're not in the room
         # and won't have their auth chain (we'll fix it up later if we join the
@@ -746,7 +915,9 @@ class PersistEventsStore:
         # instances as we'll potentially be pulling more events from the DB and
         # we don't need the overhead of fetching/parsing the full event JSON.
         event_to_types = {e.event_id: (e.type, e.state_key) for e in state_events}
-        event_to_auth_chain = {e.event_id: e.auth_event_ids() for e in state_events}
+        event_to_auth_chain: dict[str, StrCollection] = {
+            e.event_id: e.auth_event_ids() for e in state_events
+        }
         event_to_room_id = {e.event_id: e.room_id for e in state_events}
 
         return self._calculate_chain_cover_index(
@@ -758,7 +929,7 @@ class PersistEventsStore:
             event_to_auth_chain,
         )
 
-    async def _get_events_which_are_prevs(self, event_ids: Iterable[str]) -> List[str]:
+    async def _get_events_which_are_prevs(self, event_ids: Iterable[str]) -> list[str]:
         """Filter the supplied list of event_ids to get those which are prev_events of
         existing (non-outlier/rejected) events.
 
@@ -768,7 +939,7 @@ class PersistEventsStore:
         Returns:
             Filtered event ids
         """
-        results: List[str] = []
+        results: list[str] = []
 
         def _get_events_which_are_prevs_txn(
             txn: LoggingTransaction, batch: Collection[str]
@@ -799,8 +970,10 @@ class PersistEventsStore:
 
         return results
 
-    async def _get_prevs_before_rejected(self, event_ids: Iterable[str]) -> Set[str]:
-        """Get soft-failed ancestors to remove from the extremities.
+    async def _get_prevs_before_rejected(
+        self, event_ids: Iterable[str], include_soft_failed: bool = True
+    ) -> set[str]:
+        """Get soft-failed/rejected ancestors to remove from the extremities.
 
         Given a set of events, find all those that have been soft-failed or
         rejected. Returns those soft failed/rejected events and their prev
@@ -813,14 +986,15 @@ class PersistEventsStore:
         Args:
             event_ids: Events to find prev events for. Note that these must have
                 already been persisted.
-
+            include_soft_failed: Soft-failed events are included in the search. If false, only
+                rejected events are included.
         Returns:
             The previous events.
         """
 
         # The set of event_ids to return. This includes all soft-failed events
         # and their prev events.
-        existing_prevs: Set[str] = set()
+        existing_prevs: set[str] = set()
 
         def _get_prevs_before_rejected_txn(
             txn: LoggingTransaction, batch: Collection[str]
@@ -853,7 +1027,7 @@ class PersistEventsStore:
                         continue
 
                     soft_failed = db_to_json(metadata).get("soft_failed")
-                    if soft_failed or rejected:
+                    if (include_soft_failed and soft_failed) or rejected:
                         to_recursively_check.append(prev_event_id)
                         existing_prevs.add(prev_event_id)
 
@@ -869,12 +1043,13 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         *,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
         inhibit_local_membership_updates: bool,
-        state_delta_for_room: Optional[DeltaState],
-        new_forward_extremities: Optional[Set[str]],
-        new_event_links: Dict[str, NewEventChainLinks],
-        sliding_sync_table_changes: Optional[SlidingSyncTableChanges],
+        state_delta_for_room: DeltaState | None,
+        new_forward_extremities: set[str] | None,
+        new_event_links: dict[str, NewEventChainLinks],
+        sliding_sync_table_changes: SlidingSyncTableChanges | None,
+        new_state_dag_forward_extremities: set[str] | None = None,
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -983,6 +1158,11 @@ class PersistEventsStore:
                 max_stream_order=max_stream_order,
             )
 
+        if new_state_dag_forward_extremities:
+            self._set_state_dag_extremities_txn(
+                txn, room_id, new_state_dag_forward_extremities
+            )
+
         self._persist_transaction_ids_txn(txn, events_and_contexts)
 
         # Insert into event_to_state_groups.
@@ -1023,6 +1203,11 @@ class PersistEventsStore:
                 sliding_sync_table_changes,
             )
 
+        if self._msc4354_enabled:
+            self.store.insert_sticky_events_txn(
+                txn, [ev for ev, _ in events_and_contexts]
+            )
+
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
             txn, room_id, events_and_contexts
@@ -1031,8 +1216,8 @@ class PersistEventsStore:
     def _persist_event_auth_chain_txn(
         self,
         txn: LoggingTransaction,
-        events: List[EventBase],
-        new_event_links: Dict[str, NewEventChainLinks],
+        events: list[EventBase],
+        new_event_links: dict[str, NewEventChainLinks],
     ) -> None:
         if new_event_links:
             self._persist_chain_cover_index(txn, self.db_pool, new_event_links)
@@ -1065,9 +1250,9 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         db_pool: DatabasePool,
         event_chain_id_gen: SequenceGenerator,
-        event_to_room_id: Dict[str, str],
-        event_to_types: Dict[str, Tuple[str, str]],
-        event_to_auth_chain: Dict[str, StrCollection],
+        event_to_room_id: dict[str, str],
+        event_to_types: dict[str, tuple[str, str]],
+        event_to_auth_chain: dict[str, StrCollection],
     ) -> None:
         """Calculate and persist the chain cover index for the given events.
 
@@ -1094,10 +1279,10 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         db_pool: DatabasePool,
         event_chain_id_gen: SequenceGenerator,
-        event_to_room_id: Dict[str, str],
-        event_to_types: Dict[str, Tuple[str, str]],
-        event_to_auth_chain: Dict[str, StrCollection],
-    ) -> Dict[str, NewEventChainLinks]:
+        event_to_room_id: dict[str, str],
+        event_to_types: dict[str, tuple[str, str]],
+        event_to_auth_chain: dict[str, StrCollection],
+    ) -> dict[str, NewEventChainLinks]:
         """Calculate the chain cover index for the given events.
 
         Args:
@@ -1112,7 +1297,7 @@ class PersistEventsStore:
         """
 
         # Map from event ID to chain ID/sequence number.
-        chain_map: Dict[str, Tuple[int, int]] = {}
+        chain_map: dict[str, tuple[int, int]] = {}
 
         # Set of event IDs to calculate chain ID/seq numbers for.
         events_to_calc_chain_id_for = set(event_to_room_id)
@@ -1121,7 +1306,7 @@ class PersistEventsStore:
         # we're looking at. These should just be out of band memberships, where
         # we didn't have the auth chain when we first persisted.
         auth_chain_to_calc_rows = cast(
-            List[Tuple[str, str, str]],
+            list[tuple[str, str, str]],
             db_pool.simple_select_many_txn(
                 txn,
                 table="event_auth_chain_to_calculate",
@@ -1343,7 +1528,7 @@ class PersistEventsStore:
         cls,
         txn: LoggingTransaction,
         db_pool: DatabasePool,
-        new_event_links: Dict[str, NewEventChainLinks],
+        new_event_links: dict[str, NewEventChainLinks],
     ) -> None:
         db_pool.simple_insert_many_txn(
             txn,
@@ -1389,12 +1574,12 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         db_pool: DatabasePool,
         event_chain_id_gen: SequenceGenerator,
-        event_to_room_id: Dict[str, str],
-        event_to_types: Dict[str, Tuple[str, str]],
-        event_to_auth_chain: Dict[str, StrCollection],
-        events_to_calc_chain_id_for: Set[str],
-        chain_map: Dict[str, Tuple[int, int]],
-    ) -> Dict[str, Tuple[int, int]]:
+        event_to_room_id: dict[str, str],
+        event_to_types: dict[str, tuple[str, str]],
+        event_to_auth_chain: dict[str, StrCollection],
+        events_to_calc_chain_id_for: set[str],
+        chain_map: dict[str, tuple[int, int]],
+    ) -> dict[str, tuple[int, int]]:
         """Allocates, but does not persist, chain ID/sequence numbers for the
         events in `events_to_calc_chain_id_for`. (c.f. _add_chain_cover_index
         for info on args)
@@ -1426,8 +1611,8 @@ class PersistEventsStore:
         #      new chain if the sequence number has already been allocated.
         #
 
-        existing_chains: Set[int] = set()
-        tree: List[Tuple[str, Optional[str]]] = []
+        existing_chains: set[int] = set()
+        tree: list[tuple[str, str | None]] = []
 
         # We need to do this in a topologically sorted order as we want to
         # generate chain IDs/sequence numbers of an event's auth events before
@@ -1457,7 +1642,7 @@ class PersistEventsStore:
         )
         txn.execute(sql % (clause,), args)
 
-        chain_to_max_seq_no: Dict[Any, int] = {row[0]: row[1] for row in txn}
+        chain_to_max_seq_no: dict[Any, int] = {row[0]: row[1] for row in txn}
 
         # Allocate the new events chain ID/sequence numbers.
         #
@@ -1467,8 +1652,8 @@ class PersistEventsStore:
         # number of new chain IDs in one call, replacing all temporary
         # objects with real allocated chain IDs.
 
-        unallocated_chain_ids: Set[object] = set()
-        new_chain_tuples: Dict[str, Tuple[Any, int]] = {}
+        unallocated_chain_ids: set[object] = set()
+        new_chain_tuples: dict[str, tuple[Any, int]] = {}
         for event_id, auth_event_id in tree:
             # If we reference an auth_event_id we fetch the allocated chain ID,
             # either from the existing `chain_map` or the newly generated
@@ -1479,7 +1664,7 @@ class PersistEventsStore:
                 if not existing_chain_id:
                     existing_chain_id = chain_map[auth_event_id]
 
-            new_chain_tuple: Optional[Tuple[Any, int]] = None
+            new_chain_tuple: tuple[Any, int] | None = None
             if existing_chain_id:
                 # We found a chain ID/sequence number candidate, check its
                 # not already taken.
@@ -1506,7 +1691,7 @@ class PersistEventsStore:
         )
 
         # Map from potentially temporary chain ID to real chain ID
-        chain_id_to_allocated_map: Dict[Any, int] = dict(
+        chain_id_to_allocated_map: dict[Any, int] = dict(
             zip(unallocated_chain_ids, newly_allocated_chain_ids)
         )
         chain_id_to_allocated_map.update((c, c) for c in existing_chains)
@@ -1519,12 +1704,12 @@ class PersistEventsStore:
     def _persist_transaction_ids_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
     ) -> None:
         """Persist the mapping from transaction IDs to event IDs (if defined)."""
 
         inserted_ts = self._clock.time_msec()
-        to_insert_device_id: List[Tuple[str, str, str, str, str, int]] = []
+        to_insert_device_id: list[tuple[str, str, str, str, str, int]] = []
         for event, _ in events_and_contexts:
             txn_id = getattr(event.internal_metadata, "txn_id", None)
             device_id = getattr(event.internal_metadata, "device_id", None)
@@ -1752,7 +1937,7 @@ class PersistEventsStore:
                     sliding_sync_table_changes.joined_room_updates.values()
                 )
 
-                args: List[Any] = [
+                args: list[Any] = [
                     room_id,
                     room_id,
                     sliding_sync_table_changes.joined_room_bump_stamp_to_fully_insert,
@@ -2169,7 +2354,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
     ) -> None:
         """
         Update the latest `event_stream_ordering`/`bump_stamp` columns in the
@@ -2280,7 +2465,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         room_id: str,
-        new_forward_extremities: Set[str],
+        new_forward_extremities: set[str],
         max_stream_order: int,
     ) -> None:
         self.db_pool.simple_delete_txn(
@@ -2307,10 +2492,33 @@ class PersistEventsStore:
             ],
         )
 
+    def _set_state_dag_extremities_txn(
+        self, txn: LoggingTransaction, room_id: str, new_extrems: Collection[str]
+    ) -> None:
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="msc4242_state_dag_forward_extremities",
+            keyvalues={
+                "room_id": room_id,
+            },
+        )
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            table="msc4242_state_dag_forward_extremities",
+            keys=("room_id", "event_id"),
+            values=[
+                (
+                    room_id,
+                    event_id,
+                )
+                for event_id in new_extrems
+            ],
+        )
+
     @classmethod
     def _filter_events_and_contexts_for_duplicates(
-        cls, events_and_contexts: List[Tuple[EventBase, EventContext]]
-    ) -> List[Tuple[EventBase, EventContext]]:
+        cls, events_and_contexts: list[EventPersistencePair]
+    ) -> list[EventPersistencePair]:
         """Ensure that we don't have the same event twice.
 
         Pick the earliest non-outlier if there is one, else the earliest one.
@@ -2321,9 +2529,7 @@ class PersistEventsStore:
         Returns:
             filtered list
         """
-        new_events_and_contexts: OrderedDict[str, Tuple[EventBase, EventContext]] = (
-            OrderedDict()
-        )
+        new_events_and_contexts: OrderedDict[str, EventPersistencePair] = OrderedDict()
         for event, context in events_and_contexts:
             prev_event_context = new_events_and_contexts.get(event.event_id)
             if prev_event_context:
@@ -2341,7 +2547,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
     ) -> None:
         """Update min_depth for each room
 
@@ -2350,7 +2556,7 @@ class PersistEventsStore:
             room_id: The room ID
             events_and_contexts: events we are persisting
         """
-        stream_ordering: Optional[int] = None
+        stream_ordering: int | None = None
         depth_update = 0
         for event, context in events_and_contexts:
             # Don't update the stream ordering for backfilled events because
@@ -2383,8 +2589,8 @@ class PersistEventsStore:
     def _update_outliers_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-    ) -> List[Tuple[EventBase, EventContext]]:
+        events_and_contexts: list[EventPersistencePair],
+    ) -> list[EventPersistencePair]:
         """Update any outliers with new event info.
 
         This turns outliers into ex-outliers (unless the new event was rejected), and
@@ -2402,7 +2608,7 @@ class PersistEventsStore:
                 a room that has been un-partial stated.
         """
         rows = cast(
-            List[Tuple[str, bool]],
+            list[tuple[str, bool]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 "events",
@@ -2486,12 +2692,17 @@ class PersistEventsStore:
                 # event isn't an outlier any more.
                 self._update_backward_extremeties(txn, [event])
 
+                if self._msc4354_enabled and event.sticky_duration():
+                    # The de-outliered event is sticky. Update the sticky events table to ensure
+                    # we deliver this down /sync.
+                    self.store.insert_sticky_events_txn(txn, [event])
+
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 
     def _store_event_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: Collection[Tuple[EventBase, EventContext]],
+        events_and_contexts: Collection[EventPersistencePair],
     ) -> None:
         """Insert new events into the event, event_json, redaction and
         state_events tables.
@@ -2502,7 +2713,7 @@ class PersistEventsStore:
             return
 
         def event_dict(event: EventBase) -> JsonDict:
-            d = event.get_dict()
+            d = event.get_dict_for_persistence()
             d.pop("redacted", None)
             d.pop("redacted_because", None)
             return d
@@ -2595,8 +2806,8 @@ class PersistEventsStore:
     def _store_rejected_events_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-    ) -> List[Tuple[EventBase, EventContext]]:
+        events_and_contexts: list[EventPersistencePair],
+    ) -> list[EventPersistencePair]:
         """Add rows to the 'rejections' table for received events which were
         rejected
 
@@ -2623,8 +2834,8 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         *,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-        all_events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
+        all_events_and_contexts: list[EventPersistencePair],
         inhibit_local_membership_updates: bool = False,
     ) -> None:
         """Update all the miscellaneous tables for new events
@@ -2688,6 +2899,9 @@ class PersistEventsStore:
 
             self._handle_event_relations(txn, event)
 
+            if supports_msc4242_state_dag(event) and event_exists_in_state_dag(event):
+                self._store_state_dag_edges(txn, event)
+
             # Store the labels for this event.
             labels = event.content.get(EventContentFields.LABELS)
             if labels:
@@ -2718,9 +2932,9 @@ class PersistEventsStore:
     def _add_to_cache(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
     ) -> None:
-        to_prefill = []
+        to_prefill: list[EventCacheEntry] = []
 
         ev_map = {e.event_id: e for e, _ in events_and_contexts}
         if not ev_map:
@@ -2764,6 +2978,36 @@ class PersistEventsStore:
         txn.async_call_after(external_prefill)
         txn.call_after(local_prefill)
 
+    def _store_state_dag_edges(
+        self, txn: LoggingTransaction, event: MSC4242Event
+    ) -> None:
+        # the create event has no edge but we still need to persist it as get_state_dag just
+        # yanks all rows in this table. It's a bit gross to store NULL as the prev_state_event_id
+        # though.
+        if len(event.prev_state_events) == 0 and event.type == EventTypes.Create:
+            self.db_pool.simple_insert_txn(
+                txn,
+                table="msc4242_state_dag_edges",
+                values={
+                    "room_id": event.room_id,
+                    "event_id": event.event_id,
+                    "prev_state_event_id": None,
+                },
+            )
+            return
+        assert len(event.prev_state_events) > 0
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="msc4242_state_dag_edges",
+            key_names=["room_id", "event_id", "prev_state_event_id"],
+            key_values=[
+                (event.room_id, event.event_id, prev_state_event)
+                for prev_state_event in event.prev_state_events
+            ],
+            value_names=(),
+            value_values=(),
+        )
+
     def _store_redaction(self, txn: LoggingTransaction, event: EventBase) -> None:
         assert event.redacts is not None
         self.db_pool.simple_upsert_txn(
@@ -2773,6 +3017,7 @@ class PersistEventsStore:
             values={
                 "redacts": event.redacts,
                 "received_ts": self._clock.time_msec(),
+                "recheck": event.internal_metadata.need_to_check_redaction(),
             },
         )
 
@@ -2780,7 +3025,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         event_id: str,
-        labels: List[str],
+        labels: list[str],
         room_id: str,
         topological_ordering: int,
     ) -> None:
@@ -2822,7 +3067,7 @@ class PersistEventsStore:
     def _store_room_members_txn(
         self,
         txn: LoggingTransaction,
-        events: List[EventBase],
+        events: list[EventBase],
         *,
         inhibit_local_membership_updates: bool = False,
     ) -> None:
@@ -2856,7 +3101,7 @@ class PersistEventsStore:
                     event.event_id,
                     event.internal_metadata.stream_ordering,
                     event.state_key,
-                    event.user_id,
+                    event.sender,
                     event.room_id,
                     event.membership,
                     non_null_str_or_none(event.content.get("displayname")),
@@ -2986,6 +3231,10 @@ class PersistEventsStore:
             # Upsert into the threads table, but only overwrite the value if the
             # new event is of a later topological order OR if the topological
             # ordering is equal, but the stream ordering is later.
+            # (Note by definition that the stream ordering will always be later
+            # unless this is a backfilled event [= negative stream ordering]
+            # because we are only persisting this event now and stream_orderings
+            # are strictly monotonically increasing)
             sql = """
             INSERT INTO threads (room_id, thread_id, latest_event_id, topological_ordering, stream_ordering)
             VALUES (?, ?, ?, ?, ?)
@@ -3187,8 +3436,8 @@ class PersistEventsStore:
     def _set_push_actions_for_event_and_users_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-        all_events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: list[EventPersistencePair],
+        all_events_and_contexts: list[EventPersistencePair],
     ) -> None:
         """Handles moving push actions from staging table to main
         event_push_actions table for all events in `events_and_contexts`.
@@ -3271,7 +3520,7 @@ class PersistEventsStore:
     def _store_event_state_mappings_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: Collection[Tuple[EventBase, EventContext]],
+        events_and_contexts: Collection[EventPersistencePair],
     ) -> None:
         """
         Raises:
@@ -3280,7 +3529,13 @@ class PersistEventsStore:
         """
         state_groups = {}
         for event, context in events_and_contexts:
-            if event.internal_metadata.is_outlier():
+            # state dag rooms allow outliers to have state, as `/get_missing_events` state dag events are nominally
+            # outliers (not present in the timeline) but do need state persisted so we can calculate
+            # what the auth_events are for the event.
+            if (
+                not event.room_version.msc4242_state_dags
+                and event.internal_metadata.is_outlier()
+            ):
                 # double-check that we don't have any events that claim to be outliers
                 # *and* have partial state (which is meaningless: we should have no
                 # state at all for an outlier)
@@ -3368,7 +3623,7 @@ class PersistEventsStore:
         )
 
     def _handle_mult_prev_events(
-        self, txn: LoggingTransaction, events: List[EventBase]
+        self, txn: LoggingTransaction, events: list[EventBase]
     ) -> None:
         """
         For the given event, update the event edges table and forward and
@@ -3386,7 +3641,7 @@ class PersistEventsStore:
         self._update_backward_extremeties(txn, events)
 
     def _update_backward_extremeties(
-        self, txn: LoggingTransaction, events: List[EventBase]
+        self, txn: LoggingTransaction, events: list[EventBase]
     ) -> None:
         """Updates the event_backward_extremities tables based on the new/updated
         events being persisted.
@@ -3488,16 +3743,16 @@ class _LinkMap:
 
     # Stores the set of links as nested maps: source chain ID -> target chain ID
     # -> source sequence number -> target sequence number.
-    maps: Dict[int, Dict[int, Dict[int, int]]] = attr.Factory(dict)
+    maps: dict[int, dict[int, dict[int, int]]] = attr.Factory(dict)
 
     # Stores the links that have been added (with new set to true), as tuples of
     # `(source chain ID, source sequence no, target chain ID, target sequence no.)`
-    additions: Set[Tuple[int, int, int, int]] = attr.Factory(set)
+    additions: set[tuple[int, int, int, int]] = attr.Factory(set)
 
     def add_link(
         self,
-        src_tuple: Tuple[int, int],
-        target_tuple: Tuple[int, int],
+        src_tuple: tuple[int, int],
+        target_tuple: tuple[int, int],
         new: bool = True,
     ) -> bool:
         """Add a new link between two chains, ensuring no redundant links are added.
@@ -3552,7 +3807,7 @@ class _LinkMap:
         current_links[src_seq] = target_seq
         return True
 
-    def get_additions(self) -> Generator[Tuple[int, int, int, int], None, None]:
+    def get_additions(self) -> Generator[tuple[int, int, int, int], None, None]:
         """Gets any newly added links.
 
         Yields:
@@ -3566,8 +3821,8 @@ class _LinkMap:
 
     def exists_path_from(
         self,
-        src_tuple: Tuple[int, int],
-        target_tuple: Tuple[int, int],
+        src_tuple: tuple[int, int],
+        target_tuple: tuple[int, int],
     ) -> bool:
         """Checks if there is a path between the source chain ID/sequence and
         target chain ID/sequence.
@@ -3579,7 +3834,7 @@ class _LinkMap:
             return target_seq <= src_seq
 
         # We have to graph traverse the links to check for indirect paths.
-        visited_chains: Dict[int, int] = collections.Counter()
+        visited_chains: dict[int, int] = collections.Counter()
         search = [(src_chain, src_seq)]
         while search:
             chain, seq = search.pop()

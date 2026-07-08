@@ -13,7 +13,7 @@
 #
 #
 #
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
@@ -35,13 +35,18 @@ class ScheduledTasksRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         # extract query params
         action_name = parse_string(request, "action_name")
         resource_id = parse_string(request, "resource_id")
-        status = parse_string(request, "job_status")
+        status = parse_string(request, "status")
+        # This parameter was historically called `job_status`, while the Admin API docs
+        # defined it as `status`. We now support both, as `status` is generally
+        # a nicer name. A v2 of this endpoint should keep only `status`.
+        if status is None:
+            status = parse_string(request, "job_status")
         max_timestamp = parse_integer(request, "max_timestamp")
 
         actions = [action_name] if action_name else None

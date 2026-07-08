@@ -24,14 +24,18 @@
 server_name: "SERVERNAME"
 pid_file: DATADIR/homeserver.pid
 listeners:
-  - port: 8008
+  - bind_addresses:
+    - ::1
+    - 127.0.0.1
+    port: 8008
+    resources:
+    - compress: false
+      names:
+      - client
+      - federation
     tls: false
     type: http
     x_forwarded: true
-    bind_addresses: ['::1', '127.0.0.1']
-    resources:
-      - names: [client, federation]
-        compress: false
 database:
   name: sqlite3
   args:

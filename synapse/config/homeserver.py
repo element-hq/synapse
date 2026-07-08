@@ -18,7 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from ._base import RootConfig
+
+from ._base import ConfigError, RootConfig
 from .account_validity import AccountValidityConfig
 from .api import ApiConfig
 from .appservice import AppServiceConfig
@@ -36,6 +37,8 @@ from .federation import FederationConfig
 from .jwt import JWTConfig
 from .key import KeyConfig
 from .logger import LoggingConfig
+from .mas import MasConfig
+from .matrixrtc import MatrixRtcConfig
 from .metrics import MetricsConfig
 from .modules import ModulesConfig
 from .oembed import OembedConfig
@@ -65,6 +68,10 @@ from .workers import WorkerConfig
 
 
 class HomeServerConfig(RootConfig):
+    """
+    Top-level config object for Synapse homeserver (main process and workers).
+    """
+
     config_classes = [
         ModulesConfig,
         ServerConfig,
@@ -79,6 +86,7 @@ class HomeServerConfig(RootConfig):
         OembedConfig,
         CaptchaConfig,
         VoipConfig,
+        MatrixRtcConfig,
         RegistrationConfig,
         AccountValidityConfig,
         MetricsConfig,
@@ -109,4 +117,25 @@ class HomeServerConfig(RootConfig):
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
         UserTypesConfig,
+        # This must be last, as it checks for conflicts with other config options.
+        MasConfig,
     ]
+
+    def validate_config(
+        self,
+    ) -> None:
+        if (
+            self.registration.enable_registration
+            and not self.registration.enable_registration_without_verification
+        ):
+            if (
+                not self.captcha.enable_registration_captcha
+                and not self.registration.registrations_require_3pid
+                and not self.registration.registration_requires_token
+            ):
+                raise ConfigError(
+                    "You have enabled open registration without any verification. This is a known vector for "
+                    "spam and abuse. If you would like to allow public registration, please consider adding email, "
+                    "captcha, or token-based verification. Otherwise this check can be removed by setting the "
+                    "`enable_registration_without_verification` config option to `true`."
+                )

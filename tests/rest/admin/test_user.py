@@ -23,16 +23,14 @@ import hashlib
 import hmac
 import json
 import os
-import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
-from typing import Dict, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -61,7 +59,7 @@ from synapse.rest.client import (
 from synapse.server import HomeServer
 from synapse.storage.databases.main.client_ips import LAST_SEEN_GRANULARITY
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -643,10 +641,10 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         """Test that searching for a users works correctly"""
 
         def _search_test(
-            expected_user_id: Optional[str],
+            expected_user_id: str | None,
             search_term: str,
-            search_field: Optional[str] = "name",
-            expected_http_code: Optional[int] = 200,
+            search_field: str | None = "name",
+            expected_http_code: int | None = 200,
         ) -> None:
             """Search for a user and check that the returned user's id is a match
 
@@ -1185,7 +1183,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: List[str], not_user_types: Optional[List[str]] = None
+            expected_user_ids: list[str], not_user_types: list[str] | None = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1262,7 +1260,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: List[str], not_user_types: Optional[List[str]] = None
+            expected_user_ids: list[str], not_user_types: list[str] | None = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1373,9 +1371,9 @@ class UsersListTestCase(unittest.HomeserverTestCase):
 
     def _order_test(
         self,
-        expected_user_list: List[str],
-        order_by: Optional[str],
-        dir: Optional[str] = None,
+        expected_user_list: list[str],
+        order_by: str | None,
+        dir: str | None = None,
     ) -> None:
         """Request the list of users in a certain order. Assert that order is what
         we expect
@@ -1403,7 +1401,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(expected_user_list, returned_order)
         self._check_fields(channel.json_body["users"])
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected user attributes are present in content
         Args:
             content: List that is checked for content
@@ -3116,7 +3114,7 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual("@user:test", channel.json_body["name"])
         self.assertTrue(channel.json_body["admin"])
 
-    def set_user_type(self, user_type: Optional[str]) -> None:
+    def set_user_type(self, user_type: str | None) -> None:
         # Set to user_type
         channel = self.make_request(
             "PUT",
@@ -3690,7 +3688,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
             self.other_user
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -4138,7 +4136,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
             [media2] + sorted([media1, media3]), "safe_from_quarantine", "b"
         )
 
-    def _create_media_for_user(self, user_token: str, number_media: int) -> List[str]:
+    def _create_media_for_user(self, user_token: str, number_media: int) -> list[str]:
         """
         Create a number of media for a specific user
         Args:
@@ -4195,7 +4193,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
 
         return media_id
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected user attributes are present in content
         Args:
             content: List that is checked for content
@@ -4212,9 +4210,9 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
 
     def _order_test(
         self,
-        expected_media_list: List[str],
-        order_by: Optional[str],
-        dir: Optional[str] = None,
+        expected_media_list: list[str],
+        order_by: str | None,
+        dir: str | None = None,
     ) -> None:
         """Request the list of media in a certain order. Assert that order is what
         we expect
@@ -4288,6 +4286,17 @@ class UserTokenRestTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(403, channel.code, msg=channel.json_body)
+
+    def test_no_user(self) -> None:
+        """Try to log in as a user that doesn't exist."""
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/users/%s/login" % urllib.parse.quote("@ghost:test"),
+            b"{}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(404, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"])
 
     def test_send_event(self) -> None:
         """Test that sending event as a user works."""
@@ -5325,6 +5334,69 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                         matched.append(event_id)
         self.assertEqual(len(matched), len(originals))
 
+    def test_redact_messages_all_rooms_within_timeframe(self) -> None:
+        """
+        Test that request to redact user's events in all rooms within a specific timeframe is successful
+        """
+        # join rooms, send some messages
+
+        # (event_id, timestamp) pairs
+        all_message_ids: list[tuple[str, int]] = []
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+
+        for i in range(4):
+            for rm in [self.rm1, self.rm2, self.rm3]:
+                event = {"body": f"hello{i}", "msgtype": "m.text"}
+                res = self.helper.send_event(
+                    rm, "m.room.message", event, tok=self.bad_user_tok, expect_code=200
+                )
+                event_id = res["event_id"]
+                event_ts = self.get_success(
+                    self.store.get_event(event_id)
+                ).origin_server_ts
+                all_message_ids.append((event_id, event_ts))
+
+        expected_saved_message_ids = {
+            event_id for event_id, _ in all_message_ids[:5] + all_message_ids[10:]
+        }
+        expected_redacted_message_ids = {
+            event_id for event_id, _ in all_message_ids[5:10]
+        }
+
+        # Redact events 5 up to and including 9
+        _after_event_id, after_ts = all_message_ids[5]
+        _before_event_id, before_ts = all_message_ids[9]
+
+        # redact events in all rooms within specific timeframe
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [], "after_ts": after_ts, "before_ts": before_ts},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Get the set of all redacted event IDs
+        all_redacted_event_ids: set[str] = set()
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            filter = json.dumps({"types": [EventTypes.Redaction]})
+            channel = self.make_request(
+                "GET",
+                f"rooms/{rm}/messages?filter={filter}&limit=50",
+                access_token=self.admin_tok,
+            )
+            self.assertEqual(channel.code, 200)
+
+            # Get the IDs of all redacted events
+            for event in channel.json_body["chunk"]:
+                assert event["type"] == EventTypes.Redaction
+                all_redacted_event_ids.add(event["redacts"])
+
+        # check that only expected messages were redacted
+        self.assertSetEqual(expected_redacted_message_ids, all_redacted_event_ids)
+        self.assertSetEqual(expected_saved_message_ids & all_redacted_event_ids, set())
+
     def test_redact_messages_specific_rooms(self) -> None:
         """
         Test that request to redact events in specified rooms user is member of is successful
@@ -5667,6 +5739,54 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                     matched.append(event_id)
         self.assertEqual(len(matched), len(originals))
 
+    def test_use_admin_param_for_redactions(self) -> None:
+        """
+        Test that if the `use_admin` param is set to true, the admin user is used to issue
+        the redactions and that they succeed in a room where the admin user has sufficient
+        power to issue redactions
+        """
+
+        originals = []
+        join = self.helper.join(self.rm1, self.bad_user, tok=self.bad_user_tok)
+        originals.append(join["event_id"])
+        for i in range(15):
+            event = {"body": f"hello{i}", "msgtype": "m.text"}
+            res = self.helper.send_event(
+                self.rm1, "m.room.message", event, tok=self.bad_user_tok
+            )
+            originals.append(res["event_id"])
+
+        # redact messages
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [self.rm1], "use_admin": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # messages are redacted, and redactions are issued by the admin user
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.rm1}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        matches = []
+        for event in channel.json_body["chunk"]:
+            for event_id in originals:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    matches.append((event_id, event))
+        # we redacted 16 messages
+        self.assertEqual(len(matches), 16)
+
+        for redaction_tuple in matches:
+            redaction = redaction_tuple[1]
+            if redaction["sender"] != self.admin:
+                self.fail("Redaction was not issued by admin account")
+
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
     servlets = [
@@ -5730,21 +5850,25 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        timeout_s = 10
-        start_time = time.time()
-        redact_result = ""
-        while redact_result != "complete":
-            if start_time + timeout_s < time.time():
-                self.fail("Timed out waiting for redactions.")
+        # `/redact` just schedules a background task that runs in the background
+        # (fire-and-forget) so we need to do the waiting here.
+        #
+        # Need 1 tick as we send 1 replication request for the redaction of each
+        # original event. The replication request body is streamed by a `Cooperator`
+        # that uses the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
+        for _ in range(len(original_event_ids)):
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
-            channel2 = self.make_request(
-                "GET",
-                f"/_synapse/admin/v1/user/redact_status/{id}",
-                access_token=self.admin_tok,
-            )
-            redact_result = channel2.json_body["status"]
-            if redact_result == "failed":
-                self.fail("Redaction task failed.")
+        # Verify the HTTP `redact_status` endpoint reports completion.
+        channel2 = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel2.code, 200)
+        self.assertEqual(channel2.json_body["status"], "complete")
 
         redaction_ids = set()
         for rm in [self.rm1, self.rm2, self.rm3]:

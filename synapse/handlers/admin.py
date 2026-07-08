@@ -24,13 +24,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
-    List,
     Mapping,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 import attr
@@ -38,6 +33,8 @@ import attr
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
+from synapse.events.utils import FilteredEvent
 from synapse.types import (
     JsonMapping,
     Requester,
@@ -49,7 +46,7 @@ from synapse.types import (
     UserInfo,
     create_requester,
 )
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -75,7 +72,7 @@ class AdminHandler:
 
         self.hs = hs
 
-    async def get_redact_task(self, redact_id: str) -> Optional[ScheduledTask]:
+    async def get_redact_task(self, redact_id: str) -> ScheduledTask | None:
         """Get the current status of an active redaction process
 
         Args:
@@ -103,11 +100,9 @@ class AdminHandler:
 
         return ret
 
-    async def get_user(self, user: UserID) -> Optional[JsonMapping]:
+    async def get_user(self, user: UserID) -> JsonMapping | None:
         """Function to get user details"""
-        user_info: Optional[UserInfo] = await self._store.get_user_by_id(
-            user.to_string()
-        )
+        user_info: UserInfo | None = await self._store.get_user_by_id(user.to_string())
         if user_info is None:
             return None
 
@@ -218,7 +213,7 @@ class AdminHandler:
             to_key = RoomStreamToken(stream=stream_ordering)
 
             # Events that we've processed in this room
-            written_events: Set[str] = set()
+            written_events: set[str] = set()
 
             # We need to track gaps in the events stream so that we can then
             # write out the state at those events. We do this by keeping track
@@ -231,7 +226,7 @@ class AdminHandler:
             # The reverse mapping to above, i.e. map from unseen event to events
             # that have the unseen event in their prev_events, i.e. the unseen
             # events "children".
-            unseen_to_child_events: Dict[str, Set[str]] = {}
+            unseen_to_child_events: dict[str, set[str]] = {}
 
             # We fetch events in the room the user could see by fetching *all*
             # events that we have and then filtering, this isn't the most
@@ -258,32 +253,40 @@ class AdminHandler:
                     topological=last_event.depth,
                 )
 
-                events = await filter_events_for_client(
+                filtered_events = await filter_and_transform_events_for_client(
                     self._storage_controllers,
                     user_id,
                     events,
                 )
 
-                writer.write_events(room_id, events)
+                writer.write_events(room_id, filtered_events)
 
                 # Update the extremity tracking dicts
-                for event in events:
+                for filtered_event in filtered_events:
                     # Check if we have any prev events that haven't been
                     # processed yet, and add those to the appropriate dicts.
-                    unseen_events = set(event.prev_event_ids()) - written_events
+                    unseen_events = (
+                        set(filtered_event.event.prev_event_ids()) - written_events
+                    )
                     if unseen_events:
-                        event_to_unseen_prevs[event.event_id] = unseen_events
+                        event_to_unseen_prevs[filtered_event.event.event_id] = (
+                            unseen_events
+                        )
                         for unseen in unseen_events:
                             unseen_to_child_events.setdefault(unseen, set()).add(
-                                event.event_id
+                                filtered_event.event.event_id
                             )
 
                     # Now check if this event is an unseen prev event, if so
                     # then we remove this event from the appropriate dicts.
-                    for child_id in unseen_to_child_events.pop(event.event_id, []):
-                        event_to_unseen_prevs[child_id].discard(event.event_id)
+                    for child_id in unseen_to_child_events.pop(
+                        filtered_event.event.event_id, []
+                    ):
+                        event_to_unseen_prevs[child_id].discard(
+                            filtered_event.event.event_id
+                        )
 
-                    written_events.add(event.event_id)
+                    written_events.add(filtered_event.event.event_id)
 
                 logger.info(
                     "Written %d events in room %s", len(written_events), room_id
@@ -358,8 +361,11 @@ class AdminHandler:
         user_id: str,
         rooms: list,
         requester: JsonMapping,
-        reason: Optional[str],
-        limit: Optional[int],
+        use_admin: bool,
+        reason: str | None,
+        before_ts: int | None = None,
+        after_ts: int | None = None,
+        limit: int | None = None,
     ) -> str:
         """
         Start a task redacting the events of the given user in the given rooms
@@ -368,7 +374,10 @@ class AdminHandler:
             user_id: the user ID of the user whose events should be redacted
             rooms: the rooms in which to redact the user's events
             requester: the user requesting the events
+            use_admin: whether to use the admin account to issue the redactions
             reason: reason for requesting the redaction, ie spam, etc
+            before_ts: only redact events that happened before this time
+            after_ts: only redact events that happened after this time
             limit: limit on the number of events in each room to redact
 
         Returns:
@@ -395,7 +404,10 @@ class AdminHandler:
                 "rooms": rooms,
                 "requester": requester,
                 "user_id": user_id,
+                "use_admin": use_admin,
                 "reason": reason,
+                "before_ts": before_ts,
+                "after_ts": after_ts,
                 "limit": limit,
             },
         )
@@ -409,10 +421,10 @@ class AdminHandler:
 
     async def _redact_all_events(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[Mapping[str, Any]], Optional[str]]:
+    ) -> tuple[TaskStatus, Mapping[str, Any] | None, str | None]:
         """
-        Task to redact all of a users events in the given rooms, tracking which, if any, events
-        whose redaction failed
+        Task to redact all of a users events in the given rooms in the given time period,
+        tracking which, if any, events whose redaction failed
         """
 
         assert task.params is not None
@@ -421,17 +433,27 @@ class AdminHandler:
 
         r = task.params.get("requester")
         assert r is not None
-        admin = Requester.deserialize(self._store, r)
+        admin = Requester.deserialize(r)
 
         user_id = task.params.get("user_id")
         assert user_id is not None
 
-        # puppet the user if they're ours, otherwise use admin to redact
+        use_admin = task.params.get("use_admin", False)
+
+        # default to puppeting the user unless they are not local or it's been requested to
+        # use the admin user to issue the redactions
+        requester_id = (
+            admin.user.to_string()
+            if use_admin or not self.hs.is_mine_id(user_id)
+            else user_id
+        )
         requester = create_requester(
-            user_id if self.hs.is_mine_id(user_id) else admin.user.to_string(),
+            requester_id,
             authenticated_entity=admin.user.to_string(),
         )
 
+        before_ts = task.params.get("before_ts")
+        after_ts = task.params.get("after_ts")
         reason = task.params.get("reason")
         limit = task.params.get("limit")
         assert limit is not None
@@ -446,6 +468,8 @@ class AdminHandler:
                 room,
                 limit,
                 ["m.room.member", "m.room.message", "m.room.encrypted"],
+                before_ts,
+                after_ts,
             )
             if not event_ids:
                 # nothing to redact in this room
@@ -481,9 +505,15 @@ class AdminHandler:
                     event_dict["redacts"] = event.event_id
 
                 try:
+                    prev_state_events = None
+                    if supports_msc4242_state_dag(event):
+                        prev_state_events = event.prev_state_events
+                        assert prev_state_events is not None, (
+                            "Parent event of redaction has no `prev_state_events` which should be impossible as `prev_state_events` is a required field in MSC4242 rooms"
+                        )
                     # set the prev event to the offending message to allow for redactions
                     # to be processed in the case where the user has been kicked/banned before
-                    # redactions are requested
+                    # redactions are requested.
                     (
                         redaction,
                         _,
@@ -492,6 +522,7 @@ class AdminHandler:
                         event_dict,
                         prev_event_ids=[event.event_id],
                         ratelimit=False,
+                        prev_state_events=prev_state_events,
                     )
                 except Exception as ex:
                     logger.info(
@@ -507,7 +538,7 @@ class ExfiltrationWriter(metaclass=abc.ABCMeta):
     """Interface used to specify how to write exported data."""
 
     @abc.abstractmethod
-    def write_events(self, room_id: str, events: List[EventBase]) -> None:
+    def write_events(self, room_id: str, events: list[FilteredEvent]) -> None:
         """Write a batch of events for a room."""
         raise NotImplementedError()
 

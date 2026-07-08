@@ -1,13 +1,11 @@
-Deprecation Policy for Platform Dependencies
-============================================
+# Deprecation Policy
 
-Synapse has a number of platform dependencies, including Python, Rust, 
-PostgreSQL and SQLite. This document outlines the policy towards which versions 
-we support, and when we drop support for versions in the future.
+Synapse has a number of **platform dependencies** (Python, Rust, PostgreSQL, and SQLite)
+and **application dependencies** (Python and Rust packages). This document outlines the
+policy towards which versions we support, and when we drop support for versions in the
+future.
 
-
-Policy
-------
+## Platform Dependencies
 
 Synapse follows the upstream support life cycles for Python and PostgreSQL,
 i.e. when a version reaches End of Life Synapse will withdraw support for that
@@ -23,11 +21,11 @@ people building from source should ensure they can fetch recent versions of Rust
 (e.g. by using [rustup](https://rustup.rs/)).
 
 The oldest supported version of SQLite is the version
-[provided](https://packages.debian.org/bullseye/libsqlite3-0) by
-[Debian oldstable](https://wiki.debian.org/DebianOldStable).
+[provided](https://packages.debian.org/oldstable/libsqlite3-0) by
+[Debian oldstable](https://wiki.debian.org/DebianOldStable) or the oldest maintenance/security-supported [Ubuntu LTS](https://endoflife.date/ubuntu) (Ubuntu versions with only Expanded Security Maintenance are not included).
 
-Context
--------
+
+### Context
 
 It is important for system admins to have a clear understanding of the platform
 requirements of Synapse and its deprecation policies so that they can
@@ -51,3 +49,47 @@ On a similar note, SQLite does not generally have a concept of "supported
 release"; bugfixes are published for the latest minor release only. We chose to
 track Debian's oldstable as this is relatively conservative, predictably updated
 and is consistent with the `.deb` packages released by Matrix.org.
+
+
+## Application dependencies
+
+For application-level Python dependencies, we often specify loose version constraints
+(ex. `>=X.Y.Z`) to be forwards compatible with any new versions. Upper bounds (`<A.B.C`)
+are only added when necessary to prevent known incompatibilities.
+
+When selecting a minimum version, while we are mindful of the impact on downstream
+package maintainers, our primary focus is on the maintainability and progress of Synapse
+itself.
+
+For developers, a Python dependency version can be considered a "no-brainer" upgrade once it is
+available in both the latest [Debian Stable](https://packages.debian.org/stable/) and
+[Ubuntu LTS](https://launchpad.net/ubuntu) repositories. No need to burden yourself with
+extra scrutiny or consideration at this point.
+
+We aggressively update Rust dependencies. Since these are statically linked and managed
+entirely by `cargo` during build, they *can* pose no ongoing maintenance burden on others.
+This allows us to freely upgrade to leverage the latest ecosystem advancements assuming
+they don't have their own system-level dependencies.
+
+
+### Context
+
+Because Python dependencies can easily be managed in a virtual environment, we are less
+concerned about the criteria for selecting minimum versions. The only thing of concern
+is making sure we're not making it unnecessarily difficult for downstream package
+maintainers. Generally, this just means avoiding the bleeding edge for a few months.
+
+The situation for Rust dependencies is typically different and
+the concerns around Python dependency versions typically do not apply.
+For example, for packagers of Debian, the packagers have the choice of either
+using a crate packaged in the distro, or vendoring crates in the source package for the
+application.
+
+This freedom to vendor a dependency crate for a specific application consequently gives
+us even greater flexibility to upgrade Rust dependencies as needed for the project.
+
+(This is in contrast with Python dependencies, which are generally
+installed system-wide by mainstream distributions' official packages.)
+
+Some distros (e.g. Fedora) do not vendor Rust dependencies in their
+official application packages, but these cases appear to be less common.

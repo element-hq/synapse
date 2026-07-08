@@ -20,23 +20,93 @@
 #
 
 import logging
-from typing import List, Optional
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
-from synapse.federation.federation_base import event_from_pdu_json
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import StateMap
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
+
+
+class EventsTestCase(HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self._store = self.hs.get_datastores().main
+
+    def test_get_senders_for_event_ids(self) -> None:
+        """Tests the `get_senders_for_event_ids` storage function."""
+
+        users_and_tokens: dict[str, str] = {}
+        for localpart_suffix in range(10):
+            localpart = f"user_{localpart_suffix}"
+            user_id = self.register_user(localpart, "rabbit")
+            token = self.login(localpart, "rabbit")
+
+            users_and_tokens[user_id] = token
+
+        room_creator_user_id = self.register_user("room_creator", "rabbit")
+        room_creator_token = self.login("room_creator", "rabbit")
+        users_and_tokens[room_creator_user_id] = room_creator_token
+
+        # Create a room and invite some users.
+        room_id = self.helper.create_room_as(
+            room_creator_user_id, tok=room_creator_token
+        )
+        event_ids_to_senders: dict[str, str] = {}
+        for user_id, token in users_and_tokens.items():
+            if user_id == room_creator_user_id:
+                continue
+
+            self.helper.invite(
+                room=room_id,
+                targ=user_id,
+                tok=room_creator_token,
+            )
+
+            # Have the user accept the invite and join the room.
+            self.helper.join(
+                room=room_id,
+                user=user_id,
+                tok=token,
+            )
+
+            # Have the user send an event.
+            response = self.helper.send_event(
+                room_id=room_id,
+                type="m.room.message",
+                content={
+                    "msgtype": "m.text",
+                    "body": f"hello, I'm {user_id}!",
+                },
+                tok=token,
+            )
+
+            # Record the event ID and sender.
+            event_id = response["event_id"]
+            event_ids_to_senders[event_id] = user_id
+
+        # Check that `get_senders_for_event_ids` returns the correct data.
+        response = self.get_success(
+            self._store.get_senders_for_event_ids(list(event_ids_to_senders.keys()))
+        )
+        self.assert_dict(event_ids_to_senders, response)
 
 
 class ExtremPruneTestCase(HomeserverTestCase):
@@ -66,9 +136,13 @@ class ExtremPruneTestCase(HomeserverTestCase):
         body = self.helper.send(self.room_id, body="Test", tok=self.token)
         local_message_event_id = body["event_id"]
 
+        current_state = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a remote event and persist it. This will be the extremity before
         # the gap.
-        self.remote_event_1 = event_from_pdu_json(
+        self.remote_event_1 = make_test_pdu_event(
             {
                 "type": EventTypes.Message,
                 "state_key": "@user:other",
@@ -77,7 +151,11 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other",
                 "depth": 5,
                 "prev_events": [local_message_event_id],
-                "auth_events": [],
+                "auth_events": [
+                    current_state.get((EventTypes.Create, "")),
+                    current_state.get((EventTypes.PowerLevels, "")),
+                    current_state.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
@@ -89,7 +167,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         self.assert_extremities([self.remote_event_1.event_id])
 
     def persist_event(
-        self, event: EventBase, state: Optional[StateMap[str]] = None
+        self, event: EventBase, state: StateMap[str] | None = None
     ) -> None:
         """Persist the event, with optional state"""
         context = self.get_success(
@@ -101,7 +179,7 @@ class ExtremPruneTestCase(HomeserverTestCase):
         )
         self.get_success(self._persistence.persist_event(event, context))
 
-    def assert_extremities(self, expected_extremities: List[str]) -> None:
+    def assert_extremities(self, expected_extremities: list[str]) -> None:
         """Assert the current extremities for the room"""
         extremities = self.get_success(
             self.store.get_prev_events_for_room(self.room_id)
@@ -113,10 +191,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
         the same domain.
         """
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other",
@@ -125,14 +207,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other",
                 "depth": 50,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -145,22 +227,6 @@ class ExtremPruneTestCase(HomeserverTestCase):
         state is different.
         """
 
-        # Fudge a second event which points to an event we don't have.
-        remote_event_2 = event_from_pdu_json(
-            {
-                "type": EventTypes.Message,
-                "state_key": "@user:other",
-                "content": {},
-                "room_id": self.room_id,
-                "sender": "@user:other",
-                "depth": 10,
-                "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
-                "origin_server_ts": self.clock.time_msec(),
-            },
-            RoomVersions.V6,
-        )
-
         # Now we persist it with state with a dropped history visibility
         # setting. The state resolution across the old and new event will then
         # include it, and so the resolved state won't match the new state.
@@ -169,6 +235,26 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 self._state_storage_controller.get_current_state_ids(self.room_id)
             )
         )
+
+        # Fudge a second event which points to an event we don't have.
+        remote_event_2 = make_test_pdu_event(
+            {
+                "type": EventTypes.Message,
+                "state_key": "@user:other",
+                "content": {},
+                "room_id": self.room_id,
+                "sender": "@user:other",
+                "depth": 10,
+                "prev_events": ["$some_unknown_message"],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                ],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            RoomVersions.V6,
+        )
+
         state_before_gap.pop(("m.room.history_visibility", ""))
 
         context = self.get_success(
@@ -193,10 +279,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # also set the depth to "lots".
         self.reactor.advance(7 * 24 * 60 * 60)
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -205,14 +295,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -225,10 +315,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
         from a different domain.
         """
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -237,14 +331,13 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -267,10 +360,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # also set the depth to "lots".
         self.reactor.advance(7 * 24 * 60 * 60)
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -279,14 +376,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -311,10 +408,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # also set the depth to "lots".
         self.reactor.advance(7 * 24 * 60 * 60)
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -323,14 +424,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -347,10 +448,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
         local_message_event_id = body["event_id"]
         self.assert_extremities([local_message_event_id])
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
-        remote_event_2 = event_from_pdu_json(
+        remote_event_2 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": "@user:other2",
@@ -359,14 +464,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -409,7 +514,7 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 
         # Fudge a join event for a remote user.
         remote_user = "@user:other"
-        remote_event_1 = event_from_pdu_json(
+        remote_event_1 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": remote_user,
@@ -456,7 +561,7 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 
         # Fudge a join event for a remote user.
         remote_user = "@user:other"
-        remote_event_1 = event_from_pdu_json(
+        remote_event_1 = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "state_key": remote_user,

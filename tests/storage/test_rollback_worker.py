@@ -18,10 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.server import HomeServer
@@ -29,12 +28,12 @@ from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.prepare_database import PrepareDatabaseException, prepare_database
 from synapse.storage.schema import SCHEMA_VERSION
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
 
-def fake_listdir(filepath: str) -> List[str]:
+def fake_listdir(filepath: str) -> list[str]:
     """
     A fake implementation of os.listdir which we can use to mock out the filesystem.
 
@@ -69,9 +68,10 @@ class WorkerSchemaTests(HomeserverTestCase):
 
         db_pool = self.hs.get_datastores().main.db_pool
         db_conn = LoggingDatabaseConnection(
-            db_pool._db_pool.connect(),
-            db_pool.engine,
-            "tests",
+            conn=db_pool._db_pool.connect(),
+            engine=db_pool.engine,
+            default_txn_name="tests",
+            server_name="test_server",
         )
 
         cur = db_conn.cursor()
@@ -85,9 +85,10 @@ class WorkerSchemaTests(HomeserverTestCase):
         """Test that workers don't start if the DB has an older schema version"""
         db_pool = self.hs.get_datastores().main.db_pool
         db_conn = LoggingDatabaseConnection(
-            db_pool._db_pool.connect(),
-            db_pool.engine,
-            "tests",
+            conn=db_pool._db_pool.connect(),
+            engine=db_pool.engine,
+            default_txn_name="tests",
+            server_name="test_server",
         )
 
         cur = db_conn.cursor()
@@ -105,9 +106,10 @@ class WorkerSchemaTests(HomeserverTestCase):
         """
         db_pool = self.hs.get_datastores().main.db_pool
         db_conn = LoggingDatabaseConnection(
-            db_pool._db_pool.connect(),
-            db_pool.engine,
-            "tests",
+            conn=db_pool._db_pool.connect(),
+            engine=db_pool.engine,
+            default_txn_name="tests",
+            server_name="test_server",
         )
 
         # Set the schema version of the database to the current version

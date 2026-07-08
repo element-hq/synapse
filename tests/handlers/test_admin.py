@@ -22,7 +22,7 @@
 from collections import Counter
 from unittest.mock import Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.storage
@@ -31,7 +31,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -81,7 +81,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 2)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)
@@ -119,7 +120,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 1)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)
@@ -151,7 +153,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 2)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)
@@ -192,7 +195,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 2)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)

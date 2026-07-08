@@ -18,11 +18,11 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, Type, TypeVar
+from typing import Any, TypeVar
 
 import jsonschema
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from synapse._pydantic_compat import BaseModel, ValidationError, parse_obj_as
 from synapse.config._base import ConfigError
 from synapse.types import JsonDict, StrSequence
 
@@ -79,8 +79,8 @@ Model = TypeVar("Model", bound=BaseModel)
 
 def parse_and_validate_mapping(
     config: Any,
-    model_type: Type[Model],
-) -> Dict[str, Model]:
+    model_type: type[Model],
+) -> dict[str, Model]:
     """Parse `config` as a mapping from strings to a given `Model` type.
     Args:
         config: The configuration data to check
@@ -93,7 +93,7 @@ def parse_and_validate_mapping(
     try:
         # type-ignore: mypy doesn't like constructing `Dict[str, model_type]` because
         # `model_type` is a runtime variable. Pydantic is fine with this.
-        instances = parse_obj_as(Dict[str, model_type], config)  # type: ignore[valid-type]
+        instances = TypeAdapter(dict[str, model_type]).validate_python(config)  # type: ignore[valid-type]
     except ValidationError as e:
         raise ConfigError(str(e)) from e
     return instances

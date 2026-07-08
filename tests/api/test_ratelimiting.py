@@ -1,11 +1,9 @@
-from typing import Optional
-
 from synapse.api.ratelimiting import LimitExceededError, Ratelimiter
 from synapse.appservice import ApplicationService
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.module_api import RatelimitOverride
 from synapse.module_api.callbacks.ratelimit_callbacks import RatelimitModuleApiCallbacks
-from synapse.types import create_requester
+from synapse.types import UserID, create_requester
 
 from tests import unittest
 
@@ -40,8 +38,11 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             token="fake_token",
             id="foo",
             rate_limited=True,
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
         )
+        # The ratelimiter now resolves the AS via get_app_service_by_id, so the
+        # appservice must be in the store's cache for the lookup to hit.
+        self.hs.get_datastores().main.services_cache.append(appservice)
         as_requester = create_requester("@user:example.com", app_service=appservice)
 
         limiter = Ratelimiter(
@@ -76,8 +77,11 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             token="fake_token",
             id="foo",
             rate_limited=False,
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
         )
+        # The ratelimiter now resolves the AS via get_app_service_by_id, so the
+        # appservice must be in the store's cache for the lookup to hit.
+        self.hs.get_datastores().main.services_cache.append(appservice)
         as_requester = create_requester("@user:example.com", app_service=appservice)
 
         limiter = Ratelimiter(
@@ -221,6 +225,21 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         self.get_success_or_raise(
             limiter.can_do_action(None, key="test_id_1", _time_now_s=0)
         )
+
+        self.assertIn("test_id_1", limiter.actions)
+
+        self.reactor.advance(60)
+
+        self.assertNotIn("test_id_1", limiter.actions)
+
+    def test_pruning_record_action(self) -> None:
+        """Test that entries added by record_action also get pruned."""
+        limiter = Ratelimiter(
+            store=self.hs.get_datastores().main,
+            clock=self.clock,
+            cfg=RatelimitSettings(key="", per_second=0.1, burst_count=1),
+        )
+        limiter.record_action(None, key="test_id_1", n_actions=1, _time_now_s=0)
 
         self.assertIn("test_id_1", limiter.actions)
 
@@ -474,7 +493,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         # and limiter name.
         async def get_ratelimit_override_for_user(
             user_id: str, limiter_name: str
-        ) -> Optional[RatelimitOverride]:
+        ) -> RatelimitOverride | None:
             if user_id == test_user_id:
                 return RatelimitOverride(
                     per_second=0.1,

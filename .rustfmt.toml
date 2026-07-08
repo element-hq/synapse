@@ -1,1 +1,6 @@
+# Unstable options are only available on a nightly toolchain and must be opted into
+unstable_features = true
+
+# `group_imports` is an unstable option that requires nightly Rust toolchain. Tracked by
+# https://github.com/rust-lang/rustfmt/issues/5083
 group_imports = "StdExternalCrate"

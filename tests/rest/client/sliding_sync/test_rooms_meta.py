@@ -12,17 +12,18 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
+from typing import Any
 
 from parameterized import parameterized, parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.test_utils.event_injection import create_event
@@ -630,6 +631,76 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         # We didn't request any state so we shouldn't see any `required_state`
         self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
 
+    def test_rooms_meta_heroes_empty_room_name(self) -> None:
+        """
+        Test that the `rooms` `heroes` are included when the room name is an
+        empty string (i.e. unset as per the spec)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        _user3_tok = self.login(user3_id, "pass")
+
+        room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                # https://spec.matrix.org/v1.17/client-server-api/#mroomname
+                # > If a room has an m.room.name event with an absent, null, or
+                # > empty name field, it should be treated the same as a room
+                # > with no m.room.name event.
+                "name": "",
+            },
+        )
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        # User3 is invited
+        self.helper.invite(room_id, src=user2_id, targ=user3_id, tok=user2_tok)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Room has an empty name so we should see `heroes` populated
+        self.assertEqual(response_body["rooms"][room_id]["initial"], True)
+        self.assertIsNone(response_body["rooms"][room_id].get("name"))
+        self.assertCountEqual(
+            [
+                hero["user_id"]
+                for hero in response_body["rooms"][room_id].get("heroes", [])
+            ],
+            # Heroes shouldn't include the user themselves (we shouldn't see user1)
+            [user2_id, user3_id],
+        )
+        self.assertEqual(
+            response_body["rooms"][room_id]["joined_count"],
+            2,
+        )
+        self.assertEqual(
+            response_body["rooms"][room_id]["invited_count"],
+            1,
+        )
+
+        # We didn't request any state so we shouldn't see any `required_state`
+        self.assertIsNone(response_body["rooms"][room_id].get("required_state"))
+
+        # Send a message to make the room come down sync
+        self.helper.send(room_id, "message in room", tok=user2_tok)
+
+        # Incremental sync
+        incremental_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self.assertNotIn("name", incremental_body["rooms"][room_id])
+        self.assertNotIn("heroes", incremental_body["rooms"][room_id])
+
     def test_rooms_meta_heroes_when_banned(self) -> None:
         """
         Test that the `rooms` `heroes` are included in the response when the room
@@ -966,7 +1037,7 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         creator = "@user:other"
         room_id = "!foo:other"
         room_version = RoomVersions.V10
-        shared_kwargs = {
+        shared_kwargs: dict[str, Any] = {
             "room_id": room_id,
             "room_version": room_version.identifier,
         }

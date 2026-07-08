@@ -19,21 +19,22 @@
 #
 #
 
-from typing import Any, Optional
+from http import HTTPStatus
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventContentFields, RelationTypes
+from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.push.bulk_push_rule_evaluator import BulkPushRuleEvaluator
 from synapse.rest import admin
-from synapse.rest.client import login, register, room
+from synapse.rest.client import login, push_rule, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 
@@ -44,6 +45,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         room.register_servlets,
         login.register_servlets,
         register.register_servlets,
+        push_rule.register_servlets,
     ]
 
     def prepare(
@@ -206,7 +208,10 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         bulk_evaluator._action_for_event_by_user.assert_not_called()
 
     def _create_and_process(
-        self, bulk_evaluator: BulkPushRuleEvaluator, content: Optional[JsonDict] = None
+        self,
+        bulk_evaluator: BulkPushRuleEvaluator,
+        content: JsonDict | None = None,
+        type: str = "test",
     ) -> bool:
         """Returns true iff the `mentions` trigger an event push action."""
         # Create a new message event which should cause a notification.
@@ -214,7 +219,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
             self.event_creation_handler.create_event(
                 self.requester,
                 {
-                    "type": "test",
+                    "type": type,
                     "room_id": self.room_id,
                     "content": content or {},
                     "sender": f"@bob:{self.hs.hostname}",
@@ -444,5 +449,204 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                         "user_ids": [self.alice],
                     },
                 },
+            )
+        )
+
+    @override_config({"experimental_features": {"msc4306_enabled": True}})
+    def test_thread_subscriptions(self) -> None:
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+        (thread_root_id,) = self.helper.send_messages(self.room_id, 1, tok=self.token)
+
+        self.assertFalse(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "test message before subscription",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type=EventTypes.Message,
+            )
+        )
+
+        self.get_success(
+            self.hs.get_datastores().main.subscribe_user_to_thread(
+                self.alice,
+                self.room_id,
+                thread_root_id,
+                automatic_event_orderings=None,
+            )
+        )
+
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "test message after subscription",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
+            )
+        )
+
+    @override_config({"experimental_features": {"msc4306_enabled": True}})
+    def test_thread_subscriptions_suppression_after_keyword_mention_overrides(
+        self,
+    ) -> None:
+        """
+        Tests one of the purposes of the `postcontent` push rule section:
+        When a keyword mention is configured (in the `content` section),
+        it does not get suppressed by the thread being unsubscribed.
+        """
+        # add a keyword mention to alice's push rules
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/pushrules/global/content/biscuits",
+            {"pattern": "biscuits", "actions": ["notify"]},
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK)
+
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+        (thread_root_id,) = self.helper.send_messages(self.room_id, 1, tok=self.token)
+
+        self.assertFalse(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "do you want some cookies?",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
+            ),
+            "alice is not subscribed to thread and does not have a mention on 'cookies' so should not be notified",
+        )
+
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "biscuits are available in the kitchen",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
+            ),
+            "alice is not subscribed to thread but DOES have a mention on 'biscuits' so should be notified",
+        )
+
+    @override_config({"experimental_features": {"msc4306_enabled": True}})
+    def test_thread_subscriptions_notification_before_keywords_and_mentions(
+        self,
+    ) -> None:
+        """
+        Tests one of the purposes of the `postcontent` push rule section:
+        When a room is set to (what is commonly known as) 'keywords & mentions', we still receive notifications
+        for messages in threads that we are subscribed to.
+        Effectively making this 'keywords, mentions & subscriptions'
+        """
+        # add a 'keywords & mentions' setting to the room alice's push rules
+        # In case this rule isn't clear: by adding a rule in the `room` section that does nothing,
+        # it stops execution of the push rules before we fall through to the `underride` section,
+        # where intuitively many kinds of messages will ambiently generate notifications.
+        # Mentions and keywords are triggered before the `room` block, so this doesn't suppress those.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/pushrules/global/room/{self.room_id}",
+            {"actions": []},
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK)
+
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+        (thread_root_id,) = self.helper.send_messages(self.room_id, 1, tok=self.token)
+
+        # sanity check that our mentions still work
+        self.assertFalse(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "this is a plain message with no mention",
+                },
+                type="m.room.message",
+            ),
+            "alice should not be notified (mentions & keywords room setting)",
+        )
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "this is a message that mentions alice",
+                },
+                type="m.room.message",
+            ),
+            "alice should be notified (mentioned)",
+        )
+
+        # let's have alice subscribe to the thread
+        self.get_success(
+            self.hs.get_datastores().main.subscribe_user_to_thread(
+                self.alice,
+                self.room_id,
+                thread_root_id,
+                automatic_event_orderings=None,
+            )
+        )
+
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "some message in the thread",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
+            ),
+            "alice is subscribed to thread so should be notified",
+        )
+
+    def test_with_disabled_thread_subscriptions(self) -> None:
+        """
+        Test what happens with threaded events when MSC4306 is disabled.
+
+        FUTURE: If MSC4306 becomes enabled-by-default/accepted, this test is to be removed.
+        """
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+        (thread_root_id,) = self.helper.send_messages(self.room_id, 1, tok=self.token)
+
+        # When MSC4306 is not enabled, a threaded message generates a notification
+        # by default.
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "test message before subscription",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
             )
         )

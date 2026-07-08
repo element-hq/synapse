@@ -21,13 +21,13 @@
 
 """Tests REST events for /rooms paths."""
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

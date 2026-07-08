@@ -18,24 +18,25 @@
 #
 #
 import email.message
+import importlib.resources as importlib_resources
 import os
 from http import HTTPStatus
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Sequence
 
 import attr
-import pkg_resources
 from parameterized import parameterized
 
 from twisted.internet.defer import Deferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes, SynapseError
+from synapse.logging.context import make_deferred_yieldable
 from synapse.push.emailpusher import EmailPusher
 from synapse.rest.client import login, room
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import FakeSite, make_request
 from tests.unittest import HomeserverTestCase
@@ -59,11 +60,12 @@ class EmailPusherTests(HomeserverTestCase):
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": True,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "expiry_template_html": "notice_expiry.html",
             "expiry_template_text": "notice_expiry.txt",
             "notif_template_html": "notif_mail.html",
@@ -81,14 +83,14 @@ class EmailPusherTests(HomeserverTestCase):
 
         hs = self.setup_test_homeserver(config=config)
 
-        # List[Tuple[Deferred, args, kwargs]]
-        self.email_attempts: List[Tuple[Deferred, Sequence, Dict]] = []
+        # list[tuple[Deferred, args, kwargs]]
+        self.email_attempts: list[tuple[Deferred, Sequence, dict]] = []
 
         def sendmail(*args: Any, **kwargs: Any) -> Deferred:
             # This mocks out synapse.reactor.send_email._sendmail.
             d: Deferred = Deferred()
             self.email_attempts.append((d, args, kwargs))
-            return d
+            return make_deferred_yieldable(d)
 
         hs.get_send_email_handler()._sendmail = sendmail  # type: ignore[assignment]
 
@@ -377,6 +379,73 @@ class EmailPusherTests(HomeserverTestCase):
 
         self.assertIn("_matrix/media/v1/thumbnail/DUMMY_MEDIA_ID", html)
 
+    @parameterized.expand(
+        [
+            (
+                "https allowed",
+                '<a href="https://example.com">test click me</a>',
+                '<a href="https://example.com" rel="nofollow">test click me</a>',
+            ),
+            (
+                "http allowed",
+                '<a href="http://example.com">test click me</a>',
+                '<a href="http://example.com" rel="nofollow">test click me</a>',
+            ),
+            (
+                "mailto allowed",
+                '<a href="mailto:test@example.com">test click me</a>',
+                '<a href="mailto:test@example.com">test click me</a>',
+            ),
+            (
+                "javascript disallowed",
+                '<a href="javascript:stealCookies()" rel="nofollow">test click me</a>',
+                "<a>test click me</a>",
+            ),
+            (
+                "data disallowed",
+                '<a href="data:,Hello%2C%20World%21" rel="nofollow">test click me</a>',
+                "<a>test click me</a>",
+            ),
+        ],
+    )
+    def test_link_schemes_sanitized(
+        self,
+        _test_label: str,
+        input: str,
+        expected: str,
+    ) -> None:
+        # Create a room
+        room = self.helper.create_room_as(self.user_id, tok=self.access_token)
+
+        self.helper.invite(
+            room=room, src=self.user_id, tok=self.access_token, targ=self.others[0].id
+        )
+        self.helper.join(room=room, user=self.others[0].id, tok=self.others[0].token)
+
+        self.helper.send_event(
+            room,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "format": "org.matrix.custom.html",
+                "formatted_body": input,
+                "body": "test click me",  # Plain-text Fallback
+            },
+            tok=self.others[0].token,
+        )
+
+        args, kwargs = self._check_for_mail()
+        msg: bytes = args[5]
+        html_message = email.message_from_bytes(msg).get_payload(i=1)
+        assert isinstance(html_message, email.message.Message)
+
+        # Extract the `bytes` from the html Message object, and decode to a `str`.
+        html = html_message.get_payload(decode=True)
+        assert isinstance(html, bytes)
+        html = html.decode()
+
+        self.assertIn(expected, html)
+
     def test_empty_room(self) -> None:
         """All users leaving a room shouldn't cause the pusher to break."""
         # Create a simple room with two users
@@ -508,7 +577,7 @@ class EmailPusherTests(HomeserverTestCase):
         )
         self.assertEqual(len(pushers), 0)
 
-    def _check_for_mail(self) -> Tuple[Sequence, Dict]:
+    def _check_for_mail(self) -> tuple[Sequence, dict]:
         """
         Assert that synapse sent off exactly one email notification.
 

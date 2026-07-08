@@ -19,19 +19,20 @@
 #
 #
 import os
-from typing import Any, Awaitable, ContextManager, Dict, Optional, Tuple
+from typing import Any, ContextManager
 from unittest.mock import ANY, AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest
+from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.macaroons import get_value_from_macaroon
 from synapse.util.stringutils import random_string
 
@@ -44,7 +45,7 @@ try:
     from authlib.oidc.core import UserInfo
     from authlib.oidc.discovery import OpenIDProviderMetadata
 
-    from synapse.handlers.oidc import Token, UserAttributeDict
+    from synapse.handlers.oidc import OidcMetadataError, Token, UserAttributeDict
 
     HAS_OIDC = True
 except ImportError:
@@ -152,7 +153,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
     if not HAS_OIDC:
         skip = "requires OIDC"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         return config
@@ -204,7 +205,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
         client_redirect_url: str = "http://client/redirect",
         scope: str = "openid",
         with_sid: bool = False,
-    ) -> Tuple[SynapseRequest, FakeAuthorizationGrant]:
+    ) -> tuple[SynapseRequest, FakeAuthorizationGrant]:
         """Start an authorization request, and get the callback request back."""
         nonce = random_string(10)
         state = random_string(10)
@@ -221,8 +222,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
         return _build_callback_request(code, state, session), grant
 
     def assertRenderedError(
-        self, error: str, error_description: Optional[str] = None
-    ) -> Tuple[Any, ...]:
+        self, error: str, error_description: str | None = None
+    ) -> tuple[Any, ...]:
         self.render_error.assert_called_once()
         args = self.render_error.call_args[0]
         self.assertEqual(args[1], error)
@@ -263,6 +264,29 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.reset_mocks()
         self.get_success(self.provider.load_metadata())
         self.fake_server.get_metadata_handler.assert_not_called()
+
+    @override_config({"oidc_config": {**DEFAULT_CONFIG, "discover": True}})
+    def test_startup_metadata_preload_failure_is_logged(self) -> None:
+        """
+        The metadata preload on startup causes logs to be emitted, but no
+        exceptions.
+        """
+        with self.fake_server.buggy_endpoint(metadata=True):
+            with self.assertLogs("synapse.handlers.oidc", level="CRITICAL") as logs:
+                self.get_success(
+                    make_deferred_yieldable(self.handler.preload_metadata())
+                )
+
+        self.assertIn(
+            "CRITICAL:synapse.handlers.oidc:Error while preloading OIDC provider 'oidc'. Login may be broken!",
+            [line for record in logs.output for line in record.split("\n")],
+        )
+
+        # Even though the preload failed, if we try to load the metadata later,
+        # the attempt still goes through.
+        self.fake_server.get_metadata_handler.assert_not_called()
+        self.get_success(self.provider.load_metadata())
+        self.fake_server.get_metadata_handler.assert_called_once()
 
     @override_config({"oidc_config": {**EXPLICIT_ENDPOINT_CONFIG, "discover": True}})
     def test_discovery_with_explicit_config(self) -> None:
@@ -351,49 +375,53 @@ class OidcHandlerTestCase(HomeserverTestCase):
         """Provider metadatas are extensively validated."""
         h = self.provider
 
-        def force_load_metadata() -> Awaitable[None]:
+        def force_load_metadata() -> None:
             async def force_load() -> "OpenIDProviderMetadata":
                 return await h.load_metadata(force=True)
 
-            return get_awaitable_result(force_load())
+            get_awaitable_result(force_load())
 
         # Default test config does not throw
         force_load_metadata()
 
         with self.metadata_edit({"issuer": None}):
-            self.assertRaisesRegex(ValueError, "issuer", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "issuer", force_load_metadata)
 
         with self.metadata_edit({"issuer": "http://insecure/"}):
-            self.assertRaisesRegex(ValueError, "issuer", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "issuer", force_load_metadata)
 
         with self.metadata_edit({"issuer": "https://invalid/?because=query"}):
-            self.assertRaisesRegex(ValueError, "issuer", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "issuer", force_load_metadata)
 
         with self.metadata_edit({"authorization_endpoint": None}):
             self.assertRaisesRegex(
-                ValueError, "authorization_endpoint", force_load_metadata
+                OidcMetadataError, "authorization_endpoint", force_load_metadata
             )
 
         with self.metadata_edit({"authorization_endpoint": "http://insecure/auth"}):
             self.assertRaisesRegex(
-                ValueError, "authorization_endpoint", force_load_metadata
+                OidcMetadataError, "authorization_endpoint", force_load_metadata
             )
 
         with self.metadata_edit({"token_endpoint": None}):
-            self.assertRaisesRegex(ValueError, "token_endpoint", force_load_metadata)
+            self.assertRaisesRegex(
+                OidcMetadataError, "token_endpoint", force_load_metadata
+            )
 
         with self.metadata_edit({"token_endpoint": "http://insecure/token"}):
-            self.assertRaisesRegex(ValueError, "token_endpoint", force_load_metadata)
+            self.assertRaisesRegex(
+                OidcMetadataError, "token_endpoint", force_load_metadata
+            )
 
         with self.metadata_edit({"jwks_uri": None}):
-            self.assertRaisesRegex(ValueError, "jwks_uri", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "jwks_uri", force_load_metadata)
 
         with self.metadata_edit({"jwks_uri": "http://insecure/jwks.json"}):
-            self.assertRaisesRegex(ValueError, "jwks_uri", force_load_metadata)
+            self.assertRaisesRegex(OidcMetadataError, "jwks_uri", force_load_metadata)
 
         with self.metadata_edit({"response_types_supported": ["id_token"]}):
             self.assertRaisesRegex(
-                ValueError, "response_types_supported", force_load_metadata
+                OidcMetadataError, "response_types_supported", force_load_metadata
             )
 
         with self.metadata_edit(
@@ -406,7 +434,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
             {"token_endpoint_auth_methods_supported": ["client_secret_post"]}
         ):
             self.assertRaisesRegex(
-                ValueError,
+                OidcMetadataError,
                 "token_endpoint_auth_methods_supported",
                 force_load_metadata,
             )
@@ -423,7 +451,9 @@ class OidcHandlerTestCase(HomeserverTestCase):
         h._scopes = []
         self.assertTrue(h._uses_userinfo)
         with self.metadata_edit({"userinfo_endpoint": None}):
-            self.assertRaisesRegex(ValueError, "userinfo_endpoint", force_load_metadata)
+            self.assertRaisesRegex(
+                OidcMetadataError, "userinfo_endpoint", force_load_metadata
+            )
 
         with self.metadata_edit({"jwks_uri": None}):
             # Shouldn't raise with a valid userinfo, even without jwks
@@ -930,7 +960,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
         # advance the clock a bit before we start, so we aren't working with zero
         # timestamps.
         self.reactor.advance(1000)
-        start_time = self.reactor.seconds()
+        start_time_s = int(self.reactor.seconds())
         ret = self.get_success(self.provider._exchange_code(code, code_verifier=""))
 
         self.assertEqual(ret, token)
@@ -951,8 +981,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.assertEqual(claims["aud"], ISSUER)
         self.assertEqual(claims["iss"], "DEFGHI")
         self.assertEqual(claims["sub"], CLIENT_ID)
-        self.assertEqual(claims["iat"], start_time)
-        self.assertGreater(claims["exp"], start_time)
+        self.assertEqual(claims["iat"], start_time_s)
+        self.assertGreater(claims["exp"], start_time_s)
 
         # check the rest of the POSTed data
         self.assertEqual(args["grant_type"], ["authorization_code"])

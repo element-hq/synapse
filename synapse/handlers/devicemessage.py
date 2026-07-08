@@ -21,10 +21,19 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
-from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
-from synapse.api.errors import Codes, SynapseError
+import attr
+from canonicaljson import encode_canonical_json
+
+from synapse.api.constants import (
+    MAX_TO_DEVICE_CONTENT_SIZE,
+    SOFT_MAX_EDU_SIZE,
+    EduTypes,
+    EventContentFields,
+    ToDeviceEventTypes,
+)
+from synapse.api.errors import Codes, EventSizeError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import (
@@ -33,18 +42,23 @@ from synapse.logging.opentracing import (
     log_kv,
     set_tag,
 )
-from synapse.replication.http.devices import (
-    ReplicationMultiUserDevicesResyncRestServlet,
-)
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
-from synapse.util import json_encoder
-from synapse.util.stringutils import random_string
+from synapse.util import split_dict_to_fit_to_size
+from synapse.util.json import json_encoder
+from synapse.util.stringutils import random_string_insecure_fast
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
 logger = logging.getLogger(__name__)
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class DehydratedEvents:
+    events: list[JsonDict]
+    stream_id: str
+    limited: bool
 
 
 class DeviceMessageHandler:
@@ -56,9 +70,9 @@ class DeviceMessageHandler:
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
         self.is_mine = hs.is_mine
+        self.device_handler = hs.get_device_handler()
         if hs.config.experimental.msc3814_enabled:
             self.event_sources = hs.get_event_sources()
-            self.device_handler = hs.get_device_handler()
 
         # We only need to poke the federation sender explicitly if its on the
         # same instance. Other federation sender instances will get notified by
@@ -78,18 +92,6 @@ class DeviceMessageHandler:
             hs.get_federation_registry().register_instances_for_edu(
                 EduTypes.DIRECT_TO_DEVICE,
                 hs.config.worker.writers.to_device,
-            )
-
-        # The handler to call when we think a user's device list might be out of
-        # sync. We do all device list resyncing on the master instance, so if
-        # we're on a worker we hit the device resync replication API.
-        if hs.config.worker.worker_app is None:
-            self._multi_user_device_resync = (
-                hs.get_device_handler().device_list_updater.multi_user_device_resync
-            )
-        else:
-            self._multi_user_device_resync = (
-                ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
             )
 
         # a rate limiter for room key requests.  The keys are
@@ -173,7 +175,7 @@ class DeviceMessageHandler:
         self,
         message_type: str,
         sender_user_id: str,
-        by_device: Dict[str, Dict[str, Any]],
+        by_device: dict[str, dict[str, Any]],
     ) -> None:
         """Checks inbound device messages for unknown remote devices, and if
         found marks the remote cache for the user as stale.
@@ -213,13 +215,16 @@ class DeviceMessageHandler:
             await self.store.mark_remote_users_device_caches_as_stale((sender_user_id,))
 
             # Immediately attempt a resync in the background
-            run_in_background(self._multi_user_device_resync, user_ids=[sender_user_id])
+            run_in_background(
+                self.device_handler.device_list_updater.multi_user_device_resync,
+                user_ids=[sender_user_id],
+            )
 
     async def send_device_message(
         self,
         requester: Requester,
         message_type: str,
-        messages: Dict[str, Dict[str, JsonDict]],
+        messages: dict[str, dict[str, JsonDict]],
     ) -> None:
         """
         Handle a request from a user to send to-device message(s).
@@ -234,7 +239,8 @@ class DeviceMessageHandler:
         set_tag(SynapseTags.TO_DEVICE_TYPE, message_type)
         set_tag(SynapseTags.TO_DEVICE_SENDER, sender_user_id)
         local_messages = {}
-        remote_messages: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
+        # Map from destination (server) -> recipient (user ID) -> device_id -> JSON message content
+        remote_messages: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for user_id, by_device in messages.items():
             if not UserID.is_valid(user_id):
                 logger.warning(
@@ -245,6 +251,24 @@ class DeviceMessageHandler:
 
             # add an opentracing log entry for each message
             for device_id, message_content in by_device.items():
+                # Check the size of each message, as if these are too large we
+                # can't send them over federation.
+                #
+                # We do this for all to-device messages, even those that aren't
+                # over federation, so as to more easily catch clients that are
+                # sending excessively large messages.
+                if (
+                    message_len := len(encode_canonical_json(message_content))
+                ) > MAX_TO_DEVICE_CONTENT_SIZE:
+                    # 413 is currently an unspecced response for `/sendToDevice` but is
+                    # probably the best thing we can do.
+                    # https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding
+                    # this to the spec
+                    raise EventSizeError(
+                        f"To-device message for {user_id}:{device_id} is too large to send ({message_len} > {MAX_TO_DEVICE_CONTENT_SIZE})",
+                        unpersistable=True,
+                    )
+
                 log_kv(
                     {
                         "event": "send_to_device_message",
@@ -289,28 +313,33 @@ class DeviceMessageHandler:
                 destination = get_domain_from_id(user_id)
                 remote_messages.setdefault(destination, {})[user_id] = by_device
 
-        context = get_active_span_text_map()
-
-        remote_edu_contents = {}
-        for destination, messages in remote_messages.items():
-            # The EDU contains a "message_id" property which is used for
-            # idempotence. Make up a random one.
-            message_id = random_string(16)
-            log_kv({"destination": destination, "message_id": message_id})
-
-            remote_edu_contents[destination] = {
-                "messages": messages,
-                "sender": sender_user_id,
-                "type": message_type,
-                "message_id": message_id,
-                "org.matrix.opentracing_context": json_encoder.encode(context),
-            }
-
-        # Add messages to the database.
+        # Add local messages to the database.
         # Retrieve the stream id of the last-processed to-device message.
-        last_stream_id = await self.store.add_messages_to_device_inbox(
-            local_messages, remote_edu_contents
+        last_stream_id = (
+            await self.store.add_local_messages_from_client_to_device_inbox(
+                local_messages
+            )
         )
+        for destination, messages in remote_messages.items():
+            split_edus = split_device_messages_into_edus(
+                sender_user_id, message_type, messages
+            )
+            for edu in split_edus:
+                edu["org.matrix.opentracing_context"] = json_encoder.encode(
+                    get_active_span_text_map()
+                )
+                # Add remote messages to the database.
+                last_stream_id = (
+                    await self.store.add_remote_messages_from_client_to_device_inbox(
+                        {destination: edu}
+                    )
+                )
+                log_kv(
+                    {
+                        "destination": destination,
+                        "message_id": edu["message_id"],
+                    }
+                )
 
         # Notify listeners that there are new to-device messages to process,
         # handing them the latest stream id.
@@ -327,9 +356,9 @@ class DeviceMessageHandler:
         self,
         requester: Requester,
         device_id: str,
-        since_token: Optional[str],
+        since_token: str | None,
         limit: int,
-    ) -> JsonDict:
+    ) -> DehydratedEvents:
         """Fetches up to `limit` events sent to `device_id` starting from `since_token`
         and returns the new since token. If there are no more messages, returns an empty
         array.
@@ -340,8 +369,9 @@ class DeviceMessageHandler:
             since_token: stream id to start from when fetching messages
             limit: the number of messages to fetch
         Returns:
-            A dict containing the to-device messages, as well as a token that the client
-            can provide in the next call to fetch the next batch of messages
+            A DehydratedEvents containing the to-device `events` and `stream_id` token that the
+            client can provide in the next call to fetch the next batch of messages. If there are
+            more messages which will arrive in the next batch, `limited` is True, otherwise False.
         """
 
         user_id = requester.user.to_string()
@@ -405,7 +435,133 @@ class DeviceMessageHandler:
             user_id,
         )
 
-        return {
-            "events": messages,
-            "next_batch": f"d{stream_id}",
-        }
+        return DehydratedEvents(
+            events=messages,
+            stream_id=f"d{stream_id}",
+            limited=(stream_id != to_token),
+        )
+
+
+def split_device_messages_into_edus(
+    sender_user_id: str,
+    message_type: str,
+    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
+) -> list[JsonDict]:
+    """
+    This function takes many to-device messages and fits/splits them into several EDUs
+    as necessary. We split the messages up as the overall request can overrun the
+    `max_request_body_size` and prevent outbound federation traffic because of the size
+    of the transaction (cf. `SOFT_MAX_EDU_SIZE`).
+
+    Args:
+        sender_user_id: The user that is sending the to-device messages.
+        message_type: The type of to-device messages that are being sent.
+        messages_by_user_then_device: Dictionary of recipient user_id to recipient device_id to message.
+
+    Returns:
+        Bin-packed list of EDU JSON content for the given to_device messages
+    """
+    split_edus_content: list[JsonDict] = []
+
+    # The header size of the full EDU.
+    base_edu_size = _EMPTY_EDU_SIZE + len(sender_user_id) + len(message_type)
+
+    # First split up the top-level dict of user_id to device messages.
+    for subset_messages, estimated_size in split_dict_to_fit_to_size(
+        messages_by_user_then_device,
+        soft_max_size=SOFT_MAX_EDU_SIZE,
+        wrapping_object_size=base_edu_size,
+    ):
+        # The returned subset might be larger than the soft max size if it
+        # contains a single entry that is larger than the soft max size.
+        if estimated_size <= SOFT_MAX_EDU_SIZE:
+            # This message fits in a single EDU, add it as is.
+            content = create_new_to_device_edu_content(
+                sender_user_id, message_type, subset_messages
+            )
+            split_edus_content.append(content)
+            logger.debug(
+                "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
+                len(subset_messages),
+                sender_user_id,
+                content["message_id"],
+                len(split_edus_content),
+            )
+        else:
+            # This message doesn't fit in a single EDU. We split the message up
+            # further by device.
+            #
+            # Note: `subset` should only have a single entry in it.
+            for recipient, messages_by_device in subset_messages.items():
+                # The header size of the EDU for this recipient, which includes
+                # the size of the recipient user ID and the wrapping structure
+                # for the device messages.
+                subset_base_size = len(
+                    encode_canonical_json(
+                        _create_new_to_device_edu(
+                            sender_user_id, message_type, {recipient: {}}
+                        )
+                    )
+                )
+
+                for subset_messages, _estimated_size in split_dict_to_fit_to_size(
+                    messages_by_device,
+                    soft_max_size=SOFT_MAX_EDU_SIZE,
+                    wrapping_object_size=subset_base_size,
+                ):
+                    # Again, the returned subset might be larger than the soft
+                    # max size, but we can't split it any further so we have to
+                    # add it as is.
+                    content = create_new_to_device_edu_content(
+                        sender_user_id, message_type, {recipient: subset_messages}
+                    )
+                    split_edus_content.append(content)
+                    logger.debug(
+                        "Created EDU with %d recipients from %s (message_id=%s), (total EDUs so far: %d)",
+                        len(subset_messages),
+                        sender_user_id,
+                        content["message_id"],
+                        len(split_edus_content),
+                    )
+
+    return split_edus_content
+
+
+def create_new_to_device_edu_content(
+    sender_user_id: str,
+    message_type: str,
+    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
+) -> JsonDict:
+    """
+    Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
+    """
+    # The EDU contains a "message_id" property which is used for
+    # idempotence. Make up a random one.
+    message_id = random_string_insecure_fast(16)
+    content = {
+        "sender": sender_user_id,
+        "type": message_type,
+        "message_id": message_id,
+        "messages": messages_by_user_then_device,
+    }
+    return content
+
+
+def _create_new_to_device_edu(
+    sender_user_id: str,
+    message_type: str,
+    messages_by_user_then_device: dict[str, dict[str, JsonDict]],
+) -> dict[str, Any]:
+    """Create a new `m.direct_to_device` EDU, returning the full EDU dict."""
+    return {
+        "edu_type": EduTypes.DIRECT_TO_DEVICE,
+        "content": create_new_to_device_edu_content(
+            sender_user_id, message_type, messages_by_user_then_device
+        ),
+    }
+
+
+# The size of an empty EDU with no messages, which we use as the base size when
+# packing messages into EDUs. The size of the sender and message type must be
+# added to this when calculating the size of an EDU.
+_EMPTY_EDU_SIZE = len(encode_canonical_json(_create_new_to_device_edu("", "", {})))

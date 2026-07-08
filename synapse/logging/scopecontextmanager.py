@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import Optional
 
 from opentracing import Scope, ScopeManager, Span
 
@@ -47,7 +46,7 @@ class LogContextScopeManager(ScopeManager):
         pass
 
     @property
-    def active(self) -> Optional[Scope]:
+    def active(self) -> Scope | None:
         """
         Returns the currently active Scope which can be used to access the
         currently active Scope.span.

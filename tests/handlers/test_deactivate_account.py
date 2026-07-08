@@ -19,7 +19,7 @@
 #
 #
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.push.rulekinds import PRIORITY_CLASS_MAP
@@ -28,7 +28,7 @@ from synapse.rest.client import account, login, room
 from synapse.server import HomeServer
 from synapse.synapse_rust.push import PushRule
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -483,3 +483,70 @@ class DeactivateAccountTestCase(HomeserverTestCase):
 
         # Validate that the created room is forgotten
         self.assertTrue(room_id in forgotten_rooms)
+
+    def _get_profile_row(self) -> str | None:
+        """Return the `user_id` of `self.user`'s `profiles` row, or None if absent."""
+        return self.get_success(
+            self._store.db_pool.simple_select_one_onecol(
+                table="profiles",
+                keyvalues={"full_user_id": self.user},
+                retcol="user_id",
+                allow_none=True,
+                desc="_get_profile_row",
+            )
+        )
+
+    def test_reactivation_recreates_profile(self) -> None:
+        """
+        Tests that reactivating an erased user recreates their profile row, so
+        that subsequent profile operations work.
+        """
+        self.assertIsNotNone(self._get_profile_row())
+
+        # Erasure deletes the whole profiles row.
+        self._deactivate_my_account()
+        self.assertIsNone(self._get_profile_row())
+
+        # Reactivating recreates a blank profile row.
+        deactivate_handler = self.hs.get_deactivate_account_handler()
+        self.get_success(deactivate_handler.activate_account(self.user))
+        self.assertIsNotNone(self._get_profile_row())
+
+        # Setting a display name now works again.
+        user = UserID.from_string(self.user)
+        self.get_success(
+            self.hs.get_profile_handler().set_displayname(
+                user, create_requester(user), "Reactivated", by_admin=True
+            )
+        )
+        self.assertEqual(
+            self.get_success(self._store.get_profile_displayname(user)),
+            "Reactivated",
+        )
+
+    def test_reactivation_without_erasure_keeps_profile(self) -> None:
+        """
+        Reactivating a user whose profile row still exists leaves it untouched.
+        """
+        user = UserID.from_string(self.user)
+        self.get_success(
+            self.hs.get_profile_handler().set_displayname(
+                user, create_requester(user), "Original", by_admin=True
+            )
+        )
+
+        # Deactivate without erasure, so the profile row is left intact.
+        deactivate_handler = self.hs.get_deactivate_account_handler()
+        self.get_success(
+            deactivate_handler.deactivate_account(
+                self.user, erase_data=False, requester=create_requester(user)
+            )
+        )
+        self.assertIsNotNone(self._get_profile_row())
+
+        # Reactivating must not raise despite the existing profile row.
+        self.get_success(deactivate_handler.activate_account(self.user))
+        self.assertEqual(
+            self.get_success(self._store.get_profile_displayname(user)),
+            "Original",
+        )

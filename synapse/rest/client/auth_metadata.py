@@ -13,8 +13,8 @@
 # limitations under the License.
 import logging
 import typing
-from typing import Tuple, cast
 
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
@@ -47,14 +47,30 @@ class AuthIssuerServlet(RestServlet):
         self._config = hs.config
         self._auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        if self._config.experimental.msc3861.enabled:
-            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
-            # We import lazily here because of the authlib requirement
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        # This endpoint is unauthenticated and the response only depends on
+        # the metadata we get from Matrix Authentication Service. Internally,
+        # MasDelegatedAuth.issuer() is already caching the
+        # response in memory anyway. Ideally we would follow any Cache-Control directive
+        # given by MAS, but this is fine for now.
+        #
+        # - `public` means it can be cached both in the browser and in caching proxies
+        # - `max-age` controls how long we cache on the browser side. 10m is sane enough
+        # - `s-maxage` controls how long we cache on the proxy side. Since caching
+        #   proxies usually have a way to purge caches, it is fine to cache there for
+        #   longer (1h), and issue cache invalidations in case we need it
+        # - `stale-while-revalidate` allows caching proxies to serve stale content while
+        #   revalidating in the background. This is useful for making this request always
+        #   'snappy' to end users whilst still keeping it fresh
+        request.setHeader(
+            b"Cache-Control",
+            b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+        )
 
-            auth = cast(MSC3861DelegatedAuth, self._auth)
-            return 200, {"issuer": await auth.issuer()}
+        if self._config.mas.enabled:
+            assert isinstance(self._auth, MasDelegatedAuth)
+            return 200, {"issuer": await self._auth.issuer()}
+
         else:
             # Wouldn't expect this to be reached: the servelet shouldn't have been
             # registered. Still, fail gracefully if we are registered for some reason.
@@ -70,25 +86,47 @@ class AuthMetadataServlet(RestServlet):
     Advertises the OAuth 2.0 server metadata for the homeserver.
     """
 
-    PATTERNS = client_patterns(
-        "/org.matrix.msc2965/auth_metadata$",
-        unstable=True,
-        releases=(),
-    )
+    PATTERNS = [
+        *client_patterns(
+            "/auth_metadata$",
+            releases=("v1",),
+        ),
+        *client_patterns(
+            "/org.matrix.msc2965/auth_metadata$",
+            unstable=True,
+            releases=(),
+        ),
+    ]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self._config = hs.config
         self._auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        if self._config.experimental.msc3861.enabled:
-            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
-            # We import lazily here because of the authlib requirement
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
+        # This endpoint is unauthenticated and the response only depends on
+        # the metadata we get from Matrix Authentication Service. Internally,
+        # MasDelegatedAuth.issuer() is already caching the
+        # response in memory anyway. Ideally we would follow any Cache-Control directive
+        # given by MAS, but this is fine for now.
+        #
+        # - `public` means it can be cached both in the browser and in caching proxies
+        # - `max-age` controls how long we cache on the browser side. 10m is sane enough
+        # - `s-maxage` controls how long we cache on the proxy side. Since caching
+        #   proxies usually have a way to purge caches, it is fine to cache there for
+        #   longer (1h), and issue cache invalidations in case we need it
+        # - `stale-while-revalidate` allows caching proxies to serve stale content while
+        #   revalidating in the background. This is useful for making this request always
+        #   'snappy' to end users whilst still keeping it fresh
+        request.setHeader(
+            b"Cache-Control",
+            b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
+        )
 
-            auth = cast(MSC3861DelegatedAuth, self._auth)
-            return 200, await auth.auth_metadata()
+        if self._config.mas.enabled:
+            assert isinstance(self._auth, MasDelegatedAuth)
+            return 200, await self._auth.auth_metadata()
+
         else:
             # Wouldn't expect this to be reached: the servlet shouldn't have been
             # registered. Still, fail gracefully if we are registered for some reason.
@@ -100,7 +138,6 @@ class AuthMetadataServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    # We use the MSC3861 values as they are used by multiple MSCs
-    if hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled:
         AuthIssuerServlet(hs).register(http_server)
         AuthMetadataServlet(hs).register(http_server)

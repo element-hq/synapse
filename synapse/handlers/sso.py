@@ -27,14 +27,10 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
-    List,
     Mapping,
     NoReturn,
-    Optional,
     Protocol,
-    Set,
 )
 from urllib.parse import urlencode
 
@@ -46,7 +42,6 @@ from twisted.web.server import Request
 from synapse.api.constants import LoginType, ProfileFields
 from synapse.api.errors import Codes, NotFoundError, RedirectException, SynapseError
 from synapse.config.sso import SsoAttributeRequirement
-from synapse.handlers.device import DeviceHandler
 from synapse.handlers.register import init_counters_for_auth_provider
 from synapse.handlers.ui_auth import UIAuthSessionDataConstants
 from synapse.http import get_request_user_agent
@@ -72,6 +67,15 @@ class MappingException(Exception):
     """Used to catch errors when mapping an SSO response to user attributes.
 
     Note that the msg that is raised is shown to end-users.
+    """
+
+
+class SsoSetupError(Exception):
+    """
+    Used to catch and tag errors relating to an SSO setup's.
+
+    Used as the superclass of specific error classes,
+    as note we can't e.g. import the OIDC module unless OIDC dependencies are installed.
     """
 
 
@@ -106,12 +110,12 @@ class SsoIdentityProvider(Protocol):
         """User-facing name for this provider"""
 
     @property
-    def idp_icon(self) -> Optional[str]:
+    def idp_icon(self) -> str | None:
         """Optional MXC URI for user-facing icon"""
         return None
 
     @property
-    def idp_brand(self) -> Optional[str]:
+    def idp_brand(self) -> str | None:
         """Optional branding identifier"""
         return None
 
@@ -119,8 +123,8 @@ class SsoIdentityProvider(Protocol):
     async def handle_redirect_request(
         self,
         request: SynapseRequest,
-        client_redirect_url: Optional[bytes],
-        ui_auth_session_id: Optional[str] = None,
+        client_redirect_url: bytes | None,
+        ui_auth_session_id: str | None = None,
     ) -> str:
         """Handle an incoming request to /login/sso/redirect
 
@@ -145,10 +149,10 @@ class UserAttributes:
     # the localpart of the mxid that the mapper has assigned to the user.
     # if `None`, the mapper has not picked a userid, and the user should be prompted to
     # enter one.
-    localpart: Optional[str]
+    localpart: str | None
     confirm_localpart: bool = False
-    display_name: Optional[str] = None
-    picture: Optional[str] = None
+    display_name: str | None = None
+    picture: str | None = None
     # mypy thinks these are incompatible for some reason.
     emails: StrCollection = attr.Factory(list)
 
@@ -161,19 +165,19 @@ class UsernameMappingSession:
     auth_provider_id: str
 
     # An optional session ID from the IdP.
-    auth_provider_session_id: Optional[str]
+    auth_provider_session_id: str | None
 
     # user ID on the IdP server
     remote_user_id: str
 
     # attributes returned by the ID mapper
-    display_name: Optional[str]
+    display_name: str | None
     emails: StrCollection
-    avatar_url: Optional[str]
+    avatar_url: str | None
 
     # An optional dictionary of extra attributes to be provided to the client in the
     # login response.
-    extra_login_attributes: Optional[JsonDict]
+    extra_login_attributes: JsonDict | None
 
     # where to redirect the client back to
     client_redirect_url: str
@@ -182,11 +186,11 @@ class UsernameMappingSession:
     expiry_time_ms: int
 
     # choices made by the user
-    chosen_localpart: Optional[str] = None
+    chosen_localpart: str | None = None
     use_display_name: bool = True
     use_avatar: bool = True
     emails_to_use: StrCollection = ()
-    terms_accepted_version: Optional[str] = None
+    terms_accepted_version: str | None = None
 
 
 # the HTTP cookie used to track the mapping session id
@@ -203,7 +207,7 @@ class SsoHandler:
     def __init__(self, hs: "HomeServer"):
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
-        self._server_name = hs.hostname
+        self.server_name = hs.hostname
         self._is_mine_server_name = hs.is_mine_server_name
         self._registration_handler = hs.get_registration_handler()
         self._auth_handler = hs.get_auth_handler()
@@ -225,13 +229,13 @@ class SsoHandler:
         )
 
         # a lock on the mappings
-        self._mapping_lock = Linearizer(name="sso_user_mapping", clock=hs.get_clock())
+        self._mapping_lock = Linearizer(clock=hs.get_clock(), name="sso_user_mapping")
 
         # a map from session id to session data
-        self._username_mapping_sessions: Dict[str, UsernameMappingSession] = {}
+        self._username_mapping_sessions: dict[str, UsernameMappingSession] = {}
 
         # map from idp_id to SsoIdentityProvider
-        self._identity_providers: Dict[str, SsoIdentityProvider] = {}
+        self._identity_providers: dict[str, SsoIdentityProvider] = {}
 
         self._consent_at_registration = hs.config.consent.user_consent_at_registration
 
@@ -239,7 +243,9 @@ class SsoHandler:
         p_id = p.idp_id
         assert p_id not in self._identity_providers
         self._identity_providers[p_id] = p
-        init_counters_for_auth_provider(p_id)
+        init_counters_for_auth_provider(
+            auth_provider_id=p_id, server_name=self.server_name
+        )
 
     def get_identity_providers(self) -> Mapping[str, SsoIdentityProvider]:
         """Get the configured identity providers"""
@@ -280,7 +286,7 @@ class SsoHandler:
         self,
         request: Request,
         error: str,
-        error_description: Optional[str] = None,
+        error_description: str | None = None,
         code: int = 400,
     ) -> None:
         """Renders the error template and responds with it.
@@ -304,7 +310,7 @@ class SsoHandler:
         self,
         request: SynapseRequest,
         client_redirect_url: bytes,
-        idp_id: Optional[str],
+        idp_id: str | None,
     ) -> str:
         """Handle a request to /login/sso/redirect
 
@@ -323,7 +329,7 @@ class SsoHandler:
             )
 
         # if the client chose an IdP, use that
-        idp: Optional[SsoIdentityProvider] = None
+        idp: SsoIdentityProvider | None = None
         if idp_id:
             idp = self._identity_providers.get(idp_id)
             if not idp:
@@ -343,7 +349,7 @@ class SsoHandler:
 
     async def get_sso_user_by_remote_user_id(
         self, auth_provider_id: str, remote_user_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Maps the user ID of a remote IdP to a mxid for a previously seen user.
 
@@ -391,9 +397,9 @@ class SsoHandler:
         request: SynapseRequest,
         client_redirect_url: str,
         sso_to_matrix_id_mapper: Callable[[int], Awaitable[UserAttributes]],
-        grandfather_existing_users: Callable[[], Awaitable[Optional[str]]],
-        extra_login_attributes: Optional[JsonDict] = None,
-        auth_provider_session_id: Optional[str] = None,
+        grandfather_existing_users: Callable[[], Awaitable[str | None]],
+        extra_login_attributes: JsonDict | None = None,
+        auth_provider_session_id: str | None = None,
         registration_enabled: bool = True,
     ) -> None:
         """
@@ -525,7 +531,10 @@ class SsoHandler:
                             authenticated_entity=user_id,
                         )
                         await self._profile_handler.set_displayname(
-                            user_id_obj, requester, attributes.display_name, True
+                            user_id_obj,
+                            requester,
+                            attributes.display_name,
+                            by_admin=True,
                         )
                 if attributes.picture:
                     await self.set_avatar(user_id, attributes.picture)
@@ -570,7 +579,7 @@ class SsoHandler:
                 return attributes
 
             # Check if this mxid already exists
-            user_id = UserID(attributes.localpart, self._server_name).to_string()
+            user_id = UserID(attributes.localpart, self.server_name).to_string()
             if not await self._store.get_users_by_id_case_insensitive(user_id):
                 # This mxid is free
                 break
@@ -584,8 +593,8 @@ class SsoHandler:
 
     def _get_url_for_next_new_user_step(
         self,
-        attributes: Optional[UserAttributes] = None,
-        session: Optional[UsernameMappingSession] = None,
+        attributes: UserAttributes | None = None,
+        session: UsernameMappingSession | None = None,
     ) -> bytes:
         """Returns the URL to redirect to for the next step of new user registration
 
@@ -624,8 +633,8 @@ class SsoHandler:
         attributes: UserAttributes,
         client_redirect_url: str,
         next_step_url: bytes,
-        extra_login_attributes: Optional[JsonDict],
-        auth_provider_session_id: Optional[str],
+        extra_login_attributes: JsonDict | None,
+        auth_provider_session_id: str | None,
     ) -> NoReturn:
         """Creates a UsernameMappingSession and redirects the browser
 
@@ -818,7 +827,7 @@ class SsoHandler:
                 server_name = avatar_url_parts[-2]
                 media_id = avatar_url_parts[-1]
                 if self._is_mine_server_name(server_name):
-                    media = await self._media_repo.store.get_local_media(media_id)  # type: ignore[has-type]
+                    media = await self._media_repo.store.get_local_media(media_id)
                     if media is not None and upload_name == media.upload_name:
                         logger.info("skipping saving the user avatar")
                         return True
@@ -908,7 +917,7 @@ class SsoHandler:
 
         # render an error page.
         html = self._bad_user_template.render(
-            server_name=self._server_name,
+            server_name=self.server_name,
             user_id_to_verify=user_id_to_verify,
         )
         respond_with_html(request, 200, html)
@@ -960,7 +969,7 @@ class SsoHandler:
 
         if contains_invalid_mxid_characters(localpart):
             raise SynapseError(400, "localpart is invalid: %s" % (localpart,))
-        user_id = UserID(localpart, self._server_name).to_string()
+        user_id = UserID(localpart, self.server_name).to_string()
         user_infos = await self._store.get_users_by_id_case_insensitive(user_id)
 
         logger.info("[session %s] users: %s", session_id, user_infos)
@@ -998,7 +1007,7 @@ class SsoHandler:
         session.use_avatar = use_avatar
 
         emails_from_idp = set(session.emails)
-        filtered_emails: Set[str] = set()
+        filtered_emails: set[str] = set()
 
         # we iterate through the list rather than just building a set conjunction, so
         # that we can log attempts to use unknown addresses
@@ -1141,7 +1150,7 @@ class SsoHandler:
     def check_required_attributes(
         self,
         request: SynapseRequest,
-        attributes: Mapping[str, List[Any]],
+        attributes: Mapping[str, list[Any]],
         attribute_requirements: Iterable[SsoAttributeRequirement],
     ) -> bool:
         """
@@ -1177,11 +1186,9 @@ class SsoHandler:
         self,
         auth_provider_id: str,
         auth_provider_session_id: str,
-        expected_user_id: Optional[str] = None,
+        expected_user_id: str | None = None,
     ) -> None:
         """Revoke any devices and in-flight logins tied to a provider session.
-
-        Can only be called from the main process.
 
         Args:
             auth_provider_id: A unique identifier for this SSO provider, e.g.
@@ -1190,11 +1197,6 @@ class SsoHandler:
             expected_user_id: The user we're expecting to logout. If set, it will ignore
                 sessions belonging to other users and log an error.
         """
-
-        # It is expected that this is the main process.
-        assert isinstance(self._device_handler, DeviceHandler), (
-            "revoking SSO sessions can only be called on the main process"
-        )
 
         # Invalidate any running user-mapping sessions
         to_delete = []
@@ -1265,7 +1267,7 @@ def get_username_mapping_session_cookie_from_request(request: IRequest) -> str:
 
 
 def _check_attribute_requirement(
-    attributes: Mapping[str, List[Any]], req: SsoAttributeRequirement
+    attributes: Mapping[str, list[Any]], req: SsoAttributeRequirement
 ) -> bool:
     """Check if SSO attributes meet the proper requirements.
 

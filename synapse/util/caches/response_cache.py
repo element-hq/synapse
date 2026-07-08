@@ -24,16 +24,15 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generic,
     Iterable,
-    Optional,
     TypeVar,
 )
 
 import attr
 
 from twisted.internet import defer
+from twisted.python.failure import Failure
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import (
@@ -41,9 +40,15 @@ from synapse.logging.opentracing import (
     start_active_span,
     start_active_span_follows_from,
 )
-from synapse.util import Clock
-from synapse.util.async_helpers import AbstractObservableDeferred, ObservableDeferred
+from synapse.util.async_helpers import (
+    ObservableDeferred,
+    delay_cancellation,
+)
 from synapse.util.caches import EvictionReason, register_cache
+from synapse.util.cancellation import cancellable, is_function_cancellable
+from synapse.util.clock import Clock
+from synapse.util.duration import Duration
+from synapse.util.wheel_timer import WheelTimer
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +85,8 @@ class ResponseCacheContext(Generic[KV]):
 
 
 @attr.s(auto_attribs=True)
-class ResponseCacheEntry:
-    result: AbstractObservableDeferred
+class ResponseCacheEntry(Generic[KV]):
+    result: ObservableDeferred[KV]
     """The (possibly incomplete) result of the operation.
 
     Note that we continue to store an ObservableDeferred even after the operation
@@ -89,8 +94,17 @@ class ResponseCacheEntry:
     easier to cache Failure results.
     """
 
-    opentracing_span_context: "Optional[opentracing.SpanContext]"
+    opentracing_span_context: "opentracing.SpanContext | None"
     """The opentracing span which generated/is generating the result"""
+
+    cancellable: bool
+    """Whether the deferred is safe to be cancelled."""
+
+    last_observer_removed_time_ms: int | None = None
+    """The last time that an observer was removed from this entry.
+
+    Used to determine when to evict the entry if it has no observers.
+    """
 
 
 class ResponseCache(Generic[KV]):
@@ -99,23 +113,63 @@ class ResponseCache(Generic[KV]):
     returned from the cache. This means that if the client retries the request
     while the response is still being computed, that original response will be
     used rather than trying to compute a new response.
+
+    If a timeout is not specified then the cache entry will be kept while the
+    wrapped function is still running, and will be removed immediately once it
+    completes.
+
+    If a timeout is specified then the cache entry will be kept for the duration
+    of the timeout after the wrapped function completes. If the wrapped function
+    is cancellable and during processing nothing waits on the result for longer
+    than the timeout then the wrapped function will be cancelled and the cache
+    entry will be removed.
+
+    This behaviour is useful for caching responses to requests which are
+    expensive to compute, but which may be retried by clients if they time out.
+    For example, /sync requests which may take a long time to compute, and which
+    clients will retry. However, if the client stops retrying for a while then
+    we want to stop processing the request and free up the resources.
     """
 
     def __init__(
         self,
+        *,
         clock: Clock,
         name: str,
-        timeout_ms: float = 0,
+        server_name: str,
+        timeout: Duration | None = None,
         enable_logging: bool = True,
     ):
-        self._result_cache: Dict[KV, ResponseCacheEntry] = {}
+        """
+        Args:
+            clock
+            name
+            server_name: The homeserver name that this cache is associated
+                with (used to label the metric) (`hs.hostname`).
+            timeout_ms
+            enable_logging
+        """
+        self._result_cache: dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
-        self.timeout_sec = timeout_ms / 1000.0
+        self.timeout = timeout
 
         self._name = name
-        self._metrics = register_cache("response_cache", name, self, resizable=False)
+        self._metrics = register_cache(
+            cache_type="response_cache",
+            cache_name=name,
+            cache=self,
+            server_name=server_name,
+            resizable=False,
+        )
         self._enable_logging = enable_logging
+
+        self._prune_timer: WheelTimer[KV] | None = None
+        if self.timeout:
+            # Set up the timers for pruning inflight entries. The times here are
+            # how often we check for entries to prune.
+            self._prune_timer = WheelTimer(bucket_size=self.timeout / 10)
+            self.clock.looping_call(self._prune_inflight_entries, self.timeout / 10)
 
     def size(self) -> int:
         return len(self._result_cache)
@@ -134,7 +188,7 @@ class ResponseCache(Generic[KV]):
         """
         return self._result_cache.keys()
 
-    def _get(self, key: KV) -> Optional[ResponseCacheEntry]:
+    def _get(self, key: KV) -> ResponseCacheEntry | None:
         """Look up the given key.
 
         Args:
@@ -155,7 +209,8 @@ class ResponseCache(Generic[KV]):
         self,
         context: ResponseCacheContext[KV],
         deferred: "defer.Deferred[RV]",
-        opentracing_span_context: "Optional[opentracing.SpanContext]",
+        opentracing_span_context: "opentracing.SpanContext | None",
+        cancellable: bool,
     ) -> ResponseCacheEntry:
         """Set the entry for the given key to the given deferred.
 
@@ -167,30 +222,67 @@ class ResponseCache(Generic[KV]):
             context: Information about the cache miss
             deferred: The deferred which resolves to the result.
             opentracing_span_context: An opentracing span wrapping the calculation
+            cancellable: Whether the deferred is safe to be cancelled
 
         Returns:
             The cache entry object.
         """
-        result = ObservableDeferred(deferred, consumeErrors=True)
+        result = ObservableDeferred(
+            deferred,
+            # We set `consumeErrors=False` as we want to handle errors ourselves (`on_fail`) instead of
+            # replacing them with a `None` successful result that would go to `on_succeed`
+            consumeErrors=False,
+        )
         key = context.cache_key
-        entry = ResponseCacheEntry(result, opentracing_span_context)
+        entry = ResponseCacheEntry(
+            result, opentracing_span_context, cancellable=cancellable
+        )
         self._result_cache[key] = entry
 
-        def on_complete(r: RV) -> RV:
+        def on_succeed(r: RV) -> RV:
             # if this cache has a non-zero timeout, and the callback has not cleared
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
-            if self.timeout_sec and context.should_cache:
-                self.clock.call_later(self.timeout_sec, self._entry_timeout, key)
+            if self.timeout and context.should_cache:
+                self.clock.call_later(
+                    self.timeout,
+                    self._entry_timeout,
+                    key,
+                    # We don't need to track these calls since they don't hold any strong
+                    # references which would keep the `HomeServer` in memory after shutdown.
+                    # We don't want to track these because they can get cancelled really
+                    # quickly and thrash the tracking mechanism, ie. during repeated calls
+                    # to /sync.
+                    call_later_cancel_on_shutdown=False,
+                )
             else:
                 # otherwise, remove the result immediately.
                 self.unset(key)
             return r
 
-        # make sure we do this *after* adding the entry to result_cache,
-        # in case the result is already complete (in which case flipping the order would
-        # leave us with a stuck entry in the cache).
-        result.addBoth(on_complete)
+        def on_fail(failure: Failure) -> None:
+            """
+            If the deferred fails, unset the cache entry.
+            """
+            self.unset(key)
+
+            # Consider the Failure handled so they don't get thrown by the reactor
+            return None
+
+        # Two ordering constraints to be aware of for registering the callback and errback:
+        # 1. Both of them must be registered _after_ adding the entry to the result_cache,
+        #    otherwise it is possible for them to trigger immediately (before the entry
+        #    is added to the result_cache), the net effect of which is that it would leave
+        #    us with a stuck entry in the cache.
+        # 2. We must register the errback after callback.
+        #    If the errback was registered first, `on_fail` returning `None` would
+        #    cause `on_succeed` to be called with that `None` as argument.
+        #    This would start a timer to remove a cache entry, even though there isn't a
+        #    valid cache entry yet.
+        #    (This could prematurely remove a future cache entry with the same key.)
+        result.addCallback(on_succeed)
+        result.addErrback(on_fail)
+
         return entry
 
     def unset(self, key: KV) -> None:
@@ -207,6 +299,7 @@ class ResponseCache(Generic[KV]):
         self._metrics.inc_evictions(EvictionReason.time)
         self._result_cache.pop(key, None)
 
+    @cancellable
     async def wrap(
         self,
         key: KV,
@@ -263,7 +356,7 @@ class ResponseCache(Generic[KV]):
             if cache_context:
                 kwargs["cache_context"] = context
 
-            span_context: Optional[opentracing.SpanContext] = None
+            span_context: opentracing.SpanContext | None = None
 
             async def cb() -> RV:
                 # NB it is important that we do not `await` before setting span_context!
@@ -275,8 +368,44 @@ class ResponseCache(Generic[KV]):
                     return await callback(*args, **kwargs)
 
             d = run_in_background(cb)
-            entry = self._set(context, d, span_context)
-            return await make_deferred_yieldable(entry.result.observe())
+            entry = self._set(
+                context, d, span_context, cancellable=is_function_cancellable(callback)
+            )
+            try:
+                return await make_deferred_yieldable(entry.result.observe())
+            except defer.CancelledError:
+                pass
+
+            # We've been cancelled.
+            #
+            # Since we've kicked off the background operation, we can't just
+            # give up and return here and need to wait for the background
+            # operation to stop. We don't want to stop the background process
+            # immediately to give a chance for retries to come in and wait for
+            # the result.
+            #
+            # Instead, we temporarily swallow the cancellation and mark the
+            # cache key as one to potentially timeout.
+
+            # Update the `last_observer_removed_time_ms` so that the pruning
+            # mechanism can kick in if needed.
+            now = self.clock.time_msec()
+            entry.last_observer_removed_time_ms = now
+            if self._prune_timer is not None and self.timeout:
+                self._prune_timer.insert(now, key, now + self.timeout.as_millis())
+
+            # Wait on the original deferred, which will continue to run in the
+            # background until it completes. We don't want to add an observer as
+            # this would prevent the entry from being pruned.
+            #
+            # Note that this deferred has been consumed by the
+            # ObservableDeferred, so we don't know what it will return. That
+            # doesn't matter as we just want to throw a CancelledError once it completes anyway.
+            try:
+                await make_deferred_yieldable(delay_cancellation(d))
+            except Exception:
+                pass
+            raise defer.CancelledError()
 
         result = entry.result.observe()
         if self._enable_logging:
@@ -294,4 +423,60 @@ class ResponseCache(Generic[KV]):
             f"ResponseCache[{self._name}].wait",
             contexts=(span_context,) if span_context else (),
         ):
-            return await make_deferred_yieldable(result)
+            try:
+                return await make_deferred_yieldable(result)
+            except defer.CancelledError:
+                # If we're cancelled then we update the
+                # `last_observer_removed_time_ms` so that the pruning mechanism
+                # can kick in if needed.
+                now = self.clock.time_msec()
+                entry.last_observer_removed_time_ms = now
+                if self._prune_timer is not None and self.timeout:
+                    self._prune_timer.insert(now, key, now + self.timeout.as_millis())
+                raise
+
+    def _prune_inflight_entries(self) -> None:
+        """Prune entries which have been in the cache for too long without
+        observers"""
+        assert self._prune_timer is not None
+        assert self.timeout is not None
+
+        now = self.clock.time_msec()
+        keys_to_check = self._prune_timer.fetch(now)
+
+        # Loop through the keys and check if they should be evicted. We evict
+        # entries which have no active observers, and which have been in the
+        # cache for longer than the timeout since the last observer was removed.
+        for key in keys_to_check:
+            entry = self._result_cache.get(key)
+            if not entry:
+                continue
+
+            if not entry.cancellable:
+                # this entry is not cancellable, so we should keep it in the cache until it completes.
+                continue
+
+            if entry.result.has_called():
+                # this entry has already completed, so we should have scheduled it for
+                # removal at the right time. We can just skip it here and wait for the
+                # scheduled call to remove it.
+                continue
+
+            if entry.result.has_observers():
+                # this entry has observers, so we should keep it in the cache for now.
+                continue
+
+            if entry.last_observer_removed_time_ms is None:
+                # this should never happen, but just in case, we should keep the entry
+                # in the cache until we have a valid last_observer_removed_time_ms to
+                # compare against.
+                continue
+
+            if now - entry.last_observer_removed_time_ms > self.timeout.as_millis():
+                self._metrics.inc_evictions(EvictionReason.time)
+                self._result_cache.pop(key, None)
+                try:
+                    entry.result.cancel()
+                except Exception:
+                    # we ignore exceptions from cancel, as it is best effort anyway.
+                    pass

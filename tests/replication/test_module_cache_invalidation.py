@@ -24,6 +24,7 @@ import synapse
 from synapse.module_api import cached
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.server import get_clock
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ KEY = "mykey"
 
 class TestCache:
     current_value = FIRST_VALUE
+    server_name = "test_server"  # nb must be called this for @cached
+    _, clock = get_clock()  # nb must be called this for @cached
 
     @cached()
     async def cached_function(self, user_id: str) -> str:

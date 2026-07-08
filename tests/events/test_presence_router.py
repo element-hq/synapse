@@ -18,12 +18,12 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Iterable
 from unittest.mock import AsyncMock, Mock
 
 import attr
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes
 from synapse.events.presence_router import PresenceRouter, load_legacy_presence_router
@@ -34,9 +34,9 @@ from synapse.rest import admin
 from synapse.rest.client import login, presence, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, StreamToken, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
-from tests.handlers.test_sync import SyncRequestKey, SyncVersion, generate_sync_config
+from tests.handlers.test_sync import SyncRequestKey, generate_sync_config
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -46,7 +46,7 @@ from tests.unittest import (
 
 @attr.s
 class PresenceRouterTestConfig:
-    users_who_should_receive_all_presence = attr.ib(type=List[str], default=[])
+    users_who_should_receive_all_presence = attr.ib(type=list[str], default=[])
 
 
 class LegacyPresenceRouterTestModule:
@@ -56,14 +56,14 @@ class LegacyPresenceRouterTestModule:
 
     async def get_users_for_states(
         self, state_updates: Iterable[UserPresenceState]
-    ) -> Dict[str, Set[UserPresenceState]]:
+    ) -> dict[str, set[UserPresenceState]]:
         users_to_state = {
             user_id: set(state_updates)
             for user_id in self._config.users_who_should_receive_all_presence
         }
         return users_to_state
 
-    async def get_interested_users(self, user_id: str) -> Union[Set[str], str]:
+    async def get_interested_users(self, user_id: str) -> set[str] | str:
         if user_id in self._config.users_who_should_receive_all_presence:
             return PresenceRouter.ALL_USERS
 
@@ -106,14 +106,14 @@ class PresenceRouterTestModule:
 
     async def get_users_for_states(
         self, state_updates: Iterable[UserPresenceState]
-    ) -> Dict[str, Set[UserPresenceState]]:
+    ) -> dict[str, set[UserPresenceState]]:
         users_to_state = {
             user_id: set(state_updates)
             for user_id in self._config.users_who_should_receive_all_presence
         }
         return users_to_state
 
-    async def get_interested_users(self, user_id: str) -> Union[Set[str], str]:
+    async def get_interested_users(self, user_id: str) -> set[str] | str:
         if user_id in self._config.users_who_should_receive_all_presence:
             return PresenceRouter.ALL_USERS
 
@@ -482,7 +482,7 @@ def send_presence_update(
     user_id: str,
     access_token: str,
     presence_state: str,
-    status_message: Optional[str] = None,
+    status_message: str | None = None,
 ) -> JsonDict:
     # Build the presence body
     body = {"presence": presence_state}
@@ -510,8 +510,8 @@ def generate_request_key() -> SyncRequestKey:
 def sync_presence(
     testcase: HomeserverTestCase,
     user_id: str,
-    since_token: Optional[StreamToken] = None,
-) -> Tuple[List[UserPresenceState], StreamToken]:
+    since_token: StreamToken | None = None,
+) -> tuple[list[UserPresenceState], StreamToken]:
     """Perform a sync request for the given user and return the user presence updates
     they've received, as well as the next_batch token.
 
@@ -532,7 +532,6 @@ def sync_presence(
         testcase.hs.get_sync_handler().wait_for_sync_for_user(
             requester,
             sync_config,
-            SyncVersion.SYNC_V2,
             generate_request_key(),
             since_token,
         )

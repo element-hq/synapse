@@ -21,7 +21,10 @@
 import logging
 
 import synapse
-from synapse.replication.tcp.streams._base import _STREAM_UPDATE_TARGET_ROW_COUNT
+from synapse.replication.tcp.streams._base import (
+    _STREAM_UPDATE_TARGET_ROW_COUNT,
+    ToDeviceStream,
+)
 from synapse.types import JsonDict
 
 from tests.replication._base import BaseStreamTestCase
@@ -82,7 +85,12 @@ class ToDeviceStreamTestCase(BaseStreamTestCase):
         )
 
         # replication is disconnected so we shouldn't get any updates yet
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_to_device_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ToDeviceStream.NAME
+        ]
+        self.assertEqual([], received_to_device_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
@@ -90,7 +98,15 @@ class ToDeviceStreamTestCase(BaseStreamTestCase):
 
         # we should receive the fact that we have to_device updates
         # for user1 and user2
-        received_rows = self.test_handler.received_rdata_rows
-        self.assertEqual(len(received_rows), 2)
-        self.assertEqual(received_rows[0][2].entity, user1)
-        self.assertEqual(received_rows[1][2].entity, user2)
+        received_to_device_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ToDeviceStream.NAME
+        ]
+        self.assertEqual(
+            len(received_to_device_rows),
+            2,
+            "Expected two rows in the to_device stream",
+        )
+        self.assertEqual(received_to_device_rows[0][2].entity, user1)
+        self.assertEqual(received_to_device_rows[1][2].entity, user2)

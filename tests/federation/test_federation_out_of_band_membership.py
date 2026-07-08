@@ -23,21 +23,18 @@ import logging
 import time
 import urllib.parse
 from http import HTTPStatus
-from typing import Any, Callable, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, TypeVar
 from unittest.mock import Mock
 
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.events.utils import strip_event
-from synapse.federation.federation_base import (
-    event_from_pdu_json,
-)
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.matrixfederationclient import (
     ByteParser,
@@ -50,9 +47,10 @@ from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.handlers.sliding_sync import (
     StateValues,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
 from tests.utils import test_timeout
 
 logger = logging.getLogger(__name__)
@@ -80,9 +78,7 @@ def required_state_json_to_state_map(required_state: Any) -> StateMap[EventBase]
                 "Each event in `required_state` should have a string `state_key`"
             )
 
-            state_map[(event_type, event_state_key)] = make_event_from_dict(
-                state_event_dict
-            )
+            state_map[(event_type, event_state_key)] = make_test_event(state_event_dict)
     else:
         # Yell because we're in a test and this is unexpected
         raise AssertionError("`required_state` should be a list of event dicts")
@@ -146,8 +142,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.storage_controllers = hs.get_storage_controllers()
 
     def do_sync(
-        self, sync_body: JsonDict, *, since: Optional[str] = None, tok: str
-    ) -> Tuple[JsonDict, str]:
+        self, sync_body: JsonDict, *, since: str | None = None, tok: str
+    ) -> tuple[JsonDict, str]:
         """Do a sliding sync request with given body.
 
         Asserts the request was successful.
@@ -195,7 +191,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         remote_room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
         room_version = RoomVersions.V11
 
-        room_create_event = make_event_from_dict(
+        room_create_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "room_id": remote_room_id,
@@ -214,7 +210,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             room_version=room_version,
         )
 
-        creator_membership_event = make_event_from_dict(
+        creator_membership_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "room_id": remote_room_id,
@@ -232,7 +228,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         )
 
         # From the remote homeserver, invite user1 on the local homserver
-        user1_invite_membership_event = make_event_from_dict(
+        user1_invite_membership_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "room_id": remote_room_id,
@@ -294,7 +290,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 # Prevent tight-looping to allow the `test_timeout` to work
                 time.sleep(0.1)
 
-        user1_join_membership_event_template = make_event_from_dict(
+        user1_join_membership_event_template = make_test_event(
             {
                 "room_id": remote_room_id,
                 "sender": local_user1_id,
@@ -323,13 +319,13 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         async def get_json(
             destination: str,
             path: str,
-            args: Optional[QueryParams] = None,
+            args: QueryParams | None = None,
             retry_on_dns_fail: bool = True,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
             try_trailing_slash_on_400: bool = False,
-            parser: Optional[ByteParser[T]] = None,
-        ) -> Union[JsonDict, T]:
+            parser: ByteParser[T] | None = None,
+        ) -> JsonDict | T:
             if (
                 path
                 == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(remote_room_id)}/{urllib.parse.quote_plus(local_user1_id)}"
@@ -347,22 +343,22 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.federation_http_client.get_json.side_effect = get_json
 
         # PDU's that hs1 sent to hs2
-        collected_pdus_from_hs1_federation_send: Set[str] = set()
+        collected_pdus_from_hs1_federation_send: set[str] = set()
 
         async def put_json(
             destination: str,
             path: str,
-            args: Optional[QueryParams] = None,
-            data: Optional[JsonDict] = None,
-            json_data_callback: Optional[Callable[[], JsonDict]] = None,
+            args: QueryParams | None = None,
+            data: JsonDict | None = None,
+            json_data_callback: Callable[[], JsonDict] | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
             backoff_on_404: bool = False,
             try_trailing_slash_on_400: bool = False,
-            parser: Optional[ByteParser[T]] = None,
+            parser: ByteParser[T] | None = None,
             backoff_on_all_error_codes: bool = False,
-        ) -> Union[JsonDict, T, SendJoinResponse]:
+        ) -> JsonDict | T | SendJoinResponse:
             if (
                 path.startswith(
                     f"/_matrix/federation/v2/send_join/{urllib.parse.quote_plus(remote_room_id)}/"
@@ -374,7 +370,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 and parser is not None
             ):
                 # As the remote server, we need to sign the event before sending it back
-                user1_join_membership_event_signed = make_event_from_dict(
+                user1_join_membership_event_signed = make_test_event(
                     self.add_hashes_and_signatures_from_other_server(data),
                     room_version=room_version,
                 )
@@ -401,12 +397,12 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
             if path.startswith("/_matrix/federation/v1/send/") and data is not None:
                 for pdu in data.get("pdus", []):
-                    event = event_from_pdu_json(pdu, room_version)
+                    event = make_test_pdu_event(pdu, room_version)
                     collected_pdus_from_hs1_federation_send.add(event.event_id)
 
                 # Just acknowledge everything hs1 is trying to send hs2
                 return {
-                    event_from_pdu_json(pdu, room_version).event_id: {}
+                    make_test_pdu_event(pdu, room_version).event_id: {}
                     for pdu in data.get("pdus", [])
                 }
 
@@ -500,30 +496,30 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         T = TypeVar("T")
 
         # PDU's that hs1 sent to hs2
-        collected_pdus_from_hs1_federation_send: Set[str] = set()
+        collected_pdus_from_hs1_federation_send: set[str] = set()
 
         async def put_json(
             destination: str,
             path: str,
-            args: Optional[QueryParams] = None,
-            data: Optional[JsonDict] = None,
-            json_data_callback: Optional[Callable[[], JsonDict]] = None,
+            args: QueryParams | None = None,
+            data: JsonDict | None = None,
+            json_data_callback: Callable[[], JsonDict] | None = None,
             long_retries: bool = False,
-            timeout: Optional[int] = None,
+            timeout: int | None = None,
             ignore_backoff: bool = False,
             backoff_on_404: bool = False,
             try_trailing_slash_on_400: bool = False,
-            parser: Optional[ByteParser[T]] = None,
+            parser: ByteParser[T] | None = None,
             backoff_on_all_error_codes: bool = False,
-        ) -> Union[JsonDict, T]:
+        ) -> JsonDict | T:
             if path.startswith("/_matrix/federation/v1/send/") and data is not None:
                 for pdu in data.get("pdus", []):
-                    event = event_from_pdu_json(pdu, room_version)
+                    event = make_test_pdu_event(pdu, room_version)
                     collected_pdus_from_hs1_federation_send.add(event.event_id)
 
                 # Just acknowledge everything hs1 is trying to send hs2
                 return {
-                    event_from_pdu_json(pdu, room_version).event_id: {}
+                    make_test_pdu_event(pdu, room_version).event_id: {}
                     for pdu in data.get("pdus", [])
                 }
 
@@ -535,7 +531,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.federation_http_client.put_json.side_effect = put_json
 
         # From the remote homeserver, invite user2 on the local homserver
-        user2_invite_membership_event = make_event_from_dict(
+        user2_invite_membership_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "room_id": remote_room_id,

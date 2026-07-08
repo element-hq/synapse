@@ -18,20 +18,20 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, cast
+from typing import cast
 
 from canonicaljson import json
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase
+from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.builder import EventBuilder
 from synapse.server import HomeServer
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, RoomID, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.utils import create_room
@@ -67,7 +67,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         room: RoomID,
         user: UserID,
         membership: str,
-        extra_content: Optional[JsonDict] = None,
+        extra_content: JsonDict | None = None,
     ) -> EventBase:
         content = {"membership": membership}
         content.update(extra_content or {})
@@ -152,13 +152,13 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {"body": "t", "msgtype": "message"},
             },
             event,
         )
 
-        self.assertFalse("redacted_because" in event.unsigned)
+        self.assertIsNone(event.internal_metadata.redacted_by)
 
         # Redact event
         reason = "Because I said so"
@@ -168,24 +168,15 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(msg_event.event_id, event.event_id)
 
-        self.assertTrue("redacted_because" in event.unsigned)
+        self.assertIsNotNone(event.internal_metadata.redacted_by)
 
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {},
             },
             event,
-        )
-
-        self.assertObjectHasAttributes(
-            {
-                "type": EventTypes.Redaction,
-                "user_id": self.u_alice.to_string(),
-                "content": {"reason": reason},
-            },
-            event.unsigned["redacted_because"],
         )
 
     def test_redact_join(self) -> None:
@@ -200,13 +191,13 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Member,
-                "user_id": self.u_bob.to_string(),
+                "sender": self.u_bob.to_string(),
                 "content": {"membership": Membership.JOIN, "blue": "red"},
             },
             event,
         )
 
-        self.assertFalse(hasattr(event, "redacted_because"))
+        self.assertIsNone(event.internal_metadata.redacted_by)
 
         # Redact event
         reason = "Because I said so"
@@ -216,24 +207,15 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
         event = self.get_success(self.store.get_event(msg_event.event_id))
 
-        self.assertTrue("redacted_because" in event.unsigned)
+        self.assertIsNotNone(event.internal_metadata.redacted_by)
 
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Member,
-                "user_id": self.u_bob.to_string(),
+                "sender": self.u_bob.to_string(),
                 "content": {"membership": Membership.JOIN},
             },
             event,
-        )
-
-        self.assertObjectHasAttributes(
-            {
-                "type": EventTypes.Redaction,
-                "user_id": self.u_alice.to_string(),
-                "content": {"reason": reason},
-            },
-            event.unsigned["redacted_because"],
         )
 
     def test_circular_redaction(self) -> None:
@@ -247,27 +229,38 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
             async def build(
                 self,
-                prev_event_ids: List[str],
-                auth_event_ids: Optional[List[str]],
-                depth: Optional[int] = None,
+                prev_event_ids: list[str],
+                auth_event_ids: list[str] | None,
+                depth: int | None = None,
+                prev_state_events: list[str] | None = None,
             ) -> EventBase:
                 built_event = await self._base_builder.build(
                     prev_event_ids=prev_event_ids, auth_event_ids=auth_event_ids
                 )
 
-                built_event._event_id = self._event_id  # type: ignore[attr-defined]
-                built_event._dict["event_id"] = self._event_id
-                assert built_event.event_id == self._event_id
+                event_dict = built_event.get_dict()
+                event_dict["event_id"] = self._event_id
+                rebuilt_event = make_event_from_dict(
+                    event_dict,
+                    room_version=built_event.room_version,
+                    internal_metadata_dict=built_event.internal_metadata.get_dict(),
+                )
+                assert rebuilt_event.event_id == self._event_id
 
-                return built_event
+                return rebuilt_event
 
             @property
             def room_id(self) -> str:
+                assert self._base_builder.room_id is not None
                 return self._base_builder.room_id
 
             @property
             def type(self) -> str:
                 return self._base_builder.type
+
+            @property
+            def room_version(self) -> RoomVersion:
+                return self._base_builder.room_version
 
             @property
             def internal_metadata(self) -> EventInternalMetadata:
@@ -326,10 +319,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         fetched = self.get_success(self.store.get_event(redaction_event_id1))
 
         # it should have been redacted
-        self.assertEqual(fetched.unsigned["redacted_by"], redaction_event_id2)
-        self.assertEqual(
-            fetched.unsigned["redacted_because"].event_id, redaction_event_id2
-        )
+        self.assertEqual(fetched.internal_metadata.redacted_by, redaction_event_id2)
 
     def test_redact_censor(self) -> None:
         """Test that a redacted event gets censored in the DB after a month"""
@@ -344,13 +334,13 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {"body": "t", "msgtype": "message"},
             },
             event,
         )
 
-        self.assertFalse("redacted_because" in event.unsigned)
+        self.assertIsNone(event.internal_metadata.redacted_by)
 
         # Redact event
         reason = "Because I said so"
@@ -358,12 +348,12 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
         event = self.get_success(self.store.get_event(msg_event.event_id))
 
-        self.assertTrue("redacted_because" in event.unsigned)
+        self.assertIsNotNone(event.internal_metadata.redacted_by)
 
         self.assertObjectHasAttributes(
             {
                 "type": EventTypes.Message,
-                "user_id": self.u_alice.to_string(),
+                "sender": self.u_alice.to_string(),
                 "content": {},
             },
             event,

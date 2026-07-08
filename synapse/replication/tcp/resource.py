@@ -22,25 +22,28 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
 
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
 
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
 from synapse.replication.tcp.streams import EventsStream
 from synapse.replication.tcp.streams._base import CachesStream, StreamRow, Token
+from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 stream_updates_counter = Counter(
-    "synapse_replication_tcp_resource_stream_updates", "", ["stream_name"]
+    "synapse_replication_tcp_resource_stream_updates",
+    "",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,7 @@ class ReplicationStreamProtocolFactory(ServerFactory):
     def __init__(self, hs: "HomeServer"):
         self.command_handler = hs.get_replication_command_handler()
         self.clock = hs.get_clock()
+        self.hs = hs
         self.server_name = hs.config.server.server_name
 
         # If we've created a `ReplicationStreamProtocolFactory` then we're
@@ -66,7 +70,7 @@ class ReplicationStreamProtocolFactory(ServerFactory):
 
     def buildProtocol(self, addr: IAddress) -> ServerReplicationStreamProtocol:
         return ServerReplicationStreamProtocol(
-            self.server_name, self.clock, self.command_handler
+            self.hs, self.server_name, self.clock, self.command_handler
         )
 
 
@@ -78,6 +82,8 @@ class ReplicationStreamer:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
+        self.hs = hs
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
@@ -111,7 +117,7 @@ class ReplicationStreamer:
         #
         # Note that if the position hasn't advanced then we won't send anything.
         if any(EventsStream.NAME == s.NAME for s in self.streams):
-            self.clock.looping_call(self.on_notifier_poke, 1000)
+            self.clock.looping_call(self.on_notifier_poke, Duration(seconds=1))
 
     def on_notifier_poke(self) -> None:
         """Checks if there is actually any new data and sends it to the
@@ -143,7 +149,9 @@ class ReplicationStreamer:
             logger.debug("Notifier poke loop already running")
             return
 
-        run_as_background_process("replication_notifier", self._run_notifier_loop)
+        self.hs.run_as_background_process(
+            "replication_notifier", self._run_notifier_loop
+        )
 
     async def _run_notifier_loop(self) -> None:
         self.is_looping = True
@@ -155,7 +163,11 @@ class ReplicationStreamer:
             while self.pending_updates:
                 self.pending_updates = False
 
-                with Measure(self.clock, "repl.stream.get_updates"):
+                with Measure(
+                    self.clock,
+                    name="repl.stream.get_updates",
+                    server_name=self.server_name,
+                ):
                     all_streams = self.streams
 
                     if self._replication_torture_level is not None:
@@ -170,13 +182,10 @@ class ReplicationStreamer:
                         self.command_handler.will_announce_positions()
 
                         for stream in all_streams:
-                            self.command_handler.send_command(
-                                PositionCommand(
-                                    stream.NAME,
-                                    self._instance_name,
-                                    stream.last_token,
-                                    stream.last_token,
-                                )
+                            self._send_position_command(
+                                stream_name=stream.NAME,
+                                prev_token=stream.last_token,
+                                new_token=stream.last_token,
                             )
 
                     for stream in all_streams:
@@ -193,9 +202,9 @@ class ReplicationStreamer:
                         last_token = stream.last_token
 
                         logger.debug(
-                            "Getting stream: %s: %s -> %s",
+                            "Getting stream updates for %s: %s -> %s",
                             stream.NAME,
-                            stream.last_token,
+                            last_token,
                             stream.current_token(self._instance_name),
                         )
                         try:
@@ -205,23 +214,7 @@ class ReplicationStreamer:
                             logger.info("Failed to handle stream %s", stream.NAME)
                             raise
 
-                        logger.debug(
-                            "Sending %d updates",
-                            len(updates),
-                        )
-
-                        if updates:
-                            logger.info(
-                                "Streaming: %s -> %s (limited: %s, updates: %s, max token: %s)",
-                                stream.NAME,
-                                updates[-1][0],
-                                limited,
-                                len(updates),
-                                current_token,
-                            )
-                            stream_updates_counter.labels(stream.NAME).inc(len(updates))
-
-                        else:
+                        if not updates:
                             # The token has advanced but there is no data to
                             # send, so we send a `POSITION` to inform other
                             # workers of the updated position.
@@ -251,20 +244,27 @@ class ReplicationStreamer:
                             # POSITION with last token of X+1, which will
                             # cause them to check if there were any missing
                             # updates between X and X+1.
-                            logger.info(
-                                "Sending position: %s -> %s",
-                                stream.NAME,
-                                current_token,
-                            )
-                            self.command_handler.send_command(
-                                PositionCommand(
-                                    stream.NAME,
-                                    self._instance_name,
-                                    last_token,
-                                    current_token,
-                                )
+                            self._send_position_command(
+                                stream_name=stream.NAME,
+                                prev_token=last_token,
+                                new_token=current_token,
                             )
                             continue
+
+                        logger.info(
+                            "Sending update for %s: %s -> %s (limited: %s, updates: %s, max token: %s)",
+                            stream.NAME,
+                            last_token,
+                            updates[-1][0],
+                            limited,
+                            len(updates),
+                            current_token,
+                        )
+
+                        stream_updates_counter.labels(
+                            stream_name=stream.NAME,
+                            **{SERVER_NAME_LABEL: self.server_name},
+                        ).inc(len(updates))
 
                         # Some streams return multiple rows with the same stream IDs,
                         # we need to make sure they get sent out in batches. We do
@@ -285,18 +285,10 @@ class ReplicationStreamer:
                         # token, in which case we want to send out a `POSITION`
                         # to tell other workers the actual current position.
                         if updates[-1][0] < current_token:
-                            logger.info(
-                                "Sending position: %s -> %s",
-                                stream.NAME,
-                                current_token,
-                            )
-                            self.command_handler.send_command(
-                                PositionCommand(
-                                    stream.NAME,
-                                    self._instance_name,
-                                    updates[-1][0],
-                                    current_token,
-                                )
+                            self._send_position_command(
+                                stream_name=stream.NAME,
+                                prev_token=updates[-1][0],
+                                new_token=current_token,
                             )
 
             logger.debug("No more pending updates, breaking poke loop")
@@ -304,10 +296,29 @@ class ReplicationStreamer:
             self.pending_updates = False
             self.is_looping = False
 
+    def _send_position_command(
+        self, *, stream_name: str, prev_token: int, new_token: int
+    ) -> None:
+        """Send a POSITION command over replication"""
+        logger.info(
+            "Sending position for %s: %s -> %s",
+            stream_name,
+            prev_token,
+            new_token,
+        )
+        self.command_handler.send_command(
+            PositionCommand(
+                stream_name,
+                self._instance_name,
+                prev_token,
+                new_token,
+            )
+        )
+
 
 def _batch_updates(
-    updates: List[Tuple[Token, StreamRow]],
-) -> List[Tuple[Optional[Token], StreamRow]]:
+    updates: list[tuple[Token, StreamRow]],
+) -> list[tuple[Token | None, StreamRow]]:
     """Takes a list of updates of form [(token, row)] and sets the token to
     None for all rows where the next row has the same token. This is used to
     implement batching.
@@ -323,7 +334,7 @@ def _batch_updates(
     if not updates:
         return []
 
-    new_updates: List[Tuple[Optional[Token], StreamRow]] = []
+    new_updates: list[tuple[Token | None, StreamRow]] = []
     for i, update in enumerate(updates[:-1]):
         if update[0] == updates[i + 1][0]:
             new_updates.append((None, update[1]))

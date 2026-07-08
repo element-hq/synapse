@@ -19,12 +19,12 @@
 #
 #
 import logging
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Iterable
 
 from canonicaljson import encode_canonical_json
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ReceiptTypes
 from synapse.api.room_versions import RoomVersions
@@ -38,7 +38,7 @@ from synapse.storage.databases.main.event_push_actions import (
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import PersistedEventPosition
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from ._base import BaseWorkerStoreTestCase
 
@@ -66,7 +66,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         )
 
     def assertEventsEqual(
-        self, first: EventBase, second: EventBase, msg: Optional[Any] = None
+        self, first: EventBase, second: EventBase, msg: Any | None = None
     ) -> None:
         self.assertEqual(
             encode_canonical_json(first.get_pdu_json()),
@@ -101,11 +101,10 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
         msg_dict = msg.get_dict()
         msg_dict["content"] = {}
-        msg_dict["unsigned"]["redacted_by"] = redaction.event_id
-        msg_dict["unsigned"]["redacted_because"] = redaction
         redacted = make_event_from_dict(
             msg_dict, internal_metadata_dict=msg.internal_metadata.get_dict()
         )
+        redacted.internal_metadata.redacted_by = redaction.event_id
         self.check(
             "get_event", [msg.event_id], redacted, asserter=self.assertEventsEqual
         )
@@ -125,11 +124,10 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
         msg_dict = msg.get_dict()
         msg_dict["content"] = {}
-        msg_dict["unsigned"]["redacted_by"] = redaction.event_id
-        msg_dict["unsigned"]["redacted_because"] = redaction
         redacted = make_event_from_dict(
             msg_dict, internal_metadata_dict=msg.internal_metadata.get_dict()
         )
+        redacted.internal_metadata.redacted_by = redaction.event_id
         self.check(
             "get_event", [msg.event_id], redacted, asserter=self.assertEventsEqual
         )
@@ -241,16 +239,16 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         sender: str = USER_ID,
         room_id: str = ROOM_ID,
         type: str = "m.room.message",
-        key: Optional[str] = None,
-        internal: Optional[dict] = None,
-        depth: Optional[int] = None,
-        prev_events: Optional[List[Tuple[str, dict]]] = None,
-        auth_events: Optional[List[str]] = None,
-        prev_state: Optional[List[str]] = None,
-        redacts: Optional[str] = None,
+        key: str | None = None,
+        internal: dict | None = None,
+        depth: int | None = None,
+        prev_events: list[tuple[str, dict]] | None = None,
+        auth_events: list[str] | None = None,
+        prev_state: list[str] | None = None,
+        redacts: str | None = None,
         push_actions: Iterable = frozenset(),
         **content: object,
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> tuple[EventBase, EventContext]:
         prev_events = prev_events or []
         auth_events = auth_events or []
         prev_state = prev_state or []
@@ -274,6 +272,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             "origin_server_ts": self.event_id,
             "prev_events": prev_events,
             "auth_events": auth_events,
+            "hashes": {},
         }
         if key is not None:
             event_dict["state_key"] = key

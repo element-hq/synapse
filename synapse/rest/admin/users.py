@@ -23,11 +23,11 @@ import hmac
 import logging
 import secrets
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING
 
 import attr
+from pydantic import StrictBool, StrictInt, StrictStr
 
-from synapse._pydantic_compat import StrictBool, StrictInt, StrictStr
 from synapse.api.constants import Direction
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
@@ -42,6 +42,7 @@ from synapse.http.servlet import (
     parse_strings_from_args,
 )
 from synapse.http.site import SynapseRequest
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
@@ -58,6 +59,25 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+original_logger_class = logging.getLoggerClass()
+# Because this can log sensitive information, use a custom logger class that only allows
+# logging if the logger is explicitly configured.
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+user_registration_sensitive_debug_logger = logging.getLogger(
+    "synapse.rest.admin.users.registration_debug"
+)
+"""
+A logger for debugging the user registration process.
+
+Because this can log sensitive information (such as passwords and
+`registration_shared_secret`), we want people to explictly opt-in before seeing anything
+in the logs. Requires explicitly setting `synapse.rest.admin.users.registration_debug`
+in the logging configuration and does not inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 
 class UsersRestServletV2(RestServlet):
@@ -89,9 +109,9 @@ class UsersRestServletV2(RestServlet):
         self.auth = hs.get_auth()
         self.admin_handler = hs.get_admin_handler()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
-        self._msc3861_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = hs.config.mas.enabled
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         start = parse_integer(request, "from", default=0)
@@ -101,10 +121,10 @@ class UsersRestServletV2(RestServlet):
         name = parse_string(request, "name", encoding="utf-8")
 
         guests = parse_boolean(request, "guests", default=True)
-        if self._msc3861_enabled and guests:
+        if self._auth_delegation_enabled and guests:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                "The guests parameter is not supported when MSC3861 is enabled.",
+                "The guests parameter is not supported when delegating to MAS.",
                 errcode=Codes.INVALID_PARAM,
             )
 
@@ -141,8 +161,8 @@ class UsersRestServletV2(RestServlet):
 
         direction = parse_enum(request, "dir", Direction, default=Direction.FORWARDS)
 
-        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
-        args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+        # twisted.web.server.Request.args is incorrectly defined as Any | None
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
         not_user_types = parse_strings_from_args(args, "not_user_type")
 
         users, total = await self.store.get_users_paginate(
@@ -173,7 +193,7 @@ class UsersRestServletV2(RestServlet):
 
         return HTTPStatus.OK, ret
 
-    def _parse_parameter_deactivated(self, request: SynapseRequest) -> Optional[bool]:
+    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
         """
         Return None (no filtering) if `deactivated` is `true`, otherwise return `False`
         (exclude deactivated users from the results).
@@ -184,13 +204,11 @@ class UsersRestServletV2(RestServlet):
 class UsersRestServletV3(UsersRestServletV2):
     PATTERNS = admin_patterns("/users$", "v3")
 
-    def _parse_parameter_deactivated(
-        self, request: SynapseRequest
-    ) -> Union[bool, None]:
+    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
         return parse_boolean(request, "deactivated")
 
 
-class UserRestServletV2(RestServlet):
+class UserRestServletV2Get(RestServlet):
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)$", "v2")
 
     """Get request to list user details.
@@ -200,22 +218,6 @@ class UserRestServletV2(RestServlet):
 
     returns:
         200 OK with user details if success otherwise an error.
-
-    Put request to allow an administrator to add or modify a user.
-    This needs user to have administrator access in Synapse.
-    We use PUT instead of POST since we already know the id of the user
-    object to create. POST could be used to create guests.
-
-    PUT /_synapse/admin/v2/users/<user_id>
-    {
-        "password": "secret",
-        "displayname": "User"
-    }
-
-    returns:
-        201 OK with new user object if user was created or
-        200 OK with modified user object if user was modified
-        otherwise an error.
     """
 
     def __init__(self, hs: "HomeServer"):
@@ -234,7 +236,7 @@ class UserRestServletV2(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -247,9 +249,31 @@ class UserRestServletV2(RestServlet):
 
         return HTTPStatus.OK, user_info_dict
 
+
+class UserRestServletV2(UserRestServletV2Get):
+    """
+    Put request to allow an administrator to add or modify a user.
+    This needs user to have administrator access in Synapse.
+    We use PUT instead of POST since we already know the id of the user
+    object to create. POST could be used to create guests.
+
+    Note: This inherits from `UserRestServletV2Get`, so also supports the `GET` route.
+
+    PUT /_synapse/admin/v2/users/<user_id>
+    {
+        "password": "secret",
+        "displayname": "User"
+    }
+
+    returns:
+        201 OK with new user object if user was created or
+        200 OK with modified user object if user was modified
+        otherwise an error.
+    """
+
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -318,7 +342,7 @@ class UserRestServletV2(RestServlet):
                 HTTPStatus.BAD_REQUEST, "An user can't be deactivated and locked"
             )
 
-        approved: Optional[bool] = None
+        approved: bool | None = None
         if "approved" in body and self._msc3866_enabled:
             approved = body["approved"]
             if not isinstance(approved, bool):
@@ -327,14 +351,14 @@ class UserRestServletV2(RestServlet):
                     "'approved' parameter is not of type boolean",
                 )
 
-        # convert List[Dict[str, str]] into List[Tuple[str, str]]
+        # convert list[dict[str, str]] into list[tuple[str, str]]
         if external_ids is not None:
             new_external_ids = [
                 (external_id["auth_provider"], external_id["external_id"])
                 for external_id in external_ids
             ]
 
-        # convert List[Dict[str, str]] into Set[Tuple[str, str]]
+        # convert list[dict[str, str]] into set[tuple[str, str]]
         if threepids is not None:
             new_threepids = {
                 (threepid["medium"], threepid["address"]) for threepid in threepids
@@ -343,7 +367,7 @@ class UserRestServletV2(RestServlet):
         if user:  # modify user
             if "displayname" in body:
                 await self.profile_handler.set_displayname(
-                    target_user, requester, body["displayname"], True
+                    target_user, requester, body["displayname"], by_admin=True
                 )
 
             if threepids is not None:
@@ -392,7 +416,7 @@ class UserRestServletV2(RestServlet):
 
             if "avatar_url" in body:
                 await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], True
+                    target_user, requester, body["avatar_url"], by_admin=True
                 )
 
             if "admin" in body:
@@ -500,7 +524,7 @@ class UserRestServletV2(RestServlet):
 
             if "avatar_url" in body and isinstance(body["avatar_url"], str):
                 await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], True
+                    target_user, requester, body["avatar_url"], by_admin=True
                 )
 
             user_info_dict = await self.admin_handler.get_user(target_user)
@@ -523,7 +547,7 @@ class UserRegisterServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.auth_handler = hs.get_auth_handler()
         self.reactor = hs.get_reactor()
-        self.nonces: Dict[str, int] = {}
+        self.nonces: dict[str, int] = {}
         self.hs = hs
         self._all_user_types = hs.config.user_types.all_user_types
 
@@ -537,7 +561,7 @@ class UserRegisterServlet(RestServlet):
             if now - v > self.NONCE_TIMEOUT:
                 del self.nonces[k]
 
-    def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         """
         Generate a new nonce.
         """
@@ -547,7 +571,7 @@ class UserRegisterServlet(RestServlet):
         self.nonces[nonce] = int(self.reactor.seconds())
         return HTTPStatus.OK, {"nonce": nonce}
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         self._clear_old_nonces()
 
         if not self.hs.config.registration.registration_shared_secret:
@@ -635,6 +659,34 @@ class UserRegisterServlet(RestServlet):
         want_mac = want_mac_builder.hexdigest()
 
         if not hmac.compare_digest(want_mac.encode("ascii"), got_mac.encode("ascii")):
+            # If the sensitive debug logger is enabled, log the full details.
+            #
+            # For reference, the `user_registration_sensitive_debug_logger.debug(...)`
+            # call is enough to gate the logging of sensitive information unless
+            # explicitly enabled. We only have this if-statement to avoid logging the
+            # suggestion to enable the debug logger if you already have it enabled.
+            if user_registration_sensitive_debug_logger.isEnabledFor(logging.DEBUG):
+                user_registration_sensitive_debug_logger.debug(
+                    "UserRegisterServlet: Incorrect HMAC digest: actual=%s, expected=%s, registration_shared_secret=%s, body=%s",
+                    got_mac,
+                    want_mac,
+                    self.hs.config.registration.registration_shared_secret,
+                    body,
+                )
+            else:
+                # Otherwise, just log the non-sensitive essentials and advertise the
+                # debug logger for sensitive information.
+                logger.debug(
+                    (
+                        "UserRegisterServlet: HMAC incorrect (username=%s): actual=%s, expected=%s - "
+                        "If you need more information, explicitly enable the `synapse.rest.admin.users.registration_debug` "
+                        "logger at the `DEBUG` level to log things like the full request body and "
+                        "`registration_shared_secret` used to calculate the HMAC."
+                    ),
+                    username,
+                    got_mac,
+                    want_mac,
+                )
             raise SynapseError(HTTPStatus.FORBIDDEN, "HMAC incorrect")
 
         should_issue_refresh_token = body.get("refresh_token", False)
@@ -680,7 +732,7 @@ class WhoisRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         target_user = UserID.from_string(user_id)
         requester = await self.auth.get_user_by_req(request)
 
@@ -706,7 +758,7 @@ class DeactivateAccountRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, target_user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -751,7 +803,7 @@ class SuspendAccountRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, target_user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -778,7 +830,7 @@ class AccountValidityRenewServlet(RestServlet):
         )
         self.auth = hs.get_auth()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if self.account_validity_module_callbacks.on_legacy_admin_request_callback:
@@ -828,7 +880,7 @@ class ResetPasswordRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, target_user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Post request to allow an administrator reset password for a user.
         This needs user to have administrator access in Synapse.
         """
@@ -870,7 +922,7 @@ class SearchUsersRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, target_user_id: str
-    ) -> Tuple[int, Optional[List[JsonDict]]]:
+    ) -> tuple[int, list[JsonDict] | None]:
         """Get request to search user table for specific users according to
         search term.
         This needs user to have a administrator access in Synapse.
@@ -939,7 +991,7 @@ class UserAdminServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
@@ -950,13 +1002,13 @@ class UserAdminServlet(RestServlet):
                 "Only local users can be admins of this homeserver",
             )
 
-        is_admin = await self.store.is_server_admin(target_user)
+        is_admin = await self.store.is_server_admin(target_user.to_string())
 
         return HTTPStatus.OK, {"admin": is_admin}
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
         auth_user = requester.user
@@ -983,7 +1035,7 @@ class UserAdminServlet(RestServlet):
         return HTTPStatus.OK, {}
 
 
-class UserMembershipRestServlet(RestServlet):
+class UserJoinedRoomsRestServlet(RestServlet):
     """
     Get list of joined room ID's for a user.
     """
@@ -997,13 +1049,35 @@ class UserMembershipRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         room_ids = await self.store.get_rooms_for_user(user_id)
         rooms_response = {"joined_rooms": list(room_ids), "total": len(room_ids)}
 
         return HTTPStatus.OK, rooms_response
+
+
+class UserMembershipsRestServlet(RestServlet):
+    """
+    Get list of room memberships for a user.
+    """
+
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/memberships$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.is_mine = hs.is_mine
+        self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> tuple[int, JsonDict]:
+        await assert_requester_is_admin(self.auth, request)
+
+        memberships = await self.store.get_memberships_for_user(user_id)
+
+        return HTTPStatus.OK, {"memberships": memberships}
 
 
 class PushersRestServlet(RestServlet):
@@ -1029,7 +1103,7 @@ class PushersRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self.is_mine(UserID.from_string(user_id)):
@@ -1068,11 +1142,12 @@ class UserTokenRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
+        self.admin_handler = hs.get_admin_handler()
         self.is_mine_id = hs.is_mine_id
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
         auth_user = requester.user
@@ -1081,6 +1156,12 @@ class UserTokenRestServlet(RestServlet):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be logged in as"
             )
+
+        # Validate user_id
+        UserID.from_string(user_id)
+        _user_info_dict = await self.store.get_user_by_id(user_id)
+        if not _user_info_dict:
+            raise NotFoundError("User not found")
 
         body = parse_json_object_from_request(request, allow_empty_body=True)
 
@@ -1140,7 +1221,7 @@ class ShadowBanRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self.is_mine_id(user_id):
@@ -1154,7 +1235,7 @@ class ShadowBanRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self.is_mine_id(user_id):
@@ -1192,7 +1273,7 @@ class RateLimitRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self.is_mine_id(user_id):
@@ -1223,7 +1304,7 @@ class RateLimitRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self.is_mine_id(user_id):
@@ -1271,7 +1352,7 @@ class RateLimitRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         if not self.is_mine_id(user_id):
@@ -1299,7 +1380,7 @@ class AccountDataRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         if not self._is_mine_id(user_id):
@@ -1340,7 +1421,7 @@ class UserReplaceMasterCrossSigningKeyRestServlet(RestServlet):
         self,
         request: SynapseRequest,
         user_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         if user_id is None:
@@ -1374,7 +1455,7 @@ class UserByExternalId(RestServlet):
         request: SynapseRequest,
         provider: str,
         external_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         user_id = await self._store.get_user_by_external_id(provider, external_id)
@@ -1399,7 +1480,7 @@ class UserByThreePid(RestServlet):
         request: SynapseRequest,
         medium: str,
         address: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         user_id = await self._store.get_user_id_by_threepid(medium, address)
@@ -1412,9 +1493,14 @@ class UserByThreePid(RestServlet):
 
 class RedactUser(RestServlet):
     """
-    Redact all the events of a given user in the given rooms or if empty dict is provided
-    then all events in all rooms user is member of. Kicks off a background process and
-    returns an id that can be used to check on the progress of the redaction progress
+    Redact all the events of a given user in the given rooms in the given time period.
+    Kicks off a background process and returns an id that can be used to check on the
+    progress of the redaction progress.
+    If empty rooms dict is provided then all events in all rooms user is member of will
+    be affected.
+    Parameters before_ts and after_ts are millisecond timestamps.
+    If both are omitted, then messages will be redacted regardless the time they were sent.
+    If only one parameter is sent, then all messages before or after given time will be redacted.
     """
 
     PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
@@ -1425,13 +1511,16 @@ class RedactUser(RestServlet):
         self.admin_handler = hs.get_admin_handler()
 
     class PostBody(RequestBodyModel):
-        rooms: List[StrictStr]
-        reason: Optional[StrictStr]
-        limit: Optional[StrictInt]
+        rooms: list[StrictStr]
+        reason: StrictStr | None = None
+        limit: StrictInt | None = None
+        use_admin: StrictBool | None = None
+        before_ts: StrictInt | None = None
+        after_ts: StrictInt | None = None
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 
@@ -1455,8 +1544,22 @@ class RedactUser(RestServlet):
             )
             rooms = current_rooms + banned_rooms
 
+        use_admin = body.use_admin
+        if not use_admin:
+            use_admin = False
+
+        before_ts = body.before_ts
+        after_ts = body.after_ts
+
         redact_id = await self.admin_handler.start_redact_events(
-            user_id, rooms, requester.serialize(), body.reason, limit
+            user_id,
+            rooms,
+            requester.serialize(),
+            use_admin,
+            body.reason,
+            before_ts,
+            after_ts,
+            limit,
         )
 
         return HTTPStatus.OK, {"redact_id": redact_id}
@@ -1476,7 +1579,7 @@ class RedactUserStatus(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, redact_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         task = await self.admin_handler.get_redact_task(redact_id)
@@ -1519,7 +1622,7 @@ class UserInvitesCount(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
         from_ts = parse_integer(request, "from_ts", required=True)
 
@@ -1544,7 +1647,7 @@ class UserJoinedRoomCount(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
         from_ts = parse_integer(request, "from_ts", required=True)
 

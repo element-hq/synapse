@@ -54,7 +54,6 @@ if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
     export SYNAPSE_WORKER_TYPES="\
       event_persister:2, \
       background_worker, \
-      frontend_proxy, \
       event_creator, \
       user_dir, \
       media_repository, \
@@ -65,6 +64,7 @@ if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
       client_reader, \
       appservice, \
       pusher, \
+      device_lists:2, \
       stream_writers=account_data+presence+receipts+to_device+typing"
 
   fi
@@ -127,6 +127,10 @@ openssl x509 -req -in /conf/server.tls.csr \
 
 export SYNAPSE_TLS_CERT=/conf/server.tls.crt
 export SYNAPSE_TLS_KEY=/conf/server.tls.key
+
+# Add a directory for tests to add config overrides if they want
+mkdir --parents /conf/homeserver.d
+export _SYNAPSE_COMPLEMENT_EXTRA_CONFIG_DIR=/conf/homeserver.d
 
 # Run the script that writes the necessary config files and starts supervisord, which in turn
 # starts everything else

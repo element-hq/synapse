@@ -19,7 +19,7 @@
 #
 #
 import itertools
-from typing import Optional, cast
+from typing import cast
 from unittest.mock import Mock, call
 
 from parameterized import parameterized
@@ -29,7 +29,7 @@ from signedjson.key import (
     get_verify_key,
 )
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, PresenceState
 from synapse.api.presence import UserDevicePresenceState, UserPresenceState
@@ -57,7 +57,7 @@ from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, get_domain_from_id
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -90,6 +90,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -137,6 +138,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -187,6 +189,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -235,6 +238,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -275,6 +279,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=False,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -314,6 +319,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -341,6 +347,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -431,6 +438,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=True,
@@ -494,6 +502,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
+            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -942,8 +951,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.get_success(
             worker_presence_handler.user_syncing(
                 self.user_id, self.device_id, True, PresenceState.ONLINE
-            ),
-            by=0.1,
+            )
         )
 
         # Check that if we wait a while without telling the handler the user has
@@ -1261,8 +1269,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-1",
                 affect_presence=dev_1_state != PresenceState.OFFLINE,
                 presence_state=dev_1_state,
-            ),
-            by=0.01,
+            )
         )
 
         # 2. Wait half the idle timer.
@@ -1276,8 +1283,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-2",
                 affect_presence=dev_2_state != PresenceState.OFFLINE,
                 presence_state=dev_2_state,
-            ),
-            by=0.01,
+            )
         )
 
         # 4. Assert the expected presence state.
@@ -1302,8 +1308,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                     "dev-3",
                     affect_presence=True,
                     presence_state=PresenceState.ONLINE,
-                ),
-                by=0.01,
+                )
             ):
                 pass
 
@@ -1498,8 +1503,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-1",
                 affect_presence=dev_1_state != PresenceState.OFFLINE,
                 presence_state=dev_1_state,
-            ),
-            by=0.1,
+            )
         )
 
         # 2. Sync with the second device.
@@ -1509,8 +1513,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-2",
                 affect_presence=dev_2_state != PresenceState.OFFLINE,
                 presence_state=dev_2_state,
-            ),
-            by=0.1,
+            )
         )
 
         # 3. Assert the expected presence state.
@@ -1616,8 +1619,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.get_success(
             worker_to_sync_against.get_presence_handler().user_syncing(
                 self.user_id, self.device_id, True, PresenceState.ONLINE
-            ),
-            by=0.1,
+            )
         )
 
         # Check against the main process that the user's presence did not change.
@@ -1641,7 +1643,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(state.state, PresenceState.ONLINE)
 
     def _set_presencestate_with_status_msg(
-        self, state: str, status_msg: Optional[str]
+        self, state: str, status_msg: str | None
     ) -> None:
         """Set a PresenceState and status_msg and check the result.
 

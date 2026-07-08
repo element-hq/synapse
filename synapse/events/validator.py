@@ -19,11 +19,10 @@
 #
 #
 import collections.abc
-from typing import List, Type, Union, cast
+from typing import cast
 
 import jsonschema
 
-from synapse._pydantic_compat import Field, StrictBool, StrictStr
 from synapse.api.constants import (
     MAX_ALIAS_LENGTH,
     EventContentFields,
@@ -40,10 +39,8 @@ from synapse.events.utils import (
     CANONICALJSON_MIN_INT,
     validate_canonicaljson,
 )
-from synapse.http.servlet import validate_json_object
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import EventID, JsonDict, RoomID, StrCollection, UserID
-from synapse.types.rest import RequestBodyModel
+from synapse.types import EventID, JsonDict, JsonMapping, RoomID, StrCollection, UserID
 
 
 class EventValidator:
@@ -63,14 +60,17 @@ class EventValidator:
         if event.format_version == EventFormatVersions.ROOM_V1_V2:
             EventID.from_string(event.event_id)
 
-        required = [
+        required = {
             "auth_events",
             "content",
             "hashes",
             "prev_events",
             "sender",
             "type",
-        ]
+        }
+        if event.room_version.msc4242_state_dags:
+            required.remove("auth_events")
+            required.add("prev_state_events")
 
         for k in required:
             if k not in event:
@@ -113,29 +113,18 @@ class EventValidator:
                     cls=POWER_LEVELS_VALIDATOR,
                 )
             except jsonschema.ValidationError as e:
-                if e.path:
-                    # example: "users_default": '0' is not of type 'integer'
-                    # cast safety: path entries can be integers, if we fail to validate
-                    # items in an array. However, the POWER_LEVELS_SCHEMA doesn't expect
-                    # to see any arrays.
-                    message = (
-                        '"' + cast(str, e.path[-1]) + '": ' + e.message  # noqa: B306
-                    )
-                    # jsonschema.ValidationError.message is a valid attribute
-                else:
-                    # example: '0' is not of type 'integer'
-                    message = e.message  # noqa: B306
-                    # jsonschema.ValidationError.message is a valid attribute
-
-                raise SynapseError(
-                    code=400,
-                    msg=message,
-                    errcode=Codes.BAD_JSON,
-                )
+                raise _validation_error_to_api_error(e)
 
         # If the event contains a mentions key, validate it.
         if EventContentFields.MENTIONS in event.content:
-            validate_json_object(event.content[EventContentFields.MENTIONS], Mentions)
+            try:
+                jsonschema.validate(
+                    instance=event.content[EventContentFields.MENTIONS],
+                    schema=MENTIONS_SCHEMA,
+                    cls=MENTIONS_VALIDATOR,
+                )
+            except jsonschema.ValidationError as e:
+                raise _validation_error_to_api_error(e)
 
     def _validate_retention(self, event: EventBase) -> None:
         """Checks that an event that defines the retention policy for a room respects the
@@ -177,13 +166,23 @@ class EventValidator:
                 errcode=Codes.BAD_JSON,
             )
 
-    def validate_builder(self, event: Union[EventBase, EventBuilder]) -> None:
+    def validate_builder(self, event: EventBase | EventBuilder) -> None:
         """Validates that the builder/event has roughly the right format. Only
         checks values that we expect a proto event to have, rather than all the
         fields an event would have
         """
 
+        create_event_as_room_id = (
+            event.room_version.msc4291_room_ids_as_hashes
+            and event.type == EventTypes.Create
+            and hasattr(event, "state_key")
+            and event.state_key == ""
+        )
+
         strings = ["room_id", "sender", "type"]
+
+        if create_event_as_room_id:
+            strings.remove("room_id")
 
         if hasattr(event, "state_key"):
             strings.append("state_key")
@@ -192,7 +191,14 @@ class EventValidator:
             if not isinstance(getattr(event, s), str):
                 raise SynapseError(400, "Not '%s' a string type" % (s,))
 
-        RoomID.from_string(event.room_id)
+        if not create_event_as_room_id:
+            assert event.room_id is not None
+            RoomID.from_string(event.room_id)
+            if event.room_version.msc4291_room_ids_as_hashes and not RoomID.is_valid(
+                event.room_id
+            ):
+                raise SynapseError(400, f"Invalid room ID '{event.room_id}'")
+
         UserID.from_string(event.sender)
 
         if event.type == EventTypes.Message:
@@ -225,14 +231,14 @@ class EventValidator:
 
             self._ensure_state_event(event)
 
-    def _ensure_strings(self, d: JsonDict, keys: StrCollection) -> None:
+    def _ensure_strings(self, d: JsonMapping, keys: StrCollection) -> None:
         for s in keys:
             if s not in d:
                 raise SynapseError(400, "'%s' not in content" % (s,))
             if not isinstance(d[s], str):
                 raise SynapseError(400, "'%s' not a string type" % (s,))
 
-    def _ensure_state_event(self, event: Union[EventBase, EventBuilder]) -> None:
+    def _ensure_state_event(self, event: EventBase | EventBuilder) -> None:
         if not event.is_state():
             raise SynapseError(400, "'%s' must be state events" % (event.type,))
 
@@ -264,25 +270,62 @@ POWER_LEVELS_SCHEMA = {
     },
 }
 
-
-class Mentions(RequestBodyModel):
-    user_ids: List[StrictStr] = Field(default_factory=list)
-    room: StrictBool = False
+MENTIONS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "user_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "room": {"type": "boolean"},
+    },
+}
 
 
 # This could return something newer than Draft 7, but that's the current "latest"
 # validator.
-def _create_validator(schema: JsonDict) -> Type[jsonschema.Draft7Validator]:
+def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
     validator = jsonschema.validators.validator_for(schema)
 
-    # by default jsonschema does not consider a immutabledict to be an object so
-    # we need to use a custom type checker
+    # by default jsonschema does not consider a immutabledict to be an object, or
+    # a tuple to be an array (frozenutils freezes lists to tuples), so we need a
+    # custom type checker for both.
     # https://python-jsonschema.readthedocs.io/en/stable/validate/?highlight=object#validating-with-additional-types
     type_checker = validator.TYPE_CHECKER.redefine(
         "object", lambda checker, thing: isinstance(thing, collections.abc.Mapping)
+    ).redefine(
+        "array",
+        lambda checker, thing: isinstance(thing, collections.abc.Sequence),
     )
 
     return jsonschema.validators.extend(validator, type_checker=type_checker)
 
 
+def _validation_error_to_api_error(err: jsonschema.ValidationError) -> SynapseError:
+    """
+    Converts a JSONSchema `ValidationError` to a `SynapseError` that can be thrown
+    to give a Matrix API-compatible 400 Bad Request response with `M_BAD_JSON` code
+    and a descriptive error message.
+    """
+    if err.path:
+        # example: "users_default": '0' is not of type 'integer'
+        # cast safety: path entries can be integers, if we fail to validate
+        # items in an array. However, the POWER_LEVELS_SCHEMA doesn't expect
+        # to see any arrays.
+        message = '"' + cast(str, err.path[-1]) + '": ' + err.message
+        # jsonschema.ValidationError.message is a valid attribute
+    else:
+        # example: '0' is not of type 'integer'
+        message = err.message
+        # jsonschema.ValidationError.message is a valid attribute
+
+    return SynapseError(
+        code=400,
+        msg=message,
+        errcode=Codes.BAD_JSON,
+    )
+
+
 POWER_LEVELS_VALIDATOR = _create_validator(POWER_LEVELS_SCHEMA)
+
+MENTIONS_VALIDATOR = _create_validator(MENTIONS_SCHEMA)

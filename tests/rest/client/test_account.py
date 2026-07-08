@@ -18,29 +18,28 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import importlib.resources as importlib_resources
 import os
 import re
 from email.parser import Parser
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from unittest.mock import Mock
 
-import pkg_resources
-
 from twisted.internet.interfaces import IReactorTCP
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import LoginType, Membership
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest import admin
 from synapse.rest.client import account, login, register, room
 from synapse.rest.synapse.client.password_reset import PasswordResetSubmitTokenResource
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
-from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.types import JsonDict, UserID, create_requester
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeSite, make_request
@@ -59,11 +58,12 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,
@@ -87,7 +87,7 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         ) -> None:
             self.email_attempts.append(msg_bytes)
 
-        self.email_attempts: List[bytes] = []
+        self.email_attempts: list[bytes] = []
         hs.get_send_email_handler()._sendmail = sendmail
 
         return hs
@@ -325,7 +325,13 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         email = "test@example.com"
 
         client_secret = "foobar"
-        session_id = self._request_token(email, client_secret)
+        session_id = self._request_token(
+            email,
+            client_secret,
+            # The endpoint intentionally adds up to 1000ms of jitter to avoid
+            # leaking whether the email address is bound to an account.
+            timeout_ms=3000,
+        )
 
         self.assertIsNotNone(session_id)
 
@@ -363,7 +369,8 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         email: str,
         client_secret: str,
         ip: str = "127.0.0.1",
-        next_link: Optional[str] = None,
+        next_link: str | None = None,
+        timeout_ms: int = 1000,
     ) -> str:
         body = {"client_secret": client_secret, "email": email, "send_attempt": 1}
         if next_link is not None:
@@ -373,6 +380,7 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
             b"account/password/email/requestToken",
             body,
             client_ip=ip,
+            timeout_ms=timeout_ms,
         )
 
         if channel.code != 200:
@@ -384,7 +392,7 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
 
         return channel.json_body["sid"]
 
-    def _validate_token(self, link: str, next_link: Optional[str] = None) -> None:
+    def _validate_token(self, link: str, next_link: str | None = None) -> None:
         # Remove the host
         path = link.replace("https://example.com", "")
 
@@ -495,6 +503,123 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
 
         # Check that the user has been marked as deactivated.
         self.assertTrue(self.get_success(store.get_user_deactivated_status(user_id)))
+
+        # Check that this access token has been invalidated.
+        channel = self.make_request("GET", "account/whoami", access_token=tok)
+        self.assertEqual(channel.code, 401)
+
+    def test_deactivate_erase_account(self) -> None:
+        """
+        Test that a user account can be signaled for erasure on the Matrix spec endpoint
+        for client access, `/account/deactivate` and that profile data is erased as part
+        of the process
+        """
+        mxid = self.register_user("kermit", "test")
+        user_id = UserID.from_string(mxid)
+        tok = self.login("kermit", "test")
+
+        profile_handler = self.hs.get_profile_handler()
+
+        # Set some profile data that can be checked for after the user is erased
+        self.get_success(
+            profile_handler.set_displayname(
+                user_id, create_requester(user_id), "Kermit the Frog"
+            )
+        )
+        self.get_success(
+            profile_handler.set_avatar_url(
+                user_id, create_requester(user_id), "http://test/Kermit.jpg"
+            )
+        )
+        # Verify it is set
+        self.assertEqual(
+            self.get_success(profile_handler.get_displayname(user_id)),
+            "Kermit the Frog",
+        )
+        self.assertEqual(
+            self.get_success(profile_handler.get_avatar_url(user_id)),
+            "http://test/Kermit.jpg",
+        )
+
+        # Deactivate!
+        self.deactivate(mxid, tok, erase=True)
+
+        store = self.hs.get_datastores().main
+
+        # Check that the user has been marked as deactivated.
+        self.assertTrue(self.get_success(store.get_user_deactivated_status(mxid)))
+
+        # On deactivation with 'erase', the entire database row is erased. Both of these
+        # should raise a 404(Not Found) SynapseError
+        display_name_failure = self.get_failure(
+            profile_handler.get_displayname(user_id), SynapseError
+        )
+        assert display_name_failure.value.code == HTTPStatus.NOT_FOUND
+
+        avatar_url_failure = self.get_failure(
+            profile_handler.get_avatar_url(user_id), SynapseError
+        )
+        assert avatar_url_failure.value.code == HTTPStatus.NOT_FOUND
+
+        # Check that this access token has been invalidated.
+        channel = self.make_request("GET", "account/whoami", access_token=tok)
+        self.assertEqual(channel.code, 401)
+
+    @override_config({"enable_set_displayname": False, "enable_set_avatar_url": False})
+    def test_deactivate_erase_account_with_disabled_profile_changes(self) -> None:
+        """
+        Test that deactivating the user with the 'erase' option will remove existing
+        profile data, even with the Synapse configuration to forbid profile changes
+        """
+        mxid = self.register_user("kermit", "test")
+        user_id = UserID.from_string(mxid)
+        tok = self.login("kermit", "test")
+
+        profile_handler = self.hs.get_profile_handler()
+
+        # Can not use the profile handler to set a display name when it is disabled. Use
+        # the database directly
+        store = self.hs.get_datastores().main
+        self.get_success(store.set_profile_displayname(user_id, "Kermit the Frog"))
+        self.get_success(
+            store.set_profile_avatar_url(user_id, "http://test/Kermit.jpg")
+        )
+
+        # Verify it is set
+        self.assertEqual(
+            (self.get_success(store.get_profile_displayname(user_id))),
+            "Kermit the Frog",
+        )
+        self.assertEqual(
+            self.get_success(profile_handler.get_displayname(user_id)),
+            "Kermit the Frog",
+        )
+        self.assertEqual(
+            (self.get_success(store.get_profile_avatar_url(user_id))),
+            "http://test/Kermit.jpg",
+        )
+        self.assertEqual(
+            self.get_success(profile_handler.get_avatar_url(user_id)),
+            "http://test/Kermit.jpg",
+        )
+
+        # Deactivate!
+        self.deactivate(mxid, tok, erase=True)
+
+        # Check that the user has been marked as deactivated.
+        self.assertTrue(self.get_success(store.get_user_deactivated_status(mxid)))
+
+        # On deactivation with 'erase', the entire database row is erased. Both of these
+        # should raise a 404(Not Found) SynapseError
+        display_name_failure = self.get_failure(
+            profile_handler.get_displayname(user_id), SynapseError
+        )
+        assert display_name_failure.value.code == HTTPStatus.NOT_FOUND
+
+        avatar_url_failure = self.get_failure(
+            profile_handler.get_avatar_url(user_id), SynapseError
+        )
+        assert avatar_url_failure.value.code == HTTPStatus.NOT_FOUND
 
         # Check that this access token has been invalidated.
         channel = self.make_request("GET", "account/whoami", access_token=tok)
@@ -698,14 +823,23 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(len(res2), 4)
 
-    def deactivate(self, user_id: str, tok: str) -> None:
+    def deactivate(self, user_id: str, tok: str, erase: bool = False) -> None:
+        """
+        Helper to deactivate a user using the /account/deactivate endpoint, optionally
+        with erasure
+
+        Args:
+            user_id: the string formatted mxid(not a UserID)
+            tok: the user's access token
+            erase: bool of if this should be a full erasure request
+        """
         request_data = {
             "auth": {
                 "type": "m.login.password",
                 "user": user_id,
                 "password": "test",
             },
-            "erase": False,
+            "erase": erase,
         }
         channel = self.make_request(
             "POST", "account/deactivate", request_data, access_token=tok
@@ -721,7 +855,7 @@ class WhoamiTestCase(unittest.HomeserverTestCase):
         register.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["allow_guest_access"] = True
         return config
@@ -764,10 +898,10 @@ class WhoamiTestCase(unittest.HomeserverTestCase):
         as_token = "i_am_an_app_service"
 
         appservice = ApplicationService(
-            as_token,
+            token=as_token,
             id="1234",
             namespaces={"users": [{"regex": user_id, "exclusive": True}]},
-            sender=user_id,
+            sender=UserID.from_string(user_id),
         )
         self.hs.get_datastores().main.services_cache.append(appservice)
 
@@ -798,11 +932,12 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,
@@ -826,7 +961,7 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         ) -> None:
             self.email_attempts.append(msg_bytes)
 
-        self.email_attempts: List[bytes] = []
+        self.email_attempts: list[bytes] = []
         self.hs.get_send_email_handler()._sendmail = sendmail
 
         return self.hs
@@ -1151,9 +1286,9 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         self,
         email: str,
         client_secret: str,
-        next_link: Optional[str] = None,
+        next_link: str | None = None,
         expect_code: int = HTTPStatus.OK,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Request a validation token to add an email address to a user's account
 
         Args:
@@ -1200,7 +1335,9 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
         )
-        self.assertEqual(expected_errcode, channel.json_body["errcode"])
+        self.assertEqual(
+            expected_errcode, channel.json_body["errcode"], msg=channel.result["body"]
+        )
         self.assertIn(expected_error, channel.json_body["error"])
 
     def _validate_token(self, link: str) -> None:
@@ -1391,10 +1528,10 @@ class AccountStatusTestCase(unittest.HomeserverTestCase):
         async def post_json(
             destination: str,
             path: str,
-            data: Optional[JsonDict] = None,
+            data: JsonDict | None = None,
             *a: Any,
             **kwa: Any,
-        ) -> Union[JsonDict, list]:
+        ) -> JsonDict | list:
             if destination == "remote":
                 return {
                     "account_statuses": {
@@ -1500,11 +1637,11 @@ class AccountStatusTestCase(unittest.HomeserverTestCase):
 
     def _test_status(
         self,
-        users: Optional[List[str]],
+        users: list[str] | None,
         expected_status_code: int = HTTPStatus.OK,
-        expected_statuses: Optional[Dict[str, Dict[str, bool]]] = None,
-        expected_failures: Optional[List[str]] = None,
-        expected_errcode: Optional[str] = None,
+        expected_statuses: dict[str, dict[str, bool]] | None = None,
+        expected_failures: list[str] | None = None,
+        expected_errcode: str | None = None,
     ) -> None:
         """Send a request to the account status endpoint and check that the response
         matches with what's expected.

@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from netaddr import IPAddress
 
@@ -64,7 +64,7 @@ class BaseAuth:
         room_id: str,
         requester: Requester,
         allow_departed_users: bool = False,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Check if the user is in the room, or was at some point.
         Args:
             room_id: The room to check.
@@ -114,7 +114,7 @@ class BaseAuth:
     @trace
     async def check_user_in_room_or_world_readable(
         self, room_id: str, requester: Requester, allow_departed_users: bool = False
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Checks that the user is or was in the room or the room is world
         readable. If it isn't then an exception is raised.
 
@@ -172,7 +172,7 @@ class BaseAuth:
         """
 
         # It's ok if the app service is trying to use the sender from their registration
-        if app_service.sender == user_id:
+        if app_service.sender.to_string() == user_id:
             pass
         # Check to make sure the app service is allowed to control the user
         elif not app_service.is_interested_in_user(user_id):
@@ -294,7 +294,7 @@ class BaseAuth:
     @cancellable
     async def get_appservice_user(
         self, request: Request, access_token: str
-    ) -> Optional[Requester]:
+    ) -> Requester | None:
         """
         Given a request, reads the request parameters to determine:
         - whether it's an application service that's making this request
@@ -302,11 +302,8 @@ class BaseAuth:
           (the user_id URI parameter allows an application service to masquerade
           any applicable user in its namespace)
         - what device the application service should be treated as controlling
-          (the device_id[^1] URI parameter allows an application service to masquerade
+          (the device_id URI parameter allows an application service to masquerade
           as any device that exists for the relevant user)
-
-        [^1] Unstable and provided by MSC3202.
-             Must use `org.matrix.msc3202.device_id` in place of `device_id` for now.
 
         Returns:
             the application service `Requester` of that request
@@ -319,7 +316,8 @@ class BaseAuth:
         - The returned device ID, if present, has been checked to be a valid device ID
           for the returned user ID.
         """
-        DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
+        # TODO: We can drop unstable support after 2026-01-01 (couple months after stable support)
+        UNSTABLE_DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
 
         app_service = self.store.get_app_service_by_token(access_token)
         if app_service is None:
@@ -341,26 +339,24 @@ class BaseAuth:
         else:
             effective_user_id = app_service.sender
 
-        effective_device_id: Optional[str] = None
-
-        if (
-            self.hs.config.experimental.msc3202_device_masquerading_enabled
-            and DEVICE_ID_ARG_NAME in request.args
-        ):
-            effective_device_id = request.args[DEVICE_ID_ARG_NAME][0].decode("utf8")
+        effective_device_id_args = request.args.get(
+            b"device_id", request.args.get(UNSTABLE_DEVICE_ID_ARG_NAME)
+        )
+        if effective_device_id_args:
+            effective_device_id = effective_device_id_args[0].decode("utf8")
             # We only just set this so it can't be None!
             assert effective_device_id is not None
             device_opt = await self.store.get_device(
                 effective_user_id, effective_device_id
             )
             if device_opt is None:
-                # For now, use 400 M_EXCLUSIVE if the device doesn't exist.
-                # This is an open thread of discussion on MSC3202 as of 2021-12-09.
                 raise AuthError(
                     400,
                     f"Application service trying to use a device that doesn't exist ('{effective_device_id}' for {effective_user_id})",
-                    Codes.EXCLUSIVE,
+                    Codes.UNKNOWN_DEVICE,
                 )
+        else:
+            effective_device_id = None
 
         return create_requester(
             effective_user_id, app_service=app_service, device_id=effective_device_id
@@ -375,7 +371,9 @@ class BaseAuth:
         """
         ip_addr = request.get_client_ip_if_available()
 
-        if ip_addr and (not requester.app_service or self._track_appservice_user_ips):
+        if ip_addr and (
+            not requester.app_service_id or self._track_appservice_user_ips
+        ):
             user_agent = get_request_user_agent(request)
             access_token = self.get_access_token_from_request(request)
 
@@ -385,7 +383,7 @@ class BaseAuth:
             # table during the transition
             recorded_device_id = (
                 "dummy-device"
-                if requester.device_id is None and requester.app_service is not None
+                if requester.device_id is None and requester.app_service_id is not None
                 else requester.device_id
             )
             await self.store.insert_client_ip(

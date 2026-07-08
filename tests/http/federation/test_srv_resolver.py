@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, Generator, List, Tuple, cast
+from typing import Generator, cast
 from unittest.mock import Mock
 
 from twisted.internet import defer
@@ -30,7 +30,7 @@ from synapse.http.federation.srv_resolver import Server, SrvResolver
 from synapse.logging.context import LoggingContext, current_context
 
 from tests import unittest
-from tests.utils import MockClock
+from tests.server import get_clock
 
 
 class SrvResolverTestCase(unittest.TestCase):
@@ -44,17 +44,20 @@ class SrvResolverTestCase(unittest.TestCase):
             type=dns.SRV, payload=dns.Record_SRV(target=host_name)
         )
 
-        result_deferred: "Deferred[Tuple[List[dns.RRHeader], None, None]]" = Deferred()
+        result_deferred: "Deferred[tuple[list[dns.RRHeader], None, None]]" = Deferred()
         dns_client_mock.lookupService.return_value = result_deferred
 
-        cache: Dict[bytes, List[Server]] = {}
+        cache: dict[bytes, list[Server]] = {}
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
         @defer.inlineCallbacks
-        def do_lookup() -> Generator["Deferred[object]", object, List[Server]]:
-            with LoggingContext("one") as ctx:
+        def do_lookup() -> Generator["Deferred[object]", object, list[Server]]:
+            with LoggingContext(
+                name="one",
+                server_name="test_server",
+            ) as ctx:
                 resolve_d = resolver.resolve_service(service_name)
-                result: List[Server]
+                result: list[Server]
                 result = yield defer.ensureDeferred(resolve_d)  # type: ignore[assignment]
 
                 # should have restored our context
@@ -92,7 +95,7 @@ class SrvResolverTestCase(unittest.TestCase):
         cache = {service_name: [cast(Server, entry)]}
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
-        servers: List[Server]
+        servers: list[Server]
         servers = yield defer.ensureDeferred(resolver.resolve_service(service_name))  # type: ignore[assignment]
 
         dns_client_mock.lookupService.assert_called_once_with(service_name)
@@ -102,7 +105,7 @@ class SrvResolverTestCase(unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_from_cache(self) -> Generator["Deferred[object]", object, None]:
-        clock = MockClock()
+        reactor, clock = get_clock()
 
         dns_client_mock = Mock(spec_set=["lookupService"])
         dns_client_mock.lookupService = Mock(spec_set=[])
@@ -119,7 +122,7 @@ class SrvResolverTestCase(unittest.TestCase):
             dns_client=dns_client_mock, cache=cache, get_time=clock.time
         )
 
-        servers: List[Server]
+        servers: list[Server]
         servers = yield defer.ensureDeferred(resolver.resolve_service(service_name))  # type: ignore[assignment]
 
         self.assertFalse(dns_client_mock.lookupService.called)
@@ -135,7 +138,7 @@ class SrvResolverTestCase(unittest.TestCase):
 
         service_name = b"test_service.example.com"
 
-        cache: Dict[bytes, List[Server]] = {}
+        cache: dict[bytes, list[Server]] = {}
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
         with self.assertRaises(error.DNSServerError):
@@ -149,10 +152,10 @@ class SrvResolverTestCase(unittest.TestCase):
 
         service_name = b"test_service.example.com"
 
-        cache: Dict[bytes, List[Server]] = {}
+        cache: dict[bytes, list[Server]] = {}
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
-        servers: List[Server]
+        servers: list[Server]
         servers = yield defer.ensureDeferred(resolver.resolve_service(service_name))  # type: ignore[assignment]
 
         self.assertEqual(len(servers), 0)
@@ -164,10 +167,10 @@ class SrvResolverTestCase(unittest.TestCase):
         """
         service_name = b"test_service.example.com"
 
-        lookup_deferred: "Deferred[Tuple[List[dns.RRHeader], None, None]]" = Deferred()
+        lookup_deferred: "Deferred[tuple[list[dns.RRHeader], None, None]]" = Deferred()
         dns_client_mock = Mock()
         dns_client_mock.lookupService.return_value = lookup_deferred
-        cache: Dict[bytes, List[Server]] = {}
+        cache: dict[bytes, list[Server]] = {}
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
         # Old versions of Twisted don't have an ensureDeferred in failureResultOf.
@@ -190,10 +193,10 @@ class SrvResolverTestCase(unittest.TestCase):
         """
         service_name = b"test_service.example.com"
 
-        lookup_deferred: "Deferred[Tuple[List[dns.RRHeader], None, None]]" = Deferred()
+        lookup_deferred: "Deferred[tuple[list[dns.RRHeader], None, None]]" = Deferred()
         dns_client_mock = Mock()
         dns_client_mock.lookupService.return_value = lookup_deferred
-        cache: Dict[bytes, List[Server]] = {}
+        cache: dict[bytes, list[Server]] = {}
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
         # Old versions of Twisted don't have an ensureDeferred in successResultOf.

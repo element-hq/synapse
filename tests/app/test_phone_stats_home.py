@@ -2,7 +2,7 @@ import synapse
 from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import ThreadedMemoryReactorClock
 from tests.unittest import HomeserverTestCase

@@ -23,19 +23,20 @@
 import collections.abc
 import hashlib
 import logging
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable
 
 from canonicaljson import encode_canonical_json
 from signedjson.sign import sign_json
-from signedjson.types import SigningKey
+from signedjson.types import SigningKey, VerifyKey
 from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
-from synapse.events.utils import prune_event, prune_event_dict
+from synapse.events.utils import prune_event
 from synapse.logging.opentracing import trace
-from synapse.types import JsonDict
+from synapse.synapse_rust.events import redact_event_dict
+from synapse.types import JsonDict, UserID
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +81,8 @@ def check_event_content_hash(
 
 
 def compute_content_hash(
-    event_dict: Dict[str, Any], hash_algorithm: Hasher
-) -> Tuple[str, bytes]:
+    event_dict: dict[str, Any], hash_algorithm: Hasher
+) -> tuple[str, bytes]:
     """Compute the content hash of an event, which is the hash of the
     unredacted event.
 
@@ -101,6 +102,9 @@ def compute_content_hash(
     event_dict.pop("outlier", None)
     event_dict.pop("destinations", None)
 
+    # N.B. no need to pop the room_id from create events in MSC4291 rooms
+    # as they shouldn't have one.
+
     event_json_bytes = encode_canonical_json(event_dict)
 
     hashed = hash_algorithm(event_json_bytes)
@@ -109,7 +113,7 @@ def compute_content_hash(
 
 def compute_event_reference_hash(
     event: EventBase, hash_algorithm: Hasher = hashlib.sha256
-) -> Tuple[str, bytes]:
+) -> tuple[str, bytes]:
     """Computes the event reference hash. This is the hash of the redacted
     event.
 
@@ -136,7 +140,7 @@ def compute_event_signature(
     event_dict: JsonDict,
     signature_name: str,
     signing_key: SigningKey,
-) -> Dict[str, Dict[str, str]]:
+) -> dict[str, dict[str, str]]:
     """Compute the signature of the event for the given name and key.
 
     Args:
@@ -154,7 +158,7 @@ def compute_event_signature(
     Returns:
         a dictionary in the same format of an event's signatures field.
     """
-    redact_json = prune_event_dict(room_version, event_dict)
+    redact_json = redact_event_dict(room_version, event_dict)
     redact_json.pop("age_ts", None)
     redact_json.pop("unsigned", None)
     if logger.isEnabledFor(logging.DEBUG):
@@ -189,3 +193,52 @@ def add_hashes_and_signatures(
     event_dict["signatures"] = compute_event_signature(
         room_version, event_dict, signature_name=signature_name, signing_key=signing_key
     )
+
+
+def resign_event(
+    ev: EventBase,
+    server_name: str,
+    signing_key: SigningKey,
+    time_now: int | None = None,
+) -> JsonDict:
+    """Re-sign the provided event with the given signing key. Any existing signatures on the event
+    for this server_name are removed.
+
+    If there has been no signature for this event by this server_name, the event is still re-signed.
+    If there have been signatures on this event by this server_name, the event is not re-checked for
+    validity. As such, only events that have valid signatures should be passed into this function
+    e.g. from the event_json table in the database.
+    """
+    event_dict = ev.get_pdu_json(time_now=time_now)
+    event_dict["signatures"].pop(
+        server_name, None
+    )  # remove existing signatures for this server_name
+    event_dict["signatures"].update(
+        compute_event_signature(
+            ev.room_version,
+            event_dict,
+            server_name,
+            signing_key,
+        )
+    )
+    return event_dict
+
+
+def event_needs_resigning(
+    ev: EventBase, server_name: str, verify_key: VerifyKey
+) -> bool:
+    """Check if this event needs re-signing.
+
+    This returns True if all of the following are True:
+     - the event `sender` domain matches the `server_name` provided.
+     - the event has not been already signed with this `verify_key`.
+    """
+    sender = UserID.from_string(ev.sender)
+    if sender.domain != server_name:
+        return False
+    want_key_id = verify_key.alg + ":" + verify_key.version
+    signed_with_current_key_id = ev.signatures.get_signature(server_name, want_key_id)
+    if signed_with_current_key_id:
+        return False
+
+    return True
