@@ -2705,7 +2705,7 @@ class RoomDelayedEventTestCase(RoomBase):
             {"body": f"test (send after {send_after_ms})", "msgtype": "m.text"},
         )
 
-        for i in range(3):
+        for i in range(4):
             send_after_ms = 1000 * i
             channel = make_delayed_event_request()
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
