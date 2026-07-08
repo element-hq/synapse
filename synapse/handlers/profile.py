@@ -570,7 +570,7 @@ class ProfileHandler:
             # Offload to the right worker via http replication
             await self._delete_profile_upon_deactivation_client(
                 instance_name=self._profile_updates_writer_instance,
-                user_id=target_user.to_string(),
+                user_id=target_user,
                 requester=requester,
                 by_admin=by_admin,
             )
