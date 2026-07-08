@@ -1071,10 +1071,20 @@ def generate_worker_files(
     nginx_upstream_config = ""
     for upstream_worker_base_name, upstream_worker_ports in nginx_upstreams.items():
         body = ""
+
+        # Prevent nginx from marking an upstream as unavailable after it fails to
+        # contact the Synapse worker. Otherwise, if nginx sees a Synapse worker as
+        # unavailable once, it will be marked as unavailable for 10 seconds
+        # (`fail_timeout` default).
+        #
+        # This is necessary because we use `COMPLEMENT_ENABLE_DIRTY_RUNS` (re-uses
+        # deployments/homeservers) and we don't want any cross-test pollution from
+        # stopping/starting homeservers.
+        body += "    max_fails=0;\n"
+
         if using_unix_sockets:
             for port in upstream_worker_ports:
                 body += f"    server unix:/run/worker.{port};\n"
-
         else:
             for port in upstream_worker_ports:
                 body += f"    server localhost:{port};\n"
