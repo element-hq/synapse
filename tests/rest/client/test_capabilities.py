@@ -26,6 +26,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.rest.client import capabilities, login
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.unittest import override_config, skip_unless
@@ -233,7 +234,8 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(
-            capabilities["org.matrix.msc4140.delayed_events"]["max_delay_ms"], 86400000
+            capabilities["org.matrix.msc4140.delayed_events"]["max_delay_ms"],
+            Duration(days=1).as_millis(),
         )
         self.assertEqual(
             capabilities["org.matrix.msc4140.delayed_events"]["max_scheduled"], 50
