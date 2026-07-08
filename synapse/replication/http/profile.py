@@ -120,7 +120,7 @@ class ReplicationProfileSetField(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
-        user_id: UserID,
+        user_id: str,
         requester: Requester,
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
@@ -128,7 +128,7 @@ class ReplicationProfileSetField(ReplicationEndpoint):
         propagate: bool,
     ) -> JsonDict:
         return {
-            "target_user": user_id.to_string(),
+            "target_user": user_id,
             "requester": requester.user.to_string(),
             "field_name": field_name,
             "new_value": new_value,
@@ -182,13 +182,13 @@ class ReplicationProfileDeleteField(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
-        user_id: UserID,
+        user_id: str,
         requester: Requester,
         field_name: str,
         by_admin: bool,
     ) -> JsonDict:
         return {
-            "target_user": user_id.to_string(),
+            "target_user": user_id,
             "requester": requester.user.to_string(),
             "field_name": field_name,
             "by_admin": by_admin,
@@ -237,12 +237,12 @@ class ReplicationProfileDeleteUponDeactivation(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
-        user_id: UserID,
+        user_id: str,
         requester: Requester,
         by_admin: bool,
     ) -> JsonDict:
         return {
-            "target_user": user_id.to_string(),
+            "target_user": user_id,
             "requester": requester.user.to_string(),
             "by_admin": by_admin,
         }
