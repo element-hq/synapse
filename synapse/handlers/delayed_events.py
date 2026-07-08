@@ -378,7 +378,7 @@ class DelayedEventsHandler:
         if delay > max_delay:
             raise SynapseError(
                 HTTPStatus.FORBIDDEN,
-                "The requested delay exceeds the allowed maximum",
+                f"The requested delay ({delay}ms) exceeds the allowed maximum ({max_delay}ms)",
                 Codes.FORBIDDEN,
             )
 
