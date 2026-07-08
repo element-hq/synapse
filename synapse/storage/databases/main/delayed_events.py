@@ -152,10 +152,9 @@ class DelayedEventsStore(SQLBaseStore):
         Raises:
             LimitExceededError: if the DB has reached the limit of
                 how many delayed events it may store for the given requester.
-            ValueError: if the limit is not greater than 0.
+            AssertionError: if the limit is not greater than 0.
         """
-        if limit <= 0:
-            raise ValueError("limit must be greater than 0")
+        assert limit > 0, "limit must be greater than 0"
 
         delay_id = _generate_delay_id()
         send_ts = Timestamp(creation_ts + delay)
