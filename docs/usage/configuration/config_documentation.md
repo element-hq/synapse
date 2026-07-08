@@ -318,6 +318,16 @@ Example configuration:
 include_profile_data_on_invite: false
 ```
 ---
+### `include_profile_updates_in_sync`
+
+*(boolean)* Use this option to include updates of other users profiles in sync responses, for users who share rooms.
+Note, requires an MSC4429 compatible client, and is currently limited to legacy sync and local users only. Defaults to `false`.
+
+Example configuration:
+```yaml
+include_profile_updates_in_sync: true
+```
+---
 ### `allow_public_rooms_without_auth`
 
 *(boolean)* If set to true, removes the need for authentication to access the server's public rooms directory through the client API, meaning that anyone can query the room directory. Defaults to `false`.
