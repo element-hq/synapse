@@ -290,6 +290,7 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(self._get_fully_read_marker(), newer_event_id)
 
+        # Expected to be a no-op.
         channel = self.make_request(
             "POST",
             f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{older_event_id}",
@@ -324,6 +325,35 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(self._get_fully_read_marker(), older_event_id)
+
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_fully_read_receipt_does_not_move_backwards_with_explicit_opt_out(
+        self,
+    ) -> None:
+        older_event_id = self.helper.send(self.room_id, body="1", tok=self.tok)[
+            "event_id"
+        ]
+        newer_event_id = self.helper.send(self.room_id, body="2", tok=self.tok)[
+            "event_id"
+        ]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{newer_event_id}",
+            {},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Expected to be a no-op.
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{older_event_id}",
+            {"com.beeper.allow_backward": False},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(), newer_event_id)
 
     @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
     def test_allow_backward_is_rejected_for_read_receipts(self) -> None:

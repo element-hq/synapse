@@ -168,6 +168,37 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(self._get_fully_read_marker(room_id), older_event_id)
 
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_send_read_marker_does_not_move_backwards_with_explicit_opt_out(
+        self,
+    ) -> None:
+        room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
+
+        older_event_id = self.helper.send(
+            room_id=room_id, body="1", tok=self.owner_tok
+        )["event_id"]
+        newer_event_id = self.helper.send(
+            room_id=room_id, body="2", tok=self.owner_tok
+        )["event_id"]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": newer_event_id},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Expected to be a no-op.
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/read_markers",
+            content={"m.fully_read": older_event_id, "com.beeper.allow_backward": False},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(room_id), newer_event_id)
+
     def test_send_read_marker_ignores_opt_in_when_feature_disabled(self) -> None:
         room_id = self.helper.create_room_as(self.owner, tok=self.owner_tok)
         older_event_id = self.helper.send(
