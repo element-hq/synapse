@@ -76,6 +76,8 @@ class ReadMarkerRestServlet(RestServlet):
                     "com.beeper.allow_backward must be a boolean.",
                     Codes.INVALID_PARAM,
                 )
+
+            # Prevent considering the `allow_backward` field as a receipt type.
             unrecognized_types -= {"com.beeper.allow_backward"}
         else:
             allow_backward = False
