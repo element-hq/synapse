@@ -1738,6 +1738,94 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         ]
     )
     @override_config({"include_profile_updates_in_sync": True})
+    def test_sync_response_always_includes_the_user_themselves(
+        self,
+        is_initial: bool,
+        is_lazy: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled any sync response always contains the users
+        own updates.
+
+        This test is made with a user that is not in any rooms, to prove our code
+        to collect interested users from the profile updates always collect the user.
+        """
+        third_user = self.register_user("third_user", "password")
+        requester = create_requester(third_user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        if is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(third_user),
+                    requester=create_requester(third_user),
+                    field_name="field",
+                    new_value="Content",
+                )
+            )
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=third_user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        if is_initial:
+            assert initial_result.profile_updates["@third_user:test"] is not None
+            self.assertEqual(
+                initial_result.profile_updates["@third_user:test"]["field"],
+                "Content",
+            )
+        else:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(third_user),
+                    requester=create_requester(third_user),
+                    field_name="field",
+                    new_value="Content",
+                )
+            )
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=initial_result.next_batch,
+                    sync_config=generate_sync_config(
+                        user_id=third_user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            assert incremental_result.profile_updates["@third_user:test"] is not None
+            self.assertEqual(
+                incremental_result.profile_updates["@third_user:test"]["field"],
+                "Content",
+            )
+
+    @parameterized.expand(
+        [
+            [True, True],
+            [False, False],
+            [True, False],
+            [False, True],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
     def test_sync_profile_updates_works_correctly_with_falsey_values(
         self,
         is_initial: bool,

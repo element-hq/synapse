@@ -2222,6 +2222,8 @@ class SyncHandler:
         """
         # Currently, limited to only local profiles, so filter remote servers out
         user_ids = await self.store.get_local_users_who_share_room_with_user(user_id)
+        # Ensure we're in the list even if we don't belong to any rooms
+        user_ids.add(user_id)
         if include_users:
             # Filter down to selected included users
             user_ids = {user_id for user_id in user_ids if user_id in include_users}
