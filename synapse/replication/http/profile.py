@@ -260,8 +260,7 @@ class ReplicationProfileDeleteUponDeactivation(ReplicationEndpoint):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.server.include_profile_updates_in_sync:
-        ReplicationProfileUserRoomMembershipChange(hs).register(http_server)
-        ReplicationProfileSetField(hs).register(http_server)
-        ReplicationProfileDeleteField(hs).register(http_server)
-        ReplicationProfileDeleteUponDeactivation(hs).register(http_server)
+    ReplicationProfileUserRoomMembershipChange(hs).register(http_server)
+    ReplicationProfileSetField(hs).register(http_server)
+    ReplicationProfileDeleteField(hs).register(http_server)
+    ReplicationProfileDeleteUponDeactivation(hs).register(http_server)
