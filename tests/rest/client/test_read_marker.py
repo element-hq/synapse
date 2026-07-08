@@ -130,6 +130,7 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(self._get_fully_read_marker(room_id), newer_event_id)
 
+        # Expected to be a no-op.
         channel = self.make_request(
             "POST",
             f"/rooms/{room_id}/read_markers",
