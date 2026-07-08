@@ -193,7 +193,10 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             f"/rooms/{room_id}/read_markers",
-            content={"m.fully_read": older_event_id, "com.beeper.allow_backward": False},
+            content={
+                "m.fully_read": older_event_id,
+                "com.beeper.allow_backward": False,
+            },
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
