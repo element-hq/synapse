@@ -342,7 +342,7 @@ class RoomStateEventRestServlet(RestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_delay(request)
+        delay = _parse_request_for_delayed_event_delay(request)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -440,7 +440,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_delay(request)
+        delay = _parse_request_for_delayed_event_delay(request)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -513,14 +513,14 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-def _parse_request_delay(request: SynapseRequest) -> int | None:
+def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> int | None:
     """Parses from the request string the delay parameter for
         delayed event requests, and checks it for correctness.
 
     Args:
         request: the twisted HTTP request.
     Returns:
-        The value of the requested delay, or None if it was absent.
+        The value of the requested delay in milliseconds, or None if it was absent.
 
     Raises:
         SynapseError: if the delay parameter is present and invalid.
