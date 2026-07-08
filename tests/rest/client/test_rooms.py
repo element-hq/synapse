@@ -2579,12 +2579,12 @@ class RoomDelayedEventTestCase(RoomBase):
     )
     def test_delayed_event_user_limit_exceeded(self) -> None:
         """Test that users cannot have more delayed events scheduled at once than allowed."""
-        # Confirm that lifting temporal ratelimits doesn't lift this storage-based limit
+        # Disable rate-limits for this user. We want to specifically test the storage-based limit, not the request limits
         self.get_success(
             self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
         )
 
-        make_request = lambda: self.make_request(
+        make_delayed_event_request = lambda: self.make_request(
             "POST",
             (
                 "rooms/%s/send/m.room.message?org.matrix.msc4140.delay=15000"
@@ -2592,10 +2592,12 @@ class RoomDelayedEventTestCase(RoomBase):
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        channel = make_request()
+        # Send a delayed event to eat up the limit
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        channel = make_request()
+        # Try to send another delayed event (we expect to hit the limit on the max number of delayed events that can be scheduled at once)
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
         self.assertEqual(
             Codes.LIMIT_EXCEEDED,
@@ -2612,8 +2614,11 @@ class RoomDelayedEventTestCase(RoomBase):
         # Confirm that there is only a single value to the Retry-After header, as per RFC9110
         self.assertEqual(1, len(retry_after_headers))
 
+        # Wait until we're able to retry again (the retry time from the error response)
         self.reactor.advance(retry_after_sec)
-        channel = make_request()
+
+        # We should be able to send another delayed event again
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @unittest.override_config(
@@ -2629,30 +2634,30 @@ class RoomDelayedEventTestCase(RoomBase):
         Test that delayed events in the midst of being sent still count towards the limit of
         how many delayed events a user may have scheduled at once.
         """
-        send_after_ms = 1000
-        make_request = lambda: self.make_request(
+        send_after = Duration(seconds=1)
+        make_delayed_event_request = lambda: self.make_request(
             "POST",
             (
-                f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after_ms}"
+                f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after.as_millis()}"
                 % self.room_id
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        channel = make_request()
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         # Simulate the server taking a long time to persist delayed events
-        simulated_send_lag_ms = 5000
+        simulated_send_lag = Duration(seconds=5)
         event_creation_handler = self.hs.get_event_creation_handler()
         orig_send_fn = event_creation_handler.create_and_send_nonmember_event
 
         async def slow_send_fn(*args: Any, **kwargs: Any) -> Any:
-            await self.clock.sleep(Duration(milliseconds=simulated_send_lag_ms))
+            await self.clock.sleep(simulated_send_lag)
             return await orig_send_fn(*args, **kwargs)
 
         with patch.object(event_creation_handler, orig_send_fn.__name__, slow_send_fn):
-            self.reactor.advance(send_after_ms / 1000)
-            channel = make_request()
+            self.reactor.advance(send_after.as_secs())
+            channel = make_delayed_event_request()
             self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
             self.assertEqual(
                 Codes.LIMIT_EXCEEDED,
@@ -2665,8 +2670,11 @@ class RoomDelayedEventTestCase(RoomBase):
             retry_after_headers = channel.headers.getRawHeaders("Retry-After")
             assert not retry_after_headers
 
-            self.reactor.advance(simulated_send_lag_ms / 1000)
-            channel = make_request()
+            # Wait until the delayed event gets persisted
+            self.reactor.advance(simulated_send_lag.as_secs())
+
+            # We should be able to send another delayed event again
+            channel = make_delayed_event_request()
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @unittest.override_config(
@@ -2686,7 +2694,7 @@ class RoomDelayedEventTestCase(RoomBase):
         while a user has fewer scheduled delayed events than the old limit, but more than the new limit.
         """
         send_after_ms: int
-        make_request = lambda: self.make_request(
+        make_delayed_event_request = lambda: self.make_request(
             "POST",
             (
                 f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after_ms}"
@@ -2697,13 +2705,13 @@ class RoomDelayedEventTestCase(RoomBase):
 
         for i in range(3):
             send_after_ms = 1000 * i
-            channel = make_request()
+            channel = make_delayed_event_request()
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         # Simulate lowering the configured limit & applying it with a server restart
         self.hs.config.server.max_delayed_events_per_user = 2
 
-        channel = make_request()
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
         self.assertEqual(
             Codes.LIMIT_EXCEEDED,
@@ -2715,8 +2723,11 @@ class RoomDelayedEventTestCase(RoomBase):
         retry_after_sec = int(retry_after_header[0])
         assert retry_after_sec > 0
 
+        # Wait until we're able to retry again (the retry time from the error response)
         self.reactor.advance(retry_after_sec)
-        channel = make_request()
+
+        # We should be able to send another delayed event again
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
@@ -2774,7 +2785,7 @@ class RoomDelayedEventTestCase(RoomBase):
         """
 
         # Test that new delayed events are correctly ratelimited.
-        make_request = lambda: self.make_request(
+        make_delayed_event_request = lambda: self.make_request(
             "POST",
             (
                 "rooms/%s/send/m.room.message?org.matrix.msc4140.delay=2000"
@@ -2782,9 +2793,9 @@ class RoomDelayedEventTestCase(RoomBase):
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        channel = make_request()
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        channel = make_request()
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
@@ -2793,7 +2804,7 @@ class RoomDelayedEventTestCase(RoomBase):
         )
 
         # Test that the new delayed events aren't ratelimited anymore.
-        channel = make_request()
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
 

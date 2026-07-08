@@ -367,6 +367,7 @@ class DelayedEventsHandler:
         if (
             max_delay is None
             or max_delay <= 0
+            # 0 is a valid config value but equivalent to disabling sending delayed events
             or (limit := self._config.server.max_delayed_events_per_user) <= 0
         ):
             raise SynapseError(
