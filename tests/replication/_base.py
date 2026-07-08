@@ -19,7 +19,7 @@
 #
 import logging
 from collections import defaultdict
-from typing import Any
+from typing import Any, cast
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
@@ -44,10 +44,13 @@ from tests import unittest
 from tests.server import FakeTransport
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
+hiredis: Any = None
 try:
-    import hiredis
+    import hiredis as _hiredis
 except ImportError:
-    hiredis = None  # type: ignore
+    pass
+else:
+    hiredis = cast(Any, _hiredis)
 
 logger = logging.getLogger(__name__)
 

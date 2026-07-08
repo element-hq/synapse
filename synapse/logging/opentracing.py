@@ -253,13 +253,19 @@ try:
 except ImportError:
     opentracing = None  # type: ignore[assignment]
     tags = _DummyTagNames  # type: ignore[assignment]
+JaegerConfig: Any = None
+LogContextScopeManager: Any = None
 try:
-    from jaeger_client import Config as JaegerConfig
+    from jaeger_client import Config as _JaegerConfig
 
-    from synapse.logging.scopecontextmanager import LogContextScopeManager
+    from synapse.logging.scopecontextmanager import (
+        LogContextScopeManager as _LogContextScopeManager,
+    )
 except ImportError:
-    JaegerConfig = None  # type: ignore
-    LogContextScopeManager = None  # type: ignore
+    pass
+else:
+    JaegerConfig = cast(Any, _JaegerConfig)
+    LogContextScopeManager = cast(Any, _LogContextScopeManager)
 
 
 try:

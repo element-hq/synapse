@@ -19,7 +19,8 @@
 #
 #
 
-from typing import Awaitable, cast
+import logging
+from typing import Any, Awaitable, cast
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactorClock
@@ -40,24 +41,29 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests.server import get_clock
-
-try:
-    import jaeger_client
-except ImportError:
-    jaeger_client = None  # type: ignore
-
-
-try:
-    import opentracing
-
-    from synapse.logging.scopecontextmanager import LogContextScopeManager
-except ImportError:
-    opentracing = None  # type: ignore
-    LogContextScopeManager = None  # type: ignore
-
-import logging
-
 from tests.unittest import TestCase
+
+jaeger_client: Any = None
+try:
+    import jaeger_client as _jaeger_client
+except ImportError:
+    pass
+else:
+    jaeger_client = cast(Any, _jaeger_client)
+
+opentracing: Any = None
+LogContextScopeManager: Any = None
+try:
+    import opentracing as _opentracing
+
+    from synapse.logging.scopecontextmanager import (
+        LogContextScopeManager as _LogContextScopeManager,
+    )
+except ImportError:
+    pass
+else:
+    opentracing = cast(Any, _opentracing)
+    LogContextScopeManager = cast(Any, _LogContextScopeManager)
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +80,9 @@ class LogContextScopeManagerTestCase(TestCase):
     """
 
     if opentracing is None or LogContextScopeManager is None:
-        skip = "Requires opentracing"  # type: ignore[unreachable]
+        skip = "Requires opentracing"
     if jaeger_client is None:
-        skip = "Requires jaeger_client"  # type: ignore[unreachable]
+        skip = "Requires jaeger_client"
 
     def setUp(self) -> None:
         # since this is a unit test, we don't really want to mess around with the
@@ -164,15 +170,8 @@ class LogContextScopeManagerTestCase(TestCase):
     def test_overlapping_spans(self) -> None:
         """Overlapping spans which are not neatly nested should work"""
         reactor = MemoryReactorClock()
-        # type-ignore: mypy-zope doesn't seem to recognise that `MemoryReactorClock`
-        # implements `ISynapseThreadlessReactor` (combination of the normal Twisted
-        # Reactor/Clock interfaces), via inheritance from
-        # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
-        # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
-        # for testing purposes.
         clock = Clock(  # type: ignore[multiple-internal-clocks]
-            reactor,  # type: ignore[arg-type]
-            server_name="test_server",
+            cast(Any, reactor), server_name="test_server"
         )
 
         scopes = []
@@ -342,7 +341,6 @@ class LogContextScopeManagerTestCase(TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        # type-ignore: We ignore because the point is to test the bare function
         run_as_background_process(  # type: ignore[untracked-background-process]
             desc="some-bg-task",
             server_name="test_server",
@@ -409,7 +407,6 @@ class LogContextScopeManagerTestCase(TestCase):
                 "some-request",
                 tracer=self._tracer,
             ):
-                # type-ignore: We ignore because the point is to test the bare function
                 run_as_background_process(  # type: ignore[untracked-background-process]
                     desc="some-bg-task",
                     server_name="test_server",
