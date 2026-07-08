@@ -1,0 +1,1 @@
+Fix a regression where application services that opted into ephemeral events using the legacy `de.sorunome.msc2409.push_ephemeral` registration flag stopped receiving ephemeral events (including to-device messages used for encryption). Introduced in v1.156.0.
