@@ -23,7 +23,7 @@ from twisted.internet.testing import MemoryReactor
 import synapse.rest.admin
 from synapse.api.constants import EventTypes
 from synapse.rest import admin
-from synapse.rest.client import login, read_marker, register, room, versions
+from synapse.rest.client import login, read_marker, register, room
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -276,18 +276,3 @@ class ReadMarkerTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
-
-
-class ReadMarkerVersionsTestCase(unittest.HomeserverTestCase):
-    servlets = [versions.register_servlets]
-
-    def test_false_by_default(self) -> None:
-        channel = self.make_request("GET", "/_matrix/client/versions")
-        self.assertEqual(channel.code, 200, channel.result)
-        self.assertFalse(channel.json_body["unstable_features"]["com.beeper.msc4446"])
-
-    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
-    def test_true_if_enabled(self) -> None:
-        channel = self.make_request("GET", "/_matrix/client/versions")
-        self.assertEqual(channel.code, 200, channel.result)
-        self.assertTrue(channel.json_body["unstable_features"]["com.beeper.msc4446"])
