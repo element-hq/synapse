@@ -188,7 +188,7 @@ class DelayedEventsStore(SQLBaseStore):
                 )
                 row = txn.fetchone()
                 assert row
-                retry_after_ms = int(row[0]) - creation_ts
+                retry_after_ms = int(row[0]) - self.clock.time_msec()
                 err = LimitExceededError(
                     limiter_name="add_delayed_event",
                     retry_after_ms=retry_after_ms if retry_after_ms > 0 else None,
