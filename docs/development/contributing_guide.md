@@ -153,8 +153,14 @@ writing new pages, please
 to check that your contributions render correctly. The docs are written in
 [GitHub-Flavoured Markdown](https://guides.github.com/features/mastering-markdown/).
 
+## Making changes to the Rust code
+
 When changes are made to any Rust code then you must call either `poetry install`
-or `maturin develop` (if installed) to rebuild the Rust code. Using [`maturin`](https://github.com/PyO3/maturin)
+or `maturin develop` (if installed) to rebuild the Rust code.
+
+You can use `poetry install -v` or `-vv` to get more info about build failures.
+
+Using [`maturin`](https://github.com/PyO3/maturin)
 is quicker than `poetry install`, so is recommended when making frequent
 changes to the Rust code.
 
@@ -308,21 +314,6 @@ works without further arguments).
 
 Your Postgres account needs to be able to create databases; see the postgres
 docs for [`ALTER ROLE`](https://www.postgresql.org/docs/current/sql-alterrole.html).
-
-### Running the tests on MacOS
-
-To run the unit tests with SQLite on MacOS you will need to swap out the default MacOS
-python interpreter with the homebrew version. This is due to the default using a
-locked down version of Python and sqlite3. After installing python from homebrew:
-
-```
-  poetry env remove --all
-  poetry env use /opt/homebrew/bin/python3.13
-  poetry install
-  poetry run trial tests
-```
-
-This example uses python 3.13, but choose whichever version you want.
 
 ## Run the integration tests ([Sytest](https://github.com/matrix-org/sytest)).
 

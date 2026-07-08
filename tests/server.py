@@ -101,6 +101,8 @@ from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
+from synapse.util.json import json_encoder
 
 from tests.utils import (
     LEAVE_DB,
@@ -254,7 +256,7 @@ class FakeChannel:
         def _produce() -> None:
             if self._producer:
                 self._producer.resumeProducing()
-                self._reactor.callLater(0.1, _produce)
+                self._reactor.callLater(0.0, _produce)
 
         if not streaming:
             self._reactor.callLater(0.0, _produce)
@@ -300,15 +302,102 @@ class FakeChannel:
     def await_result(self, timeout_ms: int = 1000) -> None:
         """
         Wait until the request is finished.
+
+        Advances the Twisted reactor clock by 0.1s and suspending execution of the
+        Python thread (to allow other threads to do work) in a loop until we see a
+        result. We timeout when both the Twisted reactor clock has been advanced enough
+        AND we've done at-least 100 iterations (round-trips for other threads to get
+        work done).
+
+        The loop 1) allows `clock.call_later` scheduled callbacks to run if they are
+        scheduled to run now and 2) will also allow other threads to make progress. This
+        could be things spawned on the Twisted reactor threadpool or Tokio runtime
+        (async Rust code).
+
+        Args:
+            timeout_ms: The Twisted reactor time we wait until we raise a `TimedOutException`
         """
-        end_time = self._reactor.seconds() + timeout_ms / 1000.0
+        timeout = Duration(milliseconds=timeout_ms)
+
+        # TODO: Why?
         self._reactor.run()
 
+        # First, run anything that's scheduled now before we start looping and advancing
+        # non-zero time increments.
+        #
+        # Without this, if some request handler had some database queries followed by
+        # `self.hs.get_clock().sleep(Duration(seconds=1))`, and called
+        # `channel.await_result(timeout_ms=1000)`, it wouldn't be called because the
+        # first `self._reactor.advance(0.1)` would be first spent driving the database
+        # queries, and only leaving 0.9s remaining (0.1s shy of the sleep finishing) so
+        # the request would timeout.
+        #
+        # The goal is to remove the foot-guns and having to think about this for the
+        # standard cases.
+        #
+        # FIXME: Ideally, we'd advance by `0` but there is a handful of tests that
+        # assume that time advances in between requests and many requests complete from
+        # a single advance. Second best, we'd just advance by minuscule amount of time
+        # (`CLOCK_SCHEDULE_EPSILON`) but some tests assume at-least a millisecond in
+        # between as our timestamps are often recorded at the millisecond granularity
+        # (`origin_server_ts`, etc). It's a balance between test convenience of this
+        # helper and materializing test expectations so we may never fix this.
+        self._reactor.advance(Duration(milliseconds=1).as_secs())
+
+        # We only count the looping time (record the start after we advance once above)
+        start_time_seconds = self._reactor.seconds()
+        loop_count = 0
         while not self.is_finished():
-            if self._reactor.seconds() > end_time:
+            if (
+                # Exceeded the Twisted reactor time timeout
+                #
+                # We use `>=` for the reactor time condition as it's possible we advance
+                # exactly the `timeout` amount and we don't want to get stuck in an
+                # infinite loop
+                self._reactor.seconds() >= start_time_seconds + timeout.as_secs()
+                # 100 loops is arbitrary. This also makes the assumption that any work
+                # on other threads will finish before we give up after sleeping ~0.1s of
+                # real-time (100 * 0.001).
+                and loop_count > 100
+            ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
-            self._reactor.advance(0.1)
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # Note: Python has a default thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`) but we still want this here as we're
+            # able to preempt and cause the thread context switch to happen faster.
+            # Also, without any real-time sleeping, this function would complete before
+            # the 5ms switch ever happened.
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # possible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # Don't advance the Twisted reactor clock further than the timeout duration
+            # as someone should increase the timeout if they expect things to take
+            # longer.
+            if self._reactor.seconds() < start_time_seconds + timeout.as_secs():
+                self._reactor.advance(0.1)
+            else:
+                # But we want to still keep running whatever might be getting scheduled
+                # to run now.
+                #
+                # For example from other threads, they may have scheduled something on
+                # the reactor to run (like `reactor.callFromThread(...)`)
+                self._reactor.advance(0)
+
+            loop_count += 1
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
@@ -370,6 +459,7 @@ def make_request(
     await_result: bool = True,
     custom_headers: Iterable[CustomHeaderType] | None = None,
     client_ip: str = "127.0.0.1",
+    timeout_ms: int = 1000,
 ) -> FakeChannel:
     """
     Make a web request using the given method, path and content, and render it
@@ -398,6 +488,8 @@ def make_request(
         custom_headers: (name, value) pairs to add as request headers
         client_ip: The IP to use as the requesting IP. Useful for testing
             ratelimiting.
+        timeout_ms: if `await_result` is `True`, the amount of time to wait on
+            the request before timing out. Ignored otherwise.
 
     Returns:
         channel
@@ -422,7 +514,7 @@ def make_request(
         path = b"/" + path
 
     if isinstance(content, dict):
-        content = json.dumps(content).encode("utf8")
+        content = json_encoder.encode(content).encode("utf8")
     if isinstance(content, str):
         content = content.encode("utf8")
 
@@ -482,7 +574,7 @@ def make_request(
     req.requestReceived(method, path, b"1.1")
 
     if await_result:
-        channel.await_result()
+        channel.await_result(timeout_ms=timeout_ms)
 
     return channel
 
@@ -939,7 +1031,7 @@ class FakeTransport:
             # mypy ignored here because:
             #   - this is part of the test infrastructure (outside of Synapse) so tracking
             #     these calls for for homeserver shutdown doesn't make sense.
-            d.addCallback(lambda x: self._reactor.callLater(0.1, _produce))  # type: ignore[call-later-not-tracked,call-overload]
+            d.addCallback(lambda x: self._reactor.callLater(0.0, _produce))  # type: ignore[call-later-not-tracked,call-overload]
 
         if not streaming:
             # mypy ignored here because:
@@ -1107,7 +1199,7 @@ def setup_test_homeserver(
         reactor = ThreadedMemoryReactorClock()
 
     if config is None:
-        config = default_config(server_name, parse=True)
+        config = default_config(server_name=server_name, parse=True)
 
     server_name = config.server.server_name
     if not isinstance(server_name, str):

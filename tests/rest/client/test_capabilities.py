@@ -28,7 +28,12 @@ from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.unittest import override_config
+from tests.unittest import override_config, skip_unless
+
+try:
+    import lxml
+except ImportError:
+    lxml = None  # type: ignore[assignment]
 
 
 class CapabilitiesTestCase(unittest.HomeserverTestCase):
@@ -276,3 +281,39 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertFalse(
             capabilities["org.matrix.msc4267.forget_forced_upon_leave"]["enabled"]
         )
+
+    @override_config(
+        {
+            "url_preview_enabled": False,
+            "experimental_features": {"msc4452_enabled": True},
+        }
+    )
+    def test_url_previews_disabled(self) -> None:
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertFalse(capabilities["io.element.msc4452.preview_url"]["enabled"])
+
+    @skip_unless(lxml is not None, "Requires lxml")
+    @override_config(
+        {
+            "url_preview_enabled": True,
+            "url_preview_ip_range_blacklist": ["127.0.0.1"],
+            "experimental_features": {"msc4452_enabled": True},
+        },
+    )
+    def test_url_previews_enabled(self) -> None:
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertTrue(capabilities["io.element.msc4452.preview_url"]["enabled"])

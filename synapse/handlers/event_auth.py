@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING, Mapping
 
 from synapse import event_auth
 from synapse.api.constants import (
-    CREATOR_POWER_LEVEL,
-    EventContentFields,
     EventTypes,
     JoinRules,
     Membership,
@@ -38,6 +36,7 @@ from synapse.event_auth import (
 )
 from synapse.events import EventBase
 from synapse.events.builder import EventBuilder
+from synapse.handlers.room_member import get_users_which_can_issue_invite
 from synapse.types import StateMap, StrCollection
 
 if TYPE_CHECKING:
@@ -143,53 +142,20 @@ class EventAuthHandler:
         Raises:
             SynapseError if no appropriate user is found.
         """
-        create_event_id = current_state_ids[(EventTypes.Create, "")]
-        create_event = await self._store.get_event(create_event_id)
-        power_level_event_id = current_state_ids.get((EventTypes.PowerLevels, ""))
-        invite_level = 0
-        users_default_level = 0
-        if power_level_event_id:
-            power_level_event = await self._store.get_event(power_level_event_id)
-            invite_level = power_level_event.content.get("invite", invite_level)
-            users_default_level = power_level_event.content.get(
-                "users_default", users_default_level
-            )
-            users = power_level_event.content.get("users", {})
-        else:
-            users = {}
-
-        # Find the user with the highest power level (only interested in local
-        # users).
-        user_power_level = 0
-        chosen_user = None
         local_users_in_room = await self._store.get_local_users_in_room(room_id)
-        if create_event.room_version.msc4289_creator_power_enabled:
-            creators = set(
-                create_event.content.get(EventContentFields.ADDITIONAL_CREATORS, [])
-            )
-            creators.add(create_event.sender)
-            local_creators = creators.intersection(set(local_users_in_room))
-            if len(local_creators) > 0:
-                chosen_user = local_creators.pop()  # random creator
-                user_power_level = CREATOR_POWER_LEVEL
-        if chosen_user is None:
-            chosen_user = max(
-                local_users_in_room,
-                key=lambda user: users.get(user, users_default_level),
-                default=None,
-            )
-            # Return the chosen if they can issue invites.
-            if chosen_user:
-                user_power_level = users.get(chosen_user, users_default_level)
+        current_state = await self._store.get_events(current_state_ids.values())
+        auth_events = {
+            state_key: event
+            for state_key, event_id in current_state_ids.items()
+            if (event := current_state.get(event_id)) is not None
+        }
 
-        if chosen_user and user_power_level >= invite_level:
-            logger.debug(
-                "Found a user who can issue invites  %s with power level %d >= invite level %d",
-                chosen_user,
-                user_power_level,
-                invite_level,
-            )
-            return chosen_user
+        users_which_can_invite = get_users_which_can_issue_invite(auth_events)
+        local_users_which_can_invite = set(users_which_can_invite).intersection(
+            local_users_in_room
+        )
+        if local_users_which_can_invite:
+            return local_users_which_can_invite.pop()
 
         # No user was found.
         raise SynapseError(

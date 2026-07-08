@@ -110,14 +110,19 @@ class ClientDirectoryServer(RestServlet):
         room_alias_obj = RoomAlias.from_string(room_alias)
         requester = await self.auth.get_user_by_req(request)
 
-        if requester.app_service:
+        app_service = (
+            self.store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
+        if app_service:
             await self.directory_handler.delete_appservice_association(
-                requester.app_service, room_alias_obj
+                app_service, room_alias_obj
             )
 
             logger.info(
                 "Application service at %s deleted alias %s",
-                requester.app_service.url,
+                app_service.url,
                 room_alias_obj.to_string(),
             )
 
@@ -199,13 +204,13 @@ class ClientAppserviceDirectoryListServer(RestServlet):
         visibility: Literal["public", "private"],
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        if not requester.app_service:
+        if not requester.app_service_id:
             raise AuthError(
                 403, "Only appservices can edit the appservice published room list"
             )
 
         await self.directory_handler.edit_published_appservice_room_list(
-            requester.app_service.id, network_id, room_id, visibility
+            requester.app_service_id, network_id, room_id, visibility
         )
 
         return 200, {}

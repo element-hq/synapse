@@ -22,72 +22,76 @@
 import unittest as stdlib_unittest
 from typing import TYPE_CHECKING, Any, Mapping
 
-from parameterized import parameterized
-
 from synapse.api.constants import EventContentFields
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.events.utils import (
+    FilteredEvent,
     PowerLevelsContent,
-    SerializeEventConfig,
-    _split_field,
     clone_event,
     copy_and_fixup_power_levels_contents,
+    format_event_for_client_v1,
+    format_event_for_client_v2,
+    format_event_for_client_v2_without_room_id,
     format_event_raw,
-    make_config_for_admin,
     maybe_upsert_event_field,
     prune_event,
 )
-from synapse.types import JsonDict, create_requester
+from synapse.types import JsonDict
 from synapse.util.frozenutils import freeze
 
+from tests.test_utils.event_builders import make_test_event
 from tests.unittest import HomeserverTestCase
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
-def MockEvent(**kwargs: Any) -> EventBase:
-    if "event_id" not in kwargs:
-        kwargs["event_id"] = "fake_event_id"
-    if "type" not in kwargs:
-        kwargs["type"] = "fake_type"
-    if "content" not in kwargs:
-        kwargs["content"] = {}
-
-    # Move internal metadata out so we can call make_event properly
-    internal_metadata = kwargs.get("internal_metadata")
-    if internal_metadata is not None:
-        kwargs.pop("internal_metadata")
-
-    return make_event_from_dict(kwargs, internal_metadata_dict=internal_metadata)
-
-
 class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
     def test_update_okay(self) -> None:
-        event = make_event_from_dict({"event_id": "$1234"})
-        success = maybe_upsert_event_field(event, event.unsigned, "key", "value")
+        event = make_test_event({"event_id": "$1234"})
+        success = maybe_upsert_event_field(
+            event, event.unsigned, "replaces_state", "value"
+        )
         self.assertTrue(success)
-        self.assertEqual(event.unsigned["key"], "value")
+        self.assertEqual(event.unsigned["replaces_state"], "value")
 
     def test_update_not_okay(self) -> None:
-        event = make_event_from_dict({"event_id": "$1234"})
+        event = make_test_event({"event_id": "$1234"})
         LARGE_STRING = "a" * 100_000
-        success = maybe_upsert_event_field(event, event.unsigned, "key", LARGE_STRING)
+        success = maybe_upsert_event_field(
+            event, event.unsigned, "replaces_state", LARGE_STRING
+        )
         self.assertFalse(success)
-        self.assertNotIn("key", event.unsigned)
+        self.assertNotIn("replaces_state", event.unsigned)
 
     def test_update_not_okay_leaves_original_value(self) -> None:
-        event = make_event_from_dict(
-            {"event_id": "$1234", "unsigned": {"key": "value"}}
+        event = make_test_event(
+            {"event_id": "$1234", "unsigned": {"replaces_state": "value"}}
         )
         LARGE_STRING = "a" * 100_000
-        success = maybe_upsert_event_field(event, event.unsigned, "key", LARGE_STRING)
+        success = maybe_upsert_event_field(
+            event, event.unsigned, "replaces_state", LARGE_STRING
+        )
         self.assertFalse(success)
-        self.assertEqual(event.unsigned["key"], "value")
+        self.assertEqual(event.unsigned["replaces_state"], "value")
 
 
 class PruneEventTestCase(stdlib_unittest.TestCase):
+    # Fields that `make_test_event` fills in by default and that `prune_event`
+    # preserves as spec-required keep fields. Pruning tests only spell out the
+    # fields they care about; these are merged into the expected dict so each
+    # test stays focused on what it is actually checking.
+    _DEFAULT_KEPT_FIELDS: JsonDict = {
+        "sender": "@test:test",
+        "room_id": "!test:test",
+        "depth": 1,
+        "origin_server_ts": 1,
+        "hashes": {},
+        "auth_events": [],
+        "prev_events": [],
+    }
+
     def run_test(self, evdict: JsonDict, matchdict: JsonDict, **kwargs: Any) -> None:
         """
         Asserts that a new event constructed with `evdict` will look like
@@ -98,8 +102,9 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
              matchdict: The expected resulting dictionary.
              kwargs: Additional keyword arguments used to create the event.
         """
+        expected = {**self._DEFAULT_KEPT_FIELDS, **matchdict}
         self.assertEqual(
-            prune_event(make_event_from_dict(evdict, **kwargs)).get_dict(), matchdict
+            prune_event(make_test_event(evdict, **kwargs)).get_dict(), expected
         )
 
     def test_minimal(self) -> None:
@@ -116,9 +121,6 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
 
     def test_basic_keys(self) -> None:
         """Ensure that the keys that should be untouched are kept."""
-        # Note that some of the values below don't really make sense, but the
-        # pruning of events doesn't worry about the values of any fields (with
-        # the exception of the content field).
         self.run_test(
             {
                 "event_id": "$3:domain",
@@ -127,12 +129,12 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "sender": "@2:domain",
                 "state_key": "B",
                 "content": {"other_key": "foo"},
-                "hashes": "hashes",
+                "hashes": {"sha256": "abc"},
                 "signatures": {"domain": {"algo:1": "sigs"}},
                 "depth": 4,
-                "prev_events": "prev_events",
+                "prev_events": [],
                 "prev_state": "prev_state",
-                "auth_events": "auth_events",
+                "auth_events": [],
                 "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
@@ -145,11 +147,11 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "room_id": "!1:domain",
                 "sender": "@2:domain",
                 "state_key": "B",
-                "hashes": "hashes",
+                "hashes": {"sha256": "abc"},
                 "depth": 4,
-                "prev_events": "prev_events",
+                "prev_events": [],
                 "prev_state": "prev_state",
-                "auth_events": "auth_events",
+                "auth_events": [],
                 "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
@@ -618,11 +620,11 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
 
 class CloneEventTestCase(stdlib_unittest.TestCase):
     def test_unsigned_is_copied(self) -> None:
-        original = make_event_from_dict(
+        original = make_test_event(
             {
                 "type": "A",
                 "event_id": "$test:domain",
-                "unsigned": {"a": 1, "b": 2},
+                "unsigned": {"age_ts": 1, "replaces_state": "2"},
             },
             RoomVersions.V1,
             {"txn_id": "txn"},
@@ -633,10 +635,14 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
         self.assertEqual(original.internal_metadata.instance_name, "worker1")
 
         cloned = clone_event(original)
-        cloned.unsigned["b"] = 3
+        cloned.unsigned["age_ts"] = 3
 
-        self.assertEqual(original.unsigned, {"a": 1, "b": 2})
-        self.assertEqual(cloned.unsigned, {"a": 1, "b": 3})
+        self.assertEqual(
+            original.unsigned.for_event(), {"age_ts": 1, "replaces_state": "2"}
+        )
+        self.assertEqual(
+            cloned.unsigned.for_event(), {"age_ts": 3, "replaces_state": "2"}
+        )
         self.assertEqual(cloned.internal_metadata.stream_ordering, 1234)
         self.assertEqual(cloned.internal_metadata.instance_name, "worker1")
         self.assertEqual(cloned.internal_metadata.txn_id, "txn")
@@ -655,11 +661,13 @@ class SerializeEventTestCase(HomeserverTestCase):
     ) -> JsonDict:
         return self.get_success(
             self._event_serializer.serialize_event(
-                ev,
+                FilteredEvent(event=ev, membership=None),
                 1479807801915,
-                config=SerializeEventConfig(
-                    only_event_fields=fields,
-                    include_admin_metadata=include_admin_metadata,
+                config=self.get_success(
+                    self._event_serializer.create_config(
+                        event_field_allowlist=fields,
+                        include_admin_metadata=include_admin_metadata,
+                    )
                 ),
                 redaction_map=redaction_map,
             )
@@ -668,7 +676,8 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(sender="@alice:localhost", room_id="!foo:bar"), ["room_id"]
+                make_test_event(sender="@alice:localhost", room_id="!foo:bar"),
+                ["room_id"],
             ),
             {"room_id": "!foo:bar"},
         )
@@ -676,7 +685,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_nested_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"body": "A message"},
@@ -689,7 +698,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_dot_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"key.with.dots": {}},
@@ -702,7 +711,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_works_with_nested_dot_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={
@@ -718,7 +727,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_nops_with_unknown_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
@@ -731,7 +740,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_nops_with_non_dict_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"foo": ["I", "am", "an", "array"]},
@@ -744,7 +753,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_nops_with_array_keys(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     sender="@alice:localhost",
                     room_id="!foo:bar",
                     content={"foo": ["I", "am", "an", "array"]},
@@ -757,7 +766,7 @@ class SerializeEventTestCase(HomeserverTestCase):
     def test_event_fields_all_fields_if_empty(self) -> None:
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
@@ -771,29 +780,38 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {},
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
 
     def test_event_fields_fail_if_fields_not_str(self) -> None:
         with self.assertRaises(TypeError):
-            SerializeEventConfig(
-                only_event_fields=["room_id", 4],  # type: ignore[list-item]
+            self.get_success_or_raise(
+                self._event_serializer.create_config(
+                    event_field_allowlist=["room_id", 4],  # type: ignore[list-item]
+                )
             )
 
     def test_default_serialize_config_excludes_admin_metadata(self) -> None:
         # We just really don't want this to be set to True accidentally
-        self.assertFalse(SerializeEventConfig().include_admin_metadata)
+        self.assertFalse(
+            self.get_success(
+                self._event_serializer.create_config()
+            ).include_admin_metadata
+        )
 
     def test_event_flagged_for_admins(self) -> None:
         # Default behaviour should be *not* to include it
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
-                    internal_metadata={"soft_failed": True},
+                    internal_metadata_dict={"soft_failed": True},
                 ),
                 [],
             ),
@@ -803,18 +821,21 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {},
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
 
         # When asked though, we should set it
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
-                    internal_metadata={"soft_failed": True},
+                    internal_metadata_dict={"soft_failed": True},
                 ),
                 [],
                 True,
@@ -825,16 +846,19 @@ class SerializeEventTestCase(HomeserverTestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {"io.element.synapse.soft_failed": True},
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
         self.assertEqual(
             self.serialize(
-                MockEvent(
+                make_test_event(
                     type="foo",
                     event_id="test",
                     room_id="!foo:bar",
                     content={"foo": "bar"},
-                    internal_metadata={
+                    internal_metadata_dict={
                         "soft_failed": True,
                         "policy_server_spammy": True,
                     },
@@ -851,41 +875,20 @@ class SerializeEventTestCase(HomeserverTestCase):
                     "io.element.synapse.soft_failed": True,
                     "io.element.synapse.policy_server_spammy": True,
                 },
+                "sender": "@test:test",
+                "user_id": "@test:test",
+                "origin_server_ts": 1,
             },
         )
-
-    def test_make_serialize_config_for_admin_retains_other_fields(self) -> None:
-        non_default_config = SerializeEventConfig(
-            include_admin_metadata=False,  # should be True in a moment
-            as_client_event=False,  # default True
-            event_format=format_event_raw,  # default format_event_for_client_v1
-            requester=create_requester("@example:example.org"),  # default None
-            only_event_fields=["foo"],  # default None
-            include_stripped_room_state=True,  # default False
-        )
-        admin_config = make_config_for_admin(non_default_config)
-        self.assertEqual(
-            admin_config.as_client_event, non_default_config.as_client_event
-        )
-        self.assertEqual(admin_config.event_format, non_default_config.event_format)
-        self.assertEqual(admin_config.requester, non_default_config.requester)
-        self.assertEqual(
-            admin_config.only_event_fields, non_default_config.only_event_fields
-        )
-        self.assertEqual(
-            admin_config.include_stripped_room_state,
-            admin_config.include_stripped_room_state,
-        )
-        self.assertTrue(admin_config.include_admin_metadata)
 
     def test_redacted_because_is_filtered_out(self) -> None:
         """If an event's unsigned dict has a `redacted_by` field, then the
         `redacted_because` should be filtered out if not specified in
-        `only_event_fields`."""
+        `event_field_allowlist`."""
 
         redaction_id = "$redaction_event_id"
 
-        event = MockEvent(
+        event = make_test_event(
             type="foo",
             event_id="test",
             room_id="!foo:bar",
@@ -893,7 +896,7 @@ class SerializeEventTestCase(HomeserverTestCase):
         )
         event.internal_metadata.redacted_by = redaction_id
 
-        redaction_event = MockEvent(
+        redaction_event = make_test_event(
             type="m.room.redaction",
             event_id=redaction_id,
             content={"redacts": "test"},
@@ -1000,38 +1003,97 @@ class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
             copy_and_fixup_power_levels_contents({"a": {"b": {"c": 1}}})  # type: ignore[dict-item]
 
 
-class SplitFieldTestCase(stdlib_unittest.TestCase):
-    @parameterized.expand(
-        [
-            # A field with no dots.
-            ["m", ["m"]],
-            # Simple dotted fields.
-            ["m.foo", ["m", "foo"]],
-            ["m.foo.bar", ["m", "foo", "bar"]],
-            # Backslash is used as an escape character.
-            [r"m\.foo", ["m.foo"]],
-            [r"m\\.foo", ["m\\", "foo"]],
-            [r"m\\\.foo", [r"m\.foo"]],
-            [r"m\\\\.foo", ["m\\\\", "foo"]],
-            [r"m\foo", [r"m\foo"]],
-            [r"m\\foo", [r"m\foo"]],
-            [r"m\\\foo", [r"m\\foo"]],
-            [r"m\\\\foo", [r"m\\foo"]],
-            # Ensure that escapes at the end don't cause issues.
-            ["m.foo\\", ["m", "foo\\"]],
-            ["m.foo\\", ["m", "foo\\"]],
-            [r"m.foo\.", ["m", "foo."]],
-            [r"m.foo\\.", ["m", "foo\\", ""]],
-            [r"m.foo\\\.", ["m", r"foo\."]],
-            # Empty parts (corresponding to properties which are an empty string) are allowed.
-            [".m", ["", "m"]],
-            ["..m", ["", "", "m"]],
-            ["m.", ["m", ""]],
-            ["m..", ["m", "", ""]],
-            ["m..foo", ["m", "", "foo"]],
-            # Invalid escape sequences.
-            [r"\m", [r"\m"]],
-        ]
-    )
-    def test_split_field(self, input: str, expected: str) -> None:
-        self.assertEqual(_split_field(input), expected)
+class FormatEventForClientTestCase(stdlib_unittest.TestCase):
+    """Tests for the standalone `format_event_*` transforms.
+
+    These are Rust reimplementations kept purely as a backwards compatibility
+    hack for modules in the wild that import them from `synapse.events.utils`
+    (they were never part of the module API, and nothing in Synapse itself uses
+    them); like the original Python implementations they must mutate the dict
+    in place and return it.
+    """
+
+    def make_event(self) -> JsonDict:
+        return {
+            "event_id": "$event_id",
+            "room_id": "!room:test",
+            "sender": "@sender:test",
+            "type": "m.room.message",
+            "content": {"body": "hello"},
+            "auth_events": [],
+            "prev_events": [],
+            "hashes": {},
+            "signatures": {},
+            "depth": 5,
+            "origin": "test",
+            "prev_state": [],
+            "unsigned": {"age": 100, "replaces_state": "$old", "other": 1},
+        }
+
+    def test_raw(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_raw(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertEqual(result, self.make_event())
+
+    def test_v2_drops_federation_keys(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_for_client_v2(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertEqual(
+            result,
+            {
+                "event_id": "$event_id",
+                "room_id": "!room:test",
+                "sender": "@sender:test",
+                "type": "m.room.message",
+                "content": {"body": "hello"},
+                "unsigned": {"age": 100, "replaces_state": "$old", "other": 1},
+            },
+        )
+
+    def test_v2_without_room_id(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_for_client_v2_without_room_id(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertNotIn("room_id", result)
+
+    def test_v1_copies_unsigned_keys(self) -> None:
+        event_dict = self.make_event()
+        result = format_event_for_client_v1(event_dict)
+        self.assertIs(result, event_dict)
+        self.assertEqual(
+            result,
+            {
+                "event_id": "$event_id",
+                "room_id": "!room:test",
+                "sender": "@sender:test",
+                "user_id": "@sender:test",
+                "type": "m.room.message",
+                "content": {"body": "hello"},
+                "age": 100,
+                "replaces_state": "$old",
+                "unsigned": {"age": 100, "replaces_state": "$old", "other": 1},
+            },
+        )
+
+    def test_v1_no_sender(self) -> None:
+        event_dict = self.make_event()
+        del event_dict["sender"]
+        result = format_event_for_client_v1(event_dict)
+        self.assertNotIn("user_id", result)
+
+    def test_non_json_values_pass_through(self) -> None:
+        # The transforms only move keys around; values that aren't
+        # JSON-serializable must survive untouched.
+        marker = object()
+        event_dict = {
+            "sender": "@sender:test",
+            "auth_events": marker,
+            "content": marker,
+            "unsigned": {"age": marker},
+        }
+        result = format_event_for_client_v1(event_dict)
+        self.assertIs(result["content"], marker)
+        self.assertIs(result["age"], marker)
+        self.assertNotIn("auth_events", result)

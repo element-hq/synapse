@@ -38,6 +38,7 @@ from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskStatus
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class ProfileTestCase(unittest.HomeserverTestCase):
@@ -199,7 +200,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             self.assertEqual(membership[state_tuple].content["displayname"], "Frank")
 
             # Let's be sure we are over the delay introduced by slow_update_membership
-            self.get_success(self.clock.sleep(Duration(milliseconds=20)), by=1)
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
 
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
@@ -277,7 +278,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
             # Let's be sure we are over the delay introduced by slow_update_membership
             # and that the task was not executed as expected
-            self.get_success(self.clock.sleep(Duration(milliseconds=20)), by=1)
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
 
             membership = self.get_success(
                 self.storage_controllers.state.get_current_state(
@@ -298,8 +299,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 )
             )
 
+            # Wait for the `TaskScheduler.SCHEDULE_INTERVAL`
+            self.reactor.advance(Duration(minutes=1).as_secs())
             # Let's be sure we are over the delay introduced by slow_update_membership
-            self.get_success(self.clock.sleep(Duration(milliseconds=20)), by=1)
+            self.reactor.advance(Duration(milliseconds=20).as_secs())
 
             # Updates should have been resumed from room 2 after the restart
             # so room 1 should not have been updated this time
@@ -314,9 +317,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 membership[state_tuple].content["displayname"], "Frank Jr."
             )
 
+    @override_config({"enable_set_displayname": False})
     def test_set_my_name_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_displayname = False
-
         # Setting displayname for the first time is allowed
         self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
 
@@ -435,9 +437,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             (self.get_success(self.store.get_profile_avatar_url(self.frank))),
         )
 
+    @override_config({"enable_set_avatar_url": False})
     def test_set_my_avatar_if_disabled(self) -> None:
-        self.hs.config.registration.enable_set_avatar_url = False
-
         # Setting displayname for the first time is allowed
         self.get_success(
             self.store.set_profile_avatar_url(self.frank, "http://my.server/me.png")

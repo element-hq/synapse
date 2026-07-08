@@ -60,10 +60,10 @@ virtualenv, these can be installed with:
 pip install "matrix-synapse[redis]"
 ```
 
-Note that these dependencies are included when synapse is installed with `pip
-install matrix-synapse[all]`. They are also included in the debian packages from
-`packages.matrix.org` and in the docker images at
-https://hub.docker.com/r/ectorim/synapse/.
+Note that these dependencies are included when Synapse is installed with `pip install
+matrix-synapse[all]`. They are also included in the [Debian
+packages](setup/installation.md#debianubuntu) and in the [Docker
+images](setup/installation.md#docker-images-and-ansible-playbooks).
 
 To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
@@ -239,6 +239,7 @@ information.
     ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
     ^/_matrix/client/v1/rooms/.*/threads$
     ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
+    ^/_matrix/client/v1/room_summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
     ^/_matrix/client/(r0|v3|unstable)/account/deactivate$
@@ -336,14 +337,6 @@ Ensure that all SSO logins go to a single process.
 For multiple workers not handling the SSO endpoints properly, see
 [#7530](https://github.com/matrix-org/synapse/issues/7530) and
 [#9427](https://github.com/matrix-org/synapse/issues/9427).
-
-Additionally, when MSC3861 is enabled (`experimental_features.msc3861.enabled`
-set to `true`), the following endpoints can be handled by the worker:
-
-    ^/_synapse/admin/v2/users/[^/]+$
-    ^/_synapse/admin/v1/username_available$
-    ^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
-    ^/_synapse/admin/v1/users/[^/]+/devices$
 
 Note that a [HTTP listener](usage/configuration/config_documentation.md#listeners)
 with `client` and `federation` `resources` must be configured in the
@@ -575,6 +568,14 @@ configured as stream writer for the `device_lists` stream:
     ^/_matrix/client/(r0|v3|unstable)/keys/upload
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
+
+##### The `quarantined_media_changes` stream
+
+The `quarantined_media_changes` stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the `quarantined_media_changes` stream:
+
+    ^/_synapse/admin/v1/quarantine_media/.*$
 
 #### Restrict outbound federation traffic to a specific set of workers
 

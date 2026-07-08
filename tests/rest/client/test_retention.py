@@ -2,6 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -23,8 +24,9 @@ from unittest.mock import Mock
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
+from synapse.events.utils import FilteredEvent
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import login, retention, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
@@ -173,7 +175,9 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         # We should only get one event back.
         self.assertEqual(len(filtered_events), 1, filtered_events)
         # That event should be the second, not outdated event.
-        self.assertEqual(filtered_events[0].event_id, valid_event_id, filtered_events)
+        self.assertEqual(
+            filtered_events[0].event.event_id, valid_event_id, filtered_events
+        )
 
     def _test_retention_event_purged(self, room_id: str, increment: float) -> None:
         """Run the following test scenario to test the message retention policy support:
@@ -253,7 +257,11 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         assert event is not None
 
         time_now = self.clock.time_msec()
-        serialized = self.get_success(self.serializer.serialize_event(event, time_now))
+        serialized = self.get_success(
+            self.serializer.serialize_event(
+                FilteredEvent(event=event, membership=None), time_now
+            )
+        )
 
         return serialized
 
@@ -387,3 +395,122 @@ class RetentionNoDefaultPolicyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, expected_code, channel.result)
 
         return channel.json_body
+
+
+RETENTION_CONFIGURATION_URL = (
+    "/_matrix/client/unstable/org.matrix.msc1763/retention/configuration"
+)
+
+
+class RetentionConfigurationEndpointTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        retention.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.register_user("user", "password")
+        self.token = self.login("user", "password")
+
+    @override_config(
+        {
+            "experimental_features": {"msc1763_enabled": True},
+        }
+    )
+    def test_disabled_returns_404_no_retention(self) -> None:
+        """The endpoint must 404 when retention is not enabled."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 404, channel.result)
+
+    @override_config(
+        {
+            "retention": {
+                "enabled": True,
+                "default_policy": {
+                    "min_lifetime": one_day_ms,
+                    "max_lifetime": one_day_ms * 3,
+                },
+                "allowed_lifetime_min": one_day_ms,
+                "allowed_lifetime_max": one_day_ms * 3,
+            },
+            "experimental_features": {"msc1763_enabled": False},
+        }
+    )
+    def test_disabled_returns_404_no_msc1763_enabled(self) -> None:
+        """The endpoint must 404 when retention is not enabled."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 404, channel.result)
+
+    @override_config(
+        {
+            "retention": {
+                "enabled": True,
+                "default_policy": {
+                    "min_lifetime": one_day_ms,
+                    "max_lifetime": one_day_ms * 3,
+                },
+                "allowed_lifetime_min": one_day_ms,
+                "allowed_lifetime_max": one_day_ms * 3,
+            },
+            "experimental_features": {"msc1763_enabled": True},
+        }
+    )
+    def test_full_config(self) -> None:
+        """Returns default policy and max_lifetime limits when fully configured."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        body = channel.json_body
+        self.assertEqual(
+            body["policies"]["*"],
+            {"min_lifetime": one_day_ms, "max_lifetime": one_day_ms * 3},
+        )
+        self.assertEqual(
+            body["limits"]["max_lifetime"],
+            {"min": one_day_ms, "max": one_day_ms * 3},
+        )
+
+    @override_config(
+        {
+            "retention": {"enabled": True},
+            "experimental_features": {"msc1763_enabled": True},
+        }
+    )
+    def test_no_default_policy_no_limits(self) -> None:
+        """Returns empty policies and limits when nothing is configured."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        body = channel.json_body
+        self.assertEqual(body["policies"], {})
+        self.assertEqual(body["limits"], {})
+
+    @override_config(
+        {
+            "retention": {
+                "enabled": True,
+                "allowed_lifetime_min": one_day_ms,
+                "allowed_lifetime_max": one_day_ms * 7,
+            },
+            "experimental_features": {"msc1763_enabled": True},
+        }
+    )
+    def test_limits_only(self) -> None:
+        """Returns limits but no default policy entry when only limits are set."""
+        channel = self.make_request(
+            "GET", RETENTION_CONFIGURATION_URL, access_token=self.token
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        body = channel.json_body
+        self.assertNotIn("*", body["policies"])
+        self.assertEqual(
+            body["limits"]["max_lifetime"],
+            {"min": one_day_ms, "max": one_day_ms * 7},
+        )
