@@ -336,7 +336,7 @@ class RustDBAPIAdapterTestCase(unittest.TestCase):
         def backend_pid(conn: rust_dbapi.Connection) -> int:
             cursor = conn.cursor()
             cursor.execute("SELECT pg_backend_pid()")
-            (pid,) = cursor.fetchone()  # type: ignore[misc]
+            (pid,) = cursor.fetchone()
             conn.commit()
             return pid
 
