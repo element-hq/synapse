@@ -1971,9 +1971,31 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).inc()
 
-                    sharing_users = await self.store.do_users_share_a_room(
-                        user_id, updated_users
-                    )
+                    # An updated user is interesting if they share a
+                    # (non-excluded) room with the syncing user. We check by
+                    # intersecting the cached per-user room sets rather than via
+                    # `do_users_share_a_room`: its per-pair cache has a
+                    # quadratic working set and is cleared wholesale on every
+                    # membership change, so on busy servers every check missed
+                    # into SQL.
+                    #
+                    # For every presence update we need to run this code for
+                    # every user that is currently syncing. The
+                    # `get_rooms_for_user` will therefore be computed only once
+                    # for each updated user regardless of the number of syncing
+                    # users.
+                    #
+                    # The syncing user's rooms will also be cached as its needed
+                    # during sync processing anyway.
+                    my_rooms = await self.store.get_rooms_for_user(user_id)
+                    if self._rooms_to_exclude_from_presence:
+                        my_rooms = my_rooms - self._rooms_to_exclude_from_presence
+                    rooms_by_user = await self.store.get_rooms_for_users(updated_users)
+                    sharing_users = {
+                        updated_user
+                        for updated_user, rooms in rooms_by_user.items()
+                        if not my_rooms.isdisjoint(rooms)
+                    }
 
                     interested_and_updated_users = (
                         sharing_users.union(additional_users_interested_in)
