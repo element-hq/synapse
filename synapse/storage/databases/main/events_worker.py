@@ -385,6 +385,8 @@ class EventsWorkerStore(SQLBaseStore):
         finished (so we don't have to keep querying it every time)
         """
 
+        self._room_prejoin_state_types = hs.config.api.room_prejoin_state
+
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
             self._un_partial_stated_events_stream_id_gen.get_current_token_for_writer(
@@ -1125,16 +1127,42 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event_map
 
+    def calculate_stripped_state_filter(
+        self,
+        *,
+        inviter_user_id: str | None = None,
+    ) -> StateFilter:
+        """
+        Calculate the stripped state filter necessary for an event
+
+        Args:
+            inviter_user_id: An optional user ID to include the stripped membership state
+                events of. This is useful when generating the stripped state of a room for
+                invites. We want to send membership events of the inviter, so that the
+                invitee can display the inviter's profile information if the room lacks any.
+        """
+        state_filter = self._room_prejoin_state_types
+
+        # Include the state for `inviter_user_id` if specified
+        #
+        # FIXME: Doesn't seem to be in the spec
+        if inviter_user_id:
+            types = chain(
+                self._room_prejoin_state_types.to_types(),
+                [(EventTypes.Member, inviter_user_id)],
+            )
+            state_filter = StateFilter.from_types(types)
+
+        return state_filter
+
     async def get_stripped_room_state_from_event_context(
         self,
         context: EventContext,
         state_keys_to_include: StateFilter,
-        membership_user_id: str | None = None,
     ) -> list[JsonDict]:
         """
         Retrieve the stripped state from a room, given an event context to retrieve state
-        from as well as the state types to include. Optionally, include the membership
-        events from a specific user.
+        from as well as the state types to include.
 
         "Stripped" state means that only the `type`, `state_key`, `content` and `sender` keys
         are included from each state event.
@@ -1142,25 +1170,13 @@ class EventsWorkerStore(SQLBaseStore):
         Args:
             context: The event context to retrieve state of the room from.
             state_keys_to_include: The state events to include, for each event type.
-            membership_user_id: An optional user ID to include the stripped membership state
-                events of. This is useful when generating the stripped state of a room for
-                invites. We want to send membership events of the inviter, so that the
-                invitee can display the inviter's profile information if the room lacks any.
 
         Returns:
             A list of dictionaries, each representing a stripped state event from the room.
         """
-        if membership_user_id:
-            types = chain(
-                state_keys_to_include.to_types(),
-                [(EventTypes.Member, membership_user_id)],
-            )
-            filter = StateFilter.from_types(types)
-        else:
-            filter = state_keys_to_include
 
         selected_state_ids = await self.get_stripped_room_state_ids_from_event_context(
-            context, filter
+            context, state_keys_to_include
         )
 
         state_to_include = await self.get_events(selected_state_ids)
@@ -1174,8 +1190,7 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> list[str]:
         """
         Retrieve the stripped state IDs for an event, given an event context to retrieve state
-        from as well as the state types to include. Optionally, include the membership
-        events from a specific user.
+        from as well as the state types to include.
 
         "Stripped" state means that only the `type`, `state_key`, `content` and `sender` keys
         are included from each state event.

@@ -509,8 +509,6 @@ class EventCreationHandler:
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._policy_handler = hs.get_room_policy_handler()
 
-        self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
-
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
         self.request_ratelimiter = hs.get_request_ratelimiter()
@@ -2079,8 +2077,9 @@ class EventCreationHandler:
                         "invite_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
                             context,
-                            self.room_prejoin_state_types,
-                            membership_user_id=event.sender,
+                            self.store.calculate_stripped_state_filter(
+                                inviter_user_id=event.sender
+                            ),
                         ),
                     )
 
@@ -2104,7 +2103,10 @@ class EventCreationHandler:
                         "knock_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
                             context,
-                            self.room_prejoin_state_types,
+                            self.store.calculate_stripped_state_filter(
+                                # None as this is a knock, not an invite
+                                inviter_user_id=None
+                            ),
                         ),
                     )
 

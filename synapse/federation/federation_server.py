@@ -194,8 +194,6 @@ class FederationServer(FederationBase):
             hs.config.federation.federation_metrics_domains
         )
 
-        self._room_prejoin_state_types = hs.config.api.room_prejoin_state
-
         # Whether we have started handling old events in the staging area.
         self._started_handling_of_staged_events = False
 
@@ -1031,7 +1029,11 @@ class FederationServer(FederationBase):
         #
         # Find the full events based on the state at the time of the knock
         state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
-            context, self._room_prejoin_state_types
+            context,
+            self.store.calculate_stripped_state_filter(
+                # None as this is a knock, not an invite
+                inviter_user_id=None
+            ),
         )
         state_events = await self.store.get_events(state_ids)
         assert set(state_ids) == set(state_events.keys()), (

@@ -144,7 +144,6 @@ class FederationClient(FederationBase):
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
-        self._room_prejoin_state_types = hs.config.api.room_prejoin_state
 
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
@@ -1367,7 +1366,8 @@ class FederationClient(FederationBase):
         #
         # Find the full events based on the state at the time of the invite
         state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
-            context, self._room_prejoin_state_types
+            context,
+            self.store.calculate_stripped_state_filter(inviter_user_id=pdu.sender),
         )
         state_events = await self.store.get_events(state_ids)
         assert set(state_ids) == set(state_events.keys()), (
