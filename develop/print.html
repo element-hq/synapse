@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-e1cf3bac.js";
+            window.path_to_searchindex_js = "searchindex-aa974c19.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -4415,6 +4415,21 @@ shown.</p>
 </li>
 <li>
 <p><code>include_offline_users_on_sync</code> (boolean): When clients perform an initial or <code>full_state</code> sync, presence results for offline users are not included by default. Setting <code>include_offline_users_on_sync</code> to <code>true</code> will always include offline users in the results. Defaults to <code>false</code>.</p>
+</li>
+<li>
+<p><code>last_active_granularity</code> (duration): How long after a user was last active that they are still shown as “currently active” to other users. Larger values reduce the rate of presence updates sent to other users and servers.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"1m"</code>.</p>
+</li>
+<li>
+<p><code>sync_online_timeout</code> (duration): How long after a client’s last sync request their presence is switched to offline. Clients are expected to keep a sync request open at (almost) all times while online, so this only needs to cover the gap between two consecutive sync requests. Note that if <code>rc_presence</code> is set to ratelimit how often syncs can affect presence, this must be greater than the ratelimit’s interval or users will incorrectly be marked as offline in between syncs.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"30s"</code>.</p>
+</li>
+<li>
+<p><code>idle_timeout</code> (duration): How long after a user was last active that their presence is switched to “unavailable” (idle) while they remain connected. Must be greater than <code>last_active_granularity</code>.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"5m"</code>.</p>
 </li>
 </ul>
 <p>Example configuration:</p>
