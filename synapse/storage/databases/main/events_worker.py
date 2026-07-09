@@ -1127,34 +1127,6 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event_map
 
-    def _calculate_stripped_state_filter(
-        self,
-        *,
-        inviter_user_id: str | None = None,
-    ) -> StateFilter:
-        """
-        Calculate the stripped state filter necessary for an event
-
-        Args:
-            inviter_user_id: An optional user ID to include the stripped membership state
-                events of. This is useful when generating the stripped state of a room for
-                invites. We want to send membership events of the inviter, so that the
-                invitee can display the inviter's profile information if the room lacks any.
-        """
-        state_filter = self._room_prejoin_state_types
-
-        # Include the state for `inviter_user_id` if specified
-        #
-        # FIXME: Doesn't seem to be in the spec
-        if inviter_user_id:
-            types = chain(
-                self._room_prejoin_state_types.to_types(),
-                [(EventTypes.Member, inviter_user_id)],
-            )
-            state_filter = StateFilter.from_types(types)
-
-        return state_filter
-
     async def get_stripped_room_state_from_event_context(
         self,
         event: EventBase,
@@ -1200,15 +1172,25 @@ class EventsWorkerStore(SQLBaseStore):
         Returns:
             A list of event_ids, each representing the stripped state event to include for this event
         """
+        # Start with the configured default set of stripped state to include
+        state_filter = self._room_prejoin_state_types
+
+        # We want to send membership events of the inviter, so that the invitee can
+        # display the inviter's profile information if the room lacks any.
+        #
+        # FIXME: Doesn't seem to be in the spec
         is_invite_event = (
             event.type == EventTypes.Member and event.membership == Membership.INVITE
         )
+        if is_invite_event:
+            types = chain(
+                self._room_prejoin_state_types.to_types(),
+                [(EventTypes.Member, event.sender)],
+            )
+            state_filter = StateFilter.from_types(types)
 
         # Get the relevant state
-        state_keys_to_include = self._calculate_stripped_state_filter(
-            inviter_user_id=event.sender if is_invite_event else None
-        )
-        selected_state_ids = await context.get_current_state_ids(state_keys_to_include)
+        selected_state_ids = await context.get_current_state_ids(state_filter)
 
         # We know this event is not an outlier, so this must be
         # non-None.
@@ -1216,7 +1198,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         # Confusingly, `get_current_state_ids` may return events that are discarded by
         # the filter, if they're in `context._state_delta_due_to_event`. Strip these away.
-        selected_state_ids = state_keys_to_include.filter_state(selected_state_ids)
+        selected_state_ids = state_filter.filter_state(selected_state_ids)
 
         return list(selected_state_ids.values())
 
