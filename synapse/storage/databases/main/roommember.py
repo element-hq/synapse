@@ -844,7 +844,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     @cached(max_entries=10000)
     async def does_pair_of_users_share_a_room(
-        self, user_id: str, other_user_id: str
+        self, user_id: str, other_user_id: str, excluded_rooms: AbstractSet[str]
     ) -> bool:
         raise NotImplementedError()
 
@@ -852,13 +852,22 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         cached_method_name="does_pair_of_users_share_a_room", list_name="other_user_ids"
     )
     async def _do_users_share_a_room(
-        self, user_id: str, other_user_ids: Collection[str]
+        self,
+        user_id: str,
+        other_user_ids: Collection[str],
+        excluded_rooms: AbstractSet[str],
     ) -> Mapping[str, bool | None]:
         """Return mapping from user ID to whether they share a room with the
         given user.
 
         Note: `None` and `False` are equivalent and mean they don't share a
         room.
+
+        Args:
+            user_id: The user to check for shared rooms against.
+            other_user_ids: The users to check whether they share a room with `user_id`.
+            excluded_rooms: Rooms which should not, on their own, count as a
+                shared room.
         """
 
         def do_users_share_a_room_txn(
@@ -868,6 +877,18 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 self.database_engine, "state_key", user_ids
             )
 
+            # We optionally exclude some of the target user's rooms, so that two
+            # users who only share an excluded room aren't considered to share a
+            # room at all.
+            if excluded_rooms:
+                excluded_clause, excluded_args = make_in_list_sql_clause(
+                    self.database_engine, "room_id", excluded_rooms, negative=True
+                )
+                excluded_clause = "AND " + excluded_clause
+            else:
+                excluded_clause = ""
+                excluded_args = []
+
             # This query works by fetching both the list of rooms for the target
             # user and the set of other users, and then checking if there is any
             # overlap.
@@ -875,7 +896,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 SELECT DISTINCT b.state_key
                 FROM (
                     SELECT room_id FROM current_state_events
-                    WHERE type = 'm.room.member' AND membership = 'join' AND state_key = ?
+                    WHERE type = 'm.room.member' AND membership = 'join' AND state_key = ? {excluded_clause}
                 ) AS a
                 INNER JOIN (
                     SELECT room_id, state_key FROM current_state_events
@@ -883,7 +904,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 ) AS b using (room_id)
             """
 
-            txn.execute(sql, (user_id, *args))
+            txn.execute(sql, (user_id, *excluded_args, *args))
             return {u: True for (u,) in txn}
 
         to_return = {}
@@ -896,11 +917,23 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return to_return
 
     async def do_users_share_a_room(
-        self, user_id: str, other_user_ids: Collection[str]
+        self,
+        user_id: str,
+        other_user_ids: Collection[str],
+        excluded_rooms: AbstractSet[str] = frozenset(),
     ) -> set[str]:
-        """Return the set of users who share a room with the first users"""
+        """Return the set of `other_user_ids` who share a room with `user_id`.
 
-        user_dict = await self._do_users_share_a_room(user_id, other_user_ids)
+        Args:
+            user_id: The user to check for shared rooms against.
+            other_user_ids: The users to check whether they share a room with `user_id`.
+            excluded_rooms: Rooms which should not, on their own, count as a
+                shared room.
+        """
+
+        user_dict = await self._do_users_share_a_room(
+            user_id, other_user_ids, excluded_rooms
+        )
 
         return {u for u, share_room in user_dict.items() if share_room}
 
@@ -971,12 +1004,22 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return {u for u, share_room in user_dict.items() if share_room}
 
-    async def get_users_who_share_room_with_user(self, user_id: str) -> set[str]:
-        """Returns the set of users who share a room with `user_id`"""
+    async def get_users_who_share_room_with_user(
+        self, user_id: str, excluded_rooms: AbstractSet[str] = frozenset()
+    ) -> set[str]:
+        """Returns the set of users who share a room with `user_id`.
+
+        Args:
+            user_id: The user to find the co-occupants of.
+            excluded_rooms: Rooms which should not, on their own, count as a
+                shared room.
+        """
         room_ids = await self.get_rooms_for_user(user_id)
 
         user_who_share_room: set[str] = set()
         for room_id in room_ids:
+            if room_id in excluded_rooms:
+                continue
             user_ids = await self.get_users_in_room(room_id)
             user_who_share_room.update(user_ids)
 
