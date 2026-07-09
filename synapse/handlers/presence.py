@@ -781,7 +781,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             # while the state is unchanged, relaying one update per
             # SYNC_PRESENCE_RELAY_INTERVAL is enough to keep them fed. State
             # changes always go through immediately.
-            last_sent = self._last_sent_presence.get((user_id, device_id))
+            (presence, last_sent_ms)  = self._last_sent_presence.get((user_id, device_id), (None, None))
             if (
                 last_sent is not None
                 and last_sent[0] == presence
