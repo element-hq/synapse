@@ -917,8 +917,9 @@ class FederationHandler:
                 for stripped_state_event in stripped_room_state
             ]
         except Exception as exc:
-            # FIXME(MSC4311): Apply this validation for all room versions after 2027-06-01 (to allow
-            # some time for the ecosystem to adapt and support MSC4311).
+            # FIXME(MSC4311): Apply this validation for all room versions after
+            # 2027-06-01 (to allow some time for the ecosystem to adapt and support
+            # MSC4311), see https://github.com/element-hq/synapse/issues/19943
             #
             # The Matrix spec says that for "version 12+ rooms, servers SHOULD rather than
             # MAY respond to such requests with 400 M_MISSING_PARAM". Given we have the
@@ -1325,7 +1326,7 @@ class FederationHandler:
         except Exception as exc:
             # FIXME(MSC4311): Apply this validation for all room versions after
             # 2027-06-01 (to allow some time for the ecosystem to adapt and support
-            # MSC4311).
+            # MSC4311), see https://github.com/element-hq/synapse/issues/19943
             #
             # The Matrix spec says that for "version 12+ rooms, servers SHOULD rather than
             # MAY respond to such requests with 400 M_MISSING_PARAM". Given we have the
