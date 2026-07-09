@@ -2076,10 +2076,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "invite_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.store.calculate_stripped_state_filter(
-                                inviter_user_id=event.sender
-                            ),
                         ),
                     )
 
@@ -2102,11 +2100,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "knock_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.store.calculate_stripped_state_filter(
-                                # None as this is a knock, not an invite
-                                inviter_user_id=None
-                            ),
                         ),
                     )
 

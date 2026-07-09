@@ -1020,7 +1020,7 @@ class FederationServer(FederationBase):
         """
         time_now = self._clock.time_msec()
 
-        _, context = await self._on_send_membership_event(
+        event, context = await self._on_send_membership_event(
             origin, content, Membership.KNOCK, room_id
         )
 
@@ -1029,11 +1029,7 @@ class FederationServer(FederationBase):
         #
         # Find the full events based on the state at the time of the knock
         state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
-            context,
-            self.store.calculate_stripped_state_filter(
-                # None as this is a knock, not an invite
-                inviter_user_id=None
-            ),
+            event, context
         )
         state_events = await self.store.get_events(state_ids)
         assert set(state_ids) == set(state_events.keys()), (

@@ -41,7 +41,7 @@ from typing_extensions import assert_never
 
 from twisted.internet import defer
 
-from synapse.api.constants import Direction, EventTypes
+from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
@@ -1127,7 +1127,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event_map
 
-    def calculate_stripped_state_filter(
+    def _calculate_stripped_state_filter(
         self,
         *,
         inviter_user_id: str | None = None,
@@ -1157,8 +1157,8 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_stripped_room_state_from_event_context(
         self,
+        event: EventBase,
         context: EventContext,
-        state_keys_to_include: StateFilter,
     ) -> list[JsonDict]:
         """
         Retrieve the stripped state from a room, given an event context to retrieve state
@@ -1174,9 +1174,8 @@ class EventsWorkerStore(SQLBaseStore):
         Returns:
             A list of dictionaries, each representing a stripped state event from the room.
         """
-
         selected_state_ids = await self.get_stripped_room_state_ids_from_event_context(
-            context, state_keys_to_include
+            event, context
         )
 
         state_to_include = await self.get_events(selected_state_ids)
@@ -1185,8 +1184,8 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_stripped_room_state_ids_from_event_context(
         self,
+        event: EventBase,
         context: EventContext,
-        state_keys_to_include: StateFilter,
     ) -> list[str]:
         """
         Retrieve the stripped state IDs for an event, given an event context to retrieve state
@@ -1197,11 +1196,18 @@ class EventsWorkerStore(SQLBaseStore):
 
         Args:
             context: The event context to retrieve state of the room from.
-            state_keys_to_include: The state events to include, for each event type.
 
         Returns:
             A list of event_ids, each representing the stripped state event to include for this event
         """
+        is_invite_event = (
+            event.type == EventTypes.Member and event.membership == Membership.INVITE
+        )
+
+        # Get the relevant state
+        state_keys_to_include = self._calculate_stripped_state_filter(
+            inviter_user_id=event.sender if is_invite_event else None
+        )
         selected_state_ids = await context.get_current_state_ids(state_keys_to_include)
 
         # We know this event is not an outlier, so this must be
