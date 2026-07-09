@@ -4292,6 +4292,16 @@ exclude_rooms_from_sync:
 - '!foo:example.com'
 ```
 ---
+### `exclude_rooms_from_presence`
+
+*(array)* A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to `[]`.
+
+Example configuration:
+```yaml
+exclude_rooms_from_presence:
+- '!foo:example.com'
+```
+---
 ## Opentracing
 
 Configuration options related to Opentracing support.
