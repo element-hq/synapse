@@ -288,6 +288,7 @@ class ExperimentalConfig(Config):
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
 
         # MSC4446: Allow moving the fully read marker backwards.
+        # Tracked in: https://github.com/element-hq/synapse/issues/19940
         self.msc4446_enabled: bool = experimental.get("msc4446_enabled", False)
 
         # MSC4354: Sticky Events
