@@ -593,6 +593,8 @@ class WorkerPresenceHandler(BasePresenceHandler):
         sending a stopped syncing immediately followed by a started syncing
         notification to the presence writer
         """
+        if not self._track_presence:
+            return
         self._user_devices_going_offline[(user_id, device_id)] = self.clock.time_msec()
 
     def send_stop_syncing(self) -> None:
