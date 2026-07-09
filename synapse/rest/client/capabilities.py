@@ -110,7 +110,7 @@ class CapabilitiesRestServlet(RestServlet):
             ]["m.profile_fields"]
 
         response["capabilities"]["org.matrix.msc4140.delayed_events"] = {
-            "max_delay_ms": self.config.server.max_event_delay_ms or 0,
+            "max_delay_ms": self.config.server.max_event_delay_duration.as_millis(),
             "max_scheduled": self.config.server.max_delayed_events_per_user,
         }
 

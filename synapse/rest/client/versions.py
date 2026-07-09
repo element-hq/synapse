@@ -190,7 +190,9 @@ class VersionsRestServlet(RestServlet):
                         )
                     ),
                     # MSC4140: Delayed events
-                    "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
+                    "org.matrix.msc4140": bool(
+                        self.config.server.max_event_delay_duration
+                    ),
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
                     # Arbitrary key-value profile fields.

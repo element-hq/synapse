@@ -28,6 +28,7 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -122,7 +123,7 @@ class DelayedEventsStore(SQLBaseStore):
         state_key: str | None,
         origin_server_ts: int | None,
         content: JsonDict,
-        delay: int,
+        delay: Duration,
         sticky_duration_ms: int | None,
         limit: int,
     ) -> tuple[DelayID, Timestamp]:
@@ -139,7 +140,7 @@ class DelayedEventsStore(SQLBaseStore):
             origin_server_ts: The custom timestamp to send the event with.
                 If None, the timestamp will be the actual time when the event is sent.
             content: The content of the event to be sent.
-            delay: How long (in milliseconds) to wait before automatically sending the event.
+            delay: How long to wait before automatically sending the event.
             sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
                 The event will be attempted to be reliably delivered to clients and remote servers
                 during its sticky period.
@@ -157,7 +158,8 @@ class DelayedEventsStore(SQLBaseStore):
         assert limit > 0, "limit must be greater than 0"
 
         delay_id = _generate_delay_id()
-        send_ts = Timestamp(creation_ts + delay)
+        delay_ms = delay.as_millis()
+        send_ts = creation_ts + delay_ms
 
         def add_delayed_event_txn(txn: LoggingTransaction) -> Timestamp:
             num_existing: int = self.db_pool.simple_select_one_onecol_txn(
@@ -178,9 +180,9 @@ class DelayedEventsStore(SQLBaseStore):
                         retcol="MIN(send_ts)",
                     )
                 else:
- 	                # When existing delayed events exceed the limit (e.g., due to config changes),
-	                # find the send_ts threshold that will bring the queue back under the limit
-	                # once all earlier events have been sent.
+                    # When existing delayed events exceed the limit (e.g., due to config changes),
+                    # find the send_ts threshold that will bring the queue back under the limit
+                    # once all earlier events have been sent.
                     #
                     # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
                     txn.execute(
@@ -216,7 +218,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "delay_id": delay_id,
                     "user_localpart": user_localpart,
                     "device_id": device_id,
-                    "delay": delay,
+                    "delay": delay_ms,
                     "send_ts": send_ts,
                     "room_id": room_id,
                     "event_type": event_type,

@@ -333,7 +333,7 @@ class DelayedEventsHandler:
         state_key: str | None,
         origin_server_ts: int | None,
         content: JsonDict,
-        delay: int,
+        delay: Duration,
         sticky_duration_ms: int | None,
     ) -> str:
         """
@@ -347,7 +347,7 @@ class DelayedEventsHandler:
             origin_server_ts: The custom timestamp to send the event with.
                 If None, the timestamp will be the actual time when the event is sent.
             content: The content of the event to be sent.
-            delay: How long (in milliseconds) to wait before automatically sending the event.
+            delay: How long to wait before automatically sending the event.
             sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
                 The event will be attempted to be reliably delivered to clients and remote servers
                 during its sticky period.
@@ -363,10 +363,9 @@ class DelayedEventsHandler:
         # See https://github.com/element-hq/synapse/issues/18021
         await self._request_ratelimiter.ratelimit(requester)
 
-        max_delay = self._config.server.max_event_delay_ms
+        max_delay = self._config.server.max_event_delay_duration
         if (
-            max_delay is None
-            or max_delay <= 0
+            not max_delay
             # 0 is a valid config value but equivalent to disabling sending delayed events
             or (limit := self._config.server.max_delayed_events_per_user) <= 0
         ):
@@ -378,7 +377,7 @@ class DelayedEventsHandler:
         if delay > max_delay:
             raise SynapseError(
                 HTTPStatus.FORBIDDEN,
-                f"The requested delay ({delay}ms) exceeds the allowed maximum ({max_delay}ms)",
+                f"The requested delay ({delay.as_millis()}ms) exceeds the allowed maximum ({max_delay.as_millis()}ms)",
                 Codes.FORBIDDEN,
             )
 

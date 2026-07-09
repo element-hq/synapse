@@ -37,6 +37,7 @@ from twisted.conch.ssh.keys import Key
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.types import JsonDict, StrSequence
+from synapse.util.duration import Duration
 from synapse.util.module_loader import load_module
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -910,16 +911,15 @@ class ServerConfig(Config):
         # The maximum allowed delay duration for delayed events (MSC4140).
         max_event_delay_duration = config.get("max_event_delay_duration")
         if max_event_delay_duration is not None:
-            self.max_event_delay_ms: int | None = self.parse_duration(
-                max_event_delay_duration
-            )
-            if self.max_event_delay_ms <= 0:
+            max_event_delay_ms = self.parse_duration(max_event_delay_duration)
+            if max_event_delay_ms <= 0:
                 raise ConfigError(
                     "'max_event_delay_duration' must be a positive value if set",
                     ("max_event_delay_duration",),
                 )
+            self.max_event_delay_duration = Duration(milliseconds=max_event_delay_ms)
         else:
-            self.max_event_delay_ms = None
+            self.max_event_delay_duration = Duration()
 
         # The maximum number of delayed events a user may have scheduled at a time.
         # (Defined here despite being experimental to be near the other MSC4140 config)

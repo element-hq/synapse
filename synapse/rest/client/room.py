@@ -84,6 +84,7 @@ from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -513,19 +514,20 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> int | None:
+def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration | None:
     """Parses from the request string the delay parameter for
         delayed event requests, and checks it for correctness.
 
     Args:
         request: the twisted HTTP request.
     Returns:
-        The value of the requested delay in milliseconds, or None if it was absent.
+        The value of the requested delay, or None if it was absent.
 
     Raises:
         SynapseError: if the delay parameter is present and invalid.
     """
-    return parse_integer(request, "org.matrix.msc4140.delay")
+    delay_ms = parse_integer(request, "org.matrix.msc4140.delay")
+    return Duration(milliseconds=delay_ms) if delay_ms is not None else None
 
 
 # TODO: Needs unit testing for room ID + alias joins
