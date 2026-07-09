@@ -945,7 +945,7 @@ class FederationHandler:
             # validation above. The only reason this is here is because the validation
             # can fail for non-compliant servers but we should still use stripped state.
             stripped_room_state_for_client = self._minimal_parse_stripped_room_state(
-                stripped_room_state=event.unsigned.get("knock_room_state"),
+                stripped_room_state=knock_response.get("knock_room_state"),
             )
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `knock_room_state`
