@@ -2695,18 +2695,18 @@ class RoomDelayedEventTestCase(RoomBase):
         This can be invoked by the server admin lowering the configured limit & restarting the server
         while a user has fewer scheduled delayed events than the old limit, but more than the new limit.
         """
-        send_after_ms: int
+        send_after: Duration
         make_delayed_event_request = lambda: self.make_request(
             "POST",
             (
-                f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after_ms}"
+                f"rooms/%s/send/m.room.message?org.matrix.msc4140.delay={send_after.as_millis()}"
                 % self.room_id
             ).encode("ascii"),
-            {"body": f"test (send after {send_after_ms})", "msgtype": "m.text"},
+            {"body": f"test (send after {send_after.as_secs()}s)", "msgtype": "m.text"},
         )
 
         for i in range(4):
-            send_after_ms = 1000 * i
+            send_after = Duration(seconds=i)
             channel = make_delayed_event_request()
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
