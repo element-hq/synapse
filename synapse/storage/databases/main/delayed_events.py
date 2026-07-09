@@ -168,42 +168,32 @@ class DelayedEventsStore(SQLBaseStore):
                 keyvalues={"user_localpart": user_localpart},
                 retcol="COUNT(*)",
             )
-            next_send_ts: Timestamp | None
             if num_existing >= limit:
-                if num_existing == limit:
-                    next_send_ts = self.db_pool.simple_select_one_onecol_txn(
-                        txn,
-                        table="delayed_events",
-                        keyvalues={
-                            "user_localpart": user_localpart,
-                        },
-                        retcol="MIN(send_ts)",
-                    )
-                else:
-                    # When existing delayed events exceed the limit (e.g., due to config changes),
-                    # find the send_ts threshold that will bring the queue back under the limit
-                    # once all earlier events have been sent.
-                    #
-                    # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
-                    txn.execute(
-                        """
-                        SELECT MAX(send_ts) FROM (
-                            SELECT * FROM delayed_events
-                            WHERE user_localpart = ?
-                            ORDER BY send_ts ASC
-                            LIMIT ?
-                        ) AS subquery
-                        """,
-                        (
-                            user_localpart,
-                            num_existing - limit + 1,
-                        ),
-                    )
-                    row = txn.fetchone()
-                    assert row
-                    next_send_ts = row[0]
-
-                retry_after_ms = next_send_ts - self.clock.time_msec()
+                # Find the send_ts threshold that will bring the queue back under the limit.
+                # When the amount of existing delayed events has reached the limit,
+                # this will be the send time of the next delayed event to be sent.
+                # When the amount has exceeded the limit (e.g., due to config changes),
+                # this will be the send time of the delayed event that will be sent
+                # once all earlier events that exceed the limit have been sent.
+                #
+                # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
+                txn.execute(
+                    """
+                    SELECT MAX(send_ts) FROM (
+                        SELECT * FROM delayed_events
+                        WHERE user_localpart = ?
+                        ORDER BY send_ts ASC
+                        LIMIT ?
+                    ) AS subquery
+                    """,
+                    (
+                        user_localpart,
+                        num_existing - limit + 1,
+                    ),
+                )
+                row = txn.fetchone()
+                assert row
+                retry_after_ms = row[0] - self.clock.time_msec()
                 err = LimitExceededError(
                     limiter_name="add_delayed_event",
                     retry_after_ms=retry_after_ms if retry_after_ms > 0 else None,
