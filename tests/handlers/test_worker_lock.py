@@ -154,7 +154,7 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
         # database round-trips (significant on PostgreSQL) or lost to a loaded
         # CI machine doesn't make the test flaky: a healthy run costs well
         # under 1s of CPU on either database engine.
-        with test_timeout(10, cpu_time=True):
+        with test_timeout(5, cpu_time=True):
             d = self._take_locks(nb_locks_to_test)
             self.assertEqual(self.get_success(d), nb_locks_to_test)
 
