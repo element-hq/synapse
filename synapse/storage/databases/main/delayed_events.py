@@ -178,13 +178,9 @@ class DelayedEventsStore(SQLBaseStore):
                         retcol="MIN(send_ts)",
                     )
                 else:
-                    # Cover case of num_existing > limit, which can happen by reducing
-                    # the configured limit after delayed events have already been added
-                    # (or by calling this method with a limit lower than the configured one).
-                    #
-                    # Do this by querying for the send time of the next delayed event to be sent
-                    # after all delayed events that exceed the limit have been sent, as that is
-                    # when the amount of scheduled delayed events will fall below the limit.
+ 	                # When existing delayed events exceed the limit (e.g., due to config changes),
+	                # find the send_ts threshold that will bring the queue back under the limit
+	                # once all earlier events have been sent.
                     #
                     # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
                     txn.execute(
