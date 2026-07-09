@@ -929,7 +929,7 @@ class FederationHandler:
             if event_format_version.msc4311_stripped_state:
                 # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
                 # after 2027-06-01. Given Synapse claimed to support room version 12 but
-                # didn't adhere to this behavior until 2026-06-01, we will only warn for
+                # didn't adhere to this behavior until 2026-07, we will only warn for
                 # now. Don't forget to unskip the
                 # `TestMSC4311RejectInvalidStrippedStateFederation` Complement tests as
                 # well.
@@ -1336,7 +1336,7 @@ class FederationHandler:
             if room_version.msc4311_stripped_state:
                 # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
                 # after 2027-06-01. Given Synapse claimed to support room version 12 but
-                # didn't adhere to this behavior until 2026-06-01, we will only warn for
+                # didn't adhere to this behavior until 2026-07, we will only warn for
                 # now.
                 logger.warning(
                     "Continuing anyway but failed to validate `invite_room_state` on invite %s (room_version=%s): %s",
