@@ -498,6 +498,44 @@ impl EventInternalMetadata {
             .write()
             .map_err(|_| PyRuntimeError::new_err("EventInternalMetadata lock poisoned"))
     }
+
+    /// The event ID of the redaction event, if this event has been redacted.
+    pub fn redacted_by(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.redacted_by.clone())
+    }
+
+    /// The transaction ID, if set when the event was created.
+    ///
+    /// The transaction ID comes from the `txn_id` path parameter of the
+    /// client-server API request used to send the event.
+    pub fn txn_id(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.get_txn_id().map(|s| s.to_owned()))
+    }
+
+    /// The device ID of the sender, if set.
+    pub fn device_id(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.get_device_id().map(|s| s.to_owned()))
+    }
+
+    /// The access token ID of the sender, if set.
+    pub fn token_id(&self) -> PyResult<Option<i64>> {
+        Ok(self.read_inner()?.get_token_id())
+    }
+
+    /// The delay ID, set only if the event was a delayed event.
+    pub fn delay_id(&self) -> PyResult<Option<String>> {
+        Ok(self.read_inner()?.get_delay_id().map(|s| s.to_owned()))
+    }
+
+    /// Whether the event has been soft failed.
+    pub fn soft_failed(&self) -> PyResult<bool> {
+        Ok(self.read_inner()?.is_soft_failed())
+    }
+
+    /// Whether the policy server marked this event as spammy.
+    pub fn policy_server_spammy(&self) -> PyResult<bool> {
+        Ok(self.read_inner()?.get_policy_server_spammy())
+    }
 }
 
 /// Helper to convert `None` to an `AttributeError` for a property getter.
@@ -510,7 +548,7 @@ fn attr_err<T>(val: Option<T>, name: &str) -> PyResult<T> {
 #[pymethods]
 impl EventInternalMetadata {
     #[new]
-    fn new(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
+    pub fn new(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
         let mut data = Vec::with_capacity(dict.len());
 
         for (key, value) in dict.iter() {
@@ -536,7 +574,10 @@ impl EventInternalMetadata {
         })
     }
 
-    fn copy(&self) -> PyResult<Self> {
+    /// Create a deep copy of this `EventInternalMetadata` to allow modification
+    /// without affecting other references to the same metadata. This is needed
+    /// when we clone an event.
+    pub fn deep_copy(&self) -> PyResult<Self> {
         let guard = self.read_inner()?;
         Ok(EventInternalMetadata {
             inner: Arc::new(RwLock::new(guard.clone())),
@@ -560,7 +601,7 @@ impl EventInternalMetadata {
         Ok(dict.into())
     }
 
-    fn is_outlier(&self) -> PyResult<bool> {
+    pub fn is_outlier(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.is_outlier())
     }
 
@@ -723,7 +764,7 @@ impl EventInternalMetadata {
         attr_err(self.read_inner()?.get_redacted(), "redacted")
     }
     #[setter]
-    fn set_redacted(&self, obj: bool) -> PyResult<()> {
+    pub fn set_redacted(&self, obj: bool) -> PyResult<()> {
         self.write_inner()?.set_redacted(obj);
         Ok(())
     }
@@ -742,7 +783,7 @@ impl EventInternalMetadata {
 
     /// The calculated auth event IDs, if it was set when the event was created.
     #[getter]
-    fn get_calculated_auth_event_ids(&self) -> PyResult<Vec<String>> {
+    pub fn get_calculated_auth_event_ids(&self) -> PyResult<Vec<String>> {
         let guard = self.read_inner()?;
         attr_err(
             guard.get_calculated_auth_event_ids().cloned(),

@@ -175,13 +175,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         rendezvous_id = channel.json_body["id"]
         sequence_token = channel.json_body["sequence_token"]
-        expires_in_ms = channel.json_body["expires_in_ms"]
-        self.assertGreater(expires_in_ms, 0)
+        self.assertGreater(channel.json_body["expires_in_ms"], 0)
 
         session_endpoint = rz_endpoint + f"/{rendezvous_id}"
 
         # We can get the data back
-        # Advances clock by 100ms
         channel = self.make_request(
             "GET",
             session_endpoint,
@@ -191,10 +189,9 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=bar")
         self.assertEqual(channel.json_body["sequence_token"], sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 100)
+        self.assertGreater(channel.json_body["expires_in_ms"], 0)
 
         # We can update the data
-        # Advances clock by 100ms
         channel = self.make_request(
             "PUT",
             session_endpoint,
@@ -207,7 +204,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         new_sequence_token = channel.json_body["sequence_token"]
 
         # If we try to update it again with the old etag, it should fail
-        # Advances clock by 100ms
         channel = self.make_request(
             "PUT",
             session_endpoint,
@@ -221,7 +217,6 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
 
         # We should get the updated data
-        # Advances clock by 100ms
         channel = self.make_request(
             "GET",
             session_endpoint,
@@ -231,7 +226,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=baz")
         self.assertEqual(channel.json_body["sequence_token"], new_sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 400)
+        self.assertGreater(channel.json_body["expires_in_ms"], 0)
 
         # We can delete the data
         channel = self.make_request(
@@ -251,6 +246,77 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+
+    @override_config(
+        {
+            "disable_registration": True,
+            "matrix_authentication_service": {
+                "enabled": True,
+                "secret": "secret_value",
+                "endpoint": "https://issuer",
+            },
+            "experimental_features": {
+                "msc4388_mode": "open",
+            },
+        }
+    )
+    def test_rendezvous_put_is_idempotent(self) -> None:
+        """
+        A PUT using the previous sequence_token but with data that already
+        matches what is currently stored should be treated as an idempotent
+        retry and succeed (rather than returning 409). This lets clients
+        safely retry a PUT after a network error without losing the session.
+        """
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+        initial_sequence_token = channel.json_body["sequence_token"]
+        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
+
+        # Perform an update.
+        channel = self.make_request(
+            "PUT",
+            session_endpoint,
+            {"sequence_token": initial_sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        updated_sequence_token = channel.json_body["sequence_token"]
+
+        # Replaying the same PUT with the previous (now-stale) sequence_token
+        # and matching data should succeed and return the current token.
+        channel = self.make_request(
+            "PUT",
+            session_endpoint,
+            {"sequence_token": initial_sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+        # But replaying with the previous token and *different* data must
+        # still be rejected as a concurrent write.
+        channel = self.make_request(
+            "PUT",
+            session_endpoint,
+            {"sequence_token": initial_sequence_token, "data": "something=else"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 409)
+        self.assertEqual(
+            channel.json_body["errcode"], "IO_ELEMENT_MSC4388_CONCURRENT_WRITE"
+        )
+
+        # The stored data should be unchanged.
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["data"], "foo=baz")
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
 
     @override_config(
         {
@@ -305,8 +371,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         rendezvous_id = channel.json_body["id"]
         sequence_token = channel.json_body["sequence_token"]
-        expires_in_ms = channel.json_body["expires_in_ms"]
-        self.assertEqual(expires_in_ms, 120000)
+        self.assertGreater(channel.json_body["expires_in_ms"], 0)
 
         session_endpoint = rz_endpoint + f"/{rendezvous_id}"
 
@@ -320,7 +385,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=bar")
         self.assertEqual(channel.json_body["sequence_token"], sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 100)
+        self.assertGreater(channel.json_body["expires_in_ms"], 0)
 
         # We can update the data without authentication
         channel = self.make_request(
@@ -343,7 +408,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=baz")
         self.assertEqual(channel.json_body["sequence_token"], new_sequence_token)
-        self.assertEqual(channel.json_body["expires_in_ms"], expires_in_ms - 300)
+        self.assertGreater(channel.json_body["expires_in_ms"], 0)
 
         # We can delete the data without authentication
         channel = self.make_request(

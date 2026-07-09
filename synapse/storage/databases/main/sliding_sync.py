@@ -96,6 +96,14 @@ class SlidingSyncStore(SQLBaseStore):
             replaces_index="sliding_sync_membership_snapshots_user_id",
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_connections_last_used_ts_idx",
+            index_name="sliding_sync_connections_last_used_ts_idx",
+            table="sliding_sync_connections",
+            columns=("last_used_ts",),
+            where_clause="last_used_ts IS NOT NULL",
+        )
+
         if self.hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 self.delete_old_sliding_sync_connections,
@@ -186,15 +194,35 @@ class SlidingSyncStore(SQLBaseStore):
         # First we fetch (or create) the connection key associated with the
         # previous connection position.
         if previous_connection_position is not None:
+            lock_clause = ""
+            if isinstance(self.database_engine, PostgresEngine):
+                # Lock the sliding sync connection row for update upfront,
+                # to prevent deadlocks between concurrent transactions
+                # (which can retry again and again without making progress).
+                #
+                # (We don't need to explicitly lock in the other branch,
+                # where we re-create the connection, as that implies a lock
+                # anyway)
+                #
+                # Specifically, the statements seen to deadlock against
+                # each other were
+                # `INSERT INTO sliding_sync_connection_lazy_members`
+                # with conflicting tuples on
+                #     "sliding_sync_connection_lazy_members_idx" UNIQUE, btree
+                #     (connection_key, room_id, user_id)
+                # https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS
+                lock_clause = "FOR NO KEY UPDATE OF sliding_sync_connections"
+
             # The `previous_connection_position` is a user-supplied value, so we
             # need to make sure that the one they supplied is actually theirs.
-            sql = """
+            sql = f"""
                 SELECT connection_key
                 FROM sliding_sync_connection_positions
                 INNER JOIN sliding_sync_connections USING (connection_key)
                 WHERE
                     connection_position = ?
                     AND user_id = ? AND effective_device_id = ? AND conn_id = ?
+                {lock_clause}
             """
             txn.execute(
                 sql, (previous_connection_position, user_id, device_id, conn_id)

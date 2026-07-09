@@ -37,6 +37,7 @@ from typing import (
 
 import attr
 from prometheus_client import Gauge
+from typing_extensions import assert_never
 
 from twisted.internet import defer
 
@@ -775,6 +776,14 @@ class EventsWorkerStore(SQLBaseStore):
                     continue
                 elif redact_behaviour == EventRedactBehaviour.redact:
                     event = entry.redacted_event
+                elif redact_behaviour == EventRedactBehaviour.as_is:
+                    # Allow event through as is
+                    pass
+                else:
+                    # We (should) have covered all possible values of
+                    # redact_behaviour, so this is unreachable.
+                    assert_never(redact_behaviour)
+                    raise ValueError(f"Unknown redact_behaviour {redact_behaviour}")
 
             events.append(event)
 
@@ -1534,12 +1543,17 @@ class EventsWorkerStore(SQLBaseStore):
                     )
                     continue
 
-            original_ev = make_event_from_dict(
-                event_dict=d,
-                room_version=room_version,
-                internal_metadata_dict=internal_metadata,
-                rejected_reason=rejected_reason,
-            )
+            try:
+                original_ev = make_event_from_dict(
+                    event_dict=d,
+                    room_version=room_version,
+                    internal_metadata_dict=internal_metadata,
+                    rejected_reason=rejected_reason,
+                )
+            except SynapseError as e:
+                logger.error("Unable to parse event from database %s: %s", event_id, e)
+                continue
+
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
             original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier
@@ -2728,15 +2742,23 @@ class EventsWorkerStore(SQLBaseStore):
         self.invalidate_get_event_cache_after_txn(txn, event_id)
 
     async def get_events_sent_by_user_in_room(
-        self, user_id: str, room_id: str, limit: int, filter: list[str] | None = None
+        self,
+        user_id: str,
+        room_id: str,
+        limit: int,
+        filter: list[str] | None = None,
+        before_ts: int | None = None,
+        after_ts: int | None = None,
     ) -> list[str] | None:
         """
-        Get a list of event ids of events sent by the user in the specified room
+        Get a list of event ids of events sent by the user in the specified room in the specified time period
 
         Args:
             user_id: user ID to search against
             room_id: room ID of the room to search for events in
             filter: type of events to filter for
+            before_ts: filter for events that happened before this time (optional)
+            after_ts: filter for events that happened after this time (optional)
             limit: maximum number of event ids to return
         """
 
@@ -2747,16 +2769,32 @@ class EventsWorkerStore(SQLBaseStore):
             filter: list[str] | None,
             batch_size: int,
             offset: int,
+            before_ts: int | None = None,
+            after_ts: int | None = None,
         ) -> tuple[list[str] | None, int]:
+            clause = ""
             if filter:
                 base_clause, args = make_in_list_sql_clause(
                     txn.database_engine, "type", filter
                 )
                 clause = f"AND {base_clause}"
-                parameters = (user_id, room_id, *args, batch_size, offset)
+                parameters = (user_id, room_id, *args)
             else:
-                clause = ""
-                parameters = (user_id, room_id, batch_size, offset)
+                parameters = (user_id, room_id)
+
+            if before_ts:
+                if clause:
+                    clause += " AND "
+                clause += "origin_server_ts <= ?"
+                parameters += (before_ts,)
+
+            if after_ts:
+                if clause:
+                    clause += " AND "
+                clause += "origin_server_ts >= ?"
+                parameters += (after_ts,)
+
+            parameters += (batch_size, offset)
 
             sql = f"""
                     SELECT event_id FROM events
@@ -2790,6 +2828,8 @@ class EventsWorkerStore(SQLBaseStore):
                 filter,
                 batch_size,
                 offset,
+                before_ts,
+                after_ts,
             )
             if res:
                 selected_ids = selected_ids + res

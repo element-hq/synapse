@@ -34,11 +34,11 @@ It returns a JSON body like the following:
         }
     ],
     "avatar_url": "<avatar_url>",  // can be null if not set
-    "is_guest": 0,
-    "admin": 0,
-    "deactivated": 0,
+    "is_guest": false,
+    "admin": false,
+    "deactivated": false,
     "erased": false,
-    "shadow_banned": 0,
+    "shadow_banned": false,
     "creation_ts": 1560432506,
     "last_seen_ts": 1732919539393,
     "appservice_id": null,
@@ -183,24 +183,24 @@ A response body like the following is returned:
     "users": [
         {
             "name": "<user_id1>",
-            "is_guest": 0,
-            "admin": 0,
+            "is_guest": false,
+            "admin": false,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "<User One>",
             "avatar_url": null,
             "creation_ts": 1560432668000,
             "locked": false
         }, {
             "name": "<user_id2>",
-            "is_guest": 0,
-            "admin": 1,
+            "is_guest": false,
+            "admin": true,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "<User Two>",
             "avatar_url": "<avatar_url>",
             "creation_ts": 1561550621000,
@@ -227,7 +227,7 @@ The following parameters should be set in the URL:
 - `name` - Is optional and filters to only return users with user ID localparts
   **or** displaynames that contain this value.
 - `guests` - string representing a bool - Is optional and if `false` will **exclude** guest users.
-  Defaults to `true` to include guest users. This parameter is not supported when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+  Defaults to `true` to include guest users. This parameter is not supported when Matrix Authentication Service integration is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 - `admins` - Optional flag to filter admins. If `true`, only admins are queried. If `false`, admins are excluded from
   the query. When the flag is absent (the default), **both** admins and non-admins are included in the search results.
 - `deactivated` - string representing a bool - Is optional and if `true` will **include** deactivated users.
@@ -444,7 +444,7 @@ To unsuspend a user, use the same endpoint with a body of:
 
 ## Reset password
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+**Note:** This API is disabled when Matrix Authentication Service integration is enabled. Use the [MAS Admin API](https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html) or [the MAS CLI](https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-set-password) instead. An easy way to make use of this functionality is provided by [Element Admin](https://element.io/en/server-suite/admin) as part of [ESS](https://element.io/en/server-suite) Community and Pro.
 
 Changes the password of another user. This will automatically log the user out of all their devices.
 
@@ -469,7 +469,7 @@ The parameter `logout_devices` is optional and defaults to `true`.
 
 ## Get whether a user is a server administrator or not
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+**Note:** This API is disabled when Matrix Authentication Service integration is enabled. Use the [MAS Admin API](https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html) instead. An easy way to make use of this functionality is provided by [Element Admin](https://element.io/en/server-suite/admin) as part of [ESS](https://element.io/en/server-suite) Community and Pro.
 
 The api is:
 
@@ -488,7 +488,7 @@ A response body like the following is returned:
 
 ## Change whether a user is a server administrator or not
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+**Note:** This API is disabled when Matrix Authentication Service integration is enabled. Use the [MAS Admin API](https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html) or [the MAS CLI](https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-promote-admin) instead. An easy way to make use of this functionality is provided by [Element Admin](https://element.io/en/server-suite/admin) as part of [ESS](https://element.io/en/server-suite) Community and Pro.
 
 Note that you cannot demote yourself.
 
@@ -910,7 +910,7 @@ delete largest/smallest or newest/oldest files first.
 
 ## Login as a user
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+**Note:** This API is disabled when Matrix Authentication Service integration is enabled. Use [Personal sessions](https://element-hq.github.io/matrix-authentication-service/topics/authorization.html#personal-sessions-personal-access-tokens) through the [MAS Admin API](https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html) instead. An easy way to make use of this functionality is provided by [Element Admin](https://element.io/en/server-suite/admin) as part of [ESS](https://element.io/en/server-suite) Community and Pro.
 
 Get an access token that can be used to authenticate as that user. Useful for
 when admins wish to do actions on behalf of a user.
@@ -1512,24 +1512,28 @@ Returns a `404` HTTP status code if no user was found, with a response body like
 _Added in Synapse 1.72.0._
 
 
-## Redact all the events of a user
+## Redact events of a user
 
 This endpoint allows an admin to redact the events of a given user. There are no restrictions on
 redactions for a local user. By default, we puppet the user who sent the message to redact it themselves.
 Redactions for non-local users are issued using the admin user, and will fail in rooms where the
 admin user is not admin/does not have the specified power level to issue redactions. An option
-is provided to override the default and allow the admin to issue the redactions in all cases.  
+is provided to override the default and allow the admin to issue the redactions in all cases.
+There are optional parameters to filter for events that happened in the given time period. 
 
 The API is 
 ```
 POST /_synapse/admin/v1/user/<user_id>/redact
 
 {
-  "rooms": ["!roomid1", "!roomid2"]
+  "rooms": ["!roomid1", "!roomid2"],
+  "after_ts": 1779564103728,
+  "before_ts": 1779564103730
 }
 ```
 If an empty list is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted,
 otherwise all the events in the rooms provided in the request will be redacted. 
+If neither `after_ts` nor `before_ts` is provided, events will be redacted regardless of when they happened. If only one parameter is provided, all events occurring on or before/after given time will be redacted.
 
 The API starts redaction process running, and returns immediately with a JSON body with
 a redact id which can be used to query the status of the redaction process:
@@ -1557,7 +1561,9 @@ The following JSON body parameters are optional:
 - `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.
 - `use_admin` - If set to `true`, the admin user is used to issue the redactions, rather than puppeting the user. Useful
  when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
- where the admin does not have the sufficient power level to issue the redactions.  
+ where the admin does not have the sufficient power level to issue the redactions.
+- `after_ts` - Redact only events that were sent at this time or after. Format: milliseconds timestamp. _Added in Synapse 1.157.0._
+- `before_ts` - Redact only events that were sent at this time or before. Format: milliseconds timestamp. _Added in Synapse 1.157.0._
 
 _Added in Synapse 1.116.0._
 
@@ -1599,5 +1605,3 @@ The following fields are returned in the JSON response body:
   the corresponding error that caused the redaction to fail
 
 _Added in Synapse 1.116.0._
-
-

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Iterable
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
 from synapse.api.errors import AuthError, SynapseError
-from synapse.events.utils import FilteredEvent, SerializeEventConfig
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.streams.config import PaginationConfig
@@ -129,7 +129,7 @@ class EventStreamHandler:
             chunks = await self._event_serializer.serialize_events(
                 events,
                 time_now,
-                config=SerializeEventConfig(
+                config=await self._event_serializer.create_config(
                     as_client_event=as_client_event, requester=requester
                 ),
             )

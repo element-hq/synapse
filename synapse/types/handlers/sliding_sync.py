@@ -48,7 +48,7 @@ from synapse.types import (
     ThreadSubscriptionsToken,
     UserID,
 )
-from synapse.types.rest.client import SlidingSyncBody
+from synapse.types.rest.client import SlidingSyncBody, SlidingSyncStickyEventsToken
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -203,6 +203,9 @@ class SlidingSyncResult:
         highlight_count: int
 
         def __bool__(self) -> bool:
+            """Are there any updates that should be returned immediately to
+            the client?
+            """
             return (
                 # If this is the first time the client is seeing the room, we should not filter it out
                 # under any circumstance.
@@ -270,6 +273,8 @@ class SlidingSyncResult:
             events: Sequence[JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.events)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -294,23 +299,37 @@ class SlidingSyncResult:
             device_unused_fallback_key_types: Sequence[str]
 
             def __bool__(self) -> bool:
-                # Note that "signed_curve25519" is always returned in key count responses
-                # regardless of whether we uploaded any keys for it. This is necessary until
+                """Are there any updates that should be returned immediately to
+                the client?"""
+                # Note that "signed_curve25519" is always returned in key count
+                # responses regardless of whether we uploaded any keys for it.
+                # This is necessary until
                 # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
                 #
                 # Also related:
                 # https://github.com/element-hq/element-android/issues/3725 and
                 # https://github.com/matrix-org/synapse/issues/10456
-                default_otk = self.device_one_time_keys_count.get("signed_curve25519")
-                more_than_default_otk = len(self.device_one_time_keys_count) > 1 or (
-                    default_otk is not None and default_otk > 0
-                )
+                #
+                # This is why we don't incorporate `device_one_time_keys_count`
+                # (or `device_unused_fallback_key_types`) into the `__bool__`
+                # check.
+                #
+                # FIXME: Ideally we'd detect if either of those fields have
+                # changed since the last sync, but we do not currently track
+                # such state.
+                #
+                # Note that the client will receive these fields eventually when
+                # we respond to the sync request (usually sync timeouts are set
+                # to ~30s), we just won't immediately respond (even if there are
+                # changes). This delay is acceptable for clients, as a) these
+                # fields do not trigger UI (and so don't affect user perceivable
+                # latency) and b) are handled in the background by the clients
+                # anyway. The only risk being that one-time keys could be exhausted
+                # before the client knows about adding some more. But for example,
+                # if the client is syncing with a timeout of 30s, the window of
+                # staleness is so small for this not to matter.
 
-                return bool(
-                    more_than_default_otk
-                    or self.device_list_updates
-                    or self.device_unused_fallback_key_types
-                )
+                return bool(self.device_list_updates)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class AccountDataExtension:
@@ -327,6 +346,8 @@ class SlidingSyncResult:
             account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(
                     self.global_account_data_map or self.account_data_by_room_map
                 )
@@ -343,6 +364,8 @@ class SlidingSyncResult:
             room_id_to_receipt_map: Mapping[str, JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.room_id_to_receipt_map)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -357,6 +380,8 @@ class SlidingSyncResult:
             room_id_to_typing_map: Mapping[str, JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.room_id_to_typing_map)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -391,11 +416,31 @@ class SlidingSyncResult:
             prev_batch: ThreadSubscriptionsToken | None
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return (
                     bool(self.subscribed)
                     or bool(self.unsubscribed)
                     or bool(self.prev_batch)
                 )
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class StickyEventsExtension:
+            """The Sticky Events extension (MSC4354)
+
+            Attributes:
+                room_id_to_sticky_events: map (room_id -> [unexpired_sticky_events])
+                    The events are ordered by the sticky events stream.
+
+                    The events haven't yet been deduplicated to remove
+                    events that also appear in the timeline.
+            """
+
+            room_id_to_sticky_events: Mapping[str, list[FilteredEvent]]
+            next_batch: SlidingSyncStickyEventsToken
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_sticky_events)
 
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
@@ -403,8 +448,11 @@ class SlidingSyncResult:
         receipts: ReceiptsExtension | None = None
         typing: TypingExtension | None = None
         thread_subscriptions: ThreadSubscriptionsExtension | None = None
+        sticky_events: StickyEventsExtension | None = None
 
         def __bool__(self) -> bool:
+            """Are there any updates that should be returned immediately to
+            the client?"""
             return bool(
                 self.to_device
                 or self.e2ee
@@ -412,6 +460,7 @@ class SlidingSyncResult:
                 or self.receipts
                 or self.typing
                 or self.thread_subscriptions
+                or self.sticky_events
             )
 
     next_pos: SlidingSyncStreamToken
@@ -420,9 +469,14 @@ class SlidingSyncResult:
     extensions: Extensions
 
     def __bool__(self) -> bool:
-        """Make the result appear empty if there are no updates. This is used
-        to tell if the notifier needs to wait for more events when polling for
-        events.
+        """Are there any updates that should be returned immediately to
+        the client?
+
+        This is used to determine if a sliding sync response should be returned
+        immediately or if the notifier needs to wait for further updates, and
+        thus MUST return false if there is no new data since the last sync. This
+        is subtly different than just checking if any of the fields are set,
+        since some fields are always included (like `bump_stamp`).
         """
         # We don't include `self.lists` here, as a) `lists` is always non-empty even if
         # there are no changes, and b) since we're sorting rooms by `stream_ordering` of

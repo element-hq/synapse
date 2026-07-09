@@ -58,11 +58,6 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
 
     if hs.config.mas.enabled:
         resources["/_synapse/mas"] = MasResource(hs)
-    elif hs.config.experimental.msc3861.enabled:
-        from synapse.rest.synapse.client.jwks import JwksResource
-
-        resources["/_synapse/jwks"] = JwksResource(hs)
-        resources["/_synapse/mas"] = MasResource(hs)
 
     # provider-specific SSO bits. Only load these if they are enabled, since they
     # rely on optional dependencies.

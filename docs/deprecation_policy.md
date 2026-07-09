@@ -22,7 +22,7 @@ people building from source should ensure they can fetch recent versions of Rust
 
 The oldest supported version of SQLite is the version
 [provided](https://packages.debian.org/oldstable/libsqlite3-0) by
-[Debian oldstable](https://wiki.debian.org/DebianOldStable).
+[Debian oldstable](https://wiki.debian.org/DebianOldStable) or the oldest maintenance/security-supported [Ubuntu LTS](https://endoflife.date/ubuntu) (Ubuntu versions with only Expanded Security Maintenance are not included).
 
 
 ### Context
@@ -79,11 +79,17 @@ concerned about the criteria for selecting minimum versions. The only thing of c
 is making sure we're not making it unnecessarily difficult for downstream package
 maintainers. Generally, this just means avoiding the bleeding edge for a few months.
 
-The situation for Rust dependencies is fundamentally different. For packagers, the
-concerns around Python dependency versions do not apply. The `cargo` tool handles
-downloading and building all libraries to satisfy dependencies, and these libraries are
-statically linked into the final binary. This means that from a packager's perspective,
-the Rust dependency versions are an internal build detail, not a runtime dependency to
-be managed on the target system. Consequently, we have even greater flexibility to
-upgrade Rust dependencies as needed for the project. Some distros (e.g. Fedora) do
-package Rust libraries, but this appears to be the outlier rather than the norm.
+The situation for Rust dependencies is typically different and
+the concerns around Python dependency versions typically do not apply.
+For example, for packagers of Debian, the packagers have the choice of either
+using a crate packaged in the distro, or vendoring crates in the source package for the
+application.
+
+This freedom to vendor a dependency crate for a specific application consequently gives
+us even greater flexibility to upgrade Rust dependencies as needed for the project.
+
+(This is in contrast with Python dependencies, which are generally
+installed system-wide by mainstream distributions' official packages.)
+
+Some distros (e.g. Fedora) do not vendor Rust dependencies in their
+official application packages, but these cases appear to be less common.

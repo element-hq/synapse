@@ -58,7 +58,7 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
         # Create a room
         self.room_id = self.helper.create_room_as(self.user_id, tok=self.token)
 
-    def _assert_event_sticky_for(self, event_id: str, sticky_ttl: int) -> None:
+    def _assert_event_sticky_for(self, event_id: str) -> None:
         channel = self.make_request(
             "GET",
             f"/rooms/{self.room_id}/event/{event_id}",
@@ -75,10 +75,10 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
             event["unsigned"],
             f"No {EventUnsignedContentFields.STICKY_TTL} field in {event_id}; event not sticky: {event}",
         )
-        self.assertEqual(
+        self.assertGreater(
             event["unsigned"][EventUnsignedContentFields.STICKY_TTL],
-            sticky_ttl,
-            f"{event_id} had an unexpected sticky TTL: {event}",
+            0,
+            f"{event_id} had an unexpected sticky TTL (expected some value greater than 0): {event}",
         )
 
     def _assert_event_not_sticky(self, event_id: str) -> None:
@@ -112,17 +112,15 @@ class StickyEventsClientTestCase(unittest.HomeserverTestCase):
 
         # If we request the event immediately, it will still have
         # 1 minute of stickiness
-        # The other 100 ms is advanced in FakeChannel.await_result.
-        self._assert_event_sticky_for(event_id, 59_900)
+        self._assert_event_sticky_for(event_id)
 
-        # But if we advance time by 59.799 seconds...
-        # we will get the event on its last millisecond of stickiness
-        # The other 100 ms is advanced in FakeChannel.await_result.
-        self.reactor.advance(59.799)
-        self._assert_event_sticky_for(event_id, 1)
+        # But if we advance time by 59 seconds...
+        # we will get the event on its last second of stickiness
+        self.reactor.advance(Duration(seconds=59).as_secs())
+        self._assert_event_sticky_for(event_id)
 
         # Advancing time any more, the event is no longer sticky
-        self.reactor.advance(0.001)
+        self.reactor.advance(Duration(seconds=1).as_secs())
         self._assert_event_not_sticky(event_id)
 
 

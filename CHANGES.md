@@ -1,3 +1,91 @@
+# Synapse 1.156.0 (2026-07-07)
+
+No significant changes since 1.156.0rc1.
+
+# Synapse 1.156.0rc1 (2026-06-30)
+
+## Features
+
+- Expose [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) over [MSC4186 (Simplified) Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4186). ([\#19591](https://github.com/element-hq/synapse/issues/19591))
+- Stabilize support for sending ephemeral events to application services, as per [MSC2409](https://github.com/matrix-org/matrix-spec-proposals/pull/2409). Contributed by @jason-famedly @ Famedly. ([\#19758](https://github.com/element-hq/synapse/issues/19758))
+- Include `allowed_room_ids` in the `/summary` client-server API response for rooms with restricted join rules, as required by Matrix 1.15.
+  Contributed by @FrenchGithubUser @Famedly. ([\#19762](https://github.com/element-hq/synapse/issues/19762))
+- [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Allow authentication on delayed event management endpoints (such as `/restart`) to bypass ratelimits for unauthenticated requests based on the client IP address. ([\#19794](https://github.com/element-hq/synapse/issues/19794))
+- Add new metric `synapse_non_deactivated_user_count` which tracks the number of non-deactivated users in the database, split by `app_service`. ([\#19848](https://github.com/element-hq/synapse/issues/19848))
+- The `GET /_matrix/client/unstable/org.matrix.msc1763/retention/configuration` endpoint is now provided when retention
+  is enabled and `experimental_features.msc1763_enabled` is enabled, based on
+  [MSC1763](https://github.com/matrix-org/matrix-spec-proposals/pull/1763). ([\#19853](https://github.com/element-hq/synapse/issues/19853))
+- Add experimental support for [MSC4491: Invite reasons in room creation](https://github.com/matrix-org/matrix-spec-proposals/pull/4491). ([\#19874](https://github.com/element-hq/synapse/issues/19874))
+
+## Bugfixes
+
+- Provide remote servers a way to find out about an event created during the remote join handshake. Contributed by @FrenchGithubUser and @jason-famedly @ Famedly. ([\#19390](https://github.com/element-hq/synapse/issues/19390), [\#19855](https://github.com/element-hq/synapse/issues/19855), [\#19856](https://github.com/element-hq/synapse/issues/19856))
+- Advertise `org.matrix.msc4143` in `unstable_features` when `msc4143_enabled` is set. ([\#19646](https://github.com/element-hq/synapse/issues/19646))
+- Fix a long-standing bug where the badge notification count for a room could become permanently inflated if a read receipt was sent before the room's notification counts were first summarised. ([\#19785](https://github.com/element-hq/synapse/issues/19785))
+- Fix startup listener logging to report the actual bound TCP port, so listeners configured with port `0` no longer log `Synapse now listening on TCP port 0`. ([\#19810](https://github.com/element-hq/synapse/issues/19810))
+- Fix notification counts being inflated after a `/purge_history` when notifications had already been rotated into the summary table. ([\#19834](https://github.com/element-hq/synapse/issues/19834))
+- Fix `/sync` caching transient errors for the `sync_response_cache_duration`. ([\#19845](https://github.com/element-hq/synapse/issues/19845))
+- Fix local events being deleted by the [Purge History admin API](https://element-hq.github.io/synapse/v1.155/admin_api/purge_history_api.html) despite `delete_local_events` being set to false, in room versions other than 1 and 2. ([\#19850](https://github.com/element-hq/synapse/issues/19850))
+- Fix a bug where a user's dehydrated device ([MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814)) was deleted when their device list was synced from Matrix Authentication Service (e.g. upon logging out their last device), breaking offline key delivery. ([\#19892](https://github.com/element-hq/synapse/issues/19892))
+
+## Improved Documentation
+
+- Update `auto_join_rooms` config documentation to cover requirements for auto-joining invite-only rooms. ([\#19660](https://github.com/element-hq/synapse/issues/19660))
+- Add stable endpoint for [MSC3266: Room summary API](https://github.com/matrix-org/matrix-spec-proposals/pull/3266) into worker docs. Contributed by @olmari. ([\#19788](https://github.com/element-hq/synapse/issues/19788))
+- Tweak wording of Rust crate dependency update policy. ([\#19829](https://github.com/element-hq/synapse/issues/19829))
+- Fixed the Admin API user endpoint documentation examples to use JSON booleans (true/false) instead of numeric (0/1) values. ([\#19847](https://github.com/element-hq/synapse/issues/19847))
+
+## Internal Changes
+
+- Make `simple_select_one_onecol_txn()` more helpful by naming the table of the select - as all other query wrapper functions already did. ([\#19869](https://github.com/element-hq/synapse/issues/19869))
+- Refactor `get_user_which_could_invite` logic to reuse `get_users_which_can_issue_invite`. Contributed by Noah Markert. ([\#19732](https://github.com/element-hq/synapse/issues/19732))
+- Fix a flaky test (`twisted.protocols.amp.TooLong` error under `trial -jN`) caused by an oversized debug log line. ([\#19832](https://github.com/element-hq/synapse/issues/19832))
+- Upload Complement test logs as CI artifacts instead of printing the raw output to the build log. ([\#19840](https://github.com/element-hq/synapse/issues/19840))
+- Fix release script considering any workflow completion as successful. ([\#19843](https://github.com/element-hq/synapse/issues/19843))
+- Force keyword-args for clear `default_config(server_name="test")` usage in test utilities. ([\#19849](https://github.com/element-hq/synapse/issues/19849))
+- Add `.ruff_cache/` directory to `.gitignore`. ([\#19854](https://github.com/element-hq/synapse/issues/19854))
+- Bump `poetry` in CI from `2.2.1` to `2.4.1`. ([\#19866](https://github.com/element-hq/synapse/issues/19866), [\#19877](https://github.com/element-hq/synapse/issues/19877))
+- Split out `deferred` and `tokio_runtime` to their own Rust modules. ([\#19868](https://github.com/element-hq/synapse/issues/19868))
+- Prevent the `cargo-test` and `cargo-bench` CI jobs from being skipped, even on PRs that have Rust changes. ([\#19883](https://github.com/element-hq/synapse/issues/19883))
+
+
+# Synapse 1.155.0 (2026-06-16)
+
+## End of Life of Debian 12 Bookworm
+
+The next version of Synapse will not include Debian packages for Debian 12 Bookworm
+as it reached end of life on the 10th of June 2026.
+
+## Internal Changes
+
+- When building releases, don't cancel Debian package builds when one of them fails. ([\#19842](https://github.com/element-hq/synapse/issues/19842))
+
+# Synapse 1.155.0rc1 (2026-06-09)
+
+## Bugfixes
+
+- Limit the to-device EDU size to a reasonable value to mitigate long queues of to-device messages preventing outgoing federation because of the size of the transaction. ([\#19617](https://github.com/element-hq/synapse/issues/19617))
+- Work around bug that sometimes breaks joining restricted rooms that require a remote join. Contributed by @tulir @ Beeper. ([\#19730](https://github.com/element-hq/synapse/issues/19730))
+- Update Sliding Sync to return a new response immediately if a room subscription has changed and produced a new response. ([\#19734](https://github.com/element-hq/synapse/issues/19734), [\#19792](https://github.com/element-hq/synapse/issues/19792))
+- Fix the `/capabilities` endpoint returning a 500 error on non-media workers when [MSC4452: Preview URL capabilities API](https://github.com/matrix-org/matrix-spec-proposals/pull/4452) is enabled. ([\#19839](https://github.com/element-hq/synapse/issues/19839))
+
+## Improved Documentation
+
+- Document how to see Rust build failure output when using `poetry install`. ([\#19818](https://github.com/element-hq/synapse/issues/19818))
+- Document that the SQLite version included in Ubuntu LTS, aside from ESM-only versions, is included in our support policy. ([\#19823](https://github.com/element-hq/synapse/issues/19823))
+
+## Internal Changes
+
+- Port the Python Event classes to Rust. ([\#19701](https://github.com/element-hq/synapse/issues/19701), [\#19816](https://github.com/element-hq/synapse/issues/19816), [\#19817](https://github.com/element-hq/synapse/issues/19817), [\#19819](https://github.com/element-hq/synapse/issues/19819))
+- Added tests to ensure that email notification links are sanitized. Contributed by Noah Markert. ([\#19741](https://github.com/element-hq/synapse/issues/19741))
+- Add `GcpJsonFormatter` logging formatter for use with Google Cloud Logging and GKE deployments. ([\#19775](https://github.com/element-hq/synapse/issues/19775))
+- Add more logging to the to-device message replication stream. ([\#19801](https://github.com/element-hq/synapse/issues/19801), [\#19821](https://github.com/element-hq/synapse/issues/19821))
+- Port `Requester` class to Rust. ([\#19828](https://github.com/element-hq/synapse/issues/19828))
+
+# Synapse 1.154.0 (2026-06-04)
+
+No significant changes since 1.154.0rc1.
+
 # Synapse 1.154.0rc1 (2026-05-27)
 
 ## Features
