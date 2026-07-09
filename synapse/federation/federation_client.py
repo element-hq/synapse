@@ -1428,11 +1428,24 @@ class FederationClient(FederationBase):
         # Note the v1 API returns a tuple of `(200, content)`
 
         try:
+            # Use full PDU's for `invite_room_state` according to MSC4311
+            #
+            # With the v1 invite API, `invite_room_state` is carried inside the event
+            # instead of a separate field like in v2 so we must munge it in ourselves
+            event_json = pdu.get_pdu_json(time_now)
+            event_json.setdefault("unsigned", {})["invite_room_state"] = (
+                [
+                    # Use full PDU's according to MSC4311
+                    state_event.get_pdu_json(time_now)
+                    for state_event in state_events.values()
+                ],
+            )
+
             _, content = await self.transport_layer.send_invite_v1(
                 destination=destination,
                 room_id=pdu.room_id,
                 event_id=pdu.event_id,
-                content=pdu.get_pdu_json(time_now),
+                content=event_json,
             )
         except HttpResponseException as e:
             # MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
