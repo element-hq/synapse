@@ -615,6 +615,18 @@ class RoomStateTestCase(RoomBase):
             ["m.room.create"],
         )
 
+    def test_get_state_type_filter_ignored_when_disabled(self) -> None:
+        """MSC4497: type filtering is ignored unless the experimental flag is enabled."""
+        self.hs.config.experimental.msc4497_state_event_type_filter = False
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state?cc.koja.types=m.room.create" % room_id,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result["body"])
+        # When disabled, the filter should be ignored and we should get more than just the create event.
+        self.assertGreater(len(channel.json_list), 1)
+
     def test_get_state_type_filter_multiple(self) -> None:
         """MSC4497: filtering by multiple types returns only those event types."""
         self.hs.config.experimental.msc4497_state_event_type_filter = True
