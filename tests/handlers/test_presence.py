@@ -49,7 +49,6 @@ from synapse.handlers.presence import (
     EXTERNAL_PROCESS_EXPIRY,
     FEDERATION_PING_INTERVAL,
     FEDERATION_TIMEOUT,
-    SYNC_PRESENCE_RELAY_INTERVAL,
     PresenceHandler,
     WorkerPresenceHandler,
     handle_timeout,
@@ -2382,7 +2381,7 @@ class WorkerPresenceThrottleTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(state.state, PresenceState.ONLINE)
 
         # Once the relay window has passed, the next sync relays again.
-        self.reactor.advance(SYNC_PRESENCE_RELAY_INTERVAL / 1000 + 1)
+        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
         self._sync(presence)
         self.assertEqual(len(set_state_calls), 2)
 
@@ -2437,7 +2436,7 @@ class WorkerPresenceThrottleTestCase(BaseMultiWorkerStreamTestCase):
 
         # After the window passes, a bump goes through (and then suppresses
         # further bumps).
-        self.reactor.advance(SYNC_PRESENCE_RELAY_INTERVAL / 1000 + 1)
+        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
         for _ in range(2):
             self.get_success(
                 presence.bump_presence_active_time(self.user_id_obj, self.device_id),
@@ -2478,3 +2477,24 @@ class WorkerPresenceThrottleTestCase(BaseMultiWorkerStreamTestCase):
             presence.bump_presence_active_time(self.user_id_obj, self.device_id),
         )
         self.assertEqual(len(bump_calls), 1)
+
+    @override_config({"presence": {"sync_online_timeout": "12s"}})
+    def test_relay_interval_scales_with_config(self) -> None:
+        """The throttle window is derived from the configurable presence timers,
+        so it stays comfortably below a lowered sync online timeout rather than
+        being a hardcoded 25s (which would make users flap)."""
+        presence, set_state_calls, _ = self._make_sync_worker()
+
+        # 5/6 of min(12s sync online timeout, 60s default last-active
+        # granularity).
+        self.assertEqual(presence._sync_presence_relay_interval, 10 * 1000)
+
+        # A repeat within the (now shorter) window is still suppressed...
+        self._sync(presence)
+        self._sync(presence)
+        self.assertEqual(len(set_state_calls), 1)
+
+        # ...and once it passes, the next sync relays again.
+        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
+        self._sync(presence)
+        self.assertEqual(len(set_state_calls), 2)

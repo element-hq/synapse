@@ -186,15 +186,6 @@ presence_wheel_timer_size_gauge = LaterGauge(
 # `synapse.config.server.DEFAULT_LAST_ACTIVE_GRANULARITY` and friends for the
 # defaults).
 
-# How often a sync worker relays an unchanged sync-driven presence state to
-# the presence writer. Must be comfortably below the (configurable) sync online
-# timeout and last-active granularity (see
-# `synapse.config.server.DEFAULT_SYNC_ONLINE_TIMEOUT` and friends): the relayed
-# updates are what feed the writer's device last_sync_ts/last_active_ts timers,
-# so relaying less often than those timeouts would make users flap
-# offline/inactive.
-SYNC_PRESENCE_RELAY_INTERVAL = 25 * 1000
-
 # How long to wait until a device with busy status stops syncing before it
 # goes offline. Busy status waits longer than the (configurable) sync online
 # timeout, but does eventually go offline.
@@ -539,13 +530,24 @@ class WorkerPresenceHandler(BasePresenceHandler):
         # syncing but we haven't notified the presence writer of that yet
         self._user_devices_going_offline: dict[tuple[str, str | None], int] = {}
 
+        # How often to relay an unchanged sync-driven presence state to the
+        # presence writer. The relayed updates are what feed the writer's device
+        # last_sync_ts/last_active_ts timers, so this must sit comfortably below
+        # the timers it feeds — the (configurable) sync online timeout and
+        # last-active granularity — or users would flap offline / lose
+        # "currently active" between relays. We use 5/6 of the tighter of the
+        # two, i.e. the historic 25s at the default 30s sync online timeout.
+        self._sync_presence_relay_interval = (
+            min(self._sync_online_timeout, self._last_active_granularity) * 5 // 6
+        )
+
         # (user_id, device_id) -> (state, last_sent_ms) of the most recent
         # sync-driven presence update we proxied to the presence writer. Used
         # to suppress the per-sync-request set_state/bump calls, which are
         # no-ops on the writer at finer granularity than its timers: while
         # the state is unchanged there is no point relaying more than one
-        # update per SYNC_PRESENCE_RELAY_INTERVAL. Entries older than the
-        # window are swept by `send_stop_syncing`.
+        # update per relay interval. Entries older than the window are swept by
+        # `_sweep_last_sent_presence`.
         self._last_sent_presence: dict[tuple[str, str | None], tuple[str, int]] = {}
 
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
@@ -627,7 +629,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         now = self.clock.time_msec()
 
         for key, (_, last_sent_ms) in list(self._last_sent_presence.items()):
-            if now - last_sent_ms >= SYNC_PRESENCE_RELAY_INTERVAL:
+            if now - last_sent_ms >= self._sync_presence_relay_interval:
                 self._last_sent_presence.pop(key, None)
 
     async def user_syncing(
@@ -647,8 +649,8 @@ class WorkerPresenceHandler(BasePresenceHandler):
 
         # Note that this causes last_active_ts to be incremented which is not
         # what the spec wants. (This call is throttled in `set_state`: while
-        # the state is unchanged, only one update per
-        # SYNC_PRESENCE_RELAY_INTERVAL is relayed to the presence writer.)
+        # the state is unchanged, only one update per relay interval is relayed
+        # to the presence writer.)
         await self.set_state(
             UserID.from_string(user_id),
             device_id,
@@ -789,15 +791,15 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if is_sync and not force_notify:
             # Sync-driven updates arrive on every /sync request, which is far
             # finer-grained than any of the writer's presence timers need:
-            # while the state is unchanged, relaying one update per
-            # SYNC_PRESENCE_RELAY_INTERVAL is enough to keep them fed. State
-            # changes always go through immediately.
+            # while the state is unchanged, relaying one update per relay
+            # interval is enough to keep them fed. State changes always go
+            # through immediately.
             last_sent = self._last_sent_presence.get((user_id, device_id))
             if last_sent is not None:
                 last_presence, last_sent_ms = last_sent
                 if (
                     presence == last_presence
-                    and now - last_sent_ms < SYNC_PRESENCE_RELAY_INTERVAL
+                    and now - last_sent_ms < self._sync_presence_relay_interval
                 ):
                     return
             self._last_sent_presence[(user_id, device_id)] = (presence, now)
@@ -840,7 +842,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if (
             last_sent is not None
             and last_sent[0] == PresenceState.ONLINE
-            and now - last_sent[1] < SYNC_PRESENCE_RELAY_INTERVAL
+            and now - last_sent[1] < self._sync_presence_relay_interval
         ):
             return
         self._last_sent_presence[(user_id, device_id)] = (PresenceState.ONLINE, now)
