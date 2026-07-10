@@ -132,12 +132,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
         # This uses a real blocking threadpool so we have to wait for it to be
         # actually done :/
-        x = defer.ensureDeferred(test_ensure_media())
-
-        # Hotloop until the threadpool does its job...
-        self.wait_on_thread(x)
-
-        self.get_success(x)
+        self.get_success(test_ensure_media())
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -930,7 +925,7 @@ class SpamCheckerTestCaseLegacy(unittest.HomeserverTestCase):
         return resources
 
     def default_config(self) -> dict[str, Any]:
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         config.update(
             {

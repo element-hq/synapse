@@ -1,0 +1,1 @@
+Fix `test_lock_contention` being flaky when running against PostgreSQL by budgeting CPU time rather than wall-clock time.

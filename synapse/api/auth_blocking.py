@@ -88,7 +88,7 @@ class AuthBlocking:
                 # We never block the server from doing actions on behalf of
                 # users.
                 return
-            if requester.app_service and not self._track_appservice_user_ips:
+            if requester.app_service_id and not self._track_appservice_user_ips:
                 # If we're authenticated as an appservice then we only block
                 # auth if `track_appservice_user_ips` is set, as that option
                 # implicitly means that application services are part of MAU
@@ -117,7 +117,7 @@ class AuthBlocking:
             # If the user is already part of the MAU cohort or a trial user
             if user_id:
                 timestamp = await self.store.user_last_seen_monthly_active(user_id)
-                if timestamp:
+                if timestamp is not None:
                     return
 
                 is_trial = await self.store.is_trial_user(user_id)

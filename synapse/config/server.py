@@ -178,6 +178,19 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
 
 DEFAULT_ROOM_VERSION = "10"
 
+# Defaults for the presence state machine timers, in milliseconds. Overridden
+# by the corresponding options in the `presence` config section.
+#
+# How long after a user was last active that they are still considered
+# "currently_active".
+DEFAULT_LAST_ACTIVE_GRANULARITY = 60 * 1000
+# How long to wait until a new /events or /sync request before assuming the
+# client has gone.
+DEFAULT_SYNC_ONLINE_TIMEOUT = 30 * 1000
+# How long to wait before marking the user as idle. Compared against last
+# active.
+DEFAULT_IDLE_TIMER = 5 * 60 * 1000
+
 ROOM_COMPLEXITY_TOO_GREAT = (
     "Your homeserver is unable to join rooms this large or complex. "
     "Please speak to your server administrator, or upgrade your instance "
@@ -505,6 +518,32 @@ class ServerConfig(Config):
         self.presence_include_offline_users_on_sync = presence_config.get(
             "include_offline_users_on_sync", False
         )
+
+        # Timers controlling the presence state machine.
+        self.presence_last_active_granularity = self.parse_duration(
+            presence_config.get(
+                "last_active_granularity", DEFAULT_LAST_ACTIVE_GRANULARITY
+            )
+        )
+        self.presence_sync_online_timeout = self.parse_duration(
+            presence_config.get("sync_online_timeout", DEFAULT_SYNC_ONLINE_TIMEOUT)
+        )
+        self.presence_idle_timeout = self.parse_duration(
+            presence_config.get("idle_timeout", DEFAULT_IDLE_TIMER)
+        )
+        if self.presence_last_active_granularity <= 0:
+            raise ConfigError(
+                "'presence.last_active_granularity' must be a positive duration"
+            )
+        if self.presence_sync_online_timeout <= 0:
+            raise ConfigError(
+                "'presence.sync_online_timeout' must be a positive duration"
+            )
+        if self.presence_idle_timeout <= self.presence_last_active_granularity:
+            raise ConfigError(
+                "'presence.idle_timeout' must be greater than "
+                "'presence.last_active_granularity'"
+            )
 
         # Custom presence router module
         # This is the legacy way of configuring it (the config should now be put in the modules section)
@@ -934,6 +973,10 @@ class ServerConfig(Config):
                 "'msc4140_max_delayed_events_per_user' must be a non-negative integer",
                 ("experimental", "msc4140_max_delayed_events_per_user"),
             )
+
+        self.msc4140_enabled = bool(
+            self.max_delayed_events_per_user and self.max_event_delay_duration
+        )
 
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)

@@ -71,7 +71,6 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 action=Membership.JOIN,
             ),
             LimitExceededError,
-            by=0.5,
         )
 
     @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
@@ -213,7 +212,6 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 ),
                 LimitExceededError,
-                by=0.5,
             )
 
     # TODO: test that remote joins to a room are rate limited.
@@ -281,7 +279,6 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
-            by=0.5,
         )
 
         # Try to join as Chris on the original worker. Should get denied because Alice
@@ -294,7 +291,6 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
-            by=0.5,
         )
 
 

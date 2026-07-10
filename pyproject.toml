@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.154.0"
+version = "1.156.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -61,9 +61,8 @@ dependencies = [
     "msgpack>=0.5.2",
     "phonenumbers>=8.2.0",
     # we use GaugeHistogramMetric, which was added in prom-client 0.4.0.
-    # `prometheus_client.metrics` was added in 0.5.0, so we require that too.
-    # We chose 0.6.0 as that is the current version in Debian Buster (oldstable).
-    "prometheus-client>=0.6.0",
+    # `Gauge.clear()` was added in 0.10.0.
+    "prometheus-client>=0.10.0",
     # we use `order`, which arrived in attrs 19.2.0.
     # Note: 21.1.0 broke `/sync`, see https://github.com/matrix-org/synapse/issues/9936
     "attrs>=19.2.0,!=21.1.0",

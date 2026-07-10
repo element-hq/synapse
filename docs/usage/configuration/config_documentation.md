@@ -284,6 +284,24 @@ This setting has the following sub-options:
 
 * `include_offline_users_on_sync` (boolean): When clients perform an initial or `full_state` sync, presence results for offline users are not included by default. Setting `include_offline_users_on_sync` to `true` will always include offline users in the results. Defaults to `false`.
 
+* `last_active_granularity` (duration): How long after a user was last active that they are still shown as "currently active" to other users. Larger values reduce the rate of presence updates sent to other users and servers.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"1m"`.
+
+* `sync_online_timeout` (duration): How long after a client's last sync request their presence is switched to offline. Clients are expected to keep a sync request open at (almost) all times while online, so this only needs to cover the gap between two consecutive sync requests. Note that if `rc_presence` is set to ratelimit how often syncs can affect presence, this must be greater than the ratelimit's interval or users will incorrectly be marked as offline in between syncs.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"30s"`.
+
+* `idle_timeout` (duration): How long after a user was last active that their presence is switched to "unavailable" (idle) while they remain connected. Must be greater than `last_active_granularity`.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"5m"`.
+
 Example configuration:
 ```yaml
 presence:
@@ -1971,7 +1989,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2869,6 +2887,8 @@ enable_3pid_changes: false
 *(array)* Users who register on this homeserver will automatically be joined to the rooms listed under this option.
 
 By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to `public`. You can find more options relating to auto-joining rooms below.
+
+Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart` to a user who's part of the invite-only rooms.
 
 As Spaces are just rooms under the hood, Space aliases may also be used.
 

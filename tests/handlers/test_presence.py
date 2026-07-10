@@ -36,6 +36,11 @@ from synapse.api.presence import UserDevicePresenceState, UserPresenceState
 from synapse.api.room_versions import (
     RoomVersion,
 )
+from synapse.config.server import (
+    DEFAULT_IDLE_TIMER,
+    DEFAULT_LAST_ACTIVE_GRANULARITY,
+    DEFAULT_SYNC_ONLINE_TIMEOUT,
+)
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.sender import FederationSender
@@ -44,9 +49,6 @@ from synapse.handlers.presence import (
     EXTERNAL_PROCESS_EXPIRY,
     FEDERATION_PING_INTERVAL,
     FEDERATION_TIMEOUT,
-    IDLE_TIMER,
-    LAST_ACTIVE_GRANULARITY,
-    SYNC_ONLINE_TIMEOUT,
     PresenceHandler,
     handle_timeout,
     handle_update,
@@ -94,6 +96,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertTrue(persist_and_notify)
@@ -105,16 +110,20 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         self.assertEqual(wheel_timer.insert.call_count, 3)
         wheel_timer.insert.assert_has_calls(
             [
-                call(now=now, obj=user_id, then=new_state.last_active_ts + IDLE_TIMER),
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=new_state.last_active_ts + DEFAULT_IDLE_TIMER,
                 ),
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_active_ts + LAST_ACTIVE_GRANULARITY,
+                    then=new_state.last_user_sync_ts + DEFAULT_SYNC_ONLINE_TIMEOUT,
+                ),
+                call(
+                    now=now,
+                    obj=user_id,
+                    then=new_state.last_active_ts + DEFAULT_LAST_ACTIVE_GRANULARITY,
                 ),
             ],
             any_order=True,
@@ -142,6 +151,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertFalse(persist_and_notify)
@@ -154,16 +166,20 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         self.assertEqual(wheel_timer.insert.call_count, 3)
         wheel_timer.insert.assert_has_calls(
             [
-                call(now=now, obj=user_id, then=new_state.last_active_ts + IDLE_TIMER),
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=new_state.last_active_ts + DEFAULT_IDLE_TIMER,
                 ),
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_active_ts + LAST_ACTIVE_GRANULARITY,
+                    then=new_state.last_user_sync_ts + DEFAULT_SYNC_ONLINE_TIMEOUT,
+                ),
+                call(
+                    now=now,
+                    obj=user_id,
+                    then=new_state.last_active_ts + DEFAULT_LAST_ACTIVE_GRANULARITY,
                 ),
             ],
             any_order=True,
@@ -177,7 +193,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         prev_state = UserPresenceState.default(user_id)
         prev_state = prev_state.copy_and_replace(
             state=PresenceState.ONLINE,
-            last_active_ts=now - LAST_ACTIVE_GRANULARITY - 10,
+            last_active_ts=now - DEFAULT_LAST_ACTIVE_GRANULARITY - 10,
             currently_active=True,
         )
 
@@ -193,6 +209,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertFalse(persist_and_notify)
@@ -205,16 +224,20 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         self.assertEqual(wheel_timer.insert.call_count, 3)
         wheel_timer.insert.assert_has_calls(
             [
-                call(now=now, obj=user_id, then=new_state.last_active_ts + IDLE_TIMER),
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=new_state.last_active_ts + DEFAULT_IDLE_TIMER,
                 ),
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_active_ts + LAST_ACTIVE_GRANULARITY,
+                    then=new_state.last_user_sync_ts + DEFAULT_SYNC_ONLINE_TIMEOUT,
+                ),
+                call(
+                    now=now,
+                    obj=user_id,
+                    then=new_state.last_active_ts + DEFAULT_LAST_ACTIVE_GRANULARITY,
                 ),
             ],
             any_order=True,
@@ -228,7 +251,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         prev_state = UserPresenceState.default(user_id)
         prev_state = prev_state.copy_and_replace(
             state=PresenceState.ONLINE,
-            last_active_ts=now - LAST_ACTIVE_GRANULARITY - 1,
+            last_active_ts=now - DEFAULT_LAST_ACTIVE_GRANULARITY - 1,
             currently_active=True,
         )
 
@@ -242,6 +265,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertTrue(persist_and_notify)
@@ -253,11 +279,15 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         self.assertEqual(wheel_timer.insert.call_count, 2)
         wheel_timer.insert.assert_has_calls(
             [
-                call(now=now, obj=user_id, then=new_state.last_active_ts + IDLE_TIMER),
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=new_state.last_active_ts + DEFAULT_IDLE_TIMER,
+                ),
+                call(
+                    now=now,
+                    obj=user_id,
+                    then=new_state.last_user_sync_ts + DEFAULT_SYNC_ONLINE_TIMEOUT,
                 ),
             ],
             any_order=True,
@@ -283,6 +313,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertFalse(persist_and_notify)
@@ -323,6 +356,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertTrue(persist_and_notify)
@@ -351,6 +387,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertTrue(persist_and_notify)
@@ -365,7 +404,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
                 call(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=new_state.last_user_sync_ts + DEFAULT_SYNC_ONLINE_TIMEOUT,
                 )
             ],
             any_order=True,
@@ -442,6 +481,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=True,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         wheel_timer.insert.assert_not_called()
@@ -506,6 +548,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         # Check that the user is offline.
@@ -556,7 +601,7 @@ class PresenceTimeoutTestCase(unittest.TestCase):
         state = UserPresenceState.default(user_id)
         state = state.copy_and_replace(
             state=PresenceState.ONLINE,
-            last_active_ts=now - IDLE_TIMER - 1,
+            last_active_ts=now - DEFAULT_IDLE_TIMER - 1,
             last_user_sync_ts=now,
             status_msg=status_msg,
         )
@@ -574,6 +619,9 @@ class PresenceTimeoutTestCase(unittest.TestCase):
             syncing_device_ids=set(),
             user_devices={device_id: device_state},
             now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNotNone(new_state)
@@ -594,7 +642,7 @@ class PresenceTimeoutTestCase(unittest.TestCase):
         state = UserPresenceState.default(user_id)
         state = state.copy_and_replace(
             state=PresenceState.BUSY,
-            last_active_ts=now - IDLE_TIMER - 1,
+            last_active_ts=now - DEFAULT_IDLE_TIMER - 1,
             last_user_sync_ts=now,
             status_msg=status_msg,
         )
@@ -612,6 +660,9 @@ class PresenceTimeoutTestCase(unittest.TestCase):
             syncing_device_ids=set(),
             user_devices={device_id: device_state},
             now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNotNone(new_state)
@@ -629,7 +680,7 @@ class PresenceTimeoutTestCase(unittest.TestCase):
         state = state.copy_and_replace(
             state=PresenceState.ONLINE,
             last_active_ts=0,
-            last_user_sync_ts=now - SYNC_ONLINE_TIMEOUT - 1,
+            last_user_sync_ts=now - DEFAULT_SYNC_ONLINE_TIMEOUT - 1,
             status_msg=status_msg,
         )
         device_state = UserDevicePresenceState(
@@ -646,6 +697,9 @@ class PresenceTimeoutTestCase(unittest.TestCase):
             syncing_device_ids=set(),
             user_devices={device_id: device_state},
             now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNotNone(new_state)
@@ -662,8 +716,8 @@ class PresenceTimeoutTestCase(unittest.TestCase):
         state = UserPresenceState.default(user_id)
         state = state.copy_and_replace(
             state=PresenceState.ONLINE,
-            last_active_ts=now - SYNC_ONLINE_TIMEOUT - 1,
-            last_user_sync_ts=now - SYNC_ONLINE_TIMEOUT - 1,
+            last_active_ts=now - DEFAULT_SYNC_ONLINE_TIMEOUT - 1,
+            last_user_sync_ts=now - DEFAULT_SYNC_ONLINE_TIMEOUT - 1,
             status_msg=status_msg,
         )
         device_state = UserDevicePresenceState(
@@ -680,6 +734,9 @@ class PresenceTimeoutTestCase(unittest.TestCase):
             syncing_device_ids={(user_id, device_id)},
             user_devices={device_id: device_state},
             now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNotNone(new_state)
@@ -715,6 +772,9 @@ class PresenceTimeoutTestCase(unittest.TestCase):
             syncing_device_ids=set(),
             user_devices={device_id: device_state},
             now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNotNone(new_state)
@@ -746,6 +806,9 @@ class PresenceTimeoutTestCase(unittest.TestCase):
             syncing_device_ids=set(),
             user_devices={device_id: device_state},
             now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNone(new_state)
@@ -766,7 +829,14 @@ class PresenceTimeoutTestCase(unittest.TestCase):
 
         # Note that this is a remote user so we do not have their device information.
         new_state = handle_timeout(
-            state, is_mine=False, syncing_device_ids=set(), user_devices={}, now=now
+            state,
+            is_mine=False,
+            syncing_device_ids=set(),
+            user_devices={},
+            now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNotNone(new_state)
@@ -783,7 +853,7 @@ class PresenceTimeoutTestCase(unittest.TestCase):
         state = UserPresenceState.default(user_id)
         state = state.copy_and_replace(
             state=PresenceState.ONLINE,
-            last_active_ts=now - LAST_ACTIVE_GRANULARITY - 1,
+            last_active_ts=now - DEFAULT_LAST_ACTIVE_GRANULARITY - 1,
             last_user_sync_ts=now,
             last_federation_update_ts=now,
             status_msg=status_msg,
@@ -802,6 +872,9 @@ class PresenceTimeoutTestCase(unittest.TestCase):
             syncing_device_ids=set(),
             user_devices={device_id: device_state},
             now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
         )
 
         self.assertIsNotNone(new_state)
@@ -860,7 +933,7 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
         self.assertEqual(state.state, PresenceState.ONLINE)
 
         # Advance such that the user should timeout.
-        self.reactor.advance(SYNC_ONLINE_TIMEOUT / 1000)
+        self.reactor.advance(DEFAULT_SYNC_ONLINE_TIMEOUT / 1000)
         self.reactor.pump([5])
 
         # Check that the user is now offline.
@@ -900,7 +973,7 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
         self.assertEqual(state.state, PresenceState.ONLINE)
 
         # Advance slightly and sync.
-        self.reactor.advance(SYNC_ONLINE_TIMEOUT / 1000 / 2)
+        self.reactor.advance(DEFAULT_SYNC_ONLINE_TIMEOUT / 1000 / 2)
         self.get_success(
             presence_handler.user_syncing(
                 self.user_id,
@@ -917,7 +990,7 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
         self.assertEqual(state.state, expected_state)
 
         # Advance such that the user's preloaded data times out, but not the new sync.
-        self.reactor.advance(SYNC_ONLINE_TIMEOUT / 1000 / 2)
+        self.reactor.advance(DEFAULT_SYNC_ONLINE_TIMEOUT / 1000 / 2)
         self.reactor.pump([5])
 
         # Check that the user is in the sync state (as the client is currently syncing still).
@@ -925,6 +998,118 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
             presence_handler.get_state(UserID.from_string(self.user_id))
         )
         self.assertEqual(state.state, sync_state)
+
+
+# Timer values used by `PresenceConfigurableTimersTestCase`, all larger than
+# the corresponding defaults.
+_CUSTOM_TIMERS_CONFIG = {
+    "presence": {
+        "last_active_granularity": "2m",
+        "sync_online_timeout": "3m",
+        "idle_timeout": "20m",
+    }
+}
+
+
+class PresenceConfigurableTimersTestCase(unittest.HomeserverTestCase):
+    """Tests that the presence state machine timers can be changed via the
+    `presence` config section.
+
+    Each test checks that nothing happens where the default timer would have
+    fired, and that the transition then occurs once the configured timer
+    elapses.
+    """
+
+    device_id = "dev-1"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.presence_handler = hs.get_presence_handler()
+        self.user_id = f"@test:{hs.config.server.server_name}"
+        self.user_id_obj = UserID.from_string(self.user_id)
+
+    def _get_state(self) -> UserPresenceState:
+        return self.get_success(self.presence_handler.get_state(self.user_id_obj))
+
+    @override_config(_CUSTOM_TIMERS_CONFIG)
+    def test_config_parsing(self) -> None:
+        config = self.hs.config.server
+        self.assertEqual(config.presence_last_active_granularity, 2 * 60 * 1000)
+        self.assertEqual(config.presence_sync_online_timeout, 3 * 60 * 1000)
+        self.assertEqual(config.presence_idle_timeout, 20 * 60 * 1000)
+
+    @override_config(_CUSTOM_TIMERS_CONFIG)
+    def test_sync_online_timeout(self) -> None:
+        """A user only goes offline once the configured sync timeout passes."""
+        with self.get_success(
+            self.presence_handler.user_syncing(
+                self.user_id, self.device_id, True, PresenceState.ONLINE
+            )
+        ):
+            pass
+
+        self.assertEqual(self._get_state().state, PresenceState.ONLINE)
+
+        # Well past the DEFAULT_SYNC_ONLINE_TIMEOUT, but short of the
+        # configured 3m: still online.
+        self.reactor.advance(2 * DEFAULT_SYNC_ONLINE_TIMEOUT / 1000)
+        self.reactor.pump([5])
+        self.assertEqual(self._get_state().state, PresenceState.ONLINE)
+
+        # Past the configured timeout: offline.
+        self.reactor.advance(3 * 60)
+        self.reactor.pump([5])
+        self.assertEqual(self._get_state().state, PresenceState.OFFLINE)
+
+    @override_config(_CUSTOM_TIMERS_CONFIG)
+    def test_idle_timeout(self) -> None:
+        """A continuously syncing but inactive user only goes idle once the
+        configured idle timeout passes."""
+        # Leave the sync open so the device never times out.
+        self.get_success(
+            self.presence_handler.user_syncing(
+                self.user_id, self.device_id, True, PresenceState.ONLINE
+            )
+        )
+
+        # Well past the DEFAULT_IDLE_TIMER, but short of the configured 20m:
+        # still online.
+        self.reactor.advance(2 * DEFAULT_IDLE_TIMER / 1000)
+        self.reactor.pump([5])
+        self.assertEqual(self._get_state().state, PresenceState.ONLINE)
+
+        # Past the configured timeout: idle.
+        self.reactor.advance(15 * 60)
+        self.reactor.pump([5])
+        self.assertEqual(self._get_state().state, PresenceState.UNAVAILABLE)
+
+    @override_config(_CUSTOM_TIMERS_CONFIG)
+    def test_last_active_granularity(self) -> None:
+        """A user remains "currently active" for the configured duration
+        after their last activity."""
+        with self.get_success(
+            self.presence_handler.user_syncing(
+                self.user_id, self.device_id, True, PresenceState.ONLINE
+            )
+        ):
+            pass
+
+        self.assertTrue(self._get_state().currently_active)
+
+        # Past the DEFAULT_LAST_ACTIVE_GRANULARITY, but short of the
+        # configured 2m: still currently active.
+        self.reactor.advance(90)
+        self.reactor.pump([5])
+        state = self._get_state()
+        self.assertEqual(state.state, PresenceState.ONLINE)
+        self.assertTrue(state.currently_active)
+
+        # Past the configured granularity (but short of the 3m sync timeout):
+        # no longer currently active, but still online.
+        self.reactor.advance(60)
+        self.reactor.pump([5])
+        state = self._get_state()
+        self.assertEqual(state.state, PresenceState.ONLINE)
+        self.assertFalse(state.currently_active)
 
 
 class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
@@ -951,8 +1136,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.get_success(
             worker_presence_handler.user_syncing(
                 self.user_id, self.device_id, True, PresenceState.ONLINE
-            ),
-            by=0.1,
+            )
         )
 
         # Check that if we wait a while without telling the handler the user has
@@ -980,14 +1164,14 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
 
         # Check that if we wait a while without telling the handler the user has
         # stopped syncing that their presence state doesn't get timed out.
-        self.reactor.advance(SYNC_ONLINE_TIMEOUT / 2)
+        self.reactor.advance(DEFAULT_SYNC_ONLINE_TIMEOUT / 2)
 
         state = self.get_success(self.presence_handler.get_state(self.user_id_obj))
         self.assertEqual(state.state, PresenceState.ONLINE)
         self.assertEqual(state.status_msg, status_msg)
 
         # Check that if the timeout fires, then the syncing user gets timed out
-        self.reactor.advance(SYNC_ONLINE_TIMEOUT)
+        self.reactor.advance(DEFAULT_SYNC_ONLINE_TIMEOUT)
 
         state = self.get_success(self.presence_handler.get_state(self.user_id_obj))
         # status_msg should remain even after going offline
@@ -1270,12 +1454,11 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-1",
                 affect_presence=dev_1_state != PresenceState.OFFLINE,
                 presence_state=dev_1_state,
-            ),
-            by=0.01,
+            )
         )
 
         # 2. Wait half the idle timer.
-        self.reactor.advance(IDLE_TIMER / 1000 / 2)
+        self.reactor.advance(DEFAULT_IDLE_TIMER / 1000 / 2)
         self.reactor.pump([0.1])
 
         # 3. Sync with the second device.
@@ -1285,8 +1468,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-2",
                 affect_presence=dev_2_state != PresenceState.OFFLINE,
                 presence_state=dev_2_state,
-            ),
-            by=0.01,
+            )
         )
 
         # 4. Assert the expected presence state.
@@ -1303,7 +1485,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         # When testing with workers, make another random sync (with any *different*
         # user) to keep the process information from expiring.
         #
-        # This is due to EXTERNAL_PROCESS_EXPIRY being equivalent to IDLE_TIMER.
+        # This is due to EXTERNAL_PROCESS_EXPIRY being equivalent to DEFAULT_IDLE_TIMER.
         if test_with_workers:
             with self.get_success(
                 worker_presence_handler.user_syncing(
@@ -1311,14 +1493,13 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                     "dev-3",
                     affect_presence=True,
                     presence_state=PresenceState.ONLINE,
-                ),
-                by=0.01,
+                )
             ):
                 pass
 
         # 5. Advance such that the first device should be discarded (the idle timer),
         # then pump so _handle_timeouts function to called.
-        self.reactor.advance(IDLE_TIMER / 1000 / 2)
+        self.reactor.advance(DEFAULT_IDLE_TIMER / 1000 / 2)
         self.reactor.pump([0.01])
 
         # 6. Assert the expected presence state.
@@ -1334,7 +1515,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
 
         # 7. Advance such that the second device should be discarded (half the idle timer),
         # then pump so _handle_timeouts function to called.
-        self.reactor.advance(IDLE_TIMER / 1000 / 2)
+        self.reactor.advance(DEFAULT_IDLE_TIMER / 1000 / 2)
         self.reactor.pump([0.1])
 
         # 8. The devices are still "syncing" (the sync context managers were never
@@ -1507,8 +1688,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-1",
                 affect_presence=dev_1_state != PresenceState.OFFLINE,
                 presence_state=dev_1_state,
-            ),
-            by=0.1,
+            )
         )
 
         # 2. Sync with the second device.
@@ -1518,8 +1698,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 "dev-2",
                 affect_presence=dev_2_state != PresenceState.OFFLINE,
                 presence_state=dev_2_state,
-            ),
-            by=0.1,
+            )
         )
 
         # 3. Assert the expected presence state.
@@ -1539,7 +1718,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
 
         # 5. Advance such that the first device should be discarded (the sync timeout),
         # then pump so _handle_timeouts function to called.
-        self.reactor.advance(SYNC_ONLINE_TIMEOUT / 1000)
+        self.reactor.advance(DEFAULT_SYNC_ONLINE_TIMEOUT / 1000)
         self.reactor.pump([5])
 
         # 6. Assert the expected presence state.
@@ -1562,7 +1741,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         if dev_1_state == PresenceState.BUSY or dev_2_state == PresenceState.BUSY:
             timeout = BUSY_ONLINE_TIMEOUT
         else:
-            timeout = SYNC_ONLINE_TIMEOUT
+            timeout = DEFAULT_SYNC_ONLINE_TIMEOUT
         self.reactor.advance(timeout / 1000)
         self.reactor.pump([5])
 
@@ -1625,8 +1804,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.get_success(
             worker_to_sync_against.get_presence_handler().user_syncing(
                 self.user_id, self.device_id, True, PresenceState.ONLINE
-            ),
-            by=0.1,
+            )
         )
 
         # Check against the main process that the user's presence did not change.
@@ -1636,7 +1814,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
 
         # Advance such that the device would be discarded if it was not busy,
         # then pump so _handle_timeouts function to called.
-        self.reactor.advance(IDLE_TIMER / 1000)
+        self.reactor.advance(DEFAULT_IDLE_TIMER / 1000)
         self.reactor.pump([5])
 
         # The account should still be busy.
@@ -1689,7 +1867,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(state.state, PresenceState.ONLINE)
 
         # The timeout should not fire and the state should be the same.
-        self.reactor.advance(SYNC_ONLINE_TIMEOUT)
+        self.reactor.advance(DEFAULT_SYNC_ONLINE_TIMEOUT)
         state = self.get_success(self.presence_handler.get_state(self.user_id_obj))
         self.assertEqual(state.state, PresenceState.ONLINE)
 

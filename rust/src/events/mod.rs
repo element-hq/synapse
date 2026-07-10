@@ -58,6 +58,7 @@ use pyo3::{
     wrap_pyfunction, Bound, IntoPyObject, PyAny, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
+use serde_json::Value;
 
 use crate::events::{
     constants::event_type::M_ROOM_MEMBER,
@@ -87,6 +88,8 @@ pub mod filter;
 pub mod formats;
 pub mod internal_metadata;
 pub mod json_object;
+pub mod relations;
+pub mod serialize;
 pub mod signatures;
 pub mod unsigned;
 pub mod utils;
@@ -107,9 +110,21 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<json_object::JsonObjectValuesView>()?;
     child_module.add_class::<json_object::JsonObjectItemsView>()?;
     child_module.add_class::<Event>()?;
+    child_module.add_class::<relations::BundledAggregations>()?;
+    child_module.add_class::<relations::ThreadAggregation>()?;
+    child_module.add_class::<serialize::EventFormat>()?;
+    child_module.add_class::<serialize::SerializeEventConfig>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_py, m)?)?;
     child_module.add_function(wrap_pyfunction!(redact_event_dict, m)?)?;
+    child_module.add_function(wrap_pyfunction!(serialize::serialize_events, m)?)?;
+    child_module.add_function(wrap_pyfunction!(serialize::format_event_raw, m)?)?;
+    child_module.add_function(wrap_pyfunction!(serialize::format_event_for_client_v1, m)?)?;
+    child_module.add_function(wrap_pyfunction!(serialize::format_event_for_client_v2, m)?)?;
+    child_module.add_function(wrap_pyfunction!(
+        serialize::format_event_for_client_v2_without_room_id,
+        m
+    )?)?;
 
     m.add_submodule(&child_module)?;
 
@@ -129,7 +144,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 /// metadata, rejection reason, and a reference to the room version that
 /// produced this event). See the module-level docs for the high-level
 /// design.
-#[pyclass(frozen, weakref)]
+#[pyclass(frozen, weakref, skip_from_py_object)]
 pub struct Event {
     /// The parsed event JSON.
     parsed_event: FormattedEvent,
@@ -593,8 +608,19 @@ impl Event {
         }
     }
 
-    #[getter]
-    fn redacts<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+    /// Returns the `redacts` field of this event, if it has one.
+    #[getter(redacts)]
+    fn redacts_py<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        let value = self.redacts();
+        value
+            .map(|v| pythonize(py, v).map_err(Into::into))
+            .transpose()
+    }
+}
+
+impl Event {
+    /// Returns the `redacts` field of this event, if it has one.
+    pub fn redacts(&self) -> Option<&Value> {
         let common = &self.parsed_event.common_fields;
         let value = if self.room_version.updated_redaction_rules {
             common.content.get_field(REDACTS)
@@ -602,8 +628,6 @@ impl Event {
             common.other_fields.get(REDACTS)
         };
         value
-            .map(|v| pythonize(py, v).map_err(Into::into))
-            .transpose()
     }
 }
 
