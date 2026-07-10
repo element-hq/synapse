@@ -241,8 +241,8 @@ properties:
       Use this option to include updates of other users' profiles in sync responses,
       for users who share rooms.
       
-      Note, requires an MSC4429 compatible client, and is currently limited to
-      legacy sync and local users only.
+      Note, requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429)
+      compatible client, and is currently limited to legacy sync and local users only.
     default: false
     examples:
       - true

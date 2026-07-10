@@ -321,7 +321,7 @@ include_profile_data_on_invite: false
 ### `include_profile_updates_in_sync`
 
 *(boolean)* Use this option to include updates of other users' profiles in sync responses, for users who share rooms.
-Note, requires an MSC4429 compatible client, and is currently limited to legacy sync and local users only. Defaults to `false`.
+Note, requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatible client, and is currently limited to legacy sync and local users only. Defaults to `false`.
 
 Example configuration:
 ```yaml
