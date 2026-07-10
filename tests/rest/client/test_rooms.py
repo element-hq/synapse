@@ -2710,7 +2710,11 @@ class RoomDelayedEventTestCase(RoomBase):
             channel = make_delayed_event_request()
             self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        # Simulate lowering the configured limit & applying it with a server restart
+        # Simulate restarting the server after having reconfigured the limit
+        # to be lower than the number of delayed events we just scheduled.
+        #
+        # Set the limit > 1 to test not having to wait for _all_ delayed events
+        # to be sent before being able to schedule a new one.
         self.hs.config.server.max_delayed_events_per_user = 2
 
         channel = make_delayed_event_request()
