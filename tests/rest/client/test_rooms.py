@@ -2579,7 +2579,7 @@ class RoomDelayedEventTestCase(RoomBase):
             },
         }
     )
-    def test_delayed_event_user_limit_exceeded(self) -> None:
+    def test_delayed_event_user_limit_reached(self) -> None:
         """Test that users cannot have more delayed events scheduled at once than allowed."""
         # Disable rate-limits for this user. We want to specifically test the storage-based limit, not the request limits
         self.get_success(
@@ -2631,7 +2631,7 @@ class RoomDelayedEventTestCase(RoomBase):
             },
         }
     )
-    def test_delayed_event_processed_user_limit_exceeded(self) -> None:
+    def test_delayed_event_processed_user_limit_reached(self) -> None:
         """
         Test that delayed events in the midst of being sent still count towards the limit of
         how many delayed events a user may have scheduled at once.
@@ -2687,7 +2687,7 @@ class RoomDelayedEventTestCase(RoomBase):
             },
         }
     )
-    def test_delayed_event_custom_user_limit_exceeded(self) -> None:
+    def test_delayed_event_user_limit_exceeded(self) -> None:
         """
         Test that delayed event limits work properly when
         the number of already scheduled events exceeds the configured limit.
