@@ -122,6 +122,7 @@ from synapse.types import (
 )
 from synapse.util.async_helpers import Linearizer
 from synapse.util.duration import Duration
+from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
 from synapse.util.wheel_timer import WheelTimer
 
@@ -972,6 +973,14 @@ class PresenceHandler(BasePresenceHandler):
                 Duration(minutes=1),
             )
 
+        if not self._presence_enabled and self.user_to_current_state:
+            # Presence is disabled but the database still contains non-offline
+            # presence states, i.e. presence used to be enabled. Nothing writes
+            # to the presence stream while presence is disabled, so without
+            # intervention clients would show the stale states forever. Send
+            # out one final round of updates marking everyone as offline.
+            self.clock.call_when_running(self._mark_stale_presence_as_offline)
+
         presence_wheel_timer_size_gauge.register_hook(
             homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): len(self.wheel_timer)},
@@ -1028,6 +1037,36 @@ class PresenceHandler(BasePresenceHandler):
             await self.store.update_presence(
                 [self.user_to_current_state[user_id] for user_id in unpersisted]
             )
+
+    @wrap_as_background_process("PresenceHandler._mark_stale_presence_as_offline")
+    async def _mark_stale_presence_as_offline(self) -> None:
+        """One-off job, run at startup when presence is disabled, that marks
+        any non-offline presence states left over from when presence was
+        enabled as offline, and streams the changes out to clients.
+        """
+        states = [
+            state.copy_and_replace(
+                state=PresenceState.OFFLINE,
+                status_msg=None,
+                currently_active=False,
+            )
+            for state in self.user_to_current_state.values()
+            if state.state != PresenceState.OFFLINE
+        ]
+        if not states:
+            return
+
+        logger.info(
+            "Presence is disabled: marking %d stale presence states as offline",
+            len(states),
+        )
+
+        self.user_to_current_state.update({state.user_id: state for state in states})
+
+        # There may be a lot of stale states (e.g. everyone that was online
+        # when presence was disabled), so persist them in batches.
+        for batch in batch_iter(states, 500):
+            await self._persist_and_notify(list(batch))
 
     async def _update_states(
         self,

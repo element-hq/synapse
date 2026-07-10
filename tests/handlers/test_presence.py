@@ -1000,6 +1000,105 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(state.state, sync_state)
 
+    @unittest.override_config({"presence": {"enabled": False}})
+    def test_restored_presence_flushed_offline_when_presence_disabled(self) -> None:
+        """If presence is disabled, any non-offline presence states left in the
+        database from when presence was enabled should be marked as offline at
+        startup, and the updates streamed out to clients.
+        """
+        main_store = self.hs.get_datastores().main
+        before_token = main_store.get_current_presence_token()
+
+        # Get the handler, which schedules the startup flush.
+        presence_handler = self.hs.get_presence_handler()
+
+        # Fire pending `call_when_running` hooks and let the flush complete.
+        self.reactor.run()
+        self.reactor.advance(0)
+
+        # The user should now be offline, both in memory and in the database.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(self.user_id))
+        )
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
+        db_state = self.get_success(main_store.get_presence_for_users([self.user_id]))[
+            self.user_id
+        ]
+        self.assertEqual(db_state.state, PresenceState.OFFLINE)
+
+        # The flush must advance the presence stream so that syncing clients
+        # are sent the offline updates.
+        self.assertGreater(main_store.get_current_presence_token(), before_token)
+
+
+class PresenceDisabledSyncTestCase(unittest.HomeserverTestCase):
+    """Tests that presence updates written while presence is disabled (i.e. the
+    one-shot "mark everyone as offline" updates sent at startup) still reach
+    clients over /sync.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    @unittest.override_config({"presence": {"enabled": False}})
+    def test_stale_offline_updates_sent_on_incremental_sync(self) -> None:
+        user1 = self.register_user("alice", "pass")
+        user1_tok = self.login(user1, "pass")
+        user2 = self.register_user("bob", "pass")
+        user2_tok = self.login(user2, "pass")
+
+        room_id = self.helper.create_room_as(user1, tok=user1_tok)
+        self.helper.join(room_id, user2, tok=user2_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=user2_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch = channel.json_body["next_batch"]
+
+        # Simulate the startup flush: an offline update for user1 written to
+        # the presence stream while presence is disabled.
+        now = self.clock.time_msec()
+        main_store = self.hs.get_datastores().main
+        self.get_success(
+            main_store.update_presence(
+                [
+                    UserPresenceState(
+                        user_id=user1,
+                        state=PresenceState.OFFLINE,
+                        last_active_ts=now,
+                        last_federation_update_ts=now,
+                        last_user_sync_ts=now,
+                        status_msg=None,
+                        currently_active=False,
+                    )
+                ]
+            )
+        )
+
+        # user2's incremental sync should include the offline update, even
+        # though presence is disabled.
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=user2_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        presence_events = channel.json_body["presence"]["events"]
+        self.assertEqual(
+            [(e["sender"], e["content"]["presence"]) for e in presence_events],
+            [(user1, PresenceState.OFFLINE)],
+        )
+
+        # Once caught up, further syncs include no presence.
+        next_batch = channel.json_body["next_batch"]
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=user2_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body.get("presence", {}).get("events", []), [])
+
 
 # Timer values used by `PresenceConfigurableTimersTestCase`, all larger than
 # the corresponding defaults.
