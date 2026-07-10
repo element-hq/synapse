@@ -1033,9 +1033,9 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
 
 
 class PresenceDisabledSyncTestCase(unittest.HomeserverTestCase):
-    """Tests that presence updates written while presence is disabled (i.e. the
-    one-shot "mark everyone as offline" updates sent at startup) still reach
-    clients over /sync.
+    """Tests that stale presence states left over from when presence was
+    enabled reach clients over /sync, and that the startup flush marks them as
+    offline and sends the offline updates down /sync too.
     """
 
     servlets = [
@@ -1046,7 +1046,7 @@ class PresenceDisabledSyncTestCase(unittest.HomeserverTestCase):
     ]
 
     @unittest.override_config({"presence": {"enabled": False}})
-    def test_stale_offline_updates_sent_on_incremental_sync(self) -> None:
+    def test_stale_presence_flushed_offline_and_sent_on_sync(self) -> None:
         user1 = self.register_user("alice", "pass")
         user1_tok = self.login(user1, "pass")
         user2 = self.register_user("bob", "pass")
@@ -1059,28 +1059,48 @@ class PresenceDisabledSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
         next_batch = channel.json_body["next_batch"]
 
-        # Simulate the startup flush: an offline update for user1 written to
-        # the presence stream while presence is disabled.
+        # Seed a stale online presence state for user1, left over from when
+        # presence was enabled: in the database, and in the presence handler's
+        # in-memory state (which at startup is preloaded from the database).
         now = self.clock.time_msec()
-        main_store = self.hs.get_datastores().main
-        self.get_success(
-            main_store.update_presence(
-                [
-                    UserPresenceState(
-                        user_id=user1,
-                        state=PresenceState.OFFLINE,
-                        last_active_ts=now,
-                        last_federation_update_ts=now,
-                        last_user_sync_ts=now,
-                        status_msg=None,
-                        currently_active=False,
-                    )
-                ]
-            )
+        stale_state = UserPresenceState(
+            user_id=user1,
+            state=PresenceState.ONLINE,
+            last_active_ts=now,
+            last_federation_update_ts=now,
+            last_user_sync_ts=now,
+            status_msg=None,
+            currently_active=True,
         )
+        main_store = self.hs.get_datastores().main
+        self.get_success(main_store.update_presence([stale_state]))
 
-        # user2's incremental sync should include the offline update, even
-        # though presence is disabled.
+        presence_handler = self.hs.get_presence_handler()
+        assert isinstance(presence_handler, PresenceHandler)
+        presence_handler.user_to_current_state[user1] = stale_state
+
+        # The stale state comes down user2's incremental sync, even though
+        # presence is disabled.
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=user2_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        presence_events = channel.json_body["presence"]["events"]
+        self.assertEqual(
+            [(e["sender"], e["content"]["presence"]) for e in presence_events],
+            [(user1, PresenceState.ONLINE)],
+        )
+        next_batch = channel.json_body["next_batch"]
+
+        # Run the startup flush, as scheduled when the presence writer starts
+        # up with presence disabled.
+        self.get_success(presence_handler._mark_stale_presence_as_offline())
+
+        # The stale state should have been marked offline in the database...
+        db_state = self.get_success(main_store.get_presence_for_users([user1]))[user1]
+        self.assertEqual(db_state.state, PresenceState.OFFLINE)
+
+        # ... and the offline update also comes down user2's sync.
         channel = self.make_request(
             "GET", f"/sync?since={next_batch}", access_token=user2_tok
         )
