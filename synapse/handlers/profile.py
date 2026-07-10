@@ -655,7 +655,7 @@ class ProfileHandler:
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
         by_admin: bool = False,
-        propagate: bool = False,
+        propagate: bool = True,
     ) -> None:
         """
         Dispatch setting a profile field value. This either happens in the same

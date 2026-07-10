@@ -426,7 +426,7 @@ class ProfileUpdateAction(str, enum.Enum):
     we always include the full profile of users who have joined a room the syncing
     user is a member of, where full profile means all the current profile values the
     client asked for, regardless of whether they have changed recently. This ensures
-    that clients have profile re-populated for any users who have recently left
+    that clients have profiles re-populated for any users who have recently left
     shared rooms.
 
     A scenario example would be as follows:
