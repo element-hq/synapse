@@ -361,21 +361,18 @@ class DelayedEventsHandler:
         # See https://github.com/element-hq/synapse/issues/18021
         await self._request_ratelimiter.ratelimit(requester)
 
-        max_delay = self._config.server.max_event_delay_duration
-        if (
-            not max_delay
-            # 0 is a valid config value but equivalent to disabling sending delayed events
-            or (limit := self._config.server.max_delayed_events_per_user) <= 0
-        ):
+        if not self._config.server.msc4140_enabled:
             raise SynapseError(
                 HTTPStatus.FORBIDDEN,
                 "Sending delayed events has been disallowed",
                 Codes.FORBIDDEN,
             )
-        if delay > max_delay:
+        if delay > self._config.server.max_event_delay_duration:
+            requested_delay = delay.as_millis()
+            max_delay = self._config.server.max_event_delay_duration.as_millis()
             raise SynapseError(
                 HTTPStatus.FORBIDDEN,
-                f"The requested delay ({delay.as_millis()}ms) exceeds the allowed maximum ({max_delay.as_millis()}ms)",
+                f"The requested delay ({requested_delay}ms) exceeds the allowed maximum ({max_delay}ms)",
                 Codes.FORBIDDEN,
             )
 
@@ -405,7 +402,7 @@ class DelayedEventsHandler:
             content=content,
             delay=delay,
             sticky_duration_ms=sticky_duration_ms,
-            limit=limit,
+            limit=self._config.server.max_delayed_events_per_user,
         )
 
         if self._repl_client is not None:
