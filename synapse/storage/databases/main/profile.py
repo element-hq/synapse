@@ -708,10 +708,10 @@ class ProfileWorkerStore(SQLBaseStore):
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
                 sql = """
-                      INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
-                      ON CONFLICT (user_id)
-                          DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields \
-                      """
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
+                ON CONFLICT (user_id)
+                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
+                """
 
                 txn.execute(
                     sql,
@@ -728,10 +728,10 @@ class ProfileWorkerStore(SQLBaseStore):
                 # You may be tempted to use json_patch instead of providing the parameters
                 # twice, but that recursively merges objects instead of replacing.
                 sql = """
-                      INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
-                      ON CONFLICT (user_id)
-                          DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?)) \
-                      """
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
+                ON CONFLICT (user_id)
+                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
+                """
                 # This will error if field_name has double quotes in it, but that's not
                 # possible due to the grammar.
                 json_field_name = f'$."{field_name}"'
