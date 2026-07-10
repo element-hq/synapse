@@ -505,7 +505,7 @@ class ProfileHandler:
                 self._notifier.on_new_event(
                     StreamKeyType.PROFILE_UPDATES,
                     stream_id,
-                    rooms=set(room_id),
+                    rooms={room_id},
                 )
 
     async def user_joined_room(self, user_id: UserID, room_id: str) -> None:
@@ -542,7 +542,7 @@ class ProfileHandler:
                 self._notifier.on_new_event(
                     StreamKeyType.PROFILE_UPDATES,
                     stream_id,
-                    rooms=set(room_id),
+                    rooms={room_id},
                 )
 
     async def dispatch_delete_profile_upon_deactivation(

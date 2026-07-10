@@ -2402,7 +2402,7 @@ class SyncHandler:
                         )
                         cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
                         # Only send this users field if we haven't recently sent it.
-                        # Our cache value to check against is an md5 of a string of
+                        # Our cache value to check against is a sha256 of a string of
                         # user ID + field name + value, which ensures if the value
                         # changes, we'll miss the cache, thus sending the field update
                         # to the syncing user.
