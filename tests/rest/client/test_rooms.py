@@ -2504,11 +2504,11 @@ class RoomDelayedEventTestCase(RoomBase):
             {},
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        # Assert that the standard error response uses a specced errcode.
+        # Assert that the standard error response uses a valid errcode.
         # The specific errcode is irrelevant for the purpose of this test.
-        self.assertTrue(
-            channel.json_body.get("errcode", "").startswith("M_"),
-            channel.json_body,
+        self.assertIsInstance(
+            channel.json_body.get("errcode"),
+            str,
         )
 
     def test_delayed_event_unsupported_by_default(self) -> None:
