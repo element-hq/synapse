@@ -156,7 +156,7 @@ class FilteringWorkerStore(SQLBaseStore):
         # filter_id is BIGINT UNSIGNED, so if it isn't a number, fail
         # with a coherent error message rather than 500 M_UNKNOWN.
         try:
-            int(filter_id)
+            filter_id = int(filter_id)
         except ValueError:
             raise SynapseError(400, "Invalid filter ID", Codes.INVALID_PARAM)
 

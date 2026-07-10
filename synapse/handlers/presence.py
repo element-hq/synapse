@@ -179,25 +179,26 @@ presence_wheel_timer_size_gauge = LaterGauge(
     labelnames=[SERVER_NAME_LABEL],
 )
 
-# If a user was last active in the last LAST_ACTIVE_GRANULARITY, consider them
-# "currently_active"
-LAST_ACTIVE_GRANULARITY = 60 * 1000
-
-# How long to wait until a new /events or /sync request before assuming
-# the client has gone.
-SYNC_ONLINE_TIMEOUT = 30 * 1000
+# Note: the timers deciding when a user goes idle or offline and how long
+# they count as "currently_active" are configurable, via the
+# `last_active_granularity`, `sync_online_timeout` and `idle_timeout` options
+# in the `presence` config section (see
+# `synapse.config.server.DEFAULT_LAST_ACTIVE_GRANULARITY` and friends for the
+# defaults).
 
 # How often a sync worker relays an unchanged sync-driven presence state to
-# the presence writer. Must be comfortably below SYNC_ONLINE_TIMEOUT (and
-# LAST_ACTIVE_GRANULARITY): the relayed updates are what feed the writer's
-# device last_sync_ts/last_active_ts timers, so relaying less often than
-# those timeouts would make users flap offline/inactive.
+# the presence writer. Must be comfortably below the (configurable) sync online
+# timeout and last-active granularity (see
+# `synapse.config.server.DEFAULT_SYNC_ONLINE_TIMEOUT` and friends): the relayed
+# updates are what feed the writer's device last_sync_ts/last_active_ts timers,
+# so relaying less often than those timeouts would make users flap
+# offline/inactive.
 SYNC_PRESENCE_RELAY_INTERVAL = 25 * 1000
-# Busy status waits longer, but does eventually go offline.
-BUSY_ONLINE_TIMEOUT = 60 * 60 * 1000
 
-# How long to wait before marking the user as idle. Compared against last active
-IDLE_TIMER = 5 * 60 * 1000
+# How long to wait until a device with busy status stops syncing before it
+# goes offline. Busy status waits longer than the (configurable) sync online
+# timeout, but does eventually go offline.
+BUSY_ONLINE_TIMEOUT = 60 * 60 * 1000
 
 # How often we expect remote servers to resend us presence.
 FEDERATION_TIMEOUT = 30 * 60 * 1000
@@ -212,9 +213,6 @@ EXTERNAL_PROCESS_EXPIRY = 5 * 60 * 1000
 # Delay before a worker tells the presence handler that a user has stopped
 # syncing.
 UPDATE_SYNCING_USERS = Duration(seconds=10)
-
-assert LAST_ACTIVE_GRANULARITY < IDLE_TIMER
-assert SYNC_PRESENCE_RELAY_INTERVAL < SYNC_ONLINE_TIMEOUT
 
 
 class BasePresenceHandler(abc.ABC):
@@ -232,6 +230,13 @@ class BasePresenceHandler(abc.ABC):
 
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
+
+        # The (configurable) presence state machine timers.
+        self._last_active_granularity = (
+            hs.config.server.presence_last_active_granularity
+        )
+        self._sync_online_timeout = hs.config.server.presence_sync_online_timeout
+        self._idle_timer = hs.config.server.presence_idle_timeout
 
         self._federation = None
         if hs.should_send_federation():
@@ -726,7 +731,11 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self.user_to_current_state[new_state.user_id] = new_state
             is_mine = self.is_mine_id(new_state.user_id)
             if not old_state or should_notify(
-                old_state, new_state, is_mine, self.server_name
+                old_state,
+                new_state,
+                is_mine,
+                self.server_name,
+                last_active_granularity=self._last_active_granularity,
             ):
                 state_to_notify.append(new_state)
 
@@ -871,7 +880,8 @@ class PresenceHandler(BasePresenceHandler):
         if self._track_presence:
             for state in self.user_to_current_state.values():
                 # Create a psuedo-device to properly handle time outs. This will
-                # be overridden by any "real" devices within SYNC_ONLINE_TIMEOUT.
+                # be overridden by any "real" devices within the sync online
+                # timeout.
                 pseudo_device_id = None
                 self._user_to_device_to_current_state[state.user_id] = {
                     pseudo_device_id: UserDevicePresenceState(
@@ -884,12 +894,14 @@ class PresenceHandler(BasePresenceHandler):
                 }
 
                 self.wheel_timer.insert(
-                    now=now, obj=state.user_id, then=state.last_active_ts + IDLE_TIMER
+                    now=now,
+                    obj=state.user_id,
+                    then=state.last_active_ts + self._idle_timer,
                 )
                 self.wheel_timer.insert(
                     now=now,
                     obj=state.user_id,
-                    then=state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=state.last_user_sync_ts + self._sync_online_timeout,
                 )
                 if self.is_mine_id(state.user_id):
                     self.wheel_timer.insert(
@@ -1076,6 +1088,9 @@ class PresenceHandler(BasePresenceHandler):
                     # When overriding disabled presence, don't kick off all the
                     # wheel timers.
                     persist=not self._track_presence,
+                    idle_timer=self._idle_timer,
+                    sync_online_timeout=self._sync_online_timeout,
+                    last_active_granularity=self._last_active_granularity,
                 )
 
                 if force_notify:
@@ -1188,6 +1203,9 @@ class PresenceHandler(BasePresenceHandler):
             syncing_user_devices=syncing_user_devices,
             user_to_devices=self._user_to_device_to_current_state,
             now=now,
+            idle_timer=self._idle_timer,
+            sync_online_timeout=self._sync_online_timeout,
+            last_active_granularity=self._last_active_granularity,
         )
 
         return await self._update_states(changes)
@@ -1775,6 +1793,8 @@ def should_notify(
     new_state: UserPresenceState,
     is_mine: bool,
     our_server_name: str,
+    *,
+    last_active_granularity: int,
 ) -> bool:
     """Decides if a presence state change should be sent to interested parties."""
     user_location = "remote"
@@ -1821,7 +1841,7 @@ def should_notify(
 
         if (
             new_state.last_active_ts - old_state.last_active_ts
-            > LAST_ACTIVE_GRANULARITY
+            > last_active_granularity
         ):
             # Only notify about last active bumps if we're not currently active
             if not new_state.currently_active:
@@ -1832,7 +1852,7 @@ def should_notify(
                 ).inc()
                 return True
 
-    elif new_state.last_active_ts - old_state.last_active_ts > LAST_ACTIVE_GRANULARITY:
+    elif new_state.last_active_ts - old_state.last_active_ts > last_active_granularity:
         # Always notify for a transition where last active gets bumped.
         notify_reason_counter.labels(
             locality=user_location,
@@ -2155,6 +2175,10 @@ def handle_timeouts(
     syncing_user_devices: AbstractSet[tuple[str, str | None]],
     user_to_devices: dict[str, dict[str | None, UserDevicePresenceState]],
     now: int,
+    *,
+    idle_timer: int,
+    sync_online_timeout: int,
+    last_active_granularity: int,
 ) -> list[UserPresenceState]:
     """Checks the presence of users that have timed out and updates as
     appropriate.
@@ -2165,6 +2189,11 @@ def handle_timeouts(
         syncing_user_devices: A set of (user ID, device ID) tuples with active syncs..
         user_to_devices: A map of user ID to device ID to UserDevicePresenceState.
         now: Current time in ms.
+        idle_timer: How long in ms before an inactive device is marked as idle.
+        sync_online_timeout: How long in ms after the last sync before a device
+            is marked as offline.
+        last_active_granularity: How long in ms a user counts as
+            "currently active" after their last activity.
 
     Returns:
         List of UserPresenceState updates
@@ -2181,6 +2210,9 @@ def handle_timeouts(
             syncing_user_devices,
             user_to_devices.get(user_id, {}),
             now,
+            idle_timer=idle_timer,
+            sync_online_timeout=sync_online_timeout,
+            last_active_granularity=last_active_granularity,
         )
         if new_state:
             changes[state.user_id] = new_state
@@ -2194,6 +2226,10 @@ def handle_timeout(
     syncing_device_ids: AbstractSet[tuple[str, str | None]],
     user_devices: dict[str | None, UserDevicePresenceState],
     now: int,
+    *,
+    idle_timer: int,
+    sync_online_timeout: int,
+    last_active_granularity: int,
 ) -> UserPresenceState | None:
     """Checks the presence of the user to see if any of the timers have elapsed
 
@@ -2203,6 +2239,11 @@ def handle_timeout(
         syncing_user_devices: A set of (user ID, device ID) tuples with active syncs..
         user_devices: A map of device ID to UserDevicePresenceState.
         now: Current time in ms.
+        idle_timer: How long in ms before an inactive device is marked as idle.
+        sync_online_timeout: How long in ms after the last sync before a device
+            is marked as offline.
+        last_active_granularity: How long in ms a user counts as
+            "currently active" after their last activity.
 
     Returns:
         A UserPresenceState update or None if no update.
@@ -2220,7 +2261,7 @@ def handle_timeout(
         offline_devices = []
         for device_id, device_state in user_devices.items():
             if device_state.state == PresenceState.ONLINE:
-                if now - device_state.last_active_ts > IDLE_TIMER:
+                if now - device_state.last_active_ts > idle_timer:
                     # Currently online, but last activity ages ago so auto
                     # idle
                     device_state.state = PresenceState.UNAVAILABLE
@@ -2241,7 +2282,7 @@ def handle_timeout(
                 online_timeout = (
                     BUSY_ONLINE_TIMEOUT
                     if device_state.state == PresenceState.BUSY
-                    else SYNC_ONLINE_TIMEOUT
+                    else sync_online_timeout
                 )
                 if now - sync_or_active > online_timeout:
                     # Mark the device as going offline.
@@ -2260,7 +2301,7 @@ def handle_timeout(
                 state = state.copy_and_replace(state=new_presence)
                 changed = True
 
-        if now - state.last_active_ts > LAST_ACTIVE_GRANULARITY:
+        if now - state.last_active_ts > last_active_granularity:
             # So that we send down a notification that we've
             # stopped updating.
             changed = True
@@ -2289,6 +2330,10 @@ def handle_update(
     wheel_timer: WheelTimer,
     now: int,
     persist: bool,
+    *,
+    idle_timer: int,
+    sync_online_timeout: int,
+    last_active_granularity: int,
 ) -> tuple[UserPresenceState, bool, bool]:
     """Given a presence update:
         1. Add any appropriate timers.
@@ -2303,6 +2348,11 @@ def handle_update(
         now: Time now in ms
         persist: True if this state should persist until another update occurs.
             Skips insertion into wheel timers.
+        idle_timer: How long in ms before an inactive device is marked as idle.
+        sync_online_timeout: How long in ms after the last sync before a device
+            is marked as offline.
+        last_active_granularity: How long in ms a user counts as
+            "currently active" after their last activity.
 
     Returns:
         3-tuple: `(new_state, persist_and_notify, federation_ping)` where:
@@ -2322,17 +2372,17 @@ def handle_update(
             # Idle timer
             if not persist:
                 wheel_timer.insert(
-                    now=now, obj=user_id, then=new_state.last_active_ts + IDLE_TIMER
+                    now=now, obj=user_id, then=new_state.last_active_ts + idle_timer
                 )
 
-            active = now - new_state.last_active_ts < LAST_ACTIVE_GRANULARITY
+            active = now - new_state.last_active_ts < last_active_granularity
             new_state = new_state.copy_and_replace(currently_active=active)
 
             if active and not persist:
                 wheel_timer.insert(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_active_ts + LAST_ACTIVE_GRANULARITY,
+                    then=new_state.last_active_ts + last_active_granularity,
                 )
 
         if new_state.state != PresenceState.OFFLINE:
@@ -2341,7 +2391,7 @@ def handle_update(
                 wheel_timer.insert(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=new_state.last_user_sync_ts + sync_online_timeout,
                 )
 
             last_federate = new_state.last_federation_update_ts
@@ -2367,7 +2417,13 @@ def handle_update(
             )
 
     # Check whether the change was something worth notifying about
-    if should_notify(prev_state, new_state, is_mine, our_server_name):
+    if should_notify(
+        prev_state,
+        new_state,
+        is_mine,
+        our_server_name,
+        last_active_granularity=last_active_granularity,
+    ):
         new_state = new_state.copy_and_replace(last_federation_update_ts=now)
         persist_and_notify = True
 
