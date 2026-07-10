@@ -530,10 +530,34 @@ class WorkerPresenceHandler(BasePresenceHandler):
         # syncing but we haven't notified the presence writer of that yet
         self._user_devices_going_offline: dict[tuple[str, str | None], int] = {}
 
+        # How often to relay an unchanged sync-driven presence state to the
+        # presence writer. The relayed updates are what feed the writer's device
+        # last_sync_ts/last_active_ts timers, so this must sit comfortably below
+        # the timers it feeds — the (configurable) sync online timeout and
+        # last-active granularity — or users would flap offline / lose
+        # "currently active" between relays. We use 5/6 of the tighter of the
+        # two, i.e. the historic 25s at the default 30s sync online timeout.
+        self._sync_presence_relay_interval = (
+            min(self._sync_online_timeout, self._last_active_granularity) * 5 // 6
+        )
+
+        # (user_id, device_id) -> (state, last_sent_ms) of the most recent
+        # sync-driven presence update we proxied to the presence writer. Used
+        # to suppress the per-sync-request set_state/bump calls, which are
+        # no-ops on the writer at finer granularity than its timers: while
+        # the state is unchanged there is no point relaying more than one
+        # update per relay interval. Entries older than the window are swept by
+        # `_sweep_last_sent_presence`.
+        self._last_sent_presence: dict[tuple[str, str | None], tuple[str, int]] = {}
+
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS)
+        if self._track_presence:
+            self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS)
+            self.clock.looping_call(
+                self._sweep_last_sent_presence, Duration(minutes=30)
+            )
 
         hs.register_async_shutdown_handler(
             phase="before",
@@ -576,6 +600,8 @@ class WorkerPresenceHandler(BasePresenceHandler):
         sending a stopped syncing immediately followed by a started syncing
         notification to the presence writer
         """
+        if not self._track_presence:
+            return
         self._user_devices_going_offline[(user_id, device_id)] = self.clock.time_msec()
 
     def send_stop_syncing(self) -> None:
@@ -589,6 +615,22 @@ class WorkerPresenceHandler(BasePresenceHandler):
             if now - last_sync_ms > UPDATE_SYNCING_USERS.as_millis():
                 self._user_devices_going_offline.pop((user_id, device_id), None)
                 self.send_user_sync(user_id, device_id, False, last_sync_ms)
+                # Once the writer knows the device stopped syncing it may time
+                # the user out, so if the device comes back we must relay its
+                # state again rather than suppress it as a repeat.
+                self._last_sent_presence.pop((user_id, device_id), None)
+
+    def _sweep_last_sent_presence(self) -> None:
+        """Drop expired presence-throttling entries.
+
+        Entries should be dropped in `send_stop_syncing`, but we add a safety
+        net here to ensure that the dict deesn't grow unbounded.
+        """
+        now = self.clock.time_msec()
+
+        for key, (_, last_sent_ms) in list(self._last_sent_presence.items()):
+            if now - last_sent_ms >= self._sync_presence_relay_interval:
+                self._last_sent_presence.pop(key, None)
 
     async def user_syncing(
         self,
@@ -606,7 +648,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
             return _NullContextManager()
 
         # Note that this causes last_active_ts to be incremented which is not
-        # what the spec wants.
+        # what the spec wants. (This call is throttled in `set_state`: while
+        # the state is unchanged, only one update per relay interval is relayed
+        # to the presence writer.)
         await self.set_state(
             UserID.from_string(user_id),
             device_id,
@@ -743,6 +787,28 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if not self._track_presence:
             return
 
+        now = self.clock.time_msec()
+        if is_sync and not force_notify:
+            # Sync-driven updates arrive on every /sync request, which is far
+            # finer-grained than any of the writer's presence timers need:
+            # while the state is unchanged, relaying one update per relay
+            # interval is enough to keep them fed. State changes always go
+            # through immediately.
+            last_sent = self._last_sent_presence.get((user_id, device_id))
+            if last_sent is not None:
+                last_presence, last_sent_ms = last_sent
+                if (
+                    presence == last_presence
+                    and now - last_sent_ms < self._sync_presence_relay_interval
+                ):
+                    return
+            self._last_sent_presence[(user_id, device_id)] = (presence, now)
+        else:
+            # An explicit (non-sync) update doesn't refresh the writer's
+            # last_sync_ts, so it must not count as a recent relay: drop any
+            # entry so the next sync-driven update goes through.
+            self._last_sent_presence.pop((user_id, device_id), None)
+
         # Proxy request to instance that writes presence
         await self._set_state_client(
             instance_name=self._presence_writer_instance,
@@ -763,8 +829,25 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if not self._track_presence:
             return
 
-        # Proxy request to instance that writes presence
         user_id = user.to_string()
+
+        # A bump's only effects on the writer are updating last_active_ts and
+        # flipping an idle device back online. Going idle takes far longer
+        # than the relay window, so if we relayed an *online* update within
+        # the window the user cannot have gone idle since, and this bump is a
+        # no-op: skip it. Bumps after any other state (or an unknown one) go
+        # through immediately, as they may un-idle the device.
+        now = self.clock.time_msec()
+        last_sent = self._last_sent_presence.get((user_id, device_id))
+        if (
+            last_sent is not None
+            and last_sent[0] == PresenceState.ONLINE
+            and now - last_sent[1] < self._sync_presence_relay_interval
+        ):
+            return
+        self._last_sent_presence[(user_id, device_id)] = (PresenceState.ONLINE, now)
+
+        # Proxy request to instance that writes presence
         await self._bump_active_client(
             instance_name=self._presence_writer_instance,
             user_id=user_id,
