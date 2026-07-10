@@ -1,0 +1,1 @@
+Add an index to `sliding_sync_connection_lazy_members` to speed up deleting old sliding sync connection positions.
