@@ -1255,6 +1255,48 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         state = self.get_success(self.presence_handler.get_state(self.user_id_obj))
         self.assertEqual(state.state, PresenceState.OFFLINE)
 
+    def test_external_process_keepalive(self) -> None:
+        """A process that keeps sending keep-alives should not have its syncing
+        users expired, even if no user starts/stops/changes syncing.
+
+        This is what stops a worker whose users are all quietly syncing (and so
+        which sends no USER_SYNC commands under the pure-USER_SYNC model) from
+        being expired and having all of its users marked offline.
+        """
+        user_id = f"@test:{self.hs.config.server.server_name}"
+        user_id_obj = UserID.from_string(user_id)
+        process_id = "proc-1"
+
+        # A user starts syncing on the external process.
+        self.get_success(
+            self.presence_handler.update_external_syncs_row(
+                process_id,
+                user_id,
+                "dev-1",
+                True,
+                PresenceState.ONLINE,
+                self.clock.time_msec(),
+            )
+        )
+        state = self.get_success(self.presence_handler.get_state(user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        # Advance past the expiry twice, sending a keep-alive each time in
+        # between. The user should stay online throughout.
+        for _ in range(3):
+            self.reactor.advance(EXTERNAL_PROCESS_EXPIRY * 0.75 / 1000)
+            self.get_success(
+                self.presence_handler.update_external_syncs_keepalive(process_id)
+            )
+
+        state = self.get_success(self.presence_handler.get_state(user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        # Once the keep-alives stop, the process is expired and the user times out.
+        self.reactor.advance(EXTERNAL_PROCESS_EXPIRY * 2 / 1000)
+        state = self.get_success(self.presence_handler.get_state(user_id_obj))
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
     def test_user_goes_offline_by_timeout_status_msg_remain(self) -> None:
         """Test that if a user doesn't update the records for a while
         users presence goes `OFFLINE` because of timeout and `status_msg` remains.
@@ -1585,12 +1627,15 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         Test the behaviour of multiple devices syncing at the same time.
 
         Roughly the user's presence state should be set to the "highest" priority
-        of all the devices. When a device then goes offline its state should be
-        discarded and the next highest should win.
+        of all the devices.
 
-        Note that these tests use the idle timer (and don't close the syncs), it
-        is unlikely that a *single* sync would last this long, but is close enough
-        to continually syncing with that current state.
+        The syncs are never closed, i.e. each device keeps syncing with a fixed
+        state. A device that is actively syncing is treated as active and is *not*
+        auto-idled (a client that wants to appear idle says so via the sync's
+        presence state), so the combined state does not change as time passes.
+        This matches a client that continually re-syncs with the same state; it is
+        only once a device stops syncing that its state is discarded (see
+        test_set_presence_from_non_syncing_multi_device).
         """
         user_id = f"@test:{self.hs.config.server.server_name}"
 
@@ -1628,6 +1673,12 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 presence_state=dev_2_state,
             )
         )
+
+        # On a worker the sync notifies the presence writer over replication
+        # (a USER_SYNC command); pump the reactor so it is delivered and applied
+        # before we assert.
+        if test_with_workers:
+            self.reactor.pump([0.1])
 
         # 4. Assert the expected presence state.
         state = self.get_success(
@@ -1858,6 +1909,12 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                 presence_state=dev_2_state,
             )
         )
+
+        # On a worker the syncs notify the presence writer over replication
+        # (USER_SYNC commands); pump the reactor so they are delivered and applied
+        # before we assert.
+        if test_with_workers:
+            self.reactor.pump([0.1])
 
         # 3. Assert the expected presence state.
         state = self.get_success(
@@ -2481,9 +2538,10 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
 
 
 class WorkerPresenceThrottleTestCase(BaseMultiWorkerStreamTestCase):
-    """Tests that sync workers suppress the per-sync-request presence updates
-    that the presence writer would discard anyway, while relaying genuine
-    state changes immediately."""
+    """Tests that sync workers relay no per-sync-request presence updates to
+    the presence writer (presence is carried by edge-triggered USER_SYNC
+    commands instead), and that the per-user-action activity bumps are
+    throttled."""
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.user_id = f"@throttled:{hs.config.server.server_name}"
@@ -2525,133 +2583,162 @@ class WorkerPresenceThrottleTestCase(BaseMultiWorkerStreamTestCase):
             presence.user_syncing(self.user_id, self.device_id, True, state),
         )
 
-    def test_repeated_syncs_are_throttled(self) -> None:
+    def test_syncs_relay_no_set_state(self) -> None:
+        """Syncs no longer proxy a set_state to the writer at all: presence is
+        carried by USER_SYNC, so the writer still sees the user come online."""
         presence, set_state_calls, _ = self._make_sync_worker()
 
-        # Several syncs in quick succession only relay one set_state.
         for _ in range(3):
             self._sync(presence)
-        self.assertEqual(len(set_state_calls), 1)
+        self.assertEqual(len(set_state_calls), 0)
 
-        # The user did come online on the writer.
+        # The user did come online on the writer (via USER_SYNC). Pump the
+        # reactor so the replicated command is delivered and applied before we
+        # assert.
+        self.reactor.pump([0.1])
         state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
         self.assertEqual(state.state, PresenceState.ONLINE)
 
-        # Once the relay window has passed, the next sync relays again.
-        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
-        self._sync(presence)
-        self.assertEqual(len(set_state_calls), 2)
-
-    def test_state_changes_are_relayed_immediately(self) -> None:
+    def test_sync_state_changes_reach_writer(self) -> None:
+        """A change in the state a device is syncing with reaches the writer
+        immediately (via a fresh USER_SYNC), still without any set_state."""
         presence, set_state_calls, _ = self._make_sync_worker()
 
+        # After each sync, pump the reactor so the replicated USER_SYNC command
+        # is delivered and applied before we assert on the writer's state.
         self._sync(presence, PresenceState.ONLINE)
-        self._sync(presence, PresenceState.UNAVAILABLE)
-        self._sync(presence, PresenceState.ONLINE)
-        self.assertEqual(len(set_state_calls), 3)
+        self.reactor.pump([0.1])
+        state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
 
-        # A repeat of the current state within the window is suppressed.
+        self._sync(presence, PresenceState.UNAVAILABLE)
+        self.reactor.pump([0.1])
+        state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
+        self.assertEqual(state.state, PresenceState.UNAVAILABLE)
+
         self._sync(presence, PresenceState.ONLINE)
-        self.assertEqual(len(set_state_calls), 3)
+        self.reactor.pump([0.1])
+        state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        self.assertEqual(len(set_state_calls), 0)
 
     def test_resends_after_device_stops_syncing(self) -> None:
         """After a USER_SYNC stop is sent the writer may time the user out, so
-        a device that reconnects within the window must be relayed afresh."""
+        a device that reconnects must be told to the writer afresh."""
         presence, set_state_calls, _ = self._make_sync_worker()
 
         with self._sync(presence):
             pass
-        self.assertEqual(len(set_state_calls), 1)
 
         # Wait for the going-offline grace period to elapse: USER_SYNC stop is
-        # sent and the throttle entry evicted. The writer then times the user
-        # out to offline. Advance in steps (rather than one jump) so the
-        # replicated stop command is delivered before the writer's timeout
-        # loop fires (which only starts 30s after startup).
+        # sent. The writer then times the user out to offline. Advance in steps
+        # (rather than one jump) so the replicated stop command is delivered
+        # before the writer's timeout loop fires (which only starts 30s after
+        # startup).
         for _ in range(4):
             self.reactor.advance(12)
         state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
         self.assertEqual(state.state, PresenceState.OFFLINE)
 
-        # Reconnecting relays the state immediately, even though the presence
-        # value is unchanged from the last relayed one.
+        # Reconnecting sends a fresh USER_SYNC, even though the presence value
+        # is unchanged from the last one sent, and brings the user back online.
         self._sync(presence)
-        self.assertEqual(len(set_state_calls), 2)
+        self.reactor.pump([0.1])
         state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
         self.assertEqual(state.state, PresenceState.ONLINE)
 
+        self.assertEqual(len(set_state_calls), 0)
+
     def test_bumps_are_throttled(self) -> None:
-        presence, set_state_calls, bump_calls = self._make_sync_worker()
+        presence, _, bump_calls = self._make_sync_worker()
 
-        # While we recently relayed an online state, bumps are suppressed.
         self._sync(presence, PresenceState.ONLINE)
-        for _ in range(3):
-            self.get_success(
-                presence.bump_presence_active_time(self.user_id_obj, self.device_id),
-            )
-        self.assertEqual(len(bump_calls), 0)
 
-        # After the window passes, a bump goes through (and then suppresses
-        # further bumps).
-        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
-        for _ in range(2):
+        # The first bump is relayed; repeats within the window are suppressed.
+        for _ in range(3):
             self.get_success(
                 presence.bump_presence_active_time(self.user_id_obj, self.device_id),
             )
         self.assertEqual(len(bump_calls), 1)
 
+        # After the window passes, the next bump goes through (and then
+        # suppresses further bumps).
+        self.reactor.advance(presence._bump_relay_interval / 1000 + 1)
+        for _ in range(2):
+            self.get_success(
+                presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+            )
+        self.assertEqual(len(bump_calls), 2)
+
     def test_explicit_set_state_always_relayed_and_resets(self) -> None:
         """An explicit (non-sync) set_state is always relayed, and resets the
-        throttle so the next sync-driven update is relayed afresh."""
-        presence, set_state_calls, _ = self._make_sync_worker()
-
-        self._sync(presence, PresenceState.ONLINE)
-        self.assertEqual(len(set_state_calls), 1)
-
-        # An explicit update of the same state within the window still goes
-        # through (it isn't sync-driven)...
-        self.get_success(
-            presence.set_state(
-                self.user_id_obj,
-                self.device_id,
-                {"presence": PresenceState.ONLINE},
-            ),
-        )
-        self.assertEqual(len(set_state_calls), 2)
-
-        # ...and the following sync-driven update is relayed rather than
-        # suppressed, re-establishing the writer's sync timestamps.
-        self._sync(presence, PresenceState.ONLINE)
-        self.assertEqual(len(set_state_calls), 3)
-
-    def test_bump_after_non_online_state_goes_through(self) -> None:
+        bump throttle: the state just set may be one a bump would un-idle, so
+        the next bump must be relayed afresh."""
         presence, set_state_calls, bump_calls = self._make_sync_worker()
 
-        # The user is unavailable; a bump may un-idle them so it must not be
-        # suppressed.
-        self._sync(presence, PresenceState.UNAVAILABLE)
         self.get_success(
             presence.bump_presence_active_time(self.user_id_obj, self.device_id),
         )
         self.assertEqual(len(bump_calls), 1)
 
+        self.get_success(
+            presence.set_state(
+                self.user_id_obj,
+                self.device_id,
+                {"presence": PresenceState.UNAVAILABLE},
+            ),
+        )
+        self.assertEqual(len(set_state_calls), 1)
+
+        # A bump within the window is relayed rather than suppressed, as it
+        # un-idles the state just set.
+        self.get_success(
+            presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+        )
+        self.assertEqual(len(bump_calls), 2)
+
+    def test_sync_state_change_resets_bump_throttle(self) -> None:
+        """A change in the state a device is syncing with resets the bump
+        throttle, so a bump that may un-idle the new state goes through."""
+        presence, _, bump_calls = self._make_sync_worker()
+
+        self._sync(presence, PresenceState.ONLINE)
+        self.get_success(
+            presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+        )
+        self.assertEqual(len(bump_calls), 1)
+
+        # The device switches to syncing as unavailable; a following bump may
+        # un-idle it so it must not be suppressed.
+        self._sync(presence, PresenceState.UNAVAILABLE)
+        self.get_success(
+            presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+        )
+        self.assertEqual(len(bump_calls), 2)
+
     @override_config({"presence": {"sync_online_timeout": "12s"}})
     def test_relay_interval_scales_with_config(self) -> None:
         """The throttle window is derived from the configurable presence timers,
-        so it stays comfortably below a lowered sync online timeout rather than
-        being a hardcoded 25s (which would make users flap)."""
-        presence, set_state_calls, _ = self._make_sync_worker()
+        so it stays comfortably below them rather than being a hardcoded 25s."""
+        presence, _, bump_calls = self._make_sync_worker()
 
         # 5/6 of min(12s sync online timeout, 60s default last-active
         # granularity).
-        self.assertEqual(presence._sync_presence_relay_interval, 10 * 1000)
+        self.assertEqual(presence._bump_relay_interval, 10 * 1000)
 
-        # A repeat within the (now shorter) window is still suppressed...
-        self._sync(presence)
-        self._sync(presence)
-        self.assertEqual(len(set_state_calls), 1)
+        # A repeated bump within the (now shorter) window is still suppressed...
+        self.get_success(
+            presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+        )
+        self.get_success(
+            presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+        )
+        self.assertEqual(len(bump_calls), 1)
 
-        # ...and once it passes, the next sync relays again.
-        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
-        self._sync(presence)
-        self.assertEqual(len(set_state_calls), 2)
+        # ...and once it passes, the next bump relays again.
+        self.reactor.advance(presence._bump_relay_interval / 1000 + 1)
+        self.get_success(
+            presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+        )
+        self.assertEqual(len(bump_calls), 2)
