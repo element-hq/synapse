@@ -562,7 +562,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         )
                     if (
                         not prev_member_event
-                        or prev_member_event.membership == Membership.LEAVE
+                        or prev_member_event.membership != Membership.JOIN
                     ):
                         # Notify the profile handler. We only want to do this once
                         # in a multi-worker setup, so we can't dispatch a hook to all workers.
@@ -1611,10 +1611,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             prev_member_event = None
             if prev_member_event_id:
                 prev_member_event = await self.store.get_event(prev_member_event_id)
-            if (
-                not prev_member_event
-                or prev_member_event.membership == Membership.LEAVE
-            ):
+            if not prev_member_event or prev_member_event.membership != Membership.JOIN:
                 # Notify the profile handler. We only want to do this once
                 # in a multi-worker setup, so we can't dispatch a hook to all workers.
                 if self._is_profile_worker:
