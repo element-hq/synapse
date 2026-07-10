@@ -1433,13 +1433,11 @@ class FederationClient(FederationBase):
             # With the v1 invite API, `invite_room_state` is carried inside the event
             # instead of a separate field like in v2 so we must munge it in ourselves
             event_json = pdu.get_pdu_json(time_now)
-            event_json.setdefault("unsigned", {})["invite_room_state"] = (
-                [
-                    # Use full PDU's according to MSC4311
-                    state_event.get_pdu_json(time_now)
-                    for state_event in state_events.values()
-                ],
-            )
+            event_json.setdefault("unsigned", {})["invite_room_state"] = [
+                # Use full PDU's according to MSC4311
+                state_event.get_pdu_json(time_now)
+                for state_event in state_events.values()
+            ]
 
             _, content = await self.transport_layer.send_invite_v1(
                 destination=destination,
