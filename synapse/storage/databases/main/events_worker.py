@@ -2702,7 +2702,10 @@ class EventsWorkerStore(SQLBaseStore):
                 keyvalues={"event_id": event_id},
                 values={
                     "reason": rejection_reason,
-                    "last_check": self.clock.time_msec(),
+                    # `last_check` is a TEXT column, so store the timestamp as a
+                    # string rather than relying on the driver to coerce an int.
+                    # (Ideally we'd fix the schema, but that is non-trivial)
+                    "last_check": str(self.clock.time_msec()),
                 },
             )
         self.db_pool.simple_update_txn(
