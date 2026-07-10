@@ -413,8 +413,9 @@ class ProfileFields:
 class ProfileUpdateAction(str, enum.Enum):
     """
     Enum representing the action of a row in the profile updates stream tables.
-    These actions are used to determine how profiles, and what data is included in the
-    sync responses, depending on field updates and room membership changes.
+    The action determines whether a profile field update has occurred, or whether
+    something else has happened that the sync code should know about, for example
+    a user joining or leaving a room.
     """
 
     JOINED_ROOM = "joined_room"
