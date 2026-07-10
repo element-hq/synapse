@@ -238,7 +238,7 @@ properties:
   include_profile_updates_in_sync:
     type: boolean
     description: >-
-      Use this option to include updates of other users profiles in sync responses,
+      Use this option to include updates of other users' profiles in sync responses,
       for users who share rooms.
       
       Note, requires an MSC4429 compatible client, and is currently limited to
