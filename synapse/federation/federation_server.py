@@ -800,14 +800,14 @@ class FederationServer(FederationBase):
         if pdu.event_id != expected_event_id:
             raise SynapseError(
                 400,
-                Codes.INVALID_PARAM,
                 "Invite event ID must match event ID specified in the federation `/invite` request",
+                Codes.INVALID_PARAM,
             )
         if pdu.room_id != expected_room_id:
             raise SynapseError(
                 400,
-                Codes.INVALID_PARAM,
                 "The room_id specified in the invite event must match room ID specified in the federation `/invite` request",
+                Codes.INVALID_PARAM,
             )
         if await self._spam_checker_module_callbacks.should_drop_federated_event(pdu):
             logger.info(
