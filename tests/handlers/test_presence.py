@@ -411,6 +411,51 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             any_order=True,
         )
 
+    def test_online_while_syncing_stays_currently_active(self) -> None:
+        """A syncing user is treated as active even if their last active time is
+        stale, so they stay `currently_active` (and don't flip back and forth)
+        now that a sync no longer bumps their last active time on every request.
+        """
+        wheel_timer = Mock()
+        user_id = "@foo:bar"
+        now = 5000000
+
+        prev_state = UserPresenceState.default(user_id)
+        prev_state = prev_state.copy_and_replace(
+            state=PresenceState.ONLINE,
+            last_active_ts=now - DEFAULT_LAST_ACTIVE_GRANULARITY - 1,
+            currently_active=True,
+        )
+
+        new_state = prev_state.copy_and_replace(state=PresenceState.ONLINE)
+
+        state, persist_and_notify, _ = handle_update(
+            prev_state,
+            new_state,
+            is_mine=True,
+            our_server_name=self.hs.hostname,
+            wheel_timer=wheel_timer,
+            now=now,
+            persist=False,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
+            is_syncing=True,
+        )
+
+        # Despite the stale last active time, the user stays currently active
+        # because they are syncing, so there's nothing to notify about.
+        self.assertTrue(state.currently_active)
+        self.assertFalse(persist_and_notify)
+
+        # A federation ping timer is inserted so a quietly-syncing user is still
+        # re-checked (and keeps sending keep-alives) once their other timers lapse.
+        wheel_timer.insert.assert_any_call(
+            now=now,
+            obj=user_id,
+            then=new_state.last_federation_update_ts + FEDERATION_PING_INTERVAL,
+        )
+
     def test_persisting_presence_updates(self) -> None:
         """Tests that the latest presence state for each user is persisted correctly"""
         # Create some test users and presence states for them
@@ -629,6 +674,51 @@ class PresenceTimeoutTestCase(unittest.TestCase):
         assert new_state is not None
         self.assertEqual(new_state.state, PresenceState.UNAVAILABLE)
         self.assertEqual(new_state.status_msg, status_msg)
+
+    def test_idle_timer_does_not_fire_while_syncing(self) -> None:
+        """A device that is actively syncing is treated as active and is not
+        auto-idled, even if its last active time is older than the idle timer.
+
+        This matches a client that keeps re-syncing with the same state: under
+        the pure-USER_SYNC model the writer isn't told about every sync, so it
+        must treat syncing-set membership itself as ongoing activity.
+        """
+        user_id = "@foo:bar"
+        device_id = "dev-1"
+        status_msg = "I'm here!"
+        now = 5000000
+
+        state = UserPresenceState.default(user_id)
+        state = state.copy_and_replace(
+            state=PresenceState.ONLINE,
+            last_active_ts=now - DEFAULT_IDLE_TIMER - 1,
+            last_user_sync_ts=now,
+            last_federation_update_ts=now,
+            status_msg=status_msg,
+        )
+        device_state = UserDevicePresenceState(
+            user_id=user_id,
+            device_id=device_id,
+            state=state.state,
+            last_active_ts=state.last_active_ts,
+            last_sync_ts=state.last_user_sync_ts,
+        )
+
+        new_state = handle_timeout(
+            state,
+            is_mine=True,
+            # The device is still syncing.
+            syncing_device_ids={(user_id, device_id)},
+            user_devices={device_id: device_state},
+            now=now,
+            idle_timer=DEFAULT_IDLE_TIMER,
+            sync_online_timeout=DEFAULT_SYNC_ONLINE_TIMEOUT,
+            last_active_granularity=DEFAULT_LAST_ACTIVE_GRANULARITY,
+        )
+
+        # Nothing changed: the device stays online rather than idling.
+        self.assertIsNone(new_state)
+        self.assertEqual(device_state.state, PresenceState.ONLINE)
 
     def test_busy_no_idle(self) -> None:
         """
@@ -1063,23 +1153,34 @@ class PresenceConfigurableTimersTestCase(unittest.HomeserverTestCase):
 
     @override_config(_CUSTOM_TIMERS_CONFIG)
     def test_idle_timeout(self) -> None:
-        """A continuously syncing but inactive user only goes idle once the
-        configured idle timeout passes."""
-        # Leave the sync open so the device never times out.
+        """Idle is driven by the client, not a server-side timer.
+
+        A device that keeps syncing with a presence state of "online" is treated
+        as active and is never auto-idled by the server, however long the
+        (configured) idle timeout is; the server trusts the client's declared
+        state. The client signals idle by syncing with a presence of
+        "unavailable" instead, which the server applies immediately.
+        """
+        # Keep a sync open declaring the device online.
         self.get_success(
             self.presence_handler.user_syncing(
                 self.user_id, self.device_id, True, PresenceState.ONLINE
             )
         )
 
-        # Well past the DEFAULT_IDLE_TIMER, but short of the configured 20m:
-        # still online.
-        self.reactor.advance(2 * DEFAULT_IDLE_TIMER / 1000)
+        # Even well past the configured idle timeout, a syncing client that keeps
+        # declaring itself online stays online.
+        self.reactor.advance(2 * 20 * 60)
         self.reactor.pump([5])
         self.assertEqual(self._get_state().state, PresenceState.ONLINE)
 
-        # Past the configured timeout: idle.
-        self.reactor.advance(15 * 60)
+        # The client itself signals idle by syncing with presence "unavailable",
+        # which is applied straight away.
+        self.get_success(
+            self.presence_handler.user_syncing(
+                self.user_id, self.device_id, True, PresenceState.UNAVAILABLE
+            )
+        )
         self.reactor.pump([5])
         self.assertEqual(self._get_state().state, PresenceState.UNAVAILABLE)
 
@@ -1278,21 +1379,77 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
         # we should now be online
         self.assertEqual(state.state, PresenceState.ONLINE)
 
+    def test_syncing_does_not_idle(self) -> None:
+        """A device that keeps syncing stays online past the idle timer.
+
+        Under pure USER_SYNC the writer is only told about the first sync, so it
+        must keep a syncing device active itself rather than idling it once the
+        (now un-refreshed) last active time gets old.
+        """
+        # Use a local user so the presence timers apply.
+        user_id = f"@test:{self.hs.config.server.server_name}"
+        user_id_obj = UserID.from_string(user_id)
+
+        # Start syncing and leave the sync open (context is never closed).
+        self.get_success(
+            self.presence_handler.user_syncing(
+                user_id, self.device_id, True, PresenceState.ONLINE
+            )
+        )
+
+        state = self.get_success(self.presence_handler.get_state(user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        # Advance well past the idle timer, pumping so _handle_timeouts runs.
+        self.reactor.advance(DEFAULT_IDLE_TIMER / 1000 * 2)
+        self.reactor.pump([0.1])
+
+        # The device is still syncing, so it stays online (and currently active).
+        state = self.get_success(self.presence_handler.get_state(user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+        self.assertTrue(state.currently_active)
+
+    def test_sync_state_change_is_applied(self) -> None:
+        """Changing the requested presence state on a later sync for the same
+        device (without the first sync ending) is applied."""
+        user_id = f"@test:{self.hs.config.server.server_name}"
+        user_id_obj = UserID.from_string(user_id)
+
+        # First sync: online.
+        self.get_success(
+            self.presence_handler.user_syncing(
+                user_id, self.device_id, True, PresenceState.ONLINE
+            )
+        )
+        state = self.get_success(self.presence_handler.get_state(user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        # Second sync on the same device requesting a different state.
+        self.get_success(
+            self.presence_handler.user_syncing(
+                user_id, self.device_id, True, PresenceState.UNAVAILABLE
+            )
+        )
+        state = self.get_success(self.presence_handler.get_state(user_id_obj))
+        self.assertEqual(state.state, PresenceState.UNAVAILABLE)
+
     @parameterized.expand(
         # A list of tuples of 4 strings:
         #
         # * The presence state of device 1.
         # * The presence state of device 2.
         # * The expected user presence state after both devices have synced.
-        # * The expected user presence state after device 1 has idled.
-        # * The expected user presence state after device 2 has idled.
+        # * The expected user presence state once device 1 has been syncing past
+        #   the idle timer (unchanged: a syncing device is treated as active).
+        # * The expected user presence state once device 2 has also been syncing
+        #   past the idle timer (also unchanged).
         # * True to use workers, False a monolith.
         [
             (*cases, workers)
             for workers in (False, True)
             for cases in [
-                # If both devices have the same state, online should eventually idle.
-                # Otherwise, the state doesn't change.
+                # A device that keeps syncing is treated as active, so the
+                # combined state doesn't change as the idle timer elapses.
                 (
                     PresenceState.BUSY,
                     PresenceState.BUSY,
@@ -1305,7 +1462,7 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                     PresenceState.ONLINE,
                     PresenceState.ONLINE,
                     PresenceState.ONLINE,
-                    PresenceState.UNAVAILABLE,
+                    PresenceState.ONLINE,
                 ),
                 (
                     PresenceState.UNAVAILABLE,
@@ -1348,15 +1505,15 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                     PresenceState.ONLINE,
                     PresenceState.UNAVAILABLE,
                     PresenceState.ONLINE,
-                    PresenceState.UNAVAILABLE,
-                    PresenceState.UNAVAILABLE,
+                    PresenceState.ONLINE,
+                    PresenceState.ONLINE,
                 ),
                 (
                     PresenceState.ONLINE,
                     PresenceState.OFFLINE,
                     PresenceState.ONLINE,
-                    PresenceState.UNAVAILABLE,
-                    PresenceState.UNAVAILABLE,
+                    PresenceState.ONLINE,
+                    PresenceState.ONLINE,
                 ),
                 (
                     PresenceState.UNAVAILABLE,
@@ -1392,14 +1549,14 @@ class PresenceHandlerTestCase(BaseMultiWorkerStreamTestCase):
                     PresenceState.ONLINE,
                     PresenceState.ONLINE,
                     PresenceState.ONLINE,
-                    PresenceState.UNAVAILABLE,
+                    PresenceState.ONLINE,
                 ),
                 (
                     PresenceState.OFFLINE,
                     PresenceState.ONLINE,
                     PresenceState.ONLINE,
                     PresenceState.ONLINE,
-                    PresenceState.UNAVAILABLE,
+                    PresenceState.ONLINE,
                 ),
                 (
                     PresenceState.OFFLINE,

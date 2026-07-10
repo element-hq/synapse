@@ -1033,6 +1033,7 @@ class PresenceHandler(BasePresenceHandler):
         self,
         new_states: Iterable[UserPresenceState],
         force_notify: bool = False,
+        syncing_user_ids: AbstractSet[str] = frozenset(),
     ) -> None:
         """Updates presence of users. Sets the appropriate timeouts. Pokes
         the notifier and federation if and only if the changed presence state
@@ -1044,6 +1045,9 @@ class PresenceHandler(BasePresenceHandler):
                 even if it doesn't change the state of a user's presence (e.g online -> online).
                 This is currently used to bump the max presence stream ID without changing any
                 user's presence (see PresenceHandler.add_users_to_send_full_presence_to).
+            syncing_user_ids: Users with an active sync. Such users are treated as
+                currently active for as long as they keep syncing, matching the
+                historic behaviour where each sync bumped their last active time.
         """
         if not self._presence_enabled:
             # We shouldn't get here if presence is disabled, but we check anyway
@@ -1093,6 +1097,7 @@ class PresenceHandler(BasePresenceHandler):
                     idle_timer=self._idle_timer,
                     sync_online_timeout=self._sync_online_timeout,
                     last_active_granularity=self._last_active_granularity,
+                    is_syncing=user_id in syncing_user_ids,
                 )
 
                 if force_notify:
@@ -1210,7 +1215,8 @@ class PresenceHandler(BasePresenceHandler):
             last_active_granularity=self._last_active_granularity,
         )
 
-        return await self._update_states(changes)
+        syncing_user_ids = {user_id for user_id, _ in syncing_user_devices}
+        return await self._update_states(changes, syncing_user_ids=syncing_user_ids)
 
     async def bump_presence_active_time(
         self, user: UserID, device_id: str | None
@@ -2261,17 +2267,34 @@ def handle_timeout(
         # due to timeouts.
         device_changed = False
         offline_devices = []
+        # Whether any of the user's devices is currently syncing. A syncing
+        # device is treated as active (see below), so this keeps the user
+        # `currently_active` without relying on a periodic sync bumping their
+        # last active time.
+        user_is_syncing = False
         for device_id, device_state in user_devices.items():
+            device_is_syncing = (state.user_id, device_id) in syncing_device_ids
+            user_is_syncing = user_is_syncing or device_is_syncing
+
             if device_state.state == PresenceState.ONLINE:
-                if now - device_state.last_active_ts > idle_timer:
+                if (
+                    not device_is_syncing
+                    and now - device_state.last_active_ts > idle_timer
+                ):
                     # Currently online, but last activity ages ago so auto
-                    # idle
+                    # idle.
+                    #
+                    # A device that is actively syncing is treated as active and
+                    # never auto-idled: historically each sync bumped the device's
+                    # last active time, so a syncing device never idled. (Clients
+                    # that want to appear idle say so via the sync's presence
+                    # state.)
                     device_state.state = PresenceState.UNAVAILABLE
                     device_changed = True
 
             # If there are have been no sync for a while (and none ongoing),
             # set presence to offline.
-            if (state.user_id, device_id) not in syncing_device_ids:
+            if not device_is_syncing:
                 # If the user has done something recently but hasn't synced,
                 # don't set them as offline.
                 sync_or_active = max(
@@ -2303,9 +2326,13 @@ def handle_timeout(
                 state = state.copy_and_replace(state=new_presence)
                 changed = True
 
-        if now - state.last_active_ts > last_active_granularity:
-            # So that we send down a notification that we've
-            # stopped updating.
+        if not user_is_syncing and now - state.last_active_ts > last_active_granularity:
+            # So that we send down a notification that we've stopped updating.
+            #
+            # Skipped while the user is syncing: they are treated as active (and
+            # kept `currently_active` in handle_update), so we neither notify that
+            # they've stopped nor busy-loop re-firing this timer against a last
+            # active time that no longer advances on every sync.
             changed = True
 
         if now - state.last_federation_update_ts > FEDERATION_PING_INTERVAL:
@@ -2336,6 +2363,7 @@ def handle_update(
     idle_timer: int,
     sync_online_timeout: int,
     last_active_granularity: int,
+    is_syncing: bool = False,
 ) -> tuple[UserPresenceState, bool, bool]:
     """Given a presence update:
         1. Add any appropriate timers.
@@ -2355,6 +2383,9 @@ def handle_update(
             is marked as offline.
         last_active_granularity: How long in ms a user counts as
             "currently active" after their last activity.
+        is_syncing: Whether the user currently has an active sync. Such a user is
+            treated as currently active for as long as they keep syncing, matching
+            the historic behaviour where each sync bumped their last active time.
 
     Returns:
         3-tuple: `(new_state, persist_and_notify, federation_ping)` where:
@@ -2377,10 +2408,16 @@ def handle_update(
                     now=now, obj=user_id, then=new_state.last_active_ts + idle_timer
                 )
 
-            active = now - new_state.last_active_ts < last_active_granularity
+            # A syncing user is treated as active for as long as they sync, so
+            # that they don't lose `currently_active` (and flip back and forth)
+            # now that a sync no longer bumps their last active time on every
+            # request.
+            active = (
+                is_syncing or now - new_state.last_active_ts < last_active_granularity
+            )
             new_state = new_state.copy_and_replace(currently_active=active)
 
-            if active and not persist:
+            if active and not persist and not is_syncing:
                 wheel_timer.insert(
                     now=now,
                     obj=user_id,
@@ -2395,6 +2432,21 @@ def handle_update(
                     obj=user_id,
                     then=new_state.last_user_sync_ts + sync_online_timeout,
                 )
+
+                # A quietly-syncing user generates no other presence updates, so
+                # once their idle/sync timers lapse nothing would re-check them
+                # and we'd stop sending federation keep-alives. Insert a timer at
+                # the federation ping interval to keep re-checking them; it
+                # re-arms itself each time it fires (see handle_timeout). Only
+                # needed for syncing users — anyone else times out to offline
+                # within SYNC_ONLINE_TIMEOUT.
+                if is_syncing:
+                    wheel_timer.insert(
+                        now=now,
+                        obj=user_id,
+                        then=new_state.last_federation_update_ts
+                        + FEDERATION_PING_INTERVAL,
+                    )
 
             last_federate = new_state.last_federation_update_ts
             if now - last_federate > FEDERATION_PING_INTERVAL:
