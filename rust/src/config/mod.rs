@@ -47,7 +47,7 @@ pub struct AuthConfig {
 }
 #[derive(FromPyObject, Clone)]
 pub struct ServerConfig {
-    pub max_event_delay_ms: Option<u64>,
+    pub msc4140_enabled: bool,
 }
 
 #[derive(FromPyObject, Clone)]
