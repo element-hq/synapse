@@ -49,7 +49,9 @@ class RoomBackgroundUpdateStoreTestCase(HomeserverTestCase):
         """Create a room and return the room ID."""
         return self.helper.create_room_as(
             # FIXME: Room version 11 breaks test_background_populate_rooms_creator_column
-            self.user_id, tok=self.token, room_version="10"
+            self.user_id,
+            tok=self.token,
+            room_version="10",
         )
 
     def run_background_updates(self, update_name: str) -> None:
