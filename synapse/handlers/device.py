@@ -139,6 +139,13 @@ class DeviceHandler:
             hs.config.registration.dont_notify_new_devices_for
         )
 
+        # Rooms excluded from device-list update fan-out. Only honoured for
+        # *unencrypted* rooms — excluding an encrypted room would break E2EE, so
+        # encrypted rooms here are kept (see `_filter_device_list_excluded_rooms`).
+        self._rooms_to_exclude_from_device_list_updates = frozenset(
+            hs.config.server.rooms_to_exclude_from_device_list_updates
+        )
+
         self.device_list_updater = DeviceListWorkerUpdater(hs)
 
         self._task_scheduler.register_action(
@@ -517,6 +524,42 @@ class DeviceHandler:
 
         return device
 
+    async def _filter_device_list_excluded_rooms(
+        self, room_ids: StrCollection
+    ) -> frozenset[str]:
+        """Drop excluded rooms from `room_ids`, but only if they are unencrypted.
+
+        Device-list tracking serves end-to-end encryption, so it is only safe to
+        stop tracking an unencrypted room; encrypted rooms in the exclusion set
+        are kept.
+
+        Args:
+            room_ids: The rooms to filter.
+
+        Returns:
+            `room_ids` with excluded, unencrypted rooms removed.
+        """
+        excluded = self._rooms_to_exclude_from_device_list_updates
+        result = set(room_ids)
+        if not excluded:
+            # Nothing configured, so nothing to drop.
+            return frozenset(result)
+
+        # Only rooms that are both excluded and unencrypted may be dropped. Look
+        # up encryption in one bulk call (`get_room_encryption` is a `@cached`
+        # stub; `bulk_get_room_encryption` is its real `@cachedList` impl).
+        candidates = result & excluded
+        if not candidates:
+            return frozenset(result)
+
+        encryption = await self.store.bulk_get_room_encryption(candidates)
+        for room_id in candidates:
+            # `None` means positively unencrypted, so drop it. An algorithm
+            # string (encrypted) or the room-unknown sentinel are kept.
+            if encryption.get(room_id) is None:
+                result.discard(room_id)
+        return frozenset(result)
+
     @cancellable
     async def get_device_changes_in_shared_rooms(
         self,
@@ -549,14 +592,14 @@ class DeviceHandler:
             changed_users.update(changed)
             return changed_users
 
-        # If the DB returned None then the `from_token` is too old, so we fall
-        # back on looking for device updates for all users.
-
-        users_who_share_room = await self.store.get_users_who_share_room_with_user(
-            user_id
-        )
-
-        tracked_users = set(users_who_share_room)
+        # `from_token` is too old, so fall back to all users we share a room
+        # with. We derive them from the already-filtered `room_ids` rather than
+        # `get_users_who_share_room_with_user`, which would re-widen to peers in
+        # excluded rooms.
+        tracked_users: set[str] = set()
+        for room_id in room_ids:
+            user_ids = await self.store.get_users_in_room(room_id)
+            tracked_users.update(user_ids)
 
         # Always tell the user about their own devices
         tracked_users.add(user_id)
@@ -589,6 +632,15 @@ class DeviceHandler:
         # on the data required.
 
         joined_room_ids = await self.store.get_rooms_for_user(user_id)
+
+        # Rooms we track device-list updates for: joined rooms minus excluded
+        # (unencrypted) ones. Used to find *other* users joining/leaving, so we
+        # don't re-fetch keys for peers we only share an excluded room with. The
+        # full `joined_room_ids` is kept for the still-share-a-room check in
+        # `generate_sync_entry_for_device_list`, matching `/sync`.
+        tracked_room_ids = await self._filter_device_list_excluded_rooms(
+            joined_room_ids
+        )
 
         # Get the set of rooms that the user has joined/left
         membership_changes = (
@@ -624,7 +676,9 @@ class DeviceHandler:
 
         # TODO: Only pull out membership events?
         state_changes = await self.store.get_current_state_deltas_for_rooms(
-            joined_room_ids, from_token=from_token.room_key, to_token=now_token.room_key
+            tracked_room_ids,
+            from_token=from_token.room_key,
+            to_token=now_token.room_key,
         )
         for delta in state_changes:
             if delta.event_type != EventTypes.Member:
@@ -744,15 +798,28 @@ class DeviceHandler:
         users_that_have_changed = set()
 
         # Step 1a, check for changes in devices of users we share a room
-        # with
+        # with.
+        #
+        # Exclude the configured (unencrypted) rooms from the shared-rooms
+        # lookup. We filter here rather than the `joined_room_ids` parameter,
+        # which is also used below for the still-share-a-room check and left
+        # unfiltered.
+        shared_room_ids = await self._filter_device_list_excluded_rooms(joined_room_ids)
         users_that_have_changed = await self.get_device_changes_in_shared_rooms(
             user_id,
-            joined_room_ids,
+            shared_room_ids,
             from_token=since_token,
             now_token=now_token,
         )
 
-        # Step 1b, check for newly joined rooms
+        # Step 1b, check for newly joined rooms.
+        #
+        # Skip excluded (unencrypted) rooms: otherwise joining one would pull in
+        # every existing member as "changed" and trigger a mass `/keys/query`
+        # re-fetch. Encrypted rooms are still expanded, so E2EE is unaffected.
+        newly_joined_rooms = await self._filter_device_list_excluded_rooms(
+            newly_joined_rooms
+        )
         for room_id in newly_joined_rooms:
             joined_users = await self.store.get_users_in_room(room_id)
             newly_joined_or_invited_or_knocked_users.update(joined_users)
@@ -977,6 +1044,14 @@ class DeviceWriterHandler(DeviceHandler):
             return
 
         room_ids = await self.store.get_rooms_for_user(user_id)
+
+        # Drop any rooms configured to be excluded from device-list updates
+        # (unencrypted rooms only). Doing this before recording the change means
+        # the change is neither recorded against these rooms nor federated to
+        # their hosts (federation destinations are derived from the recorded
+        # `device_lists_changes_in_room` rows), and local members who only share
+        # an excluded room won't be woken.
+        room_ids = await self._filter_device_list_excluded_rooms(room_ids)
 
         position = await self.store.add_device_change_to_streams(
             user_id,

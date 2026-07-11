@@ -45,7 +45,7 @@ from synapse.federation.transport.client import (
 from synapse.federation.units import Transaction
 from synapse.handlers.device import MAX_DEVICE_DISPLAY_NAME_LEN, DeviceWriterHandler
 from synapse.rest import admin
-from synapse.rest.client import devices, login, register
+from synapse.rest.client import devices, login, register, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.types import (
@@ -497,6 +497,221 @@ class DeviceTestCase(unittest.HomeserverTestCase):
             )
         )
         self.assertIsNone(remaining_refresh_token)
+
+
+class DeviceListExcludedRoomsTestCase(unittest.HomeserverTestCase):
+    """Tests for `exclude_rooms_from_device_list_updates`.
+
+    A configured room should be dropped from device-list update fan-out, but
+    ONLY if it is unencrypted: excluding an encrypted room would break E2EE, so
+    encrypted rooms in the exclusion set must keep being tracked.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        handler = hs.get_device_handler()
+        assert isinstance(handler, DeviceWriterHandler)
+        self.handler = handler
+        self.store = hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+
+        self.user1 = self.register_user("user1", "pass")
+        self.user1_tok = self.login(self.user1, "pass", device_id="user1device")
+        self.user2 = self.register_user("user2", "pass")
+        self.user2_tok = self.login(self.user2, "pass", device_id="user2device")
+
+    def _create_shared_room(self, encrypted: bool = False) -> str:
+        """Create a room owned by user1 that user2 also joins."""
+        room_id = self.helper.create_room_as(self.user1, tok=self.user1_tok)
+        if encrypted:
+            self.helper.send_state(
+                room_id,
+                EventTypes.RoomEncryption,
+                {"algorithm": RoomEncryptionAlgorithms.MEGOLM_V1_AES_SHA2},
+                tok=self.user1_tok,
+            )
+        self.helper.join(room_id, self.user2, tok=self.user2_tok)
+        return room_id
+
+    def _changed_users_for_user2(self) -> set:
+        """Have user1 change their device, then return the set of users that
+        user2's device-list stream reports as changed since just before."""
+        from_token = self.event_sources.get_current_token()
+
+        self.get_success(self.handler.notify_device_update(self.user1, ["user1device"]))
+
+        result = self.get_success(
+            self.handler.get_user_ids_changed(self.user2, from_token)
+        )
+        return set(result.changed)
+
+    def test_change_in_shared_room_is_notified(self) -> None:
+        """Baseline: with no exclusion, a peer sharing a room IS notified."""
+        self._create_shared_room()
+
+        self.assertIn(self.user1, self._changed_users_for_user2())
+
+    def test_excluded_unencrypted_room_is_not_notified(self) -> None:
+        """A change in an excluded, unencrypted room does NOT notify a peer who
+        only shares that room."""
+        room_id = self._create_shared_room(encrypted=False)
+        self.handler._rooms_to_exclude_from_device_list_updates = frozenset({room_id})
+
+        self.assertNotIn(self.user1, self._changed_users_for_user2())
+
+    def test_non_excluded_room_still_notified(self) -> None:
+        """A peer sharing a *non-excluded* room IS still notified, even when
+        another (unshared) room is excluded."""
+        room_id = self._create_shared_room(encrypted=False)
+        self.handler._rooms_to_exclude_from_device_list_updates = frozenset(
+            {"!someotherroom:test"}
+        )
+        # Sanity check the shared room isn't the excluded one.
+        self.assertNotEqual(room_id, "!someotherroom:test")
+
+        self.assertIn(self.user1, self._changed_users_for_user2())
+
+    def test_excluded_but_encrypted_room_is_still_notified(self) -> None:
+        """If the excluded room is ENCRYPTED, the peer IS still notified: the
+        guard preserves E2EE."""
+        room_id = self._create_shared_room(encrypted=True)
+        # Ensure the encryption state is visible via the bulk (cached) lookup
+        # the handler actually uses (`get_room_encryption` is a stub).
+        self.assertIsNotNone(
+            self.get_success(self.store.bulk_get_room_encryption({room_id})).get(
+                room_id
+            )
+        )
+        self.handler._rooms_to_exclude_from_device_list_updates = frozenset({room_id})
+
+        self.assertIn(self.user1, self._changed_users_for_user2())
+
+    def _changed_via_classic_sync_fallback(self, joined_room_ids: set) -> set:
+        """Run `generate_sync_entry_for_device_list` (the classic /sync path)
+        with the too-old-token fallback in `get_device_changes_in_shared_rooms`
+        forced, and return the reported changed users for user2."""
+        from_token = self.event_sources.get_current_token()
+        # Record a device change for user1 so they appear in the per-user
+        # `device_lists_stream` that the fallback consults.
+        self.get_success(self.handler.notify_device_update(self.user1, ["user1device"]))
+        now_token = self.event_sources.get_current_token()
+
+        # Force `get_device_list_changes_in_rooms` to report the token as too
+        # old, dropping into the fallback code path.
+        with patch.object(
+            self.store,
+            "get_device_list_changes_in_rooms",
+            AsyncMock(return_value=None),
+        ):
+            result = self.get_success(
+                self.handler.generate_sync_entry_for_device_list(
+                    user_id=self.user2,
+                    since_token=from_token,
+                    now_token=now_token,
+                    joined_room_ids=joined_room_ids,
+                    newly_joined_rooms=set(),
+                    newly_joined_or_invited_or_knocked_users=set(),
+                    newly_left_rooms=set(),
+                    newly_left_users=set(),
+                )
+            )
+        return set(result.changed)
+
+    def test_classic_sync_fallback_excludes_unencrypted_room(self) -> None:
+        """The classic /sync path (`generate_sync_entry_for_device_list`) passes
+        an *unfiltered* joined-rooms set, so the filter must be applied inside
+        that method. On the too-old-token fallback a peer sharing only an
+        excluded, unencrypted room must NOT be reported as changed."""
+        room_id = self._create_shared_room(encrypted=False)
+
+        # Sanity: without exclusion, the fallback DOES surface user1 (otherwise
+        # the assertion below would pass vacuously).
+        self.handler._rooms_to_exclude_from_device_list_updates = frozenset()
+        self.assertIn(self.user1, self._changed_via_classic_sync_fallback({room_id}))
+
+        # With the room excluded (and unencrypted), user1 is filtered out.
+        self.handler._rooms_to_exclude_from_device_list_updates = frozenset({room_id})
+        self.assertNotIn(self.user1, self._changed_via_classic_sync_fallback({room_id}))
+
+    @override_config({"exclude_rooms_from_device_list_updates": ["!excluded:test"]})
+    def test_config_populates_handler(self) -> None:
+        """The config option is wired through to the handler attribute the
+        filter reads. Guards against a mis-named config key or attribute, which
+        the other tests (which set the attribute directly) would not catch."""
+        self.assertEqual(
+            self.handler._rooms_to_exclude_from_device_list_updates,
+            frozenset({"!excluded:test"}),
+        )
+
+    def test_newly_joined_excluded_room_does_not_pull_in_members(self) -> None:
+        """Joining an excluded, unencrypted room must not report its existing
+        members as changed: otherwise the join alone would trigger a
+        `/keys/query` re-fetch of every member."""
+        # user1 owns the room; user2 has NOT joined it yet.
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.user1_tok)
+        self.handler._rooms_to_exclude_from_device_list_updates = frozenset(
+            {excluded_room}
+        )
+
+        from_token = self.event_sources.get_current_token()
+        self.helper.join(excluded_room, self.user2, tok=self.user2_tok)
+        changed = set(
+            self.get_success(
+                self.handler.get_user_ids_changed(self.user2, from_token)
+            ).changed
+        )
+        self.assertNotIn(self.user1, changed)
+
+        # Control: joining a *non-excluded* room DOES pull the existing member
+        # in, so the assertion above is not vacuous.
+        other_room = self.helper.create_room_as(self.user1, tok=self.user1_tok)
+        from_token = self.event_sources.get_current_token()
+        self.helper.join(other_room, self.user2, tok=self.user2_tok)
+        changed = set(
+            self.get_success(
+                self.handler.get_user_ids_changed(self.user2, from_token)
+            ).changed
+        )
+        self.assertIn(self.user1, changed)
+
+    def test_excluded_room_not_recorded_for_federation(self) -> None:
+        """A device change in an excluded, unencrypted room is not recorded
+        against that room in `device_lists_changes_in_room`. Federation pokes
+        (and local room wake-ups) derive from those rows, so an unrecorded room
+        is never federated to its servers."""
+        room_id = self._create_shared_room(encrypted=False)
+
+        def recorded_changes_in_room() -> set:
+            from_token = self.event_sources.get_current_token()
+            self.get_success(
+                self.handler.notify_device_update(self.user1, ["user1device"])
+            )
+            now_token = self.event_sources.get_current_token()
+            return set(
+                self.get_success(
+                    self.handler.get_device_changes_in_shared_rooms(
+                        self.user2,
+                        [room_id],
+                        from_token=from_token,
+                        now_token=now_token,
+                    )
+                )
+            )
+
+        # Control: without exclusion, user1's change IS recorded against the
+        # room (so it would wake local streams and federate).
+        self.assertIn(self.user1, recorded_changes_in_room())
+
+        # With the room excluded (and unencrypted), the change is not recorded
+        # against it, so nothing fans out to that room's members or servers.
+        self.handler._rooms_to_exclude_from_device_list_updates = frozenset({room_id})
+        self.assertNotIn(self.user1, recorded_changes_in_room())
 
 
 class DehydrationTestCase(unittest.HomeserverTestCase):
