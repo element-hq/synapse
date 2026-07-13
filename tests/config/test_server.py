@@ -18,11 +18,15 @@
 #
 #
 
+
+from typing import Any
+
 import yaml
 
 from synapse.config._base import ConfigError, RootConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.server import ServerConfig, generate_ip_set, is_threepid_reserved
+from synapse.types import JsonDict
 
 from tests import unittest
 
@@ -188,6 +192,54 @@ class ServerConfigTestCase(unittest.TestCase):
         )
 
         self.assertEqual(conf["listeners"], expected_listeners)
+
+    def test_max_delayed_events_enforces_positive(self) -> None:
+        """
+        Test that the configured maximum allowed delay must be a positive value if set,
+        as per documentation
+        """
+
+        def generate_config(value: int) -> JsonDict:
+            return {"max_event_delay_duration": value}
+
+        _read_config(generate_config(1))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(0))
+
+        with self.assertRaises(ConfigError):
+            _read_config(generate_config(-1))
+
+    def test_max_delayed_events_per_user_enforces_non_negative_int(self) -> None:
+        """
+        Test that the configured maximum number of delayed events must be a non-negative value if set,
+        as a negative limit can never be satisfied
+        """
+
+        def generate_config(value: Any) -> JsonDict:
+            return {
+                "experimental_features": {"msc4140_max_delayed_events_per_user": value}
+            }
+
+        for allowed_value in (0, 1):
+            _read_config(generate_config(allowed_value))
+
+        for disallowed_value in (-1, 0.5):
+            with self.assertRaises(ConfigError):
+                _read_config(generate_config(disallowed_value))
+
+
+def _read_config(config_values: JsonDict) -> None:
+    ServerConfig(RootConfig()).read_config(
+        yaml.safe_load(
+            HomeServerConfig().generate_config(
+                config_dir_path="CONFDIR",
+                data_dir_path="/data_dir_path",
+                server_name="che.org",
+            )
+        )
+        | config_values
+    )
 
 
 class GenerateIpSetTestCase(unittest.TestCase):

@@ -51,6 +51,8 @@ from synapse.handlers.presence import (
     FEDERATION_TIMEOUT,
     PresenceHandler,
     WorkerPresenceHandler,
+    get_interested_parties,
+    get_interested_remotes,
     handle_timeout,
     handle_update,
 )
@@ -2440,6 +2442,217 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
 
         return event
+
+
+class PresenceExcludeRoomsTestCase(unittest.HomeserverTestCase):
+    """Tests that `exclude_rooms_from_presence` stops presence being routed
+    between users solely because they share an excluded room."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.hs = hs
+        self.store = hs.get_datastores().main
+        self.presence_router = hs.get_presence_router()
+        self.presence_handler = hs.get_presence_handler()
+
+        self.user1 = self.register_user("user1", "pass")
+        self.token1 = self.login("user1", "pass")
+        self.user2 = self.register_user("user2", "pass")
+        self.token2 = self.login("user2", "pass")
+
+    def test_excluded_rooms_not_routed(self) -> None:
+        # Two rooms that user1 is joined to.
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+
+        state = UserPresenceState.default(self.user1)
+
+        # Without any exclusions both rooms are interested in user1's presence.
+        room_ids_to_states, users_to_states = self.get_success(
+            get_interested_parties(self.store, self.presence_router, [state])
+        )
+        self.assertIn(excluded_room, room_ids_to_states)
+        self.assertIn(shared_room, room_ids_to_states)
+
+        # Excluding one room drops it as an interested party, but the other
+        # (non-excluded) room still routes presence...
+        room_ids_to_states, users_to_states = self.get_success(
+            get_interested_parties(
+                self.store,
+                self.presence_router,
+                [state],
+                frozenset({excluded_room}),
+            )
+        )
+        self.assertNotIn(excluded_room, room_ids_to_states)
+        self.assertIn(shared_room, room_ids_to_states)
+
+        # ...and the user always receives their own presence, even when all of
+        # their rooms are excluded.
+        room_ids_to_states, users_to_states = self.get_success(
+            get_interested_parties(
+                self.store,
+                self.presence_router,
+                [state],
+                frozenset({excluded_room, shared_room}),
+            )
+        )
+        self.assertNotIn(excluded_room, room_ids_to_states)
+        self.assertNotIn(shared_room, room_ids_to_states)
+        self.assertIn(self.user1, users_to_states)
+
+    @override_config({"exclude_rooms_from_presence": ["!excluded:test"]})
+    def test_config_populates_handler(self) -> None:
+        """The config option should be plumbed through to the presence handler
+        and the presence event source as a frozenset."""
+        self.assertEqual(
+            self.presence_handler._rooms_to_exclude_from_presence,
+            frozenset({"!excluded:test"}),
+        )
+
+        event_source = self.hs.get_event_sources().sources.presence
+        self.assertEqual(
+            event_source._rooms_to_exclude_from_presence,
+            frozenset({"!excluded:test"}),
+        )
+
+    def test_is_visible_respects_excluded_rooms(self) -> None:
+        """`is_visible` (which drives the read side of /sync) should not
+        consider two users to share presence solely via an excluded room."""
+        user1 = UserID.from_string(self.user1)
+        user2 = UserID.from_string(self.user2)
+
+        # A single shared room: the two users can see each other's presence.
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(excluded_room, self.user2, tok=self.token2)
+
+        self.assertTrue(
+            self.get_success(self.presence_handler.is_visible(user2, user1))
+        )
+
+        # Excluding the only shared room hides presence between them.
+        self.presence_handler._rooms_to_exclude_from_presence = frozenset(
+            {excluded_room}
+        )
+        self.assertFalse(
+            self.get_success(self.presence_handler.is_visible(user2, user1))
+        )
+
+        # But a second, non-excluded shared room restores visibility.
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(shared_room, self.user2, tok=self.token2)
+        self.assertTrue(
+            self.get_success(self.presence_handler.is_visible(user2, user1))
+        )
+
+    def test_get_interested_remotes_respects_excluded_rooms(self) -> None:
+        """The federation fan-out side (`get_interested_remotes`) must not route
+        presence to servers reached solely via an excluded room."""
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        state = UserPresenceState.default(self.user1)
+
+        def hosts_for(excluded: frozenset) -> set:
+            result = self.get_success(
+                get_interested_remotes(
+                    self.store, self.presence_router, [state], excluded
+                )
+            )
+            hosts: set[str] = set()
+            for room_hosts, _ in result:
+                hosts.update(room_hosts)
+            return hosts
+
+        # The local server is a host in the room (all members are local here),
+        # so presence would be routed there...
+        self.assertIn("test", hosts_for(frozenset()))
+        # ...but excluding the only room removes it as a source of destinations.
+        self.assertNotIn("test", hosts_for(frozenset({excluded_room})))
+
+
+class PresenceGetNewEventsStreamTestCase(unittest.HomeserverTestCase):
+    """Tests the incremental (`from_key`) branch of
+    `PresenceEventSource.get_new_events`, which decides which updated users are
+    interesting to the syncing user by intersecting their cached room sets.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.presence_handler = hs.get_presence_handler()
+        self.event_source = hs.get_event_sources().sources.presence
+
+        self.user1 = self.register_user("user1", "pass")
+        self.token1 = self.login("user1", "pass")
+        self.user2 = self.register_user("user2", "pass")
+        self.token2 = self.login("user2", "pass")
+        self.user3 = self.register_user("user3", "pass")
+        self.token3 = self.login("user3", "pass")
+
+    def _set_presence(self, user_id: str, state: str = "online") -> None:
+        self.get_success(
+            self.presence_handler.set_state(
+                UserID.from_string(user_id), "dev", {"presence": state}
+            )
+        )
+
+    def _updated_users_seen_by(self, user_id: str, from_key: int) -> set[str]:
+        states, _ = self.get_success(
+            self.event_source.get_new_events(
+                user=UserID.from_string(user_id), from_key=from_key
+            )
+        )
+        return {state.user_id for state in states}
+
+    def test_incremental_interest(self) -> None:
+        """A syncing user sees updates from users they share a room with (and
+        themselves), but not from strangers."""
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(shared_room, self.user2, tok=self.token2)
+        # user3 is in an unrelated room.
+        self.helper.create_room_as(self.user3, tok=self.token3)
+
+        from_key = self.event_source.get_current_key()
+        self._set_presence(self.user1)
+        self._set_presence(self.user2)
+        self._set_presence(self.user3)
+
+        seen = self._updated_users_seen_by(self.user2, from_key)
+        self.assertIn(self.user1, seen)
+        self.assertIn(self.user2, seen)  # always sees own updates
+        self.assertNotIn(self.user3, seen)
+
+    def test_incremental_interest_excluded_room(self) -> None:
+        """Sharing only an excluded room does not make an updated user
+        interesting; sharing an additional normal room does."""
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(excluded_room, self.user2, tok=self.token2)
+
+        self.event_source._rooms_to_exclude_from_presence = frozenset({excluded_room})
+
+        from_key = self.event_source.get_current_key()
+        self._set_presence(self.user1, "online")
+        seen = self._updated_users_seen_by(self.user2, from_key)
+        self.assertNotIn(self.user1, seen)
+
+        # A second, non-excluded shared room restores interest. (Use a
+        # different presence state, as repeating the same one would not
+        # generate a new update.)
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(shared_room, self.user2, tok=self.token2)
+
+        from_key = self.event_source.get_current_key()
+        self._set_presence(self.user1, "unavailable")
+        seen = self._updated_users_seen_by(self.user2, from_key)
+        self.assertIn(self.user1, seen)
 
 
 class WorkerPresenceThrottleTestCase(BaseMultiWorkerStreamTestCase):

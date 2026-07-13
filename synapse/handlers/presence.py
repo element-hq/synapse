@@ -223,6 +223,12 @@ class BasePresenceHandler(abc.ABC):
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
 
+        # Rooms which, on their own, should not cause presence to be routed
+        # between their members. See `exclude_rooms_from_presence` in the config.
+        self._rooms_to_exclude_from_presence = frozenset(
+            hs.config.server.rooms_to_exclude_from_presence
+        )
+
         # The (configurable) presence state machine timers.
         self._last_active_granularity = (
             hs.config.server.presence_last_active_granularity
@@ -436,6 +442,7 @@ class BasePresenceHandler(abc.ABC):
             self.store,
             self.presence_router,
             states,
+            self._rooms_to_exclude_from_presence,
         )
 
         for destinations, host_states in hosts_to_states:
@@ -689,7 +696,12 @@ class WorkerPresenceHandler(BasePresenceHandler):
     async def notify_from_replication(
         self, states: list[UserPresenceState], stream_id: int
     ) -> None:
-        parties = await get_interested_parties(self.store, self.presence_router, states)
+        parties = await get_interested_parties(
+            self.store,
+            self.presence_router,
+            states,
+            self._rooms_to_exclude_from_presence,
+        )
         room_ids_to_states, users_to_states = parties
 
         self.notifier.on_new_event(
@@ -1180,6 +1192,7 @@ class PresenceHandler(BasePresenceHandler):
                     self.store,
                     self.presence_router,
                     list(to_federation_ping.values()),
+                    self._rooms_to_exclude_from_presence,
                 )
 
                 for destinations, states in hosts_to_states:
@@ -1453,7 +1466,12 @@ class PresenceHandler(BasePresenceHandler):
         """
         stream_id, max_token = await self.store.update_presence(states)
 
-        parties = await get_interested_parties(self.store, self.presence_router, states)
+        parties = await get_interested_parties(
+            self.store,
+            self.presence_router,
+            states,
+            self._rooms_to_exclude_from_presence,
+        )
         room_ids_to_states, users_to_states = parties
 
         self.notifier.on_new_event(
@@ -1600,7 +1618,10 @@ class PresenceHandler(BasePresenceHandler):
             observed_user.to_string()
         )
 
-        if observer_room_ids & observed_room_ids:
+        shared_room_ids = (
+            observer_room_ids & observed_room_ids
+        ) - self._rooms_to_exclude_from_presence
+        if shared_room_ids:
             return True
 
         return False
@@ -1710,6 +1731,12 @@ class PresenceHandler(BasePresenceHandler):
         """Process current state deltas for the room to find new joins that need
         to be handled.
         """
+
+        # Excluded rooms should not, on their own, share presence between their
+        # members. This method is entirely per-room presence fan-out, so skip
+        # excluded rooms wholesale.
+        if room_id in self._rooms_to_exclude_from_presence:
+            return
 
         # Sets of newly joined users. Note that if the local server is
         # joining a remote room for the first time we'll see both the joining
@@ -1968,6 +1995,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+        self._rooms_to_exclude_from_presence = frozenset(
+            hs.config.server.rooms_to_exclude_from_presence
+        )
 
     async def get_new_events(
         self,
@@ -2082,9 +2112,31 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).inc()
 
-                    sharing_users = await self.store.do_users_share_a_room(
-                        user_id, updated_users
-                    )
+                    # An updated user is interesting if they share a
+                    # (non-excluded) room with the syncing user. We check by
+                    # intersecting the cached per-user room sets rather than via
+                    # `do_users_share_a_room`: its per-pair cache has a
+                    # quadratic working set and is cleared wholesale on every
+                    # membership change, so on busy servers every check missed
+                    # into SQL.
+                    #
+                    # For every presence update we need to run this code for
+                    # every user that is currently syncing. The
+                    # `get_rooms_for_user` will therefore be computed only once
+                    # for each updated user regardless of the number of syncing
+                    # users.
+                    #
+                    # The syncing user's rooms will also be cached as its needed
+                    # during sync processing anyway.
+                    my_rooms = await self.store.get_rooms_for_user(user_id)
+                    if self._rooms_to_exclude_from_presence:
+                        my_rooms = my_rooms - self._rooms_to_exclude_from_presence
+                    rooms_by_user = await self.store.get_rooms_for_users(updated_users)
+                    sharing_users = {
+                        updated_user
+                        for updated_user, rooms in rooms_by_user.items()
+                        if not my_rooms.isdisjoint(rooms)
+                    }
 
                     interested_and_updated_users = (
                         sharing_users.union(additional_users_interested_in)
@@ -2099,7 +2151,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                     ).inc()
 
                     users_interested_in = (
-                        await self.store.get_users_who_share_room_with_user(user_id)
+                        await self.store.get_users_who_share_room_with_user(
+                            user_id, self._rooms_to_exclude_from_presence
+                        )
                     )
                     users_interested_in.update(additional_users_interested_in)
 
@@ -2112,7 +2166,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                 # No from_key has been specified. Return the presence for all users
                 # this user is interested in
                 interested_and_updated_users = (
-                    await self.store.get_users_who_share_room_with_user(user_id)
+                    await self.store.get_users_who_share_room_with_user(
+                        user_id, self._rooms_to_exclude_from_presence
+                    )
                 )
                 interested_and_updated_users.update(additional_users_interested_in)
 
@@ -2512,7 +2568,10 @@ def _combine_device_states(
 
 
 async def get_interested_parties(
-    store: DataStore, presence_router: PresenceRouter, states: list[UserPresenceState]
+    store: DataStore,
+    presence_router: PresenceRouter,
+    states: list[UserPresenceState],
+    excluded_rooms: AbstractSet[str] = frozenset(),
 ) -> tuple[dict[str, list[UserPresenceState]], dict[str, list[UserPresenceState]]]:
     """Given a list of states return which entities (rooms, users)
     are interested in the given states.
@@ -2521,6 +2580,8 @@ async def get_interested_parties(
         store: The homeserver's data store.
         presence_router: A module for augmenting the destinations for presence updates.
         states: A list of incoming user presence updates.
+        excluded_rooms: Rooms which should not, on their own, cause presence to
+            be routed between their members.
 
     Returns:
         A 2-tuple of `(room_ids_to_states, users_to_states)`,
@@ -2531,6 +2592,8 @@ async def get_interested_parties(
     for state in states:
         room_ids = await store.get_rooms_for_user(state.user_id)
         for room_id in room_ids:
+            if room_id in excluded_rooms:
+                continue
             room_ids_to_states.setdefault(room_id, []).append(state)
 
         # Always notify self
@@ -2551,6 +2614,7 @@ async def get_interested_remotes(
     store: DataStore,
     presence_router: PresenceRouter,
     states: list[UserPresenceState],
+    excluded_rooms: AbstractSet[str] = frozenset(),
 ) -> list[tuple[StrCollection, Collection[UserPresenceState]]]:
     """Given a list of presence states figure out which remote servers
     should be sent which.
@@ -2561,6 +2625,8 @@ async def get_interested_remotes(
         store: The homeserver's data store.
         presence_router: A module for augmenting the destinations for presence updates.
         states: A list of incoming user presence updates.
+        excluded_rooms: Rooms which should not, on their own, cause presence to
+            be routed to their remote members.
 
     Returns:
         A map from destinations to presence states to send to that destination.
@@ -2574,6 +2640,8 @@ async def get_interested_remotes(
         room_ids = await store.get_rooms_for_user(state.user_id)
         hosts: set[str] = set()
         for room_id in room_ids:
+            if room_id in excluded_rooms:
+                continue
             room_hosts = await store.get_current_hosts_in_room(room_id)
             hosts.update(room_hosts)
         hosts_and_states.append((hosts, [state]))

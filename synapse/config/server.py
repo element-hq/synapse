@@ -37,6 +37,7 @@ from twisted.conch.ssh.keys import Key
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.types import JsonDict, StrSequence
+from synapse.util.duration import Duration
 from synapse.util.module_loader import load_module
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -935,6 +936,10 @@ class ServerConfig(Config):
             config.get("exclude_rooms_from_sync") or []
         )
 
+        self.rooms_to_exclude_from_presence: list[str] = (
+            config.get("exclude_rooms_from_presence") or []
+        )
+
         delete_stale_devices_after: str | None = (
             config.get("delete_stale_devices_after") or None
         )
@@ -949,13 +954,33 @@ class ServerConfig(Config):
         # The maximum allowed delay duration for delayed events (MSC4140).
         max_event_delay_duration = config.get("max_event_delay_duration")
         if max_event_delay_duration is not None:
-            self.max_event_delay_ms: int | None = self.parse_duration(
-                max_event_delay_duration
-            )
-            if self.max_event_delay_ms <= 0:
-                raise ConfigError("max_event_delay_duration must be a positive value")
+            max_event_delay_ms = self.parse_duration(max_event_delay_duration)
+            if max_event_delay_ms <= 0:
+                raise ConfigError(
+                    "'max_event_delay_duration' must be a positive value if set",
+                    ("max_event_delay_duration",),
+                )
+            self.max_event_delay_duration = Duration(milliseconds=max_event_delay_ms)
         else:
-            self.max_event_delay_ms = None
+            self.max_event_delay_duration = Duration()
+
+        # The maximum number of delayed events a user may have scheduled at a time.
+        # (Defined here despite being experimental to be near the other MSC4140 config)
+        self.max_delayed_events_per_user: int = config.get(
+            "experimental_features", {}
+        ).get("msc4140_max_delayed_events_per_user", 100)
+        if (
+            not isinstance(self.max_delayed_events_per_user, int)
+            or self.max_delayed_events_per_user < 0
+        ):
+            raise ConfigError(
+                "'msc4140_max_delayed_events_per_user' must be a non-negative integer",
+                ("experimental", "msc4140_max_delayed_events_per_user"),
+            )
+
+        self.msc4140_enabled = bool(
+            self.max_delayed_events_per_user and self.max_event_delay_duration
+        )
 
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
