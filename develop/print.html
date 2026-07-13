@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aa974c19.js";
+            window.path_to_searchindex_js = "searchindex-d3f5de34.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -7875,6 +7875,13 @@ process (i.e. not workerized) and media is stored locally Defaults to <code>fals
 <p><em>(array)</em> A list of rooms to exclude from sync responses. This is useful for server administrators wishing to group users into a room without these users being able to see it from their client. Defaults to <code>[]</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">exclude_rooms_from_sync:
+- '!foo:example.com'
+</code></pre>
+<hr>
+<h3 id="exclude_rooms_from_presence"><a class="header" href="#exclude_rooms_from_presence"><code>exclude_rooms_from_presence</code></a></h3>
+<p><em>(array)</em> A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to <code>[]</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">exclude_rooms_from_presence:
 - '!foo:example.com'
 </code></pre>
 <hr>
