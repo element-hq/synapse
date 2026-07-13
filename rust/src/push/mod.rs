@@ -369,6 +369,13 @@ pub enum KnownCondition {
     SenderNotificationPermission {
         key: Cow<'static, str>,
     },
+    // MSCxxxx (knock push rules): matches if the user the rules are being
+    // evaluated for has a power level at least that required to perform the
+    // action named by `key` (e.g. "invite").
+    #[serde(rename = "org.matrix.mscxxxx.recipient_permission")]
+    RecipientPermission {
+        key: Cow<'static, str>,
+    },
     #[serde(rename = "org.matrix.msc3931.room_version_supports")]
     RoomVersionSupports {
         feature: Cow<'static, str>,
@@ -560,6 +567,7 @@ pub struct FilteredPushRules {
     msc4210_enabled: bool,
     msc4306_enabled: bool,
     mscxxxx_beacon_push_rules_enabled: bool,
+    mscxxxx_knock_push_rule_enabled: bool,
 }
 
 #[pymethods]
@@ -576,6 +584,7 @@ impl FilteredPushRules {
         msc4210_enabled: bool,
         msc4306_enabled: bool,
         mscxxxx_beacon_push_rules_enabled: bool,
+        mscxxxx_knock_push_rule_enabled: bool,
     ) -> Self {
         Self {
             push_rules,
@@ -587,6 +596,7 @@ impl FilteredPushRules {
             msc4210_enabled,
             msc4306_enabled,
             mscxxxx_beacon_push_rules_enabled,
+            mscxxxx_knock_push_rule_enabled,
         }
     }
 
@@ -625,6 +635,12 @@ impl FilteredPushRules {
 
                 if !self.mscxxxx_beacon_push_rules_enabled
                     && rule.rule_id.contains("/.io.element.rule.beacon_info")
+                {
+                    return false;
+                }
+
+                if !self.mscxxxx_knock_push_rule_enabled
+                    && rule.rule_id.contains("/.org.matrix.mscxxxx.rule.knock")
                 {
                     return false;
                 }
