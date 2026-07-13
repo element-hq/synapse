@@ -22,6 +22,7 @@
 import logging
 from typing import (
     TYPE_CHECKING,
+    Collection,
     Iterable,
     Mapping,
     cast,
@@ -57,6 +58,67 @@ if TYPE_CHECKING:
     from synapse.storage.databases.state.deletion import StateDeletionDataStore
 
 logger = logging.getLogger(__name__)
+
+
+def _fetch_tikv_state_groups_sync(
+    groups: list[int], state_filter: StateFilter
+) -> tuple[dict[int, StateMap[str]], list[int]]:
+    import json
+
+    from synapse.synapse_rust import tikv_engine
+
+    results: dict[int, StateMap[str]] = {}
+    missing_groups: list[int] = []
+
+    groups_to_fetch = set(groups)
+    fetched_data = {}
+
+    while groups_to_fetch:
+        keys = [f"sg:{g}".encode("utf-8") for g in groups_to_fetch]
+        pairs = tikv_engine.batch_get(keys)
+
+        found_groups = set()
+        for k, v in pairs:
+            sg_id = int(k.decode("utf-8")[3:])
+            found_groups.add(sg_id)
+            fetched_data[sg_id] = json.loads(v.decode("utf-8"))
+
+        groups_to_fetch = set()
+        for sg_id in found_groups:
+            data = fetched_data[sg_id]
+            prev = data.get("prev")
+            if prev is not None and prev not in fetched_data:
+                groups_to_fetch.add(prev)
+
+    for g in groups:
+        if g not in fetched_data:
+            missing_groups.append(g)
+            continue
+
+        state_map: dict[tuple[str, str], str] = {}
+        curr = g
+        valid = True
+        deltas_stack = []
+
+        while curr is not None:
+            if curr not in fetched_data:
+                valid = False
+                break
+            data = fetched_data[curr]
+            deltas_stack.append(data.get("deltas", []))
+            curr = data.get("prev")
+
+        if not valid:
+            missing_groups.append(g)
+            continue
+
+        for deltas in reversed(deltas_stack):
+            for item in deltas:
+                state_map[(item[0], item[1])] = item[2]
+
+        results[g] = state_filter.filter_state(state_map)
+
+    return results, missing_groups
 
 
 MAX_STATE_DELTA_HOPS = 100
@@ -147,6 +209,20 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             id_column="id",
         )
 
+        self.tikv_pd_endpoints = hs.config.database.tikv_pd_endpoints
+        if self.tikv_pd_endpoints:
+            try:
+                from synapse.synapse_rust import tikv_engine
+
+                tikv_engine.open_client(self.tikv_pd_endpoints)
+                logger.info(
+                    "Connected to TiKV cluster at %s for state group offload",
+                    self.tikv_pd_endpoints,
+                )
+            except Exception as e:
+                logger.error("Failed to connect to TiKV cluster: %s", e)
+                self.tikv_pd_endpoints = None
+
     @cached(max_entries=10000, iterable=True)
     async def get_state_group_delta(self, state_group: int) -> _GetStateGroupDelta:
         """Given a state group try to return a previous group and a delta between
@@ -207,6 +283,38 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             Dict of state group to state map.
         """
         results: dict[int, StateMap[str]] = {}
+
+        if self.tikv_pd_endpoints:
+            try:
+                from synapse.logging.context import (
+                    defer_to_thread,
+                    make_deferred_yieldable,
+                )
+
+                tikv_res, missing_groups = await make_deferred_yieldable(
+                    defer_to_thread(
+                        self.hs.get_reactor(),
+                        _fetch_tikv_state_groups_sync,
+                        groups,
+                        state_filter,
+                    )
+                )
+
+                results.update(tikv_res)
+
+                if missing_groups:
+                    logger.warning(
+                        "State groups missing in TiKV: %s, falling back to SQL for those",
+                        missing_groups,
+                    )
+                    groups = missing_groups
+                else:
+                    return results
+            except Exception as e:
+                logger.error(
+                    "Failed to fetch state groups from TiKV, falling back to SQL: %s",
+                    e,
+                )
 
         chunks = [groups[i : i + 100] for i in range(0, len(groups), 100)]
         for chunk in chunks:
@@ -717,6 +825,40 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 delta_ids,
             )
             if state_group is not None:
+                if self.tikv_pd_endpoints:
+                    try:
+                        import json
+
+                        from synapse.logging.context import (
+                            defer_to_thread,
+                            make_deferred_yieldable,
+                        )
+                        from synapse.synapse_rust import tikv_engine
+
+                        key = f"sg:{state_group}".encode("utf-8")
+                        deltas = (
+                            [[k[0], k[1], v] for k, v in delta_ids.items()]
+                            if delta_ids
+                            else []
+                        )
+                        payload = {"prev": prev_group, "deltas": deltas}
+                        val = json.dumps(payload).encode("utf-8")
+                        await make_deferred_yieldable(
+                            defer_to_thread(
+                                self.hs.get_reactor(), tikv_engine.put, key, val
+                            )
+                        )
+                        logger.info(
+                            "Successfully stored state group %s in TiKV (delta size: %s)",
+                            state_group,
+                            len(deltas),
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "Failed to store state group %s in TiKV: %s",
+                            state_group,
+                            e,
+                        )
                 return state_group
 
         # We're going to persist the state as a complete group rather than
@@ -729,11 +871,42 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             current_state_ids = dict(groups[prev_group])
             current_state_ids.update(delta_ids)
 
-        return await self.db_pool.runInteraction(
+        state_group = await self.db_pool.runInteraction(
             "store_state_group.insert_full_state",
             insert_full_state_txn,
             current_state_ids,
         )
+
+        if self.tikv_pd_endpoints:
+            try:
+                import json
+
+                from synapse.logging.context import (
+                    defer_to_thread,
+                    make_deferred_yieldable,
+                )
+                from synapse.synapse_rust import tikv_engine
+
+                key = f"sg:{state_group}".encode("utf-8")
+                deltas = [
+                    [k[0], k[1], event_id] for k, event_id in current_state_ids.items()
+                ]
+                payload = {"prev": None, "deltas": deltas}
+                val = json.dumps(payload).encode("utf-8")
+                await make_deferred_yieldable(
+                    defer_to_thread(self.hs.get_reactor(), tikv_engine.put, key, val)
+                )
+                logger.info(
+                    "Successfully stored state group %s in TiKV (size: %s entries)",
+                    state_group,
+                    len(deltas),
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to store state group %s in TiKV: %s", state_group, e
+                )
+
+        return state_group
 
     async def purge_unreferenced_state_groups(
         self,
@@ -841,6 +1014,23 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             "DELETE FROM state_groups_pending_deletion WHERE state_group = ?",
             [(sg,) for sg in state_groups_to_delete],
         )
+
+        def delete_from_tikv(groups: "Collection[int]") -> None:
+            if self.tikv_pd_endpoints:
+                from synapse.logging.context import defer_to_thread
+                from synapse.synapse_rust import tikv_engine
+
+                def _do_delete() -> None:
+                    try:
+                        tikv_engine.batch_delete(
+                            [f"sg:{sg}".encode("utf-8") for sg in groups]
+                        )
+                    except Exception as e:
+                        logger.error("Failed to delete state groups from TiKV: %s", e)
+
+                defer_to_thread(self.hs.get_reactor(), _do_delete)
+
+        txn.call_after(delete_from_tikv, state_groups_to_delete)
 
         return True
 

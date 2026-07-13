@@ -1229,6 +1229,13 @@ def generate_worker_files(
                 "port": MAIN_PROCESS_REPLICATION_PORT,
             }
 
+    # Support TiKV offloading in Complement integration tests
+    tikv_endpoints = os.environ.get("SYNAPSE_TIKV_PD_ENDPOINTS")
+    if tikv_endpoints:
+        shared_config["tikv"] = {
+            "pd_endpoints": [ep.strip() for ep in tikv_endpoints.split(",")]
+        }
+
     # Shared homeserver config
     convert(
         "/conf/shared.yaml.j2",

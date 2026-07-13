@@ -31,11 +31,20 @@ jobs:
           - arrangement: monolith
             database: SQLite
 
+          - arrangement: hybrid
+            database: SQLite (hybrid, tikv)
+
           - arrangement: monolith
             database: Postgres
 
+          - arrangement: hybrid
+            database: Postgres (hybrid, tikv)
+
           - arrangement: workers
             database: Postgres
+
+          - arrangement: workers
+            database: Postgres (hybrid, tikv)
 
     steps:
       - name: Checkout synapse codebase
@@ -64,6 +73,27 @@ jobs:
 
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
+
+      - name: Start TiKV (PD & TiKV nodes)
+        if: ${{ contains(matrix.database, 'tikv') }}
+        run: |
+          docker run -d --name pd -p 2379:2379 pingcap/pd:latest \
+            --name=pd \
+            --client-urls=http://0.0.0.0:2379 \
+            --advertise-client-urls=http://172.17.0.1:2379 \
+            --data-dir=/data
+
+          # Wait for PD to be ready
+          until curl -s http://127.0.0.1:2379/pd/api/v1/members; do
+            echo "Waiting for PD to start..."
+            sleep 2
+          done
+
+          docker run -d --name tikv -p 20160:20160 pingcap/tikv:latest \
+            --addr=0.0.0.0:20160 \
+            --advertise-addr=172.17.0.1:20160 \
+            --data-dir=/data \
+            --pd=172.17.0.1:2379
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
@@ -112,8 +142,9 @@ jobs:
             | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
         env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          POSTGRES: ${{ (startsWith(matrix.database, 'Postgres')) && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          SYNAPSE_TIKV_PD_ENDPOINTS: ${{ (contains(matrix.database, 'tikv')) && '172.17.0.1:2379' || '' }}
 
       - name: Formatted sanity check Complement test logs
         # Always run this step if we attempted to run the Complement tests.
@@ -144,8 +175,9 @@ jobs:
             | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
         env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          POSTGRES: ${{ (startsWith(matrix.database, 'Postgres')) && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          SYNAPSE_TIKV_PD_ENDPOINTS: ${{ (contains(matrix.database, 'tikv')) && '172.17.0.1:2379' || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
@@ -177,8 +209,9 @@ jobs:
             | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
         shell: bash
         env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          POSTGRES: ${{ (startsWith(matrix.database, 'Postgres')) && 1 || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
+          SYNAPSE_TIKV_PD_ENDPOINTS: ${{ (contains(matrix.database, 'tikv')) && '172.17.0.1:2379' || '' }}
           TEST_ONLY_IGNORE_POETRY_LOCKFILE: ${{ inputs.use_latest_deps && 1 || '' }}
           TEST_ONLY_SKIP_DEP_HASH_VERIFICATION: ${{ inputs.use_twisted_trunk  && 1 || '' }}
 
