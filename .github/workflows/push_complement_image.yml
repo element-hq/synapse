@@ -37,16 +37,19 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         with:
           ref: ${{ inputs.branch }}
+          persist-credentials: false
       - name: Checkout clean copy of develop (scheduled build)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         if: github.event_name == 'schedule'
         with:
           ref: develop
+          persist-credentials: false
       - name: Checkout clean copy of master (on-push)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         if: github.event_name == 'push'
         with:
           ref: master
+          persist-credentials: false
       # We use `poetry` in `complement.sh`
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:

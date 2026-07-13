@@ -26,6 +26,7 @@ jobs:
         with:
           # Only clone the script file we care about, instead of the whole repo.
           sparse-checkout: .ci/scripts/triage_labelled_issue.sh
+          persist-credentials: false
 
       - name: Ensure issue exists on the board, then set Status
         run: .ci/scripts/triage_labelled_issue.sh
