@@ -32,6 +32,15 @@ class AutoAcceptInvitesConfig(Config):
 
         self.enabled = auto_accept_invites_config.get("enabled", False)
 
+        # Whether to automatically join a room on behalf of a user when an
+        # invite arrives for a knock the user has pending in that room (i.e.
+        # the knock was accepted). The user already asked to join by knocking,
+        # so this is on by default and independent of `enabled` above.
+        # See https://github.com/element-hq/synapse/issues/16307.
+        self.enabled_for_accepted_knocks = auto_accept_invites_config.get(
+            "enabled_for_accepted_knocks", True
+        )
+
         self.accept_invites_only_for_direct_messages = auto_accept_invites_config.get(
             "only_for_direct_messages", False
         )

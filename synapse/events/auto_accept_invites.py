@@ -36,8 +36,12 @@ class InviteAutoAccepter:
         self._api = api
         self.server_name = api.server_name
         self._config = config
+        # This is bundled with Synapse (rather than a true module), so reach
+        # for the datastore directly: the module API doesn't expose event
+        # fetching.
+        self._store = api._store
 
-        if not self._config.enabled:
+        if not self._config.enabled and not self._config.enabled_for_accepted_knocks:
             return
 
         should_run_on_this_worker = config.worker_to_run_on == self._api.worker_name
@@ -75,21 +79,34 @@ class InviteAutoAccepter:
         ):
             return
 
-        # Only accept invites for direct messages if the configuration mandates it.
-        is_direct_message = event.content.get("is_direct", False)
-        if (
-            self._config.accept_invites_only_for_direct_messages
-            and is_direct_message is False
-        ):
+        # An invite following a knock from the user (the knock being accepted)
+        # is auto-joined regardless of the general auto-accept settings: the
+        # user already asked to join the room by knocking.
+        # See https://github.com/element-hq/synapse/issues/16307.
+        is_accepted_knock = await self._is_accepted_knock(event)
+        if is_accepted_knock:
+            if not self._config.enabled_for_accepted_knocks:
+                return
+        elif not self._config.enabled:
             return
 
-        # Only accept invites from remote users if the configuration mandates it.
-        is_from_local_user = self._api.is_mine(event.sender)
-        if (
-            self._config.accept_invites_only_from_local_users
-            and is_from_local_user is False
-        ):
-            return
+        is_direct_message = event.content.get("is_direct", False)
+
+        if not is_accepted_knock:
+            # Only accept invites for direct messages if the configuration mandates it.
+            if (
+                self._config.accept_invites_only_for_direct_messages
+                and is_direct_message is False
+            ):
+                return
+
+            # Only accept invites from remote users if the configuration mandates it.
+            is_from_local_user = self._api.is_mine(event.sender)
+            if (
+                self._config.accept_invites_only_from_local_users
+                and is_from_local_user is False
+            ):
+                return
 
         # Check the user is activated.
         recipient = await self._api.get_userinfo_by_id(event.state_key)
@@ -126,6 +143,26 @@ class InviteAutoAccepter:
             await self._mark_room_as_direct_message(
                 event.state_key, event.sender, event.room_id
             )
+
+    async def _is_accepted_knock(self, invite_event: EventBase) -> bool:
+        """Whether the invite is the acceptance of a knock by the invited
+        user: i.e. the invited user's own knock membership event is among the
+        invite's auth events.
+
+        This works for over-federation invites too: the knocking server holds
+        the knock event (it created it), and the resident server necessarily
+        cited it as the invitee's prior membership when authing the invite.
+        """
+        for auth_event_id in invite_event.auth_event_ids():
+            auth_event = await self._store.get_event(auth_event_id, allow_none=True)
+            if (
+                auth_event is not None
+                and auth_event.type == EventTypes.Member
+                and auth_event.state_key == invite_event.state_key
+                and auth_event.membership == Membership.KNOCK
+            ):
+                return True
+        return False
 
     async def _mark_room_as_direct_message(
         self, user_id: str, dm_user_id: str, room_id: str

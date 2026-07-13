@@ -1465,7 +1465,10 @@ def start_test_homeserver(
     for module, module_config in hs.config.modules.loaded_modules:
         module(config=module_config, api=module_api)
 
-    if hs.config.auto_accept_invites.enabled:
+    if (
+        hs.config.auto_accept_invites.enabled
+        or hs.config.auto_accept_invites.enabled_for_accepted_knocks
+    ):
         # Start the local auto_accept_invites module.
         m = InviteAutoAccepter(hs.config.auto_accept_invites, module_api)
         logger.info("Loaded local module %s", m)

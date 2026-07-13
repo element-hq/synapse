@@ -5865,6 +5865,15 @@ properties:
         type: boolean
         description: Whether to run the auto-accept invites logic.
         default: false
+      enabled_for_accepted_knocks:
+        type: boolean
+        description: >-
+          Whether to automatically join a user to a room when an invite
+          arrives for a knock they have pending in that room (i.e. their
+          knock was accepted). The user already asked to join by knocking,
+          so this applies independently of `enabled` and of the restrictions
+          below.
+        default: true
       only_for_direct_messages:
         type: boolean
         description: >-
