@@ -323,6 +323,18 @@ class FederationEventHandler:
                         pdu.state_key, pdu.room_id
                     )
                     if origin == via_server or origin == get_domain_from_id(pdu.sender):
+                        # As an outlier the event will never gain a
+                        # `replaces_state`, so reflect the replaced knock in
+                        # `unsigned` ourselves: clients use `prev_content` to
+                        # distinguish a denied knock from a plain kick.
+                        knock_event = await self._store.get_event(
+                            membership_event_id, allow_none=True
+                        )
+                        if knock_event is not None:
+                            pdu.unsigned["replaces_state"] = knock_event.event_id
+                            pdu.unsigned["prev_content"] = knock_event.content
+                            pdu.unsigned["prev_sender"] = knock_event.sender
+
                         # Handle the denial event
                         pdu.internal_metadata.outlier = True
                         pdu.internal_metadata.out_of_band_membership = True
