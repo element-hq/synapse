@@ -12,6 +12,9 @@ on:
 
   workflow_dispatch:
 
+# No default GITHUB_TOKEN permissions are needed at the workflow level.
+permissions: {}
+
 jobs:
   pre:
     name: Calculate variables for GitHub Pages deployment
@@ -47,6 +50,9 @@ jobs:
   pages-docs:
     name: GitHub Pages
     runs-on: ubuntu-latest
+    permissions:
+      # Required to check out the repository and publish documentation.
+      contents: write
     needs:
       - pre
     steps:

@@ -13,10 +13,16 @@ env:
   # Note: This should match the nightly rust version in `tests.yml`.
   RUST_VERSION: nightly-2025-03-27
 
+# No default GITHUB_TOKEN permissions are needed at the workflow level.
+permissions: {}
+
 jobs:
   fixup:
     name: Fix up
     runs-on: ubuntu-latest
+    permissions:
+      # Required to check out the repository and push generated lint fixes.
+      contents: write
 
     steps:
       - name: Checkout repository

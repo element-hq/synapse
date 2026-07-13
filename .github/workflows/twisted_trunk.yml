@@ -22,6 +22,10 @@ concurrency:
 env:
   RUST_VERSION: 1.87.0
 
+permissions:
+  # Required to check out the repository.
+  contents: read
+
 jobs:
   check_repo:
     # Prevent this workflow from running on any fork of Synapse other than element-hq/synapse, as it is
@@ -170,6 +174,11 @@ jobs:
       - complement
 
     runs-on: ubuntu-latest
+    permissions:
+      # Required to check out the issue template.
+      contents: read
+      # Required to create or update the failure tracking issue.
+      issues: write
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

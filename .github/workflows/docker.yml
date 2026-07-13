@@ -8,14 +8,20 @@ on:
     branches: [master, main, develop]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-  id-token: write # needed for signing the images with GitHub OIDC Token
+# No default GITHUB_TOKEN permissions are needed at the workflow level.
+permissions: {}
+
 jobs:
   build:
     name: Build and push image for ${{ matrix.platform }}
     runs-on: ${{ matrix.runs_on }}
+    permissions:
+      # Required to check out the repository.
+      contents: read
+      # Required to push images to GitHub Container Registry.
+      packages: write
+      # Required for OIDC authentication while publishing images.
+      id-token: write
     strategy:
       matrix:
         include:
@@ -118,6 +124,11 @@ jobs:
   merge:
     name: Push merged images to ${{ matrix.repository }}
     runs-on: ubuntu-latest
+    permissions:
+      # Required to push merged images to GitHub Container Registry.
+      packages: write
+      # Required for OIDC authentication while publishing images.
+      id-token: write
     strategy:
       matrix:
         repository:

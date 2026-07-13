@@ -24,11 +24,20 @@ env:
   # It's safer for future releases to just do the day before.
   RUST_NIGHTLY_VERSION: nightly-2025-03-27 # last nightly before 1.88.0
 
+permissions:
+  # Required to check out the repository.
+  contents: read
+
 jobs:
   # Job to detect what has changed so we don't run e.g. Rust checks on PRs that
   # don't modify Rust code.
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      # Required by paths-filter to inspect repository changes.
+      contents: read
+      # Required by paths-filter to inspect pull request changes.
+      pull-requests: read
     outputs:
       rust: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.rust }}
       trial: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.trial }}

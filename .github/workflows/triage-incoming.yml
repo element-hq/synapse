@@ -4,6 +4,9 @@ on:
   issues:
     types: [ opened ]
 
+# This workflow uses ELEMENT_BOT_TOKEN, so GITHUB_TOKEN permissions are not needed.
+permissions: {}
+
 jobs:
   triage:
     uses: matrix-org/backend-meta/.github/workflows/triage-incoming.yml@18beaf3c8e536108bd04d18e6c3dc40ba3931e28 # v2.0.3
