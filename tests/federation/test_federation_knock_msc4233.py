@@ -405,9 +405,10 @@ class KnockViaServerTestCase(unittest.FederatingHomeserverTestCase):
 
         # The knock should (eventually - the PDU is processed in the
         # background) be retracted.
+        leave_event_id = None
         with test_timeout(3, "Denial of the knock was not processed"):
             while True:
-                membership, _ = self.get_success(
+                membership, leave_event_id = self.get_success(
                     self.store.get_local_current_membership_for_user_in_room(
                         knock_result.local_user1_id, knock_result.remote_room_id
                     )
@@ -415,6 +416,19 @@ class KnockViaServerTestCase(unittest.FederatingHomeserverTestCase):
                 if membership == Membership.LEAVE:
                     break
                 time.sleep(0.1)
+
+        # The stored leave should carry the replaced knock in `unsigned`, so
+        # that clients can tell a denied knock from a plain kick.
+        assert leave_event_id is not None
+        leave_event = self.get_success(self.store.get_event(leave_event_id))
+        self.assertEqual(
+            leave_event.unsigned.get("prev_content", {}).get("membership"),
+            Membership.KNOCK,
+        )
+        self.assertEqual(
+            leave_event.unsigned.get("replaces_state"),
+            knock_result.knock_event_id,
+        )
 
     def test_denied_knock_ignored_without_knock_in_auth_events(self) -> None:
         """A leave event for our knocked user which does not reference the
