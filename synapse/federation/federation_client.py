@@ -126,6 +126,15 @@ class SendJoinResult:
     servers_in_room: AbstractSet[str]
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class SendKnockResult:
+    # The response body from the remote server, of the form
+    # {"knock_room_state": [<state event dict>, ...]}.
+    response: JsonDict
+    # The server which fulfilled the knock (i.e. answered our /send_knock).
+    origin: str
+
+
 class FederationClient(FederationBase):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
@@ -1437,7 +1446,9 @@ class FederationClient(FederationBase):
         # content.
         return resp[1]
 
-    async def send_knock(self, destinations: list[str], pdu: EventBase) -> JsonDict:
+    async def send_knock(
+        self, destinations: list[str], pdu: EventBase
+    ) -> "SendKnockResult":
         """Attempts to send a knock event to a given list of servers. Iterates
         through the list until one attempt succeeds.
 
@@ -1450,20 +1461,18 @@ class FederationClient(FederationBase):
             pdu: The event to be sent.
 
         Returns:
-            The remote homeserver return some state from the room. The response
-            dictionary is in the form:
-
-            {"knock_room_state": [<state event dict>, ...]}
-
-            The list of state events may be empty.
+            A SendKnockResult holding the remote homeserver's response (some
+            state from the room, possibly empty) and the name of the server
+            that fulfilled the knock.
 
         Raises:
             SynapseError: If the chosen remote server returns a 3xx/4xx code.
             RuntimeError: If no servers were reachable.
         """
 
-        async def send_request(destination: str) -> JsonDict:
-            return await self._do_send_knock(destination, pdu)
+        async def send_request(destination: str) -> "SendKnockResult":
+            response = await self._do_send_knock(destination, pdu)
+            return SendKnockResult(response=response, origin=destination)
 
         return await self._try_destination_list(
             "send_knock", destinations, send_request

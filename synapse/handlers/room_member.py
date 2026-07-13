@@ -2086,13 +2086,38 @@ class RoomMemberMasterHandler(RoomMemberHandler):
 
         Implements RoomMemberHandler.remote_rescind_knock
         """
-        # TODO: We don't yet support rescinding knocks over federation
-        # as we don't know which homeserver to send it to. An obvious
-        # candidate is the remote homeserver we originally knocked through,
-        # however we don't currently store that information.
-
-        # Just rescind the knock locally
         knock_event = await self.store.get_event(knock_event_id)
+
+        if self.hs.config.experimental.msc4233_enabled:
+            # MSC4233: route the rescission through the server the knock was
+            # fulfilled through, which we remembered at knock time.
+            via_server = await self.store.get_local_knock_via_server(
+                knock_event.state_key, knock_event.room_id
+            )
+            if via_server is not None:
+                try:
+                    (
+                        event,
+                        stream_id,
+                    ) = await self.federation_handler.do_remotely_rescind_knock(
+                        [via_server],
+                        knock_event.room_id,
+                        knock_event.state_key,
+                        content,
+                    )
+                    return event.event_id, stream_id
+                except Exception as e:
+                    # If we can't reach the remote server, fall back to
+                    # rescinding the knock locally, as we would have done
+                    # before MSC4233.
+                    logger.warning(
+                        "Failed to rescind knock on %s via %s: %s",
+                        knock_event.room_id,
+                        via_server,
+                        e,
+                    )
+
+        # Rescind the knock locally
         return await self._generate_local_out_of_band_leave(
             knock_event, txn_id, requester, content
         )
