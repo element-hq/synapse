@@ -80,9 +80,7 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
         self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
-        self._can_write_to_profile_updates = (
-            self._instance_name in hs.config.worker.writers.profile_updates
-        )
+        self._is_events_writer = self._instance_name in hs.config.worker.writers.events
         self._profile_updates_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
             db_conn=db_conn,
             db=database,
@@ -94,7 +92,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 ("profile_updates", "instance_name", "stream_id"),
             ],
             sequence_name="profile_updates_sequence",
-            writers=hs.config.worker.writers.profile_updates,
+            writers=hs.config.worker.writers.events,
         )
 
     async def populate_full_user_id_profiles(
@@ -684,7 +682,7 @@ class ProfileWorkerStore(SQLBaseStore):
             The profile updates stream ID that was created in this transaction
         """
         if self._msc4429_enabled:
-            assert self._can_write_to_profile_updates
+            assert self._is_events_writer
 
         self._check_profile_size(txn, user_id, field_name, new_value)
 
@@ -890,7 +888,7 @@ class ProfileWorkerStore(SQLBaseStore):
         """
 
         if self._msc4429_enabled:
-            assert self._can_write_to_profile_updates
+            assert self._is_events_writer
 
         def delete_profile_field(txn: LoggingTransaction) -> int | None:
             if isinstance(self.database_engine, PostgresEngine):
@@ -995,7 +993,7 @@ class ProfileWorkerStore(SQLBaseStore):
         """
         if not users_to_update:
             return None
-        assert self._can_write_to_profile_updates
+        assert self._is_events_writer
 
         def _record_profile_updates_for_user_left_room_txn(
             txn: LoggingTransaction,
@@ -1063,7 +1061,7 @@ class ProfileWorkerStore(SQLBaseStore):
         """
         if not users_to_update:
             return None
-        assert self._can_write_to_profile_updates
+        assert self._is_events_writer
 
         def _record_profile_updates_for_user_joined_room_txn(
             txn: LoggingTransaction,
@@ -1104,7 +1102,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             None
         """
-        assert self._can_write_to_profile_updates
+        assert self._is_events_writer
         if not users_to_remove:
             return
 

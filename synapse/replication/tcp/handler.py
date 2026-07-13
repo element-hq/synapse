@@ -220,7 +220,7 @@ class ReplicationCommandHandler:
                 continue
 
             if isinstance(stream, ProfileUpdatesStream):
-                if hs.get_instance_name() in hs.config.worker.writers.profile_updates:
+                if hs.get_instance_name() in hs.config.worker.writers.events:
                     self._streams_to_replicate.append(stream)
 
                 continue

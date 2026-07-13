@@ -127,9 +127,10 @@ class WriterLocations:
     """Specifies the instances that write various streams.
 
     Attributes:
-        events: The instances that write to the event, backfill and `sticky_events` streams.
-            (`sticky_events` is written to during event persistence so must be handled by the
-            same stream writers.)
+        events: The instances that write to the event, backfill, `sticky_events` and
+            `profile_updates` streams.
+            (`sticky_events` and `profile_updates` are written to during event
+            persistence so must be handled by the same stream writers.)
         typing: The instances that write to the typing stream. Currently
             can only be a single instance.
         to_device: The instances that write to the to_device stream. Currently
@@ -182,10 +183,6 @@ class WriterLocations:
         converter=_instance_to_list_converter,
     )
     thread_subscriptions: list[str] = attr.ib(
-        default=[MAIN_PROCESS_INSTANCE_NAME],
-        converter=_instance_to_list_converter,
-    )
-    profile_updates: list[str] = attr.ib(
         default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
@@ -379,7 +376,6 @@ class WorkerConfig(Config):
             "push_rules",
             "device_lists",
             "thread_subscriptions",
-            "profile_updates",
         ):
             instances = _instance_to_list_converter(getattr(self.writers, stream))
             for instance in instances:
@@ -433,11 +429,6 @@ class WorkerConfig(Config):
         if len(self.writers.thread_subscriptions) == 0:
             raise ConfigError(
                 "Must specify at least one instance to handle `thread_subscriptions` messages."
-            )
-
-        if len(self.writers.profile_updates) == 0:
-            raise ConfigError(
-                "Must specify at least one instance to handle `profile_updates` messages."
             )
 
         self.events_shard_config = RoutableShardedWorkerHandlingConfig(

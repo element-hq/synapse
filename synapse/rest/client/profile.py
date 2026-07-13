@@ -109,9 +109,6 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
-        self._is_profile_worker = (
-            hs.get_instance_name() in hs.config.worker.writers.profile_updates
-        )
         if hs.config.experimental.msc4133_enabled:
             self.PATTERNS.append(
                 re.compile(

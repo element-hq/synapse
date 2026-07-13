@@ -577,7 +577,6 @@ configured as stream writer for the `quarantined_media_changes` stream:
 
     ^/_synapse/admin/v1/quarantine_media/.*$
 
-
 #### Restrict outbound federation traffic to a specific set of workers
 
 The

@@ -82,7 +82,6 @@ class ProfileHandler:
         self.store = hs.get_datastores().main
         self.hs = hs
         self._notifier = hs.get_notifier()
-        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
 
         self.federation = hs.get_federation_client()
         hs.get_federation_registry().register_query_handler(
@@ -106,8 +105,11 @@ class ProfileHandler:
             self._update_join_states_task, UPDATE_JOIN_STATES_ACTION_NAME
         )
         self._worker_locks = hs.get_worker_locks_handler()
-        self._is_profile_worker = (
-            hs.get_instance_name() in hs.config.worker.writers.profile_updates
+
+        # Profile updates stream
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._is_events_writer = (
+            hs.get_instance_name() in hs.config.worker.writers.events
         )
         self._delete_profile_field_client = ReplicationProfileDeleteField.make_client(
             self.hs
@@ -116,9 +118,7 @@ class ProfileHandler:
             ReplicationProfileDeleteUponDeactivation.make_client(self.hs)
         )
         self._set_profile_field_client = ReplicationProfileSetField.make_client(self.hs)
-        self._profile_updates_writer_instance = (
-            self.hs.config.worker.writers.profile_updates[0]
-        )
+        self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
 
     async def get_targets_for_profile_updates(
         self, user_id: UserID
@@ -482,7 +482,7 @@ class ProfileHandler:
         if not self._msc4429_enabled:
             return
         # We should never be called without being a profile worker
-        assert self._is_profile_worker
+        assert self._is_events_writer
 
         user_id_str = user_id.to_string()
 
@@ -524,7 +524,7 @@ class ProfileHandler:
         if not self._msc4429_enabled:
             return
         # We should never be called without being a profile worker
-        assert self._is_profile_worker
+        assert self._is_events_writer
 
         user_id_str = user_id.to_string()
 
@@ -553,14 +553,15 @@ class ProfileHandler:
     ) -> None:
         """
         Dispatch profile deletion upon deactivation to the right instance that
-        can write to profiles, or handle it ourselves, if we're a profile worker.
+        can write to the profile updates stream, or handle it ourselves,
+        if we're an events stream writer.
 
         Args:
             target_user: User ID who'se profile is being deactivated.
             requester: The requesting user.
             by_admin: Whether the action is being done by an admin.
         """
-        if self._is_profile_worker:
+        if self._is_events_writer:
             await self.delete_profile_upon_deactivation(
                 target_user=target_user,
                 requester=requester,
@@ -670,7 +671,7 @@ class ProfileHandler:
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
         """
-        if self._is_profile_worker:
+        if self._is_events_writer:
             await self.set_field(
                 target_user=target_user,
                 requester=requester,
@@ -934,7 +935,7 @@ class ProfileHandler:
             by_admin: Whether this change was made by an administrator.
         """
         assert field_name not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
-        if self._is_profile_worker:
+        if self._is_events_writer:
             await self.delete_profile_field(
                 target_user=target_user,
                 requester=requester,
