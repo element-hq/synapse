@@ -28,14 +28,13 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase
-from synapse.events import builder
+from synapse.events import EventBase, builder
 from synapse.events.snapshot import EventContext
 from synapse.events.utils import strip_event
 from synapse.http.matrixfederationclient import ByteParser
 from synapse.http.types import QueryParams
 from synapse.rest import admin
-from synapse.rest.client import knock, login, room
+from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -75,11 +74,18 @@ class KnockViaServerTestCase(unittest.FederatingHomeserverTestCase):
         knock.register_servlets,
         room.register_servlets,
         login.register_servlets,
+        sync.register_servlets,
     ]
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
-        conf["experimental_features"] = {"msc4233_enabled": True}
+        conf["experimental_features"] = {
+            "msc4233_enabled": True,
+            # For the state_after test: out-of-band leaves must be reflected
+            # in `state_after` for clients that no longer apply timeline
+            # events to state.
+            "msc4222_enabled": True,
+        }
         return conf
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
@@ -417,6 +423,60 @@ class KnockViaServerTestCase(unittest.FederatingHomeserverTestCase):
                     break
                 time.sleep(0.1)
 
+    def test_denied_knock_in_state_after(self) -> None:
+        """The out-of-band leave retracting the knock is reflected in
+        `state_after` (MSC4222) on sync: it is an outlier, so it never enters
+        the current state delta stream, and clients using `state_after` do
+        not apply timeline events to state."""
+        knock_result = self._knock_on_remote_room()
+
+        # Sync up to just after the knock.
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/sync?timeout=0&org.matrix.msc4222.use_state_after=true",
+            access_token=knock_result.local_user1_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        since_token = channel.json_body["next_batch"]
+
+        self._send_denial_over_federation(
+            knock_result,
+            auth_events=[
+                knock_result.room_create_event.event_id,
+                knock_result.knock_event_id,
+            ],
+        )
+
+        with test_timeout(3, "Denial of the knock was not processed"):
+            while True:
+                membership, _ = self.get_success(
+                    self.store.get_local_current_membership_for_user_in_room(
+                        knock_result.local_user1_id, knock_result.remote_room_id
+                    )
+                )
+                if membership == Membership.LEAVE:
+                    break
+                time.sleep(0.1)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/sync?timeout=0&org.matrix.msc4222.use_state_after=true&since={since_token}",
+            access_token=knock_result.local_user1_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        leave_room = channel.json_body["rooms"]["leave"][knock_result.remote_room_id]
+        state_after_events = leave_room["org.matrix.msc4222.state_after"]["events"]
+        self.assertTrue(
+            any(
+                e["type"] == EventTypes.Member
+                and e["state_key"] == knock_result.local_user1_id
+                and e["content"]["membership"] == Membership.LEAVE
+                for e in state_after_events
+            ),
+            leave_room,
+        )
+
     def test_denied_knock_ignored_without_knock_in_auth_events(self) -> None:
         """A leave event for our knocked user which does not reference the
         knock in its auth events is ignored."""
@@ -495,7 +555,7 @@ class DenyKnockFederationSendTestCase(unittest.FederatingHomeserverTestCase):
     def test_deny_sends_leave_to_knocking_server(self) -> None:
         """Kicking a remote user whose membership is knock sends the leave
         event to their (otherwise uninvolved) server."""
-        user_id = self.register_user("u1", "pass")
+        self.register_user("u1", "pass")
         user_token = self.login("u1", "pass")
 
         fake_knocking_user_id = f"@user:{self.OTHER_SERVER_NAME}"
@@ -585,9 +645,7 @@ class DenyKnockFederationSendTestCase(unittest.FederatingHomeserverTestCase):
             while True:
                 leave_pdus = [
                     pdu
-                    for pdu in sent_pdus_by_destination.get(
-                        self.OTHER_SERVER_NAME, []
-                    )
+                    for pdu in sent_pdus_by_destination.get(self.OTHER_SERVER_NAME, [])
                     if pdu.get("type") == EventTypes.Member
                     and pdu.get("state_key") == fake_knocking_user_id
                     and pdu.get("content", {}).get("membership") == Membership.LEAVE
