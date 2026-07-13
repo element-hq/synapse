@@ -96,9 +96,11 @@ jobs:
             --docker-build-arg=--cache-to=type=local,mode=max,dest=/tmp/.buildx-cache-new \
             --docker-build-arg=--progress=plain \
             --docker-build-arg=--load \
-            "${{ matrix.distro }}"
+            "${MATRIX_DISTRO}"
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+        env:
+          MATRIX_DISTRO: ${{ matrix.distro }}
 
       - name: Artifact name
         id: artifact-name
@@ -217,7 +219,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" \
+          gh release upload "${GITHUB_REF_NAME}" \
             Sdist/* \
             Wheel*/* \
             debs.tar.xz \
