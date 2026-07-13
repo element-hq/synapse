@@ -721,6 +721,43 @@ pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
         default: true,
         default_enabled: true,
     },
+    PushRule {
+        rule_id: Cow::Borrowed("global/underride/.io.element.rule.beacon_info_one_to_one"),
+        priority_class: 1,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::RoomMemberCount {
+                is: Some(Cow::Borrowed("2")),
+            }),
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc3672.beacon_info"),
+            })),
+            Condition::Known(KnownCondition::EventPropertyIs(EventPropertyIsCondition {
+                key: Cow::Borrowed("content.live"),
+                value: Cow::Owned(SimpleJsonValue::Bool(true)),
+            })),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify, SOUND_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
+        rule_id: Cow::Borrowed("global/underride/.io.element.rule.beacon_info"),
+        priority_class: 1,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc3672.beacon_info"),
+            })),
+            Condition::Known(KnownCondition::EventPropertyIs(EventPropertyIsCondition {
+                key: Cow::Borrowed("content.live"),
+                value: Cow::Owned(SimpleJsonValue::Bool(true)),
+            })),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify]),
+        default: true,
+        default_enabled: true,
+    },
 ];
 
 lazy_static! {

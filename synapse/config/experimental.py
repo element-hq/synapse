@@ -156,6 +156,13 @@ class ExperimentalConfig(Config):
             "msc3381_polls_enabled", False
         )
 
+        # MSCXXXX (unnumbered draft): default push rules for live location share
+        # beacon_info start events (the MSC3672 state event). Unstable rule ids:
+        # .io.element.rule.beacon_info(_one_to_one).
+        self.mscxxxx_beacon_push_rules_enabled: bool = experimental.get(
+            "mscxxxx_beacon_push_rules_enabled", False
+        )
+
         # MSC3912: Relation-based redactions.
         self.msc3912_enabled: bool = experimental.get("msc3912_enabled", False)
 
