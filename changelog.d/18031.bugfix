@@ -1,0 +1,1 @@
+Reflect out-of-band membership events (invite rejections, knock rescissions and denials) in `state_after` (MSC4222) on `/sync`, so that clients which no longer apply timeline events to room state learn of the membership change.
