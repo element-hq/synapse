@@ -681,7 +681,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres
+        image: postgres@sha256:22c89fe0d0f507606260237fd55e51f6137f58b2d5bcf6152242b96d9fe8f9a4
         ports:
           - 5432:5432
         env:
