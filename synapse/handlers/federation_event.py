@@ -256,12 +256,17 @@ class FederationEventHandler:
             room_id, self.server_name
         )
         if not is_in_room:
-            # Check if this is a leave event rescinding an invite
+            # Check if this is a leave event rescinding an invite, or denying
+            # a knock (MSC4233)
+            msc4233_enabled = self._config.experimental.msc4233_enabled
             if (
                 pdu.type == EventTypes.Member
-                and pdu.membership == Membership.LEAVE
                 and pdu.state_key != pdu.sender
                 and self._is_mine_id(pdu.state_key)
+                and (
+                    pdu.membership == Membership.LEAVE
+                    or (msc4233_enabled and pdu.membership == Membership.BAN)
+                )
             ):
                 (
                     membership,
@@ -270,7 +275,8 @@ class FederationEventHandler:
                     pdu.state_key, pdu.room_id
                 )
                 if (
-                    membership == Membership.INVITE
+                    pdu.membership == Membership.LEAVE
+                    and membership == Membership.INVITE
                     and membership_event_id
                     and membership_event_id
                     in pdu.auth_event_ids()  # The invite should be in the auth events of the rescission.
@@ -287,6 +293,37 @@ class FederationEventHandler:
                     # have no way of knowing who is and isn't a room admin.
                     if invite_event and pdu.sender == invite_event.sender:
                         # Handle the rescission event
+                        pdu.internal_metadata.outlier = True
+                        pdu.internal_metadata.out_of_band_membership = True
+                        context = EventContext.for_outlier(self._storage_controllers)
+                        await self.persist_events_and_notify(room_id, [(pdu, context)])
+                        return
+                elif (
+                    msc4233_enabled
+                    and membership == Membership.KNOCK
+                    and membership_event_id
+                    and membership_event_id
+                    in pdu.auth_event_ids()  # The knock should be in the auth events of the denial.
+                ):
+                    # A local user's knock on this remote room is being denied
+                    # (or the user banned).
+                    #
+                    # We cannot fully auth the denial event, but the sender has
+                    # demonstrated knowledge of our knock by referencing it in
+                    # the auth events, and the event's signature (checked on
+                    # receipt) proves it comes from the sender's server. On top
+                    # of that, only accept the event from the server the knock
+                    # was fulfilled through, or from the denying user's own
+                    # server.
+                    #
+                    # Technically we cannot verify that the sender has the
+                    # power level required to deny the knock, but the same
+                    # holds for invite rescission above.
+                    via_server = await self._store.get_local_knock_via_server(
+                        pdu.state_key, pdu.room_id
+                    )
+                    if origin == via_server or origin == get_domain_from_id(pdu.sender):
+                        # Handle the denial event
                         pdu.internal_metadata.outlier = True
                         pdu.internal_metadata.out_of_band_membership = True
                         context = EventContext.for_outlier(self._storage_controllers)

@@ -886,7 +886,18 @@ class FederationHandler:
 
         # Send the signed event back to the room, and potentially receive some
         # further information about the room in the form of partial state events
-        knock_response = await self.federation_client.send_knock(target_hosts, event)
+        send_knock_result = await self.federation_client.send_knock(target_hosts, event)
+        knock_response = send_knock_result.response
+
+        # Remember which server fulfilled the knock, so that we can route a
+        # rescission of the knock through it later, and know which server to
+        # trust for an out-of-band retraction of the knock (MSC4233).
+        await self.store.store_local_knock_via_server(
+            user_id=knockee,
+            room_id=event.room_id,
+            via_server=send_knock_result.origin,
+            knock_event_id=event.event_id,
+        )
 
         # Store any stripped room state events in the "unsigned" key of the event.
         # This is a bit of a hack and is cribbing off of invites. Basically we
@@ -1161,6 +1172,17 @@ class FederationHandler:
             raise
 
         return event
+
+    async def do_remotely_rescind_knock(
+        self, target_hosts: Iterable[str], room_id: str, user_id: str, content: JsonDict
+    ) -> tuple[EventBase, int]:
+        """Rescind a knock on a remote room: the same make_leave/send_leave
+        dance as rejecting an invite, routed through the server(s) given
+        (normally the server the knock was fulfilled through, per MSC4233).
+        """
+        return await self.do_remotely_reject_invite(
+            target_hosts, room_id, user_id, content
+        )
 
     async def do_remotely_reject_invite(
         self, target_hosts: Iterable[str], room_id: str, user_id: str, content: JsonDict
