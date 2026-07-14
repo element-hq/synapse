@@ -260,7 +260,18 @@ def _prepare() -> None:
     schema_file = "schema/synapse-config.schema.yaml"
     major_minor_version = ".".join(new_version.split(".")[:2])
     url = f"https://element-hq.github.io/synapse/schema/synapse/v{major_minor_version}/synapse-config.schema.json"
-    subprocess.check_output(["sed", "-i", f"0,/^\\$id: .*/s||$id: {url}|", schema_file])
+    # Find/replace the `$id: ...` line in `schema/synapse-config.schema.yaml` with a new
+    # unique identifier for this release
+    #
+    # We use two `open(...)` blocks as it's easier to read/write then figure out the
+    # seek/truncate dance with one.
+    with open(schema_file) as f:
+        contents = f.read()
+    contents = re.sub(
+        r"^\$id: .*", f"$id: {url}", contents, count=1, flags=re.MULTILINE
+    )
+    with open(schema_file, "w") as f:
+        f.write(contents)
 
     # Generate changelogs.
     generate_and_write_changelog(synapse_repo, current_version, new_version)
