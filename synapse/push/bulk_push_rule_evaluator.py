@@ -51,7 +51,7 @@ from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import ProfileInfo
 from synapse.synapse_rust.push import FilteredPushRules, PushRuleEvaluator
-from synapse.types import JsonMapping, JsonValue
+from synapse.types import JsonMapping, JsonValue, StateMap
 from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
@@ -87,6 +87,21 @@ STATE_EVENT_TYPES_TO_MARK_UNREAD = {
 
 
 SENTINEL = object()
+
+
+def _coerce_power_level(level: object, default: int) -> int:
+    """Interpret a power level from `m.room.power_levels` content as an integer.
+
+    Old room versions permit floats, strings and nulls where an integer is
+    meant; interpret those where possible and fall back to `default`
+    otherwise, matching `get_named_level` and `get_user_power_level`.
+    """
+    if type(level) is int:  # noqa: E721
+        return level
+    try:
+        return int(level)  # type: ignore[call-overload]  # level is arbitrary JSON here
+    except (TypeError, ValueError):
+        return default
 
 
 def _should_count_as_unread(event: EventBase, context: EventContext) -> bool:
@@ -233,7 +248,7 @@ class BulkPushRuleEvaluator:
         event: EventBase,
         context: EventContext,
         event_id_to_event: Mapping[str, EventBase],
-    ) -> tuple[JsonMapping, int | None]:
+    ) -> tuple[JsonMapping, int | None, StateMap[EventBase] | None]:
         """
         Given an event and an event context, get the power level event relevant to the event
         and the power level of the sender of the event.
@@ -243,10 +258,15 @@ class BulkPushRuleEvaluator:
             event_id_to_event: a mapping of event_id to event for a set of events being
             batch persisted. This is needed as the sought-after power level event may
             be in this batch rather than the DB
+
+        Returns:
+            The content of the power levels event, the sender's power level, and the
+            auth events the latter was computed from (for computing other users' power
+            levels). The last two are `None` for an outlier.
         """
         # There are no power levels and sender levels possible to get from outlier
         if event.internal_metadata.is_outlier():
-            return {}, None
+            return {}, None, None
 
         event_types = auth_types_for_event(event.room_version, event)
         prev_state_ids = await context.get_prev_state_ids(
@@ -301,7 +321,7 @@ class BulkPushRuleEvaluator:
 
         pl_event = auth_events.get(POWER_KEY)
 
-        return pl_event.content if pl_event else {}, sender_level
+        return pl_event.content if pl_event else {}, sender_level, auth_events
 
     async def _related_events(
         self, event: EventBase
@@ -405,12 +425,12 @@ class BulkPushRuleEvaluator:
         # See https://github.com/matrix-org/synapse/issues/16606
         (
             room_member_count,
-            (power_levels, sender_power_level),
+            (power_levels, sender_power_level, auth_events),
             related_events,
             profiles,
         ) = await make_deferred_yieldable(
             cast(
-                "Deferred[tuple[int, tuple[dict, int | None], dict[str, dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
+                "Deferred[tuple[int, tuple[dict, int | None, StateMap[EventBase] | None], dict[str, dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
                 gather_results(
                     (
                         run_in_background(  # type: ignore[call-overload]
@@ -465,6 +485,22 @@ class BulkPushRuleEvaluator:
                     except (TypeError, ValueError):
                         del notification_levels[key]
 
+        # MSC4506 (knock push rules): the level required to perform each action
+        # the `recipient_permission` condition can name, defaulting as
+        # `m.room.power_levels` does for an absent key. `None` coerces to the
+        # default too, matching `get_named_level`. Membership state events do
+        # not fall back to `state_default`. Left empty when the feature is off,
+        # so that a user-defined rule naming the condition never matches.
+        msc4506_enabled = self.hs.config.experimental.msc4506_enabled
+        action_power_levels: dict[str, int] = {}
+        if msc4506_enabled:
+            action_power_levels = {
+                "invite": _coerce_power_level(power_levels.get("invite"), 0),
+                "kick": _coerce_power_level(power_levels.get("kick"), 50),
+                "ban": _coerce_power_level(power_levels.get("ban"), 50),
+                "redact": _coerce_power_level(power_levels.get("redact"), 50),
+            }
+
         # Pull out any user and room mentions.
         has_mentions = EventContentFields.MENTIONS in event.content
 
@@ -474,6 +510,7 @@ class BulkPushRuleEvaluator:
             room_member_count,
             sender_power_level,
             notification_levels,
+            action_power_levels,
             related_events,
             self._related_event_match_enabled,
             event.room_version.msc3931_push_features,
@@ -516,8 +553,19 @@ class BulkPushRuleEvaluator:
             if msc4306_thread_subscribers is not None:
                 msc4306_thread_subscription_state = uid in msc4306_thread_subscribers
 
+            # MSC4506: the recipient's own level, for the
+            # `recipient_permission` condition. An outlier gives us no auth
+            # events to derive it from.
+            recipient_power_level: int | None = None
+            if msc4506_enabled and auth_events is not None:
+                recipient_power_level = get_user_power_level(uid, auth_events)
+
             actions = evaluator.run(
-                rules, uid, display_name, msc4306_thread_subscription_state
+                rules,
+                uid,
+                display_name,
+                msc4306_thread_subscription_state,
+                recipient_power_level,
             )
             if "notify" in actions:
                 # Push rules say we should notify the user of this event

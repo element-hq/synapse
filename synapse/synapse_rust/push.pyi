@@ -62,6 +62,7 @@ class PushRuleEvaluator:
         room_member_count: int,
         sender_power_level: int | None,
         notification_power_levels: Mapping[str, int],
+        action_power_levels: Mapping[str, int],
         related_events_flattened: Mapping[str, Mapping[str, JsonValue]],
         related_event_match_enabled: bool,
         room_version_feature_flags: list[str],
@@ -75,6 +76,7 @@ class PushRuleEvaluator:
         user_id: str | None,
         display_name: str | None,
         msc4306_thread_subscription_state: bool | None,
+        recipient_power_level: int | None = None,
     ) -> Collection[Mapping | str]: ...
     def matches(
         self,
@@ -82,4 +84,5 @@ class PushRuleEvaluator:
         user_id: str | None,
         display_name: str | None,
         msc4306_thread_subscription_state: bool | None = None,
+        recipient_power_level: int | None = None,
     ) -> bool: ...

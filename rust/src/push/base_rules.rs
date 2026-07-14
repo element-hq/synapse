@@ -851,6 +851,7 @@ mod tests {
             Some(sender_power_level),
             BTreeMap::new(),
             BTreeMap::new(),
+            BTreeMap::new(),
             false,
             vec![],
             false,
@@ -864,7 +865,7 @@ mod tests {
     fn test_rtc_invite_for_me_notifies_mentioned_user() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], false, 0);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
     }
 
@@ -872,7 +873,7 @@ mod tests {
     fn test_rtc_invite_for_me_ignores_other_users() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[BOB], false, 0);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 
@@ -881,7 +882,7 @@ mod tests {
         // The default `notifications.room` power level is 50.
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 50);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![Action::Notify, RING_ACTION]);
     }
 
@@ -889,7 +890,7 @@ mod tests {
     fn test_rtc_invite_for_room_requires_permission() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[], true, 0);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 
@@ -897,7 +898,7 @@ mod tests {
     fn test_rtc_rules_ignore_other_event_types() {
         let evaluator = build_evaluator("org.example.other", &[ALICE], true, 50);
 
-        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(true), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 
@@ -905,7 +906,7 @@ mod tests {
     fn test_rtc_rules_are_omitted_when_msc4075_is_disabled() {
         let evaluator = build_evaluator(RTC_NOTIFICATION_TYPE, &[ALICE], true, 50);
 
-        let actions = evaluator.run(&push_rules(false), Some(ALICE), None, None);
+        let actions = evaluator.run(&push_rules(false), Some(ALICE), None, None, None);
         assert_eq!(actions, vec![]);
     }
 }
