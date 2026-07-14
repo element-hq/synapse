@@ -273,6 +273,22 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         default: true,
         default_enabled: true,
     },
+    // MSC4505: explicitly suppress live location share beacon updates in unencrypted
+    // rooms (in encrypted rooms they arrive as m.room.encrypted and can only be
+    // suppressed client-side after decryption).
+    PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4505.rule.beacon"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[Condition::Known(KnownCondition::EventMatch(
+            EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc3672.beacon"),
+            },
+        ))]),
+        actions: Cow::Borrowed(&[]),
+        default: true,
+        default_enabled: true,
+    },
 ];
 
 pub const BASE_APPEND_CONTENT_RULES: &[PushRule] = &[PushRule {
@@ -722,7 +738,7 @@ pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
         default_enabled: true,
     },
     PushRule {
-        rule_id: Cow::Borrowed("global/underride/.io.element.rule.beacon_info_one_to_one"),
+        rule_id: Cow::Borrowed("global/underride/.org.matrix.msc4505.rule.beacon_info_one_to_one"),
         priority_class: 1,
         conditions: Cow::Borrowed(&[
             Condition::Known(KnownCondition::RoomMemberCount {
@@ -742,7 +758,7 @@ pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
         default_enabled: true,
     },
     PushRule {
-        rule_id: Cow::Borrowed("global/underride/.io.element.rule.beacon_info"),
+        rule_id: Cow::Borrowed("global/underride/.org.matrix.msc4505.rule.beacon_info"),
         priority_class: 1,
         conditions: Cow::Borrowed(&[
             Condition::Known(KnownCondition::EventMatch(EventMatchCondition {

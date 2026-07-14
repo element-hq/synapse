@@ -559,7 +559,7 @@ pub struct FilteredPushRules {
     msc4028_push_encrypted_events: bool,
     msc4210_enabled: bool,
     msc4306_enabled: bool,
-    mscxxxx_beacon_push_rules_enabled: bool,
+    msc4505_enabled: bool,
 }
 
 #[pymethods]
@@ -575,7 +575,7 @@ impl FilteredPushRules {
         msc4028_push_encrypted_events: bool,
         msc4210_enabled: bool,
         msc4306_enabled: bool,
-        mscxxxx_beacon_push_rules_enabled: bool,
+        msc4505_enabled: bool,
     ) -> Self {
         Self {
             push_rules,
@@ -586,7 +586,7 @@ impl FilteredPushRules {
             msc4028_push_encrypted_events,
             msc4210_enabled,
             msc4306_enabled,
-            mscxxxx_beacon_push_rules_enabled,
+            msc4505_enabled,
         }
     }
 
@@ -623,8 +623,8 @@ impl FilteredPushRules {
                     return false;
                 }
 
-                if !self.mscxxxx_beacon_push_rules_enabled
-                    && rule.rule_id.contains("/.io.element.rule.beacon_info")
+                if !self.msc4505_enabled
+                    && rule.rule_id.contains("/.org.matrix.msc4505.rule.beacon")
                 {
                     return false;
                 }
