@@ -363,6 +363,13 @@ pub enum KnownCondition {
     SenderNotificationPermission {
         key: Cow<'static, str>,
     },
+    // MSC4506 (knock push rules): matches when the user the rules are being
+    // evaluated for has at least the power level required to perform the
+    // action named by `key` (one of "invite", "kick", "ban", "redact").
+    #[serde(rename = "org.matrix.msc4506.recipient_permission")]
+    RecipientPermission {
+        key: Cow<'static, str>,
+    },
     #[serde(rename = "org.matrix.msc3931.room_version_supports")]
     RoomVersionSupports {
         feature: Cow<'static, str>,

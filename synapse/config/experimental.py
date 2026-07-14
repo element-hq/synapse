@@ -159,6 +159,11 @@ class ExperimentalConfig(Config):
             "msc3381_polls_enabled", False
         )
 
+        # MSC4506: a default push rule notifying the room members who can act on a
+        # knock (MSC2403), via the new `recipient_permission` push rule condition.
+        # Tracked in: https://github.com/element-hq/synapse/issues/NNNNN
+        self.msc4506_enabled: bool = experimental.get("msc4506_enabled", False)
+
         # MSC3912: Relation-based redactions.
         self.msc3912_enabled: bool = experimental.get("msc3912_enabled", False)
 
