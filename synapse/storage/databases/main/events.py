@@ -3129,13 +3129,15 @@ class PersistEventsStore:
                 and event.internal_metadata.is_out_of_band_membership()
             ):
                 # The only sort of out-of-band-membership events we expect to see here
-                # are remote invites/knocks and LEAVE events corresponding to
-                # rejected/retracted invites and rescinded knocks.
+                # are remote invites/knocks, LEAVE events corresponding to
+                # rejected/retracted invites and rescinded knocks, and LEAVE/BAN
+                # events corresponding to denied knocks (MSC4233).
                 assert event.type == EventTypes.Member
                 assert event.membership in (
                     Membership.INVITE,
                     Membership.KNOCK,
                     Membership.LEAVE,
+                    Membership.BAN,
                 )
 
                 self.db_pool.simple_upsert_txn(
@@ -3170,10 +3172,11 @@ class PersistEventsStore:
                     "event_stream_ordering": event.internal_metadata.stream_ordering,
                     "event_instance_name": event.internal_metadata.instance_name,
                 }
-                if event.membership == Membership.LEAVE:
-                    # Inherit the meta data from the remote invite/knock. When using
-                    # sliding sync filters, this will prevent the room from
-                    # disappearing/appearing just because you left the room.
+                if event.membership in (Membership.LEAVE, Membership.BAN):
+                    # Inherit the meta data from the remote invite/knock (a BAN here is
+                    # a denied knock, MSC4233). When using sliding sync filters, this
+                    # will prevent the room from disappearing/appearing just because
+                    # you left the room.
                     pass
                 elif event.membership in (Membership.INVITE, Membership.KNOCK):
                     extra_insert_values = (
