@@ -57,6 +57,7 @@ fn bench_match_exact(b: &mut Bencher) {
         Some(0),
         Default::default(),
         Default::default(),
+        Default::default(),
         true,
         vec![],
         false,
@@ -72,10 +73,10 @@ fn bench_match_exact(b: &mut Bencher) {
         },
     ));
 
-    let matched = eval.match_condition(&condition, None, None, None).unwrap();
+    let matched = eval.match_condition(&condition, None, None, None, None).unwrap();
     assert!(matched, "Didn't match");
 
-    b.iter(|| eval.match_condition(&condition, None, None, None).unwrap());
+    b.iter(|| eval.match_condition(&condition, None, None, None, None).unwrap());
 }
 
 #[bench]
@@ -104,6 +105,7 @@ fn bench_match_word(b: &mut Bencher) {
         Some(0),
         Default::default(),
         Default::default(),
+        Default::default(),
         true,
         vec![],
         false,
@@ -119,10 +121,10 @@ fn bench_match_word(b: &mut Bencher) {
         },
     ));
 
-    let matched = eval.match_condition(&condition, None, None, None).unwrap();
+    let matched = eval.match_condition(&condition, None, None, None, None).unwrap();
     assert!(matched, "Didn't match");
 
-    b.iter(|| eval.match_condition(&condition, None, None, None).unwrap());
+    b.iter(|| eval.match_condition(&condition, None, None, None, None).unwrap());
 }
 
 #[bench]
@@ -151,6 +153,7 @@ fn bench_match_word_miss(b: &mut Bencher) {
         Some(0),
         Default::default(),
         Default::default(),
+        Default::default(),
         true,
         vec![],
         false,
@@ -166,10 +169,10 @@ fn bench_match_word_miss(b: &mut Bencher) {
         },
     ));
 
-    let matched = eval.match_condition(&condition, None, None, None).unwrap();
+    let matched = eval.match_condition(&condition, None, None, None, None).unwrap();
     assert!(!matched, "Didn't match");
 
-    b.iter(|| eval.match_condition(&condition, None, None, None).unwrap());
+    b.iter(|| eval.match_condition(&condition, None, None, None, None).unwrap());
 }
 
 #[bench]
@@ -198,6 +201,7 @@ fn bench_eval_message(b: &mut Bencher) {
         Some(0),
         Default::default(),
         Default::default(),
+        Default::default(),
         true,
         vec![],
         false,
@@ -216,7 +220,8 @@ fn bench_eval_message(b: &mut Bencher) {
         false,
         false,
         false,
+        false,
     );
 
-    b.iter(|| eval.run(&rules, Some("bob"), Some("person"), None));
+    b.iter(|| eval.run(&rules, Some("bob"), Some("person"), None, None));
 }
