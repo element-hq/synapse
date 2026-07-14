@@ -361,10 +361,13 @@ class KnockViaServerTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(membership, Membership.LEAVE)
 
     def _send_denial_over_federation(
-        self, knock_result: RemoteRoomKnockResult, auth_events: list[str]
+        self,
+        knock_result: RemoteRoomKnockResult,
+        auth_events: list[str],
+        membership: str = Membership.LEAVE,
     ) -> None:
-        """Send a leave event denying the knock to our server, as the remote
-        server we knocked through."""
+        """Send a leave (or ban) event denying the knock to our server, as the
+        remote server we knocked through."""
         deny_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
@@ -374,7 +377,7 @@ class KnockViaServerTestCase(unittest.FederatingHomeserverTestCase):
                     "origin_server_ts": 3,
                     "type": EventTypes.Member,
                     "state_key": knock_result.local_user1_id,
-                    "content": {"membership": Membership.LEAVE},
+                    "content": {"membership": membership},
                     "auth_events": auth_events,
                     "prev_events": [knock_result.knock_event_id],
                 }
@@ -428,6 +431,42 @@ class KnockViaServerTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(
             leave_event.unsigned.get("replaces_state"),
             knock_result.knock_event_id,
+        )
+
+    def test_banned_knock_accepted_from_via_server(self) -> None:
+        """A ban event for our knocked user (deny + ban, per MSC2403 a ban has
+        the same retracting effect), referencing the knock in its auth events
+        and sent by the server we knocked through, retracts the knock and
+        leaves us banned."""
+        knock_result = self._knock_on_remote_room()
+
+        self._send_denial_over_federation(
+            knock_result,
+            auth_events=[
+                knock_result.room_create_event.event_id,
+                knock_result.knock_event_id,
+            ],
+            membership=Membership.BAN,
+        )
+
+        ban_event_id = None
+        with test_timeout(3, "Ban of the knocked user was not processed"):
+            while True:
+                membership, ban_event_id = self.get_success(
+                    self.store.get_local_current_membership_for_user_in_room(
+                        knock_result.local_user1_id, knock_result.remote_room_id
+                    )
+                )
+                if membership == Membership.BAN:
+                    break
+                time.sleep(0.1)
+
+        # The stored ban should carry the replaced knock in `unsigned`.
+        assert ban_event_id is not None
+        ban_event = self.get_success(self.store.get_event(ban_event_id))
+        self.assertEqual(
+            ban_event.unsigned.get("prev_content", {}).get("membership"),
+            Membership.KNOCK,
         )
 
     def test_denied_knock_ignored_without_knock_in_auth_events(self) -> None:
@@ -505,10 +544,15 @@ class DenyKnockFederationSendTestCase(unittest.FederatingHomeserverTestCase):
 
         return super().prepare(reactor, clock, homeserver)
 
-    def test_deny_sends_leave_to_knocking_server(self) -> None:
-        """Kicking a remote user whose membership is knock sends the leave
-        event to their (otherwise uninvolved) server."""
-        user_id = self.register_user("u1", "pass")
+    def _setup_room_with_pending_federated_knock(
+        self,
+    ) -> tuple[str, str, str, dict[str, list[JsonDict]]]:
+        """Create a knockable room, receive a federated knock into it, and
+        start collecting outbound PDUs.
+
+        Returns (room_id, admin_token, knocking_user_id, sent_pdus_by_destination).
+        """
+        self.register_user("u1", "pass")
         user_token = self.login("u1", "pass")
 
         fake_knocking_user_id = f"@user:{self.OTHER_SERVER_NAME}"
@@ -583,6 +627,40 @@ class DenyKnockFederationSendTestCase(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(200, channel.code, channel.result)
 
+        return room_id, user_token, fake_knocking_user_id, sent_pdus_by_destination
+
+    def _expect_membership_sent_to_knocking_server(
+        self,
+        sent_pdus_by_destination: dict[str, list[JsonDict]],
+        knocking_user_id: str,
+        membership: str,
+    ) -> None:
+        """Wait until a membership event of the given kind for the knocking
+        user has been sent to their (otherwise uninvolved) server."""
+        with test_timeout(3, f"{membership} event was not sent to the knocking server"):
+            while True:
+                pdus = [
+                    pdu
+                    for pdu in sent_pdus_by_destination.get(self.OTHER_SERVER_NAME, [])
+                    if pdu.get("type") == EventTypes.Member
+                    and pdu.get("state_key") == knocking_user_id
+                    and pdu.get("content", {}).get("membership") == membership
+                ]
+                if pdus:
+                    break
+                time.sleep(0.1)
+                self.pump(0.1)
+
+    def test_deny_sends_leave_to_knocking_server(self) -> None:
+        """Kicking a remote user whose membership is knock sends the leave
+        event to their (otherwise uninvolved) server."""
+        (
+            room_id,
+            user_token,
+            fake_knocking_user_id,
+            sent_pdus_by_destination,
+        ) = self._setup_room_with_pending_federated_knock()
+
         # The local user denies the knock.
         channel = self.make_request(
             "POST",
@@ -594,18 +672,29 @@ class DenyKnockFederationSendTestCase(unittest.FederatingHomeserverTestCase):
 
         # The leave event should be sent to the knocking user's server, even
         # though it has no other users in the room.
-        with test_timeout(3, "Leave event was not sent to the knocking server"):
-            while True:
-                leave_pdus = [
-                    pdu
-                    for pdu in sent_pdus_by_destination.get(
-                        self.OTHER_SERVER_NAME, []
-                    )
-                    if pdu.get("type") == EventTypes.Member
-                    and pdu.get("state_key") == fake_knocking_user_id
-                    and pdu.get("content", {}).get("membership") == Membership.LEAVE
-                ]
-                if leave_pdus:
-                    break
-                time.sleep(0.1)
-                self.pump(0.1)
+        self._expect_membership_sent_to_knocking_server(
+            sent_pdus_by_destination, fake_knocking_user_id, Membership.LEAVE
+        )
+
+    def test_ban_sends_ban_to_knocking_server(self) -> None:
+        """Banning a remote user whose membership is knock (deny + ban) sends
+        the ban event to their (otherwise uninvolved) server."""
+        (
+            room_id,
+            user_token,
+            fake_knocking_user_id,
+            sent_pdus_by_destination,
+        ) = self._setup_room_with_pending_federated_knock()
+
+        # The local user bans the knocker.
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{urllib.parse.quote_plus(room_id)}/ban",
+            {"user_id": fake_knocking_user_id},
+            access_token=user_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        self._expect_membership_sent_to_knocking_server(
+            sent_pdus_by_destination, fake_knocking_user_id, Membership.BAN
+        )
