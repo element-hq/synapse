@@ -359,6 +359,59 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             exc=LimitExceededError,
         )
 
+    def test_context_on_out_of_band_invite(self) -> None:
+        """/context on the user's own out-of-band invite returns the event with an
+        empty context instead of a 500: the outlier has no stream position or state
+        group, so surrounding events and state cannot be computed. Clients fetch such
+        events e.g. to render a push notification for an invite after the server has
+        already joined the user (auto-accepted knock)."""
+        other_server = "otherserver"
+        other_user = "@otheruser:" + other_server
+
+        user_id = self.register_user("kermit", "test")
+        tok = self.login("kermit", "test")
+        room_id = self.helper.create_room_as(room_creator=user_id, tok=tok)
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        invited_user = self.register_user("invitee", "test")
+        invited_tok = self.login("invitee", "test")
+
+        invite = make_test_pdu_event(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": "invite"},
+                "room_id": room_id,
+                "sender": other_user,
+                "state_key": invited_user,
+                "depth": 32,
+                "prev_events": [],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+        self.get_success(
+            self.handler.on_invite_request(other_server, invite, invite.room_version)
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/context/{invite.event_id}",
+            access_token=invited_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body["event"]["event_id"], invite.event_id)
+        self.assertEqual(channel.json_body["events_before"], [])
+        self.assertEqual(channel.json_body["events_after"], [])
+
+        # Another user must NOT be able to fetch it.
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id}/context/{invite.event_id}",
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+
     def _build_and_send_join_event(
         self, other_server: str, other_user: str, room_id: str
     ) -> EventBase:
