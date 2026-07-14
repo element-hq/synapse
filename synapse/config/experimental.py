@@ -156,12 +156,11 @@ class ExperimentalConfig(Config):
             "msc3381_polls_enabled", False
         )
 
-        # MSCXXXX (unnumbered draft): default push rules for live location share
-        # beacon_info start events (the MSC3672 state event). Unstable rule ids:
-        # .io.element.rule.beacon_info(_one_to_one).
-        self.mscxxxx_beacon_push_rules_enabled: bool = experimental.get(
-            "mscxxxx_beacon_push_rules_enabled", False
-        )
+        # MSC4505: default push rules for live location sharing — notify on
+        # beacon_info start events (the MSC3672 state event), suppress beacon
+        # updates. Unstable rule ids: .org.matrix.msc4505.rule.beacon_info
+        # (_one_to_one) / .org.matrix.msc4505.rule.beacon.
+        self.msc4505_enabled: bool = experimental.get("msc4505_enabled", False)
 
         # MSCXXXX (unnumbered draft): default push rule notifying room members
         # who can act on a knock (MSC2403), via the new `recipient_permission`

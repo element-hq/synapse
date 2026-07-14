@@ -107,7 +107,7 @@ def _load_rules(
         msc4028_push_encrypted_events=experimental_config.msc4028_push_encrypted_events,
         msc4210_enabled=experimental_config.msc4210_enabled,
         msc4306_enabled=experimental_config.msc4306_enabled,
-        mscxxxx_beacon_push_rules_enabled=experimental_config.mscxxxx_beacon_push_rules_enabled,
+        msc4505_enabled=experimental_config.msc4505_enabled,
         mscxxxx_knock_push_rule_enabled=experimental_config.mscxxxx_knock_push_rule_enabled,
     )
 
