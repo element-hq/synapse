@@ -51,7 +51,7 @@ class FilteredPushRules:
         msc4210_enabled: bool,
         msc4306_enabled: bool,
         msc4505_enabled: bool,
-        mscxxxx_knock_push_rule_enabled: bool,
+        msc4506_enabled: bool,
     ): ...
     def rules(self) -> Collection[tuple[PushRule, bool]]: ...
 

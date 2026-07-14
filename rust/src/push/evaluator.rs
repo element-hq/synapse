@@ -92,7 +92,7 @@ pub struct PushRuleEvaluator {
     /// outlier.
     sender_power_level: Option<i64>,
 
-    /// MSCxxxx: the power level required to perform each of the room's
+    /// MSC4506: the power level required to perform each of the room's
     /// power-levels actions (e.g. "invite", "kick"), for the
     /// `recipient_permission` condition. Includes the spec defaults for
     /// actions absent from the `m.room.power_levels` content.
@@ -190,7 +190,7 @@ impl PushRuleEvaluator {
     /// - `Some(false)` if the event is in a thread and the user does NOT have a subscription for that thread
     ///
     /// recipient_power_level: the power level of the user the rules are being
-    /// evaluated for, used by the MSCxxxx `recipient_permission` condition.
+    /// evaluated for, used by the MSC4506 `recipient_permission` condition.
     #[pyo3(signature = (push_rules, user_id=None, display_name=None, msc4306_thread_subscription_state=None, recipient_power_level=None))]
     pub fn run(
         &self,

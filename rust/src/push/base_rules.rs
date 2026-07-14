@@ -117,12 +117,12 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         default: true,
         default_enabled: true,
     },
-    // MSCxxxx: notify the members of a room who are able to act on a knock
+    // MSC4506: notify the members of a room who are able to act on a knock
     // (i.e. those with a power level sufficient to invite the knocker). Must
     // come before `.m.rule.member_event`, which suppresses all other member
     // events.
     PushRule {
-        rule_id: Cow::Borrowed("global/override/.org.matrix.mscxxxx.rule.knock"),
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4506.rule.knock"),
         priority_class: 5,
         conditions: Cow::Borrowed(&[
             Condition::Known(KnownCondition::EventMatch(EventMatchCondition {

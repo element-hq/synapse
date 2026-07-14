@@ -162,12 +162,12 @@ class ExperimentalConfig(Config):
         # (_one_to_one) / .org.matrix.msc4505.rule.beacon.
         self.msc4505_enabled: bool = experimental.get("msc4505_enabled", False)
 
-        # MSCXXXX (unnumbered draft): default push rule notifying room members
+        # MSC4506: default push rule notifying room members
         # who can act on a knock (MSC2403), via the new `recipient_permission`
-        # push rule condition. Unstable ids: .org.matrix.mscxxxx.rule.knock /
-        # org.matrix.mscxxxx.recipient_permission.
-        self.mscxxxx_knock_push_rule_enabled: bool = experimental.get(
-            "mscxxxx_knock_push_rule_enabled", False
+        # push rule condition. Unstable ids: .org.matrix.msc4506.rule.knock /
+        # org.matrix.msc4506.recipient_permission.
+        self.msc4506_enabled: bool = experimental.get(
+            "msc4506_enabled", False
         )
 
         # MSC3912: Relation-based redactions.

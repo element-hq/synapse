@@ -824,14 +824,14 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
 
     def test_recipient_permission(self) -> None:
         """
-        Test the MSCxxxx `recipient_permission` condition (knock push rules).
+        Test the MSC4506 `recipient_permission` condition (knock push rules).
         """
         evaluator = self._get_evaluator(
             {"membership": "knock"},
             action_power_levels={"invite": 50},
         )
         condition = {
-            "kind": "org.matrix.mscxxxx.recipient_permission",
+            "kind": "org.matrix.msc4506.recipient_permission",
             "key": "invite",
         }
 
@@ -854,7 +854,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         # An action key with no known level never matches.
         self.assertFalse(
             evaluator.matches(
-                {"kind": "org.matrix.mscxxxx.recipient_permission", "key": "nonsense"},
+                {"kind": "org.matrix.msc4506.recipient_permission", "key": "nonsense"},
                 "@user:test",
                 None,
                 recipient_power_level=100,

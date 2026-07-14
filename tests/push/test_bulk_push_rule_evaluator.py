@@ -653,7 +653,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
 
 
 class TestKnockPushRules(HomeserverTestCase):
-    """Tests for the MSCxxxx knock push rule (`.org.matrix.mscxxxx.rule.knock`
+    """Tests for the MSC4506 knock push rule (`.org.matrix.msc4506.rule.knock`
     with the `recipient_permission` condition): a knock should notify exactly
     the members of the room whose power level lets them act on it.
     """
@@ -714,7 +714,7 @@ class TestKnockPushRules(HomeserverTestCase):
         )
 
     @override_config(
-        {"experimental_features": {"mscxxxx_knock_push_rule_enabled": True}}
+        {"experimental_features": {"msc4506_enabled": True}}
     )
     def test_knock_notifies_only_users_who_can_act(self) -> None:
         knock_event_id = self._knock_and_get_event_id()

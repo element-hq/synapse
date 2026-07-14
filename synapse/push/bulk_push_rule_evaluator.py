@@ -191,10 +191,10 @@ class BulkPushRuleEvaluator:
                 if target_already_in_room:
                     local_users = [event.state_key]
             elif (
-                self.hs.config.experimental.mscxxxx_knock_push_rule_enabled
+                self.hs.config.experimental.msc4506_enabled
                 and event.membership == Membership.KNOCK
             ):
-                # MSCxxxx: a knock (sender == state_key, so not caught above)
+                # MSC4506: a knock (sender == state_key, so not caught above)
                 # should notify the members of the room who can act on it, so
                 # we can't take the membership-events-only-notify-their-target
                 # fast path.
@@ -480,7 +480,7 @@ class BulkPushRuleEvaluator:
                     except (TypeError, ValueError):
                         del notification_levels[key]
 
-        # MSCxxxx (knock push rules): the level required to perform each of the
+        # MSC4506 (knock push rules): the level required to perform each of the
         # room's power-levels actions, and the data to compute each recipient's
         # own level, for the `recipient_permission` condition. As above,
         # non-integer levels in old room versions are interpreted as integers
@@ -558,7 +558,7 @@ class BulkPushRuleEvaluator:
             if msc4306_thread_subscribers is not None:
                 msc4306_thread_subscription_state = uid in msc4306_thread_subscribers
 
-            # MSCxxxx: this user's own power level, for the
+            # MSC4506: this user's own power level, for the
             # `recipient_permission` condition.
             recipient_power_level = _coerce_power_level(
                 user_power_levels.get(uid, users_default_level), users_default_level
