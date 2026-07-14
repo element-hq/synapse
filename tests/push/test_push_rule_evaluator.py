@@ -161,6 +161,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         content: JsonMapping,
         *,
         related_events: JsonDict | None = None,
+        action_power_levels: dict[str, int] | None = None,
         msc4210: bool = False,
         msc4306: bool = False,
     ) -> PushRuleEvaluator:
@@ -184,6 +185,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             room_member_count,
             sender_power_level,
             cast(dict[str, int], power_levels.get("notifications", {})),
+            {} if action_power_levels is None else action_power_levels,
             {} if related_events is None else related_events,
             related_event_match_enabled=True,
             room_version_feature_flags=event.room_version.msc3931_push_features,
@@ -817,6 +819,45 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                 },
                 "@user:test",
                 "display_name",
+            )
+        )
+
+    def test_recipient_permission(self) -> None:
+        """
+        Test the MSC4506 `recipient_permission` condition (knock push rules).
+        """
+        evaluator = self._get_evaluator(
+            {"membership": "knock"},
+            action_power_levels={"invite": 50},
+        )
+        condition = {
+            "kind": "org.matrix.msc4506.recipient_permission",
+            "key": "invite",
+        }
+
+        # A recipient at or above the required level matches.
+        self.assertTrue(
+            evaluator.matches(condition, "@user:test", None, recipient_power_level=50)
+        )
+        self.assertTrue(
+            evaluator.matches(condition, "@user:test", None, recipient_power_level=100)
+        )
+
+        # A recipient below the required level does not match.
+        self.assertFalse(
+            evaluator.matches(condition, "@user:test", None, recipient_power_level=0)
+        )
+
+        # No recipient power level: never matches.
+        self.assertFalse(evaluator.matches(condition, "@user:test", None))
+
+        # An action key with no known level never matches.
+        self.assertFalse(
+            evaluator.matches(
+                {"kind": "org.matrix.msc4506.recipient_permission", "key": "nonsense"},
+                "@user:test",
+                None,
+                recipient_power_level=100,
             )
         )
 
