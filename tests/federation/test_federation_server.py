@@ -324,6 +324,95 @@ class StateQueryTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
 
+class TimestampToEventTests(unittest.FederatingHomeserverTestCase):
+    """Tests for `GET /_matrix/federation/v1/timestamp_to_event/<roomID>`."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # Create a room and join the remote server so it's allowed to query
+        user = self.register_user("u1", "pass")
+        tok = self.login("u1", "pass")
+        self.room_id = self.helper.create_room_as(user, tok=tok)
+        # Send one event at time = 1000s
+        self.reactor.advance(1000)
+        self.event_at_1000 = self.helper.send_messages(self.room_id, 1, tok=tok)[0]
+
+        # Send another event at time = 4000s
+        self.reactor.advance(3000)
+        self.event_at_4000 = self.helper.send_messages(self.room_id, 1, tok=tok)[0]
+
+        # Send another event at time = 8000s
+        self.reactor.advance(4000)
+        self.event_at_8000 = self.helper.send_messages(self.room_id, 1, tok=tok)[0]
+
+        super().prepare(reactor, clock, hs)
+
+    @parameterized.expand(
+        [
+            # Query backwards from 5000s, should find the event at 4000s
+            (5000000, "b"),
+            # Query forwards from 1100s, should find the event at 4000s
+            (1100000, "f"),
+        ]
+    )
+    def test_happy_path(self, ts: int, dir: str) -> None:
+        """
+        Tests that a server in the room gets 200 OK
+        with the closest event IDs as requested for a given timestamp,
+        in both forward and backward directions.
+        """
+        # Join the remote server to the room
+        self.inject_room_member(self.room_id, "@user:" + self.OTHER_SERVER_NAME, "join")
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/timestamp_to_event/{self.room_id}?ts={ts}&dir={dir}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["event_id"], self.event_at_4000)
+
+    @parameterized.expand(
+        [
+            # Query backwards at 0s, no events to be found.
+            (0, "b"),
+            # Query forwards from 8100s, no events to be found.
+            (8100000, "f"),
+        ]
+    )
+    def test_no_matching_event(self, ts: int, dir: str) -> None:
+        """
+        Tests that a 404 / M_NOT_FOUND is returned when no event occurs
+        in the requested direction of a timestamp.
+        """
+        # Join the remote server to the room
+        self.inject_room_member(self.room_id, "@user:" + self.OTHER_SERVER_NAME, "join")
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/timestamp_to_event/{self.room_id}?ts={ts}&dir={dir}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+
+    def test_requires_server_in_room(self) -> None:
+        """
+        Tests that a server not in the room is rejected with 403 / M_FORBIDDEN.
+        """
+        # Notably: _don't_ join the remote server to the room
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/timestamp_to_event/{self.room_id}?ts=2000000&dir=b",
+        )
+        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+
 class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
     servlets = [
         admin.register_servlets,
