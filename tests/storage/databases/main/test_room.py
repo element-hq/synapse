@@ -49,6 +49,8 @@ class RoomBackgroundUpdateStoreTestCase(HomeserverTestCase):
         """Create a room and return the room ID."""
         return self.helper.create_room_as(
             # FIXME: Room version 11 breaks test_background_populate_rooms_creator_column
+            # Since room version 11 removes `creator` field, it never got populated
+            # to the database, thus breaking that test
             self.user_id,
             tok=self.token,
             room_version="10",
