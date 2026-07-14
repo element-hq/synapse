@@ -32,7 +32,10 @@ from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.config._base import RootConfig
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
-from synapse.events.auto_accept_invites import InviteAutoAccepter
+from synapse.events.auto_accept_invites import (
+    UNSTABLE_KEY_BUNDLE_CLAIM_TYPE,
+    InviteAutoAccepter,
+)
 from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey
 from synapse.module_api import ModuleApi
 from synapse.rest import admin
@@ -122,6 +125,27 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         join_updates, _ = sync_join(self, knocker_id)
         self.assertEqual(len(join_updates), 1)
         self.assertEqual(join_updates[0].room_id, room_id)
+
+        # The join was server-initiated, so the knocker's device should have
+        # been designated (via a to-device message) to eagerly claim any
+        # MSC4268 room key bundle for the room.
+        devices = self.get_success(
+            self.hs.get_datastores().main.get_devices_by_user(knocker_id)
+        )
+        self.assertEqual(len(devices), 1, devices)
+        device_id = next(iter(devices))
+        to_stream_id = self.hs.get_datastores().main.get_to_device_stream_token()
+        messages, _ = self.get_success(
+            self.hs.get_datastores().main.get_messages_for_device(
+                knocker_id, device_id, 0, to_stream_id
+            )
+        )
+        claim_messages = [
+            m for m in messages if m["type"] == UNSTABLE_KEY_BUNDLE_CLAIM_TYPE
+        ]
+        self.assertEqual(len(claim_messages), 1, messages)
+        self.assertEqual(claim_messages[0]["content"], {"room_id": room_id})
+        self.assertEqual(claim_messages[0]["sender"], knocker_id)
 
     def test_no_auto_join_on_accepted_knock_by_default(self) -> None:
         """With `enabled_for_accepted_knocks` off (the default), an accepted
