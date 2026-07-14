@@ -267,6 +267,7 @@ class PersistEventsStore:
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -1206,6 +1207,14 @@ class PersistEventsStore:
         if self._msc4354_enabled:
             self.store.insert_sticky_events_txn(
                 txn, [ev for ev, _ in events_and_contexts]
+            )
+
+        if self._msc4429_enabled:
+            self.store.record_profile_updates_for_membership_changes_from_events(
+                txn=txn,
+                events=[
+                    ev for ev, _ in events_and_contexts if ev.type == EventTypes.Member
+                ],
             )
 
         # We only update the sliding sync tables for non-backfilled events.

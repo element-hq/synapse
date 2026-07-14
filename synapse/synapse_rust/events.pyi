@@ -65,6 +65,13 @@ class EventInternalMetadata:
     # MSC4242 state dags
     calculated_auth_event_ids: list[str]
 
+    prev_membership: str | None
+    """The previous membership, set only if this is a membership event."""
+    membership_update_users_in_shared_rooms: list[str] | None
+    """For membership events, this will contain a list of users who
+    would be interested in the users profile updates, triggered
+    by the membership change."""
+
     def get_dict(self) -> JsonDict: ...
     def is_outlier(self) -> bool: ...
     def copy(self) -> "EventInternalMetadata": ...

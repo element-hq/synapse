@@ -844,18 +844,27 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     @cached(max_entries=10000)
     async def does_pair_of_users_share_a_room(
-        self, user_id: str, other_user_id: str
+        self,
+        user_id: str,
+        other_user_id: str,
+        exclude_room_ids: list[str] | None = None,
     ) -> bool:
         raise NotImplementedError()
 
     @cachedList(
-        cached_method_name="does_pair_of_users_share_a_room", list_name="other_user_ids"
+        cached_method_name="does_pair_of_users_share_a_room",
+        list_name="other_user_ids",
     )
     async def _do_users_share_a_room(
-        self, user_id: str, other_user_ids: Collection[str]
+        self,
+        user_id: str,
+        other_user_ids: Collection[str],
+        exclude_room_id: str | None = None,
     ) -> Mapping[str, bool | None]:
         """Return mapping from user ID to whether they share a room with the
         given user.
+
+        Optionally, exclude a room when querying the database.
 
         Note: `None` and `False` are equivalent and mean they don't share a
         room.
@@ -867,6 +876,16 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "state_key", user_ids
             )
+            # Build SQL args based on whether we are excluding a room ID or not
+            exclude_room_id_clause = ""
+            sql_args = [
+                user_id,
+            ]
+            if exclude_room_id:
+                exclude_room_id_clause = "AND room_id != ?"
+                sql_args.extend([exclude_room_id, *args, exclude_room_id])
+            else:
+                sql_args.extend([*args])
 
             # This query works by fetching both the list of rooms for the target
             # user and the set of other users, and then checking if there is any
@@ -876,14 +895,18 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 FROM (
                     SELECT room_id FROM current_state_events
                     WHERE type = 'm.room.member' AND membership = 'join' AND state_key = ?
+                        {exclude_room_id_clause}
                 ) AS a
                 INNER JOIN (
                     SELECT room_id, state_key FROM current_state_events
                     WHERE type = 'm.room.member' AND membership = 'join' AND {clause}
+                        {exclude_room_id_clause}
                 ) AS b using (room_id)
             """
-
-            txn.execute(sql, (user_id, *args))
+            txn.execute(
+                sql,
+                sql_args,
+            )
             return {u: True for (u,) in txn}
 
         to_return = {}
@@ -896,11 +919,15 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return to_return
 
     async def do_users_share_a_room(
-        self, user_id: str, other_user_ids: Collection[str]
+        self,
+        user_id: str,
+        other_user_ids: Collection[str],
+        exclude_room_id: str | None = None,
     ) -> set[str]:
         """Return the set of users who share a room with the first users"""
-
-        user_dict = await self._do_users_share_a_room(user_id, other_user_ids)
+        user_dict = await self._do_users_share_a_room(
+            user_id, other_user_ids, exclude_room_id
+        )
 
         return {u for u, share_room in user_dict.items() if share_room}
 

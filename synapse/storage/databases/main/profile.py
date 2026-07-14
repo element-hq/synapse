@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING, Collection, Iterable, cast
 import attr
 from canonicaljson import encode_canonical_json
 
-from synapse.api.constants import ProfileFields, ProfileUpdateAction
+from synapse.api.constants import Membership, ProfileFields, ProfileUpdateAction
 from synapse.api.errors import Codes, StoreError
+from synapse.events import EventBase
 from synapse.replication.tcp.streams._base import ProfileUpdatesStream
 from synapse.storage._base import SQLBaseStore, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -760,6 +761,55 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return stream_id
 
+    def record_profile_updates_for_membership_changes_from_events(
+        self, *, txn: LoggingTransaction, events: list[EventBase]
+    ) -> None:
+        """
+        Record profile updates from membership events.
+
+        Adds "joined_room" and "left_room" profile update actions into the
+        profile updates stream tables.
+
+        Args:
+            txn: The transaction to use.
+            events: A list of membership events.
+        """
+        if not self._msc4429_enabled:
+            return
+
+        assert self._is_events_writer
+
+        for event in events:
+            if (
+                event.membership not in (Membership.JOIN, Membership.LEAVE)
+                or not event.internal_metadata.membership_update_users_in_shared_rooms
+            ):
+                continue
+            if (
+                event.membership == Membership.JOIN
+                and event.internal_metadata.prev_membership != Membership.JOIN
+            ):
+                self._record_profile_updates_txn(
+                    txn=txn,
+                    user_id=UserID.from_string(event.sender),
+                    action=ProfileUpdateAction.JOINED_ROOM,
+                    target_users=set(
+                        event.internal_metadata.membership_update_users_in_shared_rooms
+                    ),
+                    field_names=None,
+                )
+            elif (
+                event.membership == Membership.LEAVE
+                and event.internal_metadata.prev_membership != Membership.LEAVE
+            ):
+                self._record_profile_updates_for_user_left_room_txn(
+                    txn=txn,
+                    user_id=UserID.from_string(event.sender),
+                    users_to_update=set(
+                        event.internal_metadata.membership_update_users_in_shared_rooms
+                    ),
+                )
+
     def _record_profile_updates_txn(
         self,
         *,
@@ -971,11 +1021,12 @@ class ProfileWorkerStore(SQLBaseStore):
             _delete_profile_txn,
         )
 
-    async def record_profile_updates_for_user_left_room(
+    def _record_profile_updates_for_user_left_room_txn(
         self,
+        txn: LoggingTransaction,
         user_id: UserID,
         users_to_update: set[str],
-    ) -> int | None:
+    ) -> None:
         """
         Record updates into the profile updates stream for when a user leaves
         the last room with a set of users.
@@ -987,144 +1038,23 @@ class ProfileWorkerStore(SQLBaseStore):
         Args:
             user_id: The user who left the last common room with a set of users.
             users_to_update: The set of users who no longer share rooms with the user.
-
-        Returns:
-            Stream ID for the profile update stream update.
         """
-        if not users_to_update:
-            return None
-        assert self._is_events_writer
-
-        def _record_profile_updates_for_user_left_room_txn(
-            txn: LoggingTransaction,
-        ) -> int | None:
-            # First clear the previous rows from the table
-            txn.execute(
-                """
-                SELECT stream_id FROM profile_updates
-                WHERE user_id = ?
-                """,
-                (user_id.to_string(),),
-            )
-            res = txn.fetchall()
-            if res:
-                stream_ids = [row[0] for row in res]
-
-                user_clause, user_args = make_in_list_sql_clause(
-                    txn.database_engine,
-                    "user_id",
-                    users_to_update,
-                )
-                stream_id_clause, stream_id_args = make_in_list_sql_clause(
-                    txn.database_engine,
-                    "stream_id",
-                    stream_ids,
-                )
-                txn.execute(
-                    f"""
-                        DELETE FROM profile_updates_per_user
-                            WHERE {user_clause}
-                            AND {stream_id_clause}
-                    """,
-                    (*user_args, *stream_id_args),
-                )
-
-            # Now record the "left room" action in the stream
-            stream_id = self._record_profile_updates_txn(
-                txn=txn,
-                user_id=user_id,
-                action=ProfileUpdateAction.LEFT_ROOM,
-                field_names=[],
-                target_users=users_to_update,
-            )
-            return stream_id
-
-        return await self.db_pool.runInteraction(
-            "record_profile_updates_for_user_left_room",
-            _record_profile_updates_for_user_left_room_txn,
-        )
-
-    async def record_profile_updates_for_user_joined_room(
-        self,
-        user_id: UserID,
-        users_to_update: set[str],
-    ) -> int | None:
-        """
-        Record updates into the profile updates stream for when a user joins a room.
-
-        Args:
-            user_id: The user who joined a room.
-            users_to_update: A set of the other users in the room.
-
-        Returns:
-            Stream ID for the profile update stream update.
-        """
-        if not users_to_update:
-            return None
-        assert self._is_events_writer
-
-        def _record_profile_updates_for_user_joined_room_txn(
-            txn: LoggingTransaction,
-        ) -> int | None:
-            stream_id = self._record_profile_updates_txn(
-                txn=txn,
-                user_id=user_id,
-                action=ProfileUpdateAction.JOINED_ROOM,
-                field_names=[],
-                target_users=users_to_update,
-            )
-            return stream_id
-
-        return await self.db_pool.runInteraction(
-            "record_profile_updates_for_user_joined_room",
-            _record_profile_updates_for_user_joined_room_txn,
-        )
-
-    async def clear_profile_updates_for_user(
-        self, user_id: UserID, users_to_remove: set[str]
-    ) -> None:
-        """
-        Clear all the ProfileUpdateAction rows from the
-        `profile_updates_per_user` table from a particular user for
-        a list of target users. This could be needed for example to ensure when
-        a user leaves the last shared room with another user, that we clear all
-        the old updates to ensure we don't leak any field updates to the other user.
-
-        This does not remove the stream ID row from `profile_updates` as it is
-        likely other per user rows may refer to it. Our automatic pruning of old
-        stream ID's will kick in later and clean up potential orphan `profile_updates`
-        table rows.
-
-        Args:
-            user_id: The user's ID.
-            users_to_remove: List of users to remove per user rows for.
-
-        Returns:
-            None
-        """
-        assert self._is_events_writer
-        if not users_to_remove:
-            return
-
-        def _clear_profile_updates_for_user_txn(
-            txn: LoggingTransaction,
-        ) -> None:
-            sql = """
-                SELECT stream_id FROM profile_updates
-                    WHERE user_id = ?
+        # First clear the previous rows from the table
+        txn.execute(
             """
-
-            txn.execute(sql, (user_id.to_string(),))
-            res = txn.fetchall()
-            if not res:
-                return
-
+            SELECT stream_id FROM profile_updates
+            WHERE user_id = ?
+            """,
+            (user_id.to_string(),),
+        )
+        res = txn.fetchall()
+        if res:
             stream_ids = [row[0] for row in res]
 
             user_clause, user_args = make_in_list_sql_clause(
                 txn.database_engine,
                 "user_id",
-                users_to_remove,
+                users_to_update,
             )
             stream_id_clause, stream_id_args = make_in_list_sql_clause(
                 txn.database_engine,
@@ -1133,16 +1063,20 @@ class ProfileWorkerStore(SQLBaseStore):
             )
             txn.execute(
                 f"""
-                DELETE FROM profile_updates_per_user
-                    WHERE {user_clause}
-                    AND {stream_id_clause}
-            """,
+                    DELETE FROM profile_updates_per_user
+                        WHERE {user_clause}
+                        AND {stream_id_clause}
+                """,
                 (*user_args, *stream_id_args),
             )
 
-        await self.db_pool.runInteraction(
-            "clear_profile_updates_for_user",
-            _clear_profile_updates_for_user_txn,
+        # Now record the "left room" action in the stream
+        self._record_profile_updates_txn(
+            txn=txn,
+            user_id=user_id,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users=users_to_update,
         )
 
 
