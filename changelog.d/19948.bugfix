@@ -1,0 +1,1 @@
+Fix presence states being shown to clients forever after presence is disabled, by marking any previously only users as offline.

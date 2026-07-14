@@ -325,13 +325,8 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         email = "test@example.com"
 
         client_secret = "foobar"
-        session_id = self._request_token(
-            email,
-            client_secret,
-            # The endpoint intentionally adds up to 1000ms of jitter to avoid
-            # leaking whether the email address is bound to an account.
-            timeout_ms=3000,
-        )
+
+        session_id = self._request_token(email, client_secret)
 
         self.assertIsNotNone(session_id)
 
@@ -370,18 +365,21 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         client_secret: str,
         ip: str = "127.0.0.1",
         next_link: str | None = None,
-        timeout_ms: int = 1000,
     ) -> str:
         body = {"client_secret": client_secret, "email": email, "send_attempt": 1}
         if next_link is not None:
             body["next_link"] = next_link
+
         channel = self.make_request(
             "POST",
             b"account/password/email/requestToken",
             body,
             client_ip=ip,
-            timeout_ms=timeout_ms,
+            await_result=False,
         )
+        # Note: The endpoint intentionally adds up to 1000ms of jitter to avoid
+        # leaking whether the email address is bound to an account.
+        channel.await_result(timeout_ms=1000)
 
         if channel.code != 200:
             raise HttpResponseException(

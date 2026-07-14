@@ -5365,6 +5365,18 @@ properties:
     default: []
     examples:
       - - "!foo:example.com"
+  exclude_rooms_from_presence:
+    type: array
+    description: >-
+      A list of rooms to exclude from presence updates. Presence will not be
+      routed between two users solely because they share one of these rooms.
+      Users who also share a non-excluded room continue to exchange presence as
+      normal.
+    items:
+      type: string
+    default: []
+    examples:
+      - - "!foo:example.com"
   opentracing:
     type: object
     description: >-

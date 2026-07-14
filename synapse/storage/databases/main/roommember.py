@@ -998,12 +998,22 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return {u for u, share_room in user_dict.items() if share_room}
 
-    async def get_users_who_share_room_with_user(self, user_id: str) -> set[str]:
-        """Returns the set of users who share a room with `user_id`"""
+    async def get_users_who_share_room_with_user(
+        self, user_id: str, excluded_rooms: AbstractSet[str] = frozenset()
+    ) -> set[str]:
+        """Returns the set of users who share a room with `user_id`.
+
+        Args:
+            user_id: The user to find the co-occupants of.
+            excluded_rooms: Rooms which should not, on their own, count as a
+                shared room.
+        """
         room_ids = await self.get_rooms_for_user(user_id)
 
         user_who_share_room: set[str] = set()
         for room_id in room_ids:
+            if room_id in excluded_rooms:
+                continue
             user_ids = await self.get_users_in_room(room_id)
             user_who_share_room.update(user_ids)
 
