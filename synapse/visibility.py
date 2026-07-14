@@ -197,13 +197,10 @@ async def filter_and_transform_events_for_client(
         # Filter out call invites in public rooms, as this would potentially
         # ring a lot of users.
         if event.type == EventTypes.CallInvite and not event.is_state():
-            # `state_after_event` should only be None if the event is an outlier,
-            # and earlier code should filter out outliers entirely.
-            #
-            # In addition, we only create outliers locally for out-of-band
-            # invite rejections, invites received over federation, or state
-            # events needed to authorise other events. None of this applies to
-            # call invites.
+            # `state_after_event` is None only for an outlier (see below). An
+            # outlier reaches this point only as the user's own membership or
+            # through `always_include_ids`, which callers fill with the IDs of
+            # current state events. So a non-state call invite always has state here.
             assert state_after_event is not None
 
             room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
@@ -216,8 +213,9 @@ async def filter_and_transform_events_for_client(
         # Annotate the event with the user's membership after the event.
         #
         # Normally we just look in `state_after_event`, but if the event is an outlier
-        # we won't have such a state. The only outliers that are returned here are the
-        # user's own membership event, so we can just inspect that.
+        # we won't have such a state. An outlier here is either the user's own
+        # membership event, which we inspect directly, or an event in
+        # `always_include_ids`, which we return without a membership.
 
         user_membership_event: EventBase | None
         if event.type == EventTypes.Member and event.state_key == user_id:
@@ -225,8 +223,17 @@ async def filter_and_transform_events_for_client(
         elif state_after_event is not None:
             user_membership_event = state_after_event.get((EventTypes.Member, user_id))
         else:
-            # unreachable!
-            raise Exception("Missing state for event that is not user's own membership")
+            # The cached copy of an event can still be flagged as an outlier after
+            # the event has entered the room's current state, in which case no state
+            # was fetched for it. Serve it without a membership annotation.
+            logger.info(
+                "filter_and_transform_events_for_client: no state for always-included"
+                " outlier event %s in room %s; returning it without a membership"
+                " annotation",
+                event.event_id,
+                event.room_id,
+            )
+            return FilteredEvent(event=filtered, membership=None)
 
         user_membership = (
             user_membership_event.membership
