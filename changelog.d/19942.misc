@@ -1,1 +1,0 @@
-Add `last_active_granularity`, `sync_online_timeout` and `idle_timeout` options to the `presence` config section to allow tuning the presence state machine timers.
