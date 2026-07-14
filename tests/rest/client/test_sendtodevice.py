@@ -489,6 +489,60 @@ class SendToDeviceTestCase(HomeserverTestCase):
             },
         )
 
+    def test_remote_spoofed_sender(self) -> None:
+        """
+        Tests that a to-device message whose sender domain does not match the origin
+        server is dropped.
+        """
+        user2 = self.register_user("u2", "pass")
+        user2_tok = self.login("u2", "pass", "d2")
+
+        federation_registry = self.hs.get_federation_registry()
+
+        # Send a spoofed to-device message EDU
+        self.get_success(
+            federation_registry.on_edu(
+                EduTypes.DIRECT_TO_DEVICE,
+                "example.org",
+                {
+                    "sender": "@user:not.the.same.example.org",
+                    "type": "org.example.test",
+                    "messages": {user2: {"d2": {"foo": "bar"}}},
+                    "message_id": "1",
+                },
+            )
+        )
+        # Also send a valid one as a sentinel, to make sure our test setup
+        # is working as we'd expect
+        self.get_success(
+            federation_registry.on_edu(
+                EduTypes.DIRECT_TO_DEVICE,
+                "example.org",
+                {
+                    "sender": "@user:example.org",
+                    "type": "org.example.test",
+                    "messages": {user2: {"d2": {"hiss": "meow"}}},
+                    "message_id": "1",
+                },
+            )
+        )
+
+        # Then do a /sync and be sure it didn't come down
+        channel = self.make_request("GET", "/sync", access_token=user2_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        messages = channel.json_body.get("to_device", {}).get("events", [])
+        self.assertEqual(
+            messages,
+            [
+                # Only the sentinel (valid) to-device message came down, not the spoofed one
+                {
+                    "content": {"hiss": "meow"},
+                    "sender": "@user:example.org",
+                    "type": "org.example.test",
+                }
+            ],
+        )
+
     def test_limited_sync(self) -> None:
         """If a limited sync for to-devices happens the next /sync should respond immediately."""
 
