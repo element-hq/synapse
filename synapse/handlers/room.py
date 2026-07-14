@@ -1983,15 +1983,15 @@ class RoomContextHandler:
             # context rather than failing. Clients legitimately fetch such events,
             # e.g. to render a push notification for an invite after the room has
             # already been joined.
-            token = await StreamToken.START.to_string(self.store)
+            dummy_token = await StreamToken.START.to_string(self.store)
             return EventContext(
                 events_before=[],
                 event=filtered[0],
                 events_after=[],
                 state=[],
                 aggregations={},
-                start=token,
-                end=token,
+                start=dummy_token,
+                end=dummy_token,
             )
 
         results = await self.store.get_events_around(
