@@ -5873,7 +5873,7 @@ properties:
           knock was accepted). The user already asked to join by knocking,
           so this applies independently of `enabled` and of the restrictions
           below.
-        default: true
+        default: false
       only_for_direct_messages:
         type: boolean
         description: >-

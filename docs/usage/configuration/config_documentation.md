@@ -4773,7 +4773,7 @@ This setting has the following sub-options:
 
 * `enabled` (boolean): Whether to run the auto-accept invites logic. Defaults to `false`.
 
-* `enabled_for_accepted_knocks` (boolean): Whether to automatically join a user to a room when an invite arrives for a knock they have pending in that room (i.e. their knock was accepted). The user already asked to join by knocking, so this applies independently of `enabled` and of the restrictions below. Defaults to `true`.
+* `enabled_for_accepted_knocks` (boolean): Whether to automatically join a user to a room when an invite arrives for a knock they have pending in that room (i.e. their knock was accepted). The user already asked to join by knocking, so this applies independently of `enabled` and of the restrictions below. Defaults to `false`.
 
 * `only_for_direct_messages` (boolean): Whether invites should be automatically accepted for all room types, or only for direct messages. Defaults to `false`.
 

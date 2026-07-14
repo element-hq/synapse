@@ -92,10 +92,17 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
 
         return room_id, creator_id, creator_tok, knocker_id
 
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled_for_accepted_knocks": True,
+            },
+        }
+    )
     def test_auto_join_on_accepted_knock(self) -> None:
-        """A user whose knock is accepted (invited by a room member) is
-        automatically joined to the room, even with no `auto_accept_invites`
-        configuration at all."""
+        """With `enabled_for_accepted_knocks` on, a user whose knock is
+        accepted (invited by a room member) is automatically joined to the
+        room."""
         (
             room_id,
             creator_id,
@@ -116,16 +123,9 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         self.assertEqual(len(join_updates), 1)
         self.assertEqual(join_updates[0].room_id, room_id)
 
-    @override_config(
-        {
-            "auto_accept_invites": {
-                "enabled_for_accepted_knocks": False,
-            },
-        }
-    )
-    def test_no_auto_join_on_accepted_knock_when_disabled(self) -> None:
-        """With `enabled_for_accepted_knocks` off, an accepted knock stays an
-        ordinary invite."""
+    def test_no_auto_join_on_accepted_knock_by_default(self) -> None:
+        """With `enabled_for_accepted_knocks` off (the default), an accepted
+        knock stays an ordinary invite."""
         (
             room_id,
             creator_id,
@@ -143,9 +143,16 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         join_updates, _ = sync_join(self, knocker_id)
         self.assertEqual(len(join_updates), 0)
 
-    def test_plain_invite_not_auto_accepted_by_default(self) -> None:
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled_for_accepted_knocks": True,
+            },
+        }
+    )
+    def test_plain_invite_not_auto_accepted(self) -> None:
         """A plain invite (no prior knock) is not auto-accepted just because
-        the accepted-knocks logic is enabled by default."""
+        the accepted-knocks logic is enabled."""
         inviting_user_id = self.register_user("inviter2", "pass")
         inviting_user_tok = self.login("inviter2", "pass")
 

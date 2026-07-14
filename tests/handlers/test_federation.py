@@ -159,6 +159,62 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
 
         self.assertEqual(sg, sg2)
 
+    def test_rejected_event_with_on_new_event_callback(self) -> None:
+        """
+        A rejected event must not break the notifier when a module has
+        registered an `on_new_event` callback (which the notifier invokes for
+        each new event).
+
+        Regression test: the callback dispatcher used to look the event up
+        without `allow_rejected=True`, so a rejected event raised
+        `NotFoundError` inside the federation persist path.
+        """
+        OTHER_SERVER = "otherserver"
+        OTHER_USER = "@otheruser:" + OTHER_SERVER
+
+        # create the room
+        user_id = self.register_user("kermit", "test")
+        tok = self.login("kermit", "test")
+        room_id = self.helper.create_room_as(room_creator=user_id, tok=tok)
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        # pretend that another server has joined
+        join_event = self._build_and_send_join_event(OTHER_SERVER, OTHER_USER, room_id)
+
+        # register an `on_new_event` callback (after the events above, so that
+        # they don't count towards its calls)
+        on_new_event = AsyncMock(return_value=None)
+        self.hs.get_module_api_callbacks().third_party_event_rules._on_new_event_callbacks.append(
+            on_new_event
+        )
+
+        # build and send an event which will be rejected
+        ev = make_test_pdu_event(
+            {
+                "type": EventTypes.Message,
+                "content": {},
+                "room_id": room_id,
+                "sender": "@yetanotheruser:" + OTHER_SERVER,
+                "depth": join_event.depth + 1,
+                "prev_events": [join_event.event_id],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+
+        # this should succeed, despite the on_new_event callback
+        self.get_success(
+            self.hs.get_federation_event_handler().on_receive_pdu(OTHER_SERVER, ev)
+        )
+
+        # that should have been rejected...
+        e = self.get_success(self.store.get_event(ev.event_id, allow_rejected=True))
+        self.assertIsNotNone(e.rejected_reason)
+
+        # ... and the module should not have been told about it
+        on_new_event.assert_not_called()
+
     def test_rejected_state_event_state(self) -> None:
         """
         Check that we store the state group correctly for rejected state events.
