@@ -266,12 +266,12 @@ def _prepare() -> None:
     # We use two `open(...)` blocks as it's easier to read/write then figure out the
     # seek/truncate dance with one.
     with open(schema_file) as f:
-        contents = f.read()
-    contents = re.sub(
-        r"^\$id: .*", f"$id: {url}", contents, count=1, flags=re.MULTILINE
+        schema_file_content = f.read()
+    new_schema_file_content = re.sub(
+        r"^\$id: .*", f"$id: {url}", schema_file_content, count=1, flags=re.MULTILINE
     )
     with open(schema_file, "w") as f:
-        f.write(contents)
+        f.write(new_schema_file_content)
 
     # Generate changelogs.
     generate_and_write_changelog(synapse_repo, current_version, new_version)
