@@ -38,7 +38,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -92,6 +92,293 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+
+class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):
+    """
+    Regression tests for room confusion in /get_missing_events
+    https://github.com/element-hq/synapse/security/advisories/GHSA-27p5-4f45-gx76
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        # Local user
+        self.local_user_id = self.register_user("alice", "pass")
+        self.local_user_token = self.login("alice", "pass")
+        self.local_user = UserID.from_string(self.local_user_id)
+
+        # Create 2 rooms (one with the remote server, one without).
+        # - The remote server will be in this room
+        self.room_allowed = self.helper.create_room_as(
+            self.local_user_id, tok=self.local_user_token
+        )
+        self.inject_room_member(
+            self.room_allowed, f"@remote:{self.OTHER_SERVER_NAME}", "join"
+        )
+        # - The remote server will _not_ be in this room
+        self.room_blocked = self.helper.create_room_as(
+            self.local_user_id, tok=self.local_user_token
+        )
+
+        # Insert a linear chain of events in both rooms
+        self.room_allowed_event_ids = self.helper.send_messages(
+            self.room_allowed, num_events=5, tok=self.local_user_token
+        )
+        self.room_blocked_event_ids = self.helper.send_messages(
+            self.room_blocked, num_events=5, tok=self.local_user_token
+        )
+
+    def _extract_returned_event_ids(self, json_body: JsonDict) -> set[str]:
+        """
+        Given the response body of `/get_missing_events`, return the event IDs
+        of the events that were returned in the response.
+        This only includes event IDs from `self.room_allowed_event_ids` and
+        `self.room_blocked_event_ids`; other events are ignored.
+
+        As the federation PDU format doesn't include event IDs
+        (at least not for every room version), we match on the
+        `(room_id, content.body, prev_events)` triple against the events
+        we sent in the setup.
+        """
+        store = self.hs.get_datastores().main
+        events = self.get_success(
+            store.get_events_as_list(
+                list(self.room_allowed_event_ids) + list(self.room_blocked_event_ids)
+            )
+        )
+        # (room_id, content.body, prev_events) -> event ID
+        event_lookup: dict[tuple[str, str, tuple[str, ...]], str] = {}
+        for event in events:
+            key = (
+                event.room_id,
+                event.content["body"],
+                tuple(event.prev_event_ids()),
+            )
+            event_lookup[key] = event.event_id
+
+        returned_event_ids: set[str] = set()
+        for pdu in json_body["events"]:
+            key = (
+                pdu.get("room_id"),
+                pdu.get("content", {}).get("body"),
+                tuple(pdu.get("prev_events", [])),
+            )
+            event_id = event_lookup.get(key)
+            if event_id is None:
+                # Not one of the events we created; ignore it.
+                continue
+            returned_event_ids.add(event_id)
+        return returned_event_ids
+
+    def test_get_missing_events_returns_events_from_correct_room(self) -> None:
+        """
+        Tests the happy path when `latest_events` and `earliest_events`
+        are both in the correct room.
+
+                returned
+                  |
+                  v
+            e1 <- e2 <- e3 <- e4 <- e5
+            ^           ^
+            |           |
+            earliest    latest
+
+        Not a regression test; I'm just filling a gap in our (in-repo) testing
+        as far as I can tell.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [self.room_allowed_event_ids[1]],
+                "latest_events": [self.room_allowed_event_ids[3]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            {self.room_allowed_event_ids[2]},
+        )
+
+    def test_get_missing_events_with_empty_earliest_events(self) -> None:
+        """
+        Tests that `/get_missing_events`, when given no `earliest_events`,
+        walks back to the start of the room, capped at `limit`.
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [],
+                "latest_events": [self.room_allowed_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            set(self.room_allowed_event_ids[:-1]),
+        )
+
+    def test_get_missing_events_with_unknown_earliest_event(self) -> None:
+        """
+        Tests that `/get_missing_events` ignores unknown event IDs given in
+        `earliest_events`.
+
+        This makes sense as the `earliest_events` are intuitively
+        'events to stop at' when walking backwards.
+        Since we don't know about those events, we don't use them as stopping conditions.
+        (In other words, this falls back to the same behaviour as
+        `test_get_missing_events_with_empty_earliest_events`.)
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": ["$someUnknownEventId"],
+                "latest_events": [self.room_allowed_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            set(self.room_allowed_event_ids[:-1]),
+        )
+
+    def test_get_missing_events_with_no_latest_event(self) -> None:
+        """
+        Tests that when the `/get_missing_events` request references
+        no events in `latest_events`, the response is 200 OK
+        with an empty `events` list.
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": ["$someOtherUnknownEventId"],
+                "latest_events": [],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_with_unknown_latest_event(self) -> None:
+        """
+        Tests that when the `/get_missing_events` request references
+        unknown events in `latest_events`, the response is 200 OK
+        with an empty `events` list.
+
+        I imagine this makes sense as you might request several events
+        in `latest_events` to start walking back from and we need to be
+        tolerant of the fact that servers don't always know about every event.
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": ["$someOtherUnknownEventId"],
+                "latest_events": ["$someUnknownEventId"],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_ignores_events_from_other_room(self) -> None:
+        """
+        Tests that providing `earliest_events` and `latest_events` from the wrong room
+        treats them the same as being unknown.
+
+        From `test_get_missing_events_with_unknown_latest_event` we established that
+        unknown events in `latest_events` get skipped (to the point of returning an empty
+        `events: []` response)
+
+        From `test_get_missing_events_with_unknown_earliest_event` we established that
+        unknown events in `earliest_events` get ignored as stopping conditions.
+
+        This regression test previously failed.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [self.room_blocked_event_ids[0]],
+                "latest_events": [self.room_blocked_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_skips_latest_events_from_other_room(self) -> None:
+        """
+        Tests that providing `latest_events` from the wrong room
+        treats it as being unknown, even if `earliest_events` are from the correct
+        room.
+
+        From `test_get_missing_events_with_unknown_latest_event` we established that
+        unknown events in `latest_events` get skipped (to the point of returning an empty
+        `events: []` response)
+
+        This regression test previously failed.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [self.room_allowed_event_ids[0]],
+                "latest_events": [self.room_blocked_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_ignores_earliest_events_from_other_room(self) -> None:
+        """
+        Tests that providing `earliest_events` from the wrong room causes those
+        events to be ignored as stopping conditions,
+        even though `latest_events` are from the correct room.
+
+        From `test_get_missing_events_with_unknown_earliest_event` we established that
+        unknown events in `earliest_events` get ignored as stopping conditions.
+
+        This test was previously fine, but is an obvious extra case.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                # Use [-3] here as we want to see if the walk-back algorithm
+                # confuses depth (topological ordering) across the two rooms.
+                "earliest_events": [self.room_blocked_event_ids[-3]],
+                "latest_events": [self.room_allowed_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            set(self.room_allowed_event_ids[:-1]),
+        )
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:
