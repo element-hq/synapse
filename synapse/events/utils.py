@@ -120,12 +120,14 @@ class FilteredEvent:
     """The event to be serialized."""
 
     membership: str | None
-    """The user whose requesting the event's membership at the time of the
-    event was sent.
+    """The requesting user's membership at the time the event was sent.
 
     This is None if we didn't compute the membership. In Synapse this happens a)
-    when returning state events to state endpoints, or b) when the event is
-    returned to an admin.
+    when returning state events to state endpoints, b) when the event is
+    returned to an admin, or c) when we have no state at the event, which
+    happens for an event let through by `always_include_ids` whose copy still
+    carries the outlier flag (see
+    `synapse.visibility.filter_and_transform_events_for_client`).
 
     According to the spec we don't have to include the membership for any events
     if we don't want to, especially if its expensive to compute. In practice
