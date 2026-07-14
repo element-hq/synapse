@@ -192,6 +192,15 @@ class BulkPushRuleEvaluator:
                 )
                 if target_already_in_room:
                     local_users = [event.state_key]
+            elif (
+                self.hs.config.experimental.msc4506_enabled
+                and event.membership == Membership.KNOCK
+            ):
+                # MSC4506: a knock (sender == state_key, so not caught above)
+                # should notify the members of the room who can act on it, so
+                # we can't take the membership-events-only-notify-their-target
+                # fast path.
+                local_users = await self.store.get_local_users_in_room(event.room_id)
         else:
             # We get the users who may need to be notified by first fetching the
             # local users currently in the room, finding those that have push rules,

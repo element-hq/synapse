@@ -730,6 +730,7 @@ fn test_requires_room_version_supports_condition() {
             false,
             false,
             false,
+            false,
         ),
         None,
         None,
