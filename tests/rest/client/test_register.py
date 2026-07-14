@@ -749,16 +749,15 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # Note: The endpoint intentionally adds up to 1000ms of jitter to avoid
-        # leaking whether the email address is bound to an account.
-        #
-        # This should be handled by `await_result` underneath, which has a
-        # 1000ms timeout.
         channel = self.make_request(
             "POST",
             b"register/email/requestToken",
             {"client_secret": "foobar", "email": email, "send_attempt": 1},
+            await_result=False,
         )
+        # Note: The endpoint intentionally adds up to 1000ms of jitter to avoid
+        # leaking whether the email address is bound to an account.
+        channel.await_result(timeout_ms=1000)
         self.assertEqual(200, channel.code, channel.result)
 
         self.assertIsNotNone(channel.json_body.get("sid"))
