@@ -31,7 +31,6 @@ See doc/log_contexts.rst for details on how this works.
 """
 
 import logging
-import threading
 import typing
 from types import TracebackType
 from typing import (
@@ -53,7 +52,9 @@ from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.synapse_rust.logcontext import (
+    DEBUG_LOGGER_NAME,
     ContextResourceUsage as ContextResourceUsage,
+    LoggingContext as LoggingContext,
     current_context as current_context,
     register_sentinel,
     swap_current_context,
@@ -61,14 +62,13 @@ from synapse.synapse_rust.logcontext import (
 from synapse.util.stringutils import random_string_insecure_fast
 
 if TYPE_CHECKING:
-    from synapse.logging.scopecontextmanager import _LogContextScope
     from synapse.types import ISynapseReactor
 
 logger = logging.getLogger(__name__)
 
 original_logger_class = logging.getLoggerClass()
 logging.setLoggerClass(ExplicitlyConfiguredLogger)
-logcontext_debug_logger = logging.getLogger("synapse.logging.context.debug")
+logcontext_debug_logger = logging.getLogger(DEBUG_LOGGER_NAME)
 """
 A logger for debugging when the logcontext switches.
 
@@ -108,15 +108,6 @@ except Exception:
 # a hook which can be set during testing to assert that we aren't abusing logcontexts.
 def logcontext_error(msg: str) -> None:
     logger.warning(msg)
-
-
-# get an id for the current thread.
-#
-# threading.get_ident doesn't actually return an OS-level tid, and annoyingly,
-# on Linux it actually returns the same value either side of a fork() call. However
-# we only fork in one place, so it's not worth the hoop-jumping to get a real tid.
-#
-get_thread_id = threading.get_ident
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -205,286 +196,6 @@ SENTINEL_CONTEXT = _Sentinel()
 # identity and `bool(context)` semantics are preserved. We push it in from here
 # rather than have Rust import this module, to avoid a circular import.
 register_sentinel(SENTINEL_CONTEXT)
-
-
-class LoggingContext:
-    """Additional context for log formatting. Contexts are scoped within a
-    "with" block.
-
-    If a parent is given when creating a new context, then:
-        - logging fields are copied from the parent to the new context on entry
-        - when the new context exits, the cpu usage stats are copied from the
-          child to the parent
-
-    Args:
-        name: Name for the context for logging.
-        server_name: The name of the server this context is associated with
-            (`config.server.server_name` or `hs.hostname`)
-        parent_context (LoggingContext|None): The parent of the new context
-        request: Synapse Request Context object. Useful to associate all the logs
-            happening to a given request.
-
-    """
-
-    __slots__ = [
-        "previous_context",
-        "name",
-        "server_name",
-        "parent_context",
-        "_resource_usage",
-        "usage_start",
-        "main_thread",
-        "finished",
-        "request",
-        "tag",
-        "scope",
-    ]
-
-    def __init__(
-        self,
-        *,
-        name: str,
-        server_name: str,
-        parent_context: "LoggingContext | None" = None,
-        request: ContextRequest | None = None,
-    ) -> None:
-        self.previous_context = current_context()
-
-        # track the resources used by this context so far
-        self._resource_usage = ContextResourceUsage()
-
-        # The thread resource usage when the logcontext became active. None
-        # if the context is not currently active.
-        self.usage_start: resource.struct_rusage | None = None
-
-        self.name = name
-        self.server_name = server_name
-        self.main_thread = get_thread_id()
-        self.request = None
-        self.tag = ""
-        self.scope: "_LogContextScope" | None = None
-
-        # keep track of whether we have hit the __exit__ block for this context
-        # (suggesting that the the thing that created the context thinks it should
-        # be finished, and that re-activating it would suggest an error).
-        self.finished = False
-
-        self.parent_context = parent_context
-
-        # Inherit some fields from the parent context
-        if self.parent_context is not None:
-            # which request this corresponds to
-            self.request = self.parent_context.request
-
-            # we also track the current scope:
-            self.scope = self.parent_context.scope
-
-        if request is not None:
-            # the request param overrides the request from the parent context
-            self.request = request
-
-    def __str__(self) -> str:
-        return self.name
-
-    def __enter__(self) -> "LoggingContext":
-        """Enters this logging context into thread local storage"""
-        logcontext_debug_logger.debug("LoggingContext(%s).__enter__", self.name)
-        old_context = set_current_context(self)
-        if self.previous_context != old_context:
-            logcontext_error(
-                "Expected previous context %r, found %r"
-                % (
-                    self.previous_context,
-                    old_context,
-                )
-            )
-        return self
-
-    def __exit__(
-        self,
-        type: type[BaseException] | None,
-        value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Restore the logging context in thread local storage to the state it
-        was before this context was entered.
-        Returns:
-            None to avoid suppressing any exceptions that were thrown.
-        """
-        logcontext_debug_logger.debug(
-            "LoggingContext(%s).__exit__ --> %s", self.name, self.previous_context
-        )
-        current = set_current_context(self.previous_context)
-        if current is not self:
-            if current is SENTINEL_CONTEXT:
-                logcontext_error("Expected logging context %s was lost" % (self,))
-            else:
-                logcontext_error(
-                    "Expected logging context %s but found %s" % (self, current)
-                )
-
-        # the fact that we are here suggests that the caller thinks that everything
-        # is done and dusted for this logcontext, and further activity will not get
-        # recorded against the correct metrics.
-        self.finished = True
-
-    def start(self, rusage: "resource.struct_rusage | None") -> None:
-        """
-        Record that this logcontext is currently running.
-
-        This should not be called directly: use set_current_context
-
-        Args:
-            rusage: the resources used by the current thread, at the point of
-                switching to this logcontext. May be None if this platform doesn't
-                support getrusuage.
-        """
-        if get_thread_id() != self.main_thread:
-            logcontext_error("Started logcontext %s on different thread" % (self,))
-            return
-
-        if self.finished:
-            logcontext_error("Re-starting finished log context %s" % (self,))
-
-        # If we haven't already started record the thread resource usage so
-        # far
-        if self.usage_start:
-            logcontext_error("Re-starting already-active log context %s" % (self,))
-        else:
-            self.usage_start = rusage
-
-    def stop(self, rusage: "resource.struct_rusage | None") -> None:
-        """
-        Record that this logcontext is no longer running.
-
-        This should not be called directly: use set_current_context
-
-        Args:
-            rusage: the resources used by the current thread, at the point of
-                switching away from this logcontext. May be None if this platform
-                doesn't support getrusuage.
-        """
-
-        try:
-            if get_thread_id() != self.main_thread:
-                logcontext_error("Stopped logcontext %s on different thread" % (self,))
-                return
-
-            if not rusage:
-                return
-
-            # Record the cpu used since we started
-            if not self.usage_start:
-                logcontext_error(
-                    "Called stop on logcontext %s without recording a start rusage"
-                    % (self,)
-                )
-                return
-
-            utime_delta, stime_delta = self._get_cputime(rusage)
-            self.add_cputime(utime_delta, stime_delta)
-        finally:
-            self.usage_start = None
-
-    def get_resource_usage(self) -> ContextResourceUsage:
-        """Get resources used by this logcontext so far.
-
-        Returns:
-            A *copy* of the object tracking resource usage so far
-        """
-        # we always return a copy, for consistency
-        res = self._resource_usage.copy()
-
-        # If we are on the correct thread and we're currently running then we
-        # can include resource usage so far.
-        is_main_thread = get_thread_id() == self.main_thread
-        if self.usage_start and is_main_thread:
-            rusage = get_thread_resource_usage()
-            assert rusage is not None
-            utime_delta, stime_delta = self._get_cputime(rusage)
-            res.ru_utime += utime_delta
-            res.ru_stime += stime_delta
-
-        return res
-
-    def _get_cputime(self, current: "resource.struct_rusage") -> tuple[float, float]:
-        """Get the cpu usage time between start() and the given rusage
-
-        Args:
-            rusage: the current resource usage
-
-        Returns: tuple[float, float]: seconds in user mode, seconds in system mode
-        """
-        assert self.usage_start is not None
-
-        utime_delta = current.ru_utime - self.usage_start.ru_utime
-        stime_delta = current.ru_stime - self.usage_start.ru_stime
-
-        # sanity check
-        if utime_delta < 0:
-            logger.error(
-                "utime went backwards! %f < %f",
-                current.ru_utime,
-                self.usage_start.ru_utime,
-            )
-            utime_delta = 0
-
-        if stime_delta < 0:
-            logger.error(
-                "stime went backwards! %f < %f",
-                current.ru_stime,
-                self.usage_start.ru_stime,
-            )
-            stime_delta = 0
-
-        return utime_delta, stime_delta
-
-    def add_cputime(self, utime_delta: float, stime_delta: float) -> None:
-        """Update the CPU time usage of this context (and any parents, recursively).
-
-        Args:
-            utime_delta: additional user time, in seconds, spent in this context.
-            stime_delta: additional system time, in seconds, spent in this context.
-        """
-        self._resource_usage.ru_utime += utime_delta
-        self._resource_usage.ru_stime += stime_delta
-        if self.parent_context:
-            self.parent_context.add_cputime(utime_delta, stime_delta)
-
-    def add_database_transaction(self, duration_sec: float) -> None:
-        """Record the use of a database transaction and the length of time it took.
-
-        Args:
-            duration_sec: The number of seconds the database transaction took.
-        """
-        if duration_sec < 0:
-            raise ValueError("DB txn time can only be non-negative")
-        self._resource_usage.db_txn_count += 1
-        self._resource_usage.db_txn_duration_sec += duration_sec
-        if self.parent_context:
-            self.parent_context.add_database_transaction(duration_sec)
-
-    def add_database_scheduled(self, sched_sec: float) -> None:
-        """Record a use of the database pool
-
-        Args:
-            sched_sec: number of seconds it took us to get a connection
-        """
-        if sched_sec < 0:
-            raise ValueError("DB scheduling time can only be non-negative")
-        self._resource_usage.db_sched_duration_sec += sched_sec
-        if self.parent_context:
-            self.parent_context.add_database_scheduled(sched_sec)
-
-    def record_event_fetch(self, event_count: int) -> None:
-        """Record a number of events being fetched from the db
-
-        Args:
-            event_count: number of events being fetched
-        """
-        self._resource_usage.evt_db_fetch_count += event_count
-        if self.parent_context:
-            self.parent_context.record_event_fetch(event_count)
 
 
 class LoggingContextFilter(logging.Filter):

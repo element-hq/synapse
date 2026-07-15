@@ -10,9 +10,19 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Optional
+import resource
+from types import TracebackType
+from typing import TYPE_CHECKING, Optional
 
-from synapse.logging.context import LoggingContextOrSentinel
+from synapse.logging.context import ContextRequest, LoggingContextOrSentinel
+
+if TYPE_CHECKING:
+    from synapse.logging.scopecontextmanager import _LogContextScope
+
+DEBUG_LOGGER_NAME: str
+"""Name of the opt-in logger for logcontext switch tracing
+(`synapse.logging.context.debug`). Shared with the Rust `debug!` target so the
+names cannot drift."""
 
 class ContextResourceUsage:
     """Tracks the resources used by a log context."""
@@ -31,6 +41,55 @@ class ContextResourceUsage:
     def __isub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
     def __add__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
     def __sub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
+
+class LoggingContext:
+    """Additional context for log formatting. Contexts are scoped within a
+    "with" block.
+
+    If a parent is given when creating a new context, then:
+        - logging fields are copied from the parent to the new context on entry
+        - when the new context exits, the cpu usage stats are copied from the
+          child to the parent
+    """
+
+    previous_context: LoggingContextOrSentinel
+    name: str
+    server_name: str
+    parent_context: "Optional[LoggingContext]"
+    usage_start: "Optional[resource.struct_rusage]"
+    main_thread: int
+    finished: bool
+    request: Optional[ContextRequest]
+    tag: str
+    scope: "Optional[_LogContextScope]"
+    _resource_usage: ContextResourceUsage
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        server_name: str,
+        parent_context: "Optional[LoggingContext]" = None,
+        request: Optional[ContextRequest] = None,
+    ) -> None: ...
+    def __str__(self) -> str: ...
+    def __enter__(self) -> "LoggingContext": ...
+    def __exit__(
+        self,
+        type: Optional[type[BaseException]],
+        value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None: ...
+    def start(self, rusage: "Optional[resource.struct_rusage]") -> None: ...
+    def stop(self, rusage: "Optional[resource.struct_rusage]") -> None: ...
+    def get_resource_usage(self) -> ContextResourceUsage: ...
+    def _get_cputime(
+        self, current: "resource.struct_rusage"
+    ) -> tuple[float, float]: ...
+    def add_cputime(self, utime_delta: float, stime_delta: float) -> None: ...
+    def add_database_transaction(self, duration_sec: float) -> None: ...
+    def add_database_scheduled(self, sched_sec: float) -> None: ...
+    def record_event_fetch(self, event_count: int) -> None: ...
 
 def current_context() -> LoggingContextOrSentinel:
     """Get the current logging context.
