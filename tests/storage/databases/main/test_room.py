@@ -75,15 +75,17 @@ class RoomBackgroundUpdateStoreTestCase(HomeserverTestCase):
         """
 
         # Insert a room without the creator
-        # This uses room version 10, because the `POPULATE_ROOMS_CREATOR_COLUMN`
-        # background update assumes that the room `creator` field is available
-        # in the `m.room.create` event content, which was removed in room
-        # version 11. That assumption is safe as the background update only
-        # backfills rooms whose `creator` column is unset, which can only be
-        # rooms created before Synapse started populating the column at room
-        # creation time (Synapse 1.43, 2021), all of which predate room version
-        # 11 (2023).
-        room_id = self._generate_room(room_version="10")
+        room_id = self._generate_room(
+            # Create the room as v10, because the `POPULATE_ROOMS_CREATOR_COLUMN`
+            # background update assumes that the room `creator` field is available
+            # in the `m.room.create` event content, which was removed in room
+            # version 11. That assumption is safe as the background update only
+            # backfills rooms whose `creator` column is unset, which can only be
+            # rooms created before Synapse started populating the column at room
+            # creation time (Synapse 1.43, 2021), all of which predate room version
+            # 11 (2023).
+            room_version="10"
+        )
         self.get_success(
             self.store.db_pool.simple_update(
                 table="rooms",

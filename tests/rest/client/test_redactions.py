@@ -63,11 +63,11 @@ class RedactionsTestCase(HomeserverTestCase):
 
         # Create a room
         self.room_id = self.helper.create_room_as(
+            self.mod_user_id,
+            tok=self.mod_access_token,
             # FIXME: Using room version 10 here as using later version requires
             # https://github.com/element-hq/synapse/pull/19782
             # Remove the override when the above PR is merged.
-            self.mod_user_id,
-            tok=self.mod_access_token,
             room_version="10",
         )
 
