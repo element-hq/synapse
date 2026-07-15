@@ -42,7 +42,7 @@ from signedjson.key import (
 from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.types import JsonDict
-from synapse.util.stringutils import random_string_with_symbols
+from synapse.util.stringutils import random_string, random_string_with_symbols
 
 from ._base import Config, ConfigError, read_file
 
@@ -351,9 +351,8 @@ class KeyConfig(Config):
             if len(signing_keys.split("\n")[0].split()) == 1:
                 # handle keys in the old format.
                 key = decode_signing_key_base64(
-                    NACL_ED25519, "pending_key_id", signing_keys.split("\n")[0]
+                    NACL_ED25519, "a_" + random_string(4), signing_keys.split("\n")[0]
                 )
-                key.version = _derive_signing_key_version(key)
                 with open(
                     signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
                 ) as signing_key_file:
