@@ -228,7 +228,7 @@ The following parameters should be set in the URL:
   **or** displaynames that contain this value.
 - `guests` - string representing a bool - Is optional and if `false` will **exclude** guest users.
   Defaults to `true` to include guest users. Setting this option to `true` is not supported when Matrix Authentication
-  Service integration is enabled. See [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+  Service integration is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 - `admins` - Optional flag to filter admins. If `true`, only admins are queried. If `false`, admins are excluded from
   the query. When the flag is absent (the default), **both** admins and non-admins are included in the search results.
 - `deactivated` - string representing a bool - Is optional and if `true` will **include** deactivated users.
