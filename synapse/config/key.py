@@ -35,7 +35,7 @@ from signedjson.key import (
     decode_signing_key_base64,
     decode_verify_key_bytes,
     is_signing_algorithm_supported,
-    read_signing_keys as _read_signing_keys,
+    read_signing_keys,
     write_signing_keys,
 )
 from unpaddedbase64 import decode_base64
@@ -111,7 +111,7 @@ _SIGNING_KEY_VERSION_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def read_signing_keys(lines: list[str]) -> list[SigningKey]:
-    loaded_signing_keys = _read_signing_keys(lines)
+    loaded_signing_keys = read_signing_keys(lines)
     for signing_key in loaded_signing_keys:
         expected_version = derive_signing_key_version(signing_key)
         if signing_key.version == expected_version:
