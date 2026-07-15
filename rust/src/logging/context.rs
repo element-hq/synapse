@@ -120,6 +120,121 @@ impl LogContext {
     }
 }
 
+/// Tracks the resources used by a log context.
+///
+/// A native drop-in for the former Python `ContextResourceUsage` class; the
+/// public attribute surface, operators and `repr` are preserved so callers
+/// (Measure, request/background-process metrics, task scheduler, ...) are
+/// unaffected. Keeping this native lets the switch machinery do its rusage
+/// accounting without allocating a Python object per operation.
+#[pyclass(
+    name = "ContextResourceUsage",
+    module = "synapse.logging.context",
+    from_py_object
+)]
+#[derive(Clone, Default)]
+pub struct ContextResourceUsage {
+    /// System CPU time, in seconds.
+    #[pyo3(get, set)]
+    pub ru_stime: f64,
+    /// User CPU time, in seconds.
+    #[pyo3(get, set)]
+    pub ru_utime: f64,
+    /// Number of database transactions done.
+    #[pyo3(get, set)]
+    pub db_txn_count: i64,
+    /// Time spent doing database transactions (excluding scheduling), in seconds.
+    #[pyo3(get, set)]
+    pub db_txn_duration_sec: f64,
+    /// Time spent waiting for a database connection, in seconds.
+    #[pyo3(get, set)]
+    pub db_sched_duration_sec: f64,
+    /// Number of events requested from the database.
+    #[pyo3(get, set)]
+    pub evt_db_fetch_count: i64,
+}
+
+impl ContextResourceUsage {
+    fn add_assign(&mut self, other: &ContextResourceUsage) {
+        self.ru_utime += other.ru_utime;
+        self.ru_stime += other.ru_stime;
+        self.db_txn_count += other.db_txn_count;
+        self.db_txn_duration_sec += other.db_txn_duration_sec;
+        self.db_sched_duration_sec += other.db_sched_duration_sec;
+        self.evt_db_fetch_count += other.evt_db_fetch_count;
+    }
+
+    fn sub_assign(&mut self, other: &ContextResourceUsage) {
+        self.ru_utime -= other.ru_utime;
+        self.ru_stime -= other.ru_stime;
+        self.db_txn_count -= other.db_txn_count;
+        self.db_txn_duration_sec -= other.db_txn_duration_sec;
+        self.db_sched_duration_sec -= other.db_sched_duration_sec;
+        self.evt_db_fetch_count -= other.evt_db_fetch_count;
+    }
+}
+
+#[pymethods]
+impl ContextResourceUsage {
+    /// `ContextResourceUsage(copy_from=None)` — if `copy_from` is given, copy its
+    /// stats; otherwise start at zero.
+    #[new]
+    #[pyo3(signature = (copy_from=None))]
+    fn new(copy_from: Option<ContextResourceUsage>) -> Self {
+        copy_from.unwrap_or_default()
+    }
+
+    /// Return a copy of this object.
+    fn copy(&self) -> ContextResourceUsage {
+        self.clone()
+    }
+
+    /// Reset all stats to zero.
+    fn reset(&mut self) {
+        *self = ContextResourceUsage::default();
+    }
+
+    fn __repr__(&self) -> String {
+        // Matches the historical Python `__repr__` (values were interpolated with
+        // `%r`, i.e. `repr()`, inside single quotes).
+        format!(
+            "<ContextResourceUsage ru_stime='{:?}', ru_utime='{:?}', \
+             db_txn_count='{}', db_txn_duration_sec='{:?}', \
+             db_sched_duration_sec='{:?}', evt_db_fetch_count='{}'>",
+            self.ru_stime,
+            self.ru_utime,
+            self.db_txn_count,
+            self.db_txn_duration_sec,
+            self.db_sched_duration_sec,
+            self.evt_db_fetch_count,
+        )
+    }
+
+    /// `self += other`; mutate in place. pyo3 returns `self` for the in-place slot.
+    fn __iadd__(&mut self, other: ContextResourceUsage) {
+        self.add_assign(&other);
+    }
+
+    /// `self -= other`; mutate in place. pyo3 returns `self` for the in-place slot.
+    fn __isub__(&mut self, other: ContextResourceUsage) {
+        self.sub_assign(&other);
+    }
+
+    /// `self + other`, returning a new object.
+    fn __add__(&self, other: ContextResourceUsage) -> ContextResourceUsage {
+        let mut res = self.clone();
+        res.add_assign(&other);
+        res
+    }
+
+    /// `self - other`, returning a new object.
+    fn __sub__(&self, other: ContextResourceUsage) -> ContextResourceUsage {
+        let mut res = self.clone();
+        res.sub_assign(&other);
+        res
+    }
+}
+
 /// Register the Python sentinel logcontext.
 ///
 /// Called once from `synapse.logging.context` at import time. Registering twice
@@ -183,6 +298,7 @@ pub fn swap_current_context(py: Python<'_>, context: Py<PyAny>) -> Py<PyAny> {
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child_module: Bound<'_, PyModule> = PyModule::new(py, "logcontext")?;
+    child_module.add_class::<ContextResourceUsage>()?;
     child_module.add_function(wrap_pyfunction!(current_context, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(swap_current_context, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(register_sentinel, &child_module)?)?;

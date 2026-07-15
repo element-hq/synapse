@@ -53,6 +53,7 @@ from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.synapse_rust.logcontext import (
+    ContextResourceUsage as ContextResourceUsage,
     current_context as current_context,
     register_sentinel,
     swap_current_context,
@@ -116,107 +117,6 @@ def logcontext_error(msg: str) -> None:
 # we only fork in one place, so it's not worth the hoop-jumping to get a real tid.
 #
 get_thread_id = threading.get_ident
-
-
-class ContextResourceUsage:
-    """Object for tracking the resources used by a log context
-
-    Attributes:
-        ru_utime (float): user CPU time (in seconds)
-        ru_stime (float): system CPU time (in seconds)
-        db_txn_count (int): number of database transactions done
-        db_sched_duration_sec (float): amount of time spent waiting for a
-            database connection
-        db_txn_duration_sec (float): amount of time spent doing database
-            transactions (excluding scheduling time)
-        evt_db_fetch_count (int): number of events requested from the database
-    """
-
-    __slots__ = [
-        "ru_stime",
-        "ru_utime",
-        "db_txn_count",
-        "db_txn_duration_sec",
-        "db_sched_duration_sec",
-        "evt_db_fetch_count",
-    ]
-
-    def __init__(self, copy_from: "ContextResourceUsage | None" = None) -> None:
-        """Create a new ContextResourceUsage
-
-        Args:
-            copy_from: if not None, an object to copy stats from
-        """
-        if copy_from is None:
-            self.reset()
-        else:
-            # FIXME: mypy can't infer the types set via reset() above, so specify explicitly for now
-            self.ru_utime: float = copy_from.ru_utime
-            self.ru_stime: float = copy_from.ru_stime
-            self.db_txn_count: int = copy_from.db_txn_count
-
-            self.db_txn_duration_sec: float = copy_from.db_txn_duration_sec
-            self.db_sched_duration_sec: float = copy_from.db_sched_duration_sec
-            self.evt_db_fetch_count: int = copy_from.evt_db_fetch_count
-
-    def copy(self) -> "ContextResourceUsage":
-        return ContextResourceUsage(copy_from=self)
-
-    def reset(self) -> None:
-        self.ru_stime = 0.0
-        self.ru_utime = 0.0
-        self.db_txn_count = 0
-
-        self.db_txn_duration_sec = 0.0
-        self.db_sched_duration_sec = 0.0
-        self.evt_db_fetch_count = 0
-
-    def __repr__(self) -> str:
-        return (
-            "<ContextResourceUsage ru_stime='%r', ru_utime='%r', "
-            "db_txn_count='%r', db_txn_duration_sec='%r', "
-            "db_sched_duration_sec='%r', evt_db_fetch_count='%r'>"
-        ) % (
-            self.ru_stime,
-            self.ru_utime,
-            self.db_txn_count,
-            self.db_txn_duration_sec,
-            self.db_sched_duration_sec,
-            self.evt_db_fetch_count,
-        )
-
-    def __iadd__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        """Add another ContextResourceUsage's stats to this one's.
-
-        Args:
-            other: the other resource usage object
-        """
-        self.ru_utime += other.ru_utime
-        self.ru_stime += other.ru_stime
-        self.db_txn_count += other.db_txn_count
-        self.db_txn_duration_sec += other.db_txn_duration_sec
-        self.db_sched_duration_sec += other.db_sched_duration_sec
-        self.evt_db_fetch_count += other.evt_db_fetch_count
-        return self
-
-    def __isub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        self.ru_utime -= other.ru_utime
-        self.ru_stime -= other.ru_stime
-        self.db_txn_count -= other.db_txn_count
-        self.db_txn_duration_sec -= other.db_txn_duration_sec
-        self.db_sched_duration_sec -= other.db_sched_duration_sec
-        self.evt_db_fetch_count -= other.evt_db_fetch_count
-        return self
-
-    def __add__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        res = ContextResourceUsage(copy_from=self)
-        res += other
-        return res
-
-    def __sub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
-        res = ContextResourceUsage(copy_from=self)
-        res -= other
-        return res
 
 
 @attr.s(slots=True, auto_attribs=True)

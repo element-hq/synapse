@@ -10,7 +10,27 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+from typing import Optional
+
 from synapse.logging.context import LoggingContextOrSentinel
+
+class ContextResourceUsage:
+    """Tracks the resources used by a log context."""
+
+    ru_stime: float
+    ru_utime: float
+    db_txn_count: int
+    db_txn_duration_sec: float
+    db_sched_duration_sec: float
+    evt_db_fetch_count: int
+
+    def __init__(self, copy_from: "Optional[ContextResourceUsage]" = None) -> None: ...
+    def copy(self) -> "ContextResourceUsage": ...
+    def reset(self) -> None: ...
+    def __iadd__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
+    def __isub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
+    def __add__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
+    def __sub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
 
 def current_context() -> LoggingContextOrSentinel:
     """Get the current logging context.
