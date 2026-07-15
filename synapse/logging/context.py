@@ -52,6 +52,11 @@ from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
+from synapse.synapse_rust.logcontext import (
+    current_context as current_context,
+    register_sentinel,
+    swap_current_context,
+)
 from synapse.util.stringutils import random_string_insecure_fast
 
 if TYPE_CHECKING:
@@ -293,6 +298,13 @@ class _Sentinel:
 
 
 SENTINEL_CONTEXT = _Sentinel()
+
+# Hand the sentinel to the Rust logcontext slot, which owns the "current context"
+# storage (see `synapse.synapse_rust.logcontext` / `rust/src/logcontext.rs`). Rust
+# returns this exact object when no context is set, so `context is SENTINEL_CONTEXT`
+# identity and `bool(context)` semantics are preserved. We push it in from here
+# rather than have Rust import this module, to avoid a circular import.
+register_sentinel(SENTINEL_CONTEXT)
 
 
 class LoggingContext:
@@ -733,17 +745,16 @@ class PreserveLoggingContext:
                 )
 
 
-_thread_local = threading.local()
-_thread_local.current_context = SENTINEL_CONTEXT
-
-
-def current_context() -> LoggingContextOrSentinel:
-    """Get the current logging context from thread local storage"""
-    return getattr(_thread_local, "current_context", SENTINEL_CONTEXT)
-
-
 def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSentinel:
-    """Set the current logging context in thread local storage
+    """Set the current logging context.
+
+    The actual "current context" storage lives in Rust (see
+    `synapse.synapse_rust.logcontext` / `rust/src/logcontext.rs`) so that it is
+    visible from both Python (reactor + threadpool threads) and Rust (tokio
+    tasks). This function keeps the accounting policy: it does the CPU/resource
+    `getrusage` start/stop bookkeeping and delegates the raw slot write to
+    `swap_current_context`.
+
     Args:
         context: The context to activate.
 
@@ -760,7 +771,7 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
     if current is not context:
         rusage = get_thread_resource_usage()
         current.stop(rusage)
-        _thread_local.current_context = context
+        swap_current_context(context)
         context.start(rusage)
 
     return current
