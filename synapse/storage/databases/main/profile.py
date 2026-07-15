@@ -884,10 +884,12 @@ class ProfileWorkerStore(SQLBaseStore):
             values=values,
         )
 
-        # Add per user tracking rows pointing to the latest stream ID
+        # Add per user tracking rows for each generated stream ID
         inserted_ts = self.clock.time_msec()
         per_user_values = [
-            (stream_ids[-1], user_id, inserted_ts) for user_id in target_users
+            (stream_id, user_id, inserted_ts)
+            for user_id in target_users
+            for stream_id in stream_ids
         ]
         self.db_pool.simple_insert_many_txn(
             txn,
@@ -1049,25 +1051,20 @@ class ProfileWorkerStore(SQLBaseStore):
         )
         res = txn.fetchall()
         if res:
-            stream_ids = [row[0] for row in res]
-
             user_clause, user_args = make_in_list_sql_clause(
                 txn.database_engine,
                 "user_id",
                 users_to_update,
             )
-            stream_id_clause, stream_id_args = make_in_list_sql_clause(
-                txn.database_engine,
-                "stream_id",
-                stream_ids,
-            )
             txn.execute(
                 f"""
                     DELETE FROM profile_updates_per_user
                         WHERE {user_clause}
-                        AND {stream_id_clause}
+                        AND stream_id IN (
+                            SELECT stream_id FROM profile_updates WHERE user_id = ?
+                        )
                 """,
-                (*user_args, *stream_id_args),
+                (*user_args, user_id.to_string()),
             )
 
         # Now record the "left room" action in the stream

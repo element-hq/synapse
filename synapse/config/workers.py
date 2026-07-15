@@ -145,7 +145,6 @@ class WriterLocations:
         device_lists: The instances that write to the device list stream.
         thread_subscriptions: The instances that write to the thread subscriptions
             stream.
-        profile_updates: The instances that write to the profile updates stream.
         quarantined_media_changes: The instances that write to the quarantined media
              changes stream.
     """

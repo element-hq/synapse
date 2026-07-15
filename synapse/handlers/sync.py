@@ -2416,10 +2416,15 @@ class SyncHandler:
                         # user ID + field name + value, which ensures if the value
                         # changes, we'll miss the cache, thus sending the field update
                         # to the syncing user.
+                        import json
+
                         cache_value = hashlib.sha256(
-                            f"{other_user_id}-{field_name}-{profile_data.get(field_name)}".encode(
-                                "utf8"
-                            )
+                            json.dumps(
+                                [other_user_id, field_name, profile_data.get(field_name)],
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                ensure_ascii=False,
+                            ).encode("utf8")
                         ).hexdigest()
                         if cache.get(cache_value) is None:
                             per_user_updates[field_name] = profile_data.get(field_name)
