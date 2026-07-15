@@ -1042,30 +1042,21 @@ class ProfileWorkerStore(SQLBaseStore):
             users_to_update: The set of users who no longer share rooms with the user.
         """
         # First clear the previous rows from the table
-        txn.execute(
-            """
-            SELECT stream_id FROM profile_updates
-            WHERE user_id = ?
-            """,
-            (user_id.to_string(),),
+        user_clause, user_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "user_id",
+            users_to_update,
         )
-        res = txn.fetchall()
-        if res:
-            user_clause, user_args = make_in_list_sql_clause(
-                txn.database_engine,
-                "user_id",
-                users_to_update,
-            )
-            txn.execute(
-                f"""
-                    DELETE FROM profile_updates_per_user
-                        WHERE {user_clause}
-                        AND stream_id IN (
-                            SELECT stream_id FROM profile_updates WHERE user_id = ?
-                        )
-                """,
-                (*user_args, user_id.to_string()),
-            )
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {user_clause}
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE user_id = ?
+                    )
+            """,
+            (*user_args, user_id.to_string()),
+        )
 
         # Now record the "left room" action in the stream
         self._record_profile_updates_txn(
