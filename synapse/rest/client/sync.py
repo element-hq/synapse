@@ -1149,18 +1149,28 @@ class SlidingSyncRestServlet(RestServlet):
             serialized_extensions[
                 "org.matrix.msc4262.profiles"
             ] = await self._serialise_profiles(
-                requester, extensions.profiles, ref_rooms_results
+                extensions.profiles,
             )
 
         return serialized_extensions
 
     async def _serialise_profiles(
         self,
-        requester: Requester,
         profiles: SlidingSyncResult.Extensions.ProfilesExtension,
-        ref_rooms_results: Mapping[str, SlidingSyncResult.RoomResult],
     ) -> JsonMapping:
-        return profiles.users
+        """
+        Serialise the profiles extension response.
+
+        Args:
+            profiles: The generated profiles response object.
+
+        Returns:
+            A dictionary containing the response `users` with the
+            generated profile updates.
+        """
+        return {
+            "users": profiles.users,
+        }
 
     async def _serialise_sticky_events(
         self,

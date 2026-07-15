@@ -20,6 +20,7 @@ from twisted.internet.testing import MemoryReactor
 import synapse.rest.admin
 from synapse.rest.client import login, profile, room, sync
 from synapse.server import HomeServer
+from synapse.types import UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -55,7 +56,15 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-
+        self.profile_handler = self.hs.get_profile_handler()
+        self.user = self.register_user("user", "password")
+        self.tok = self.login("user", "password")
+        self.other_user = self.register_user("other_user", "password")
+        self.other_tok = self.login("other_user", "password")
+        self.joined_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.join(
+            room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
         super().prepare(reactor, clock, hs)
 
     @parameterized.expand(
@@ -69,26 +78,45 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         Test that no profile extension response is returned
         if the feature is not enabled.
         """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-
+        if is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
         # Make an initial Sliding Sync request with the profiles extension enabled
         sync_body = {
             "lists": {},
             "extensions": {
                 "org.matrix.msc4262.profiles": {
                     "enabled": True,
+                    "fields": ["field"],
                 },
             },
         }
-        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
-        self.assertIsNone(response_body["extensions"].get("org.matrix.msc4262.profiles"))
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        self.assertIsNone(
+            response_body["extensions"].get("org.matrix.msc4262.profiles")
+        )
 
         if not is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
             # Make an incremental Sliding Sync request
-            response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+            response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
 
-            self.assertIsNone(response_body["extensions"].get("org.matrix.msc4262.profiles"))
+            self.assertIsNone(
+                response_body["extensions"].get("org.matrix.msc4262.profiles")
+            )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_no_data_initial_sync(self) -> None:
@@ -105,11 +133,14 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             "extensions": {
                 "org.matrix.msc4262.profiles": {
                     "enabled": True,
+                    "fields": ["field"],
                 },
             },
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-        self.assertIsNone(response_body["extensions"].get("org.matrix.msc4262.profiles"))
+        self.assertIsNone(
+            response_body["extensions"].get("org.matrix.msc4262.profiles")
+        )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_no_data_incremental_sync(self) -> None:
@@ -125,6 +156,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             "extensions": {
                 "org.matrix.msc4262.profiles": {
                     "enabled": True,
+                    "fields": ["field"],
                 }
             },
         }
@@ -133,4 +165,124 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         # Make an incremental Sliding Sync request with the profiles extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        self.assertIsNone(response_body["extensions"].get("org.matrix.msc4262.profiles"))
+        self.assertIsNone(
+            response_body["extensions"].get("org.matrix.msc4262.profiles")
+        )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_updated_fields_are_sent(self, is_initial: bool) -> None:
+        """
+        Test that profile extension response returns field updates
+        in incremental and initial sync.
+        """
+        if is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                    "fields": ["field"],
+                },
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        if is_initial:
+            self.assertEqual(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                    "@other_user:test"
+                ],
+                {
+                    "updated": {
+                        "field": "value",
+                    }
+                },
+            )
+
+        if not is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
+            # Make an incremental Sliding Sync request
+            response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+
+            self.assertEqual(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                    "@other_user:test"
+                ],
+                {
+                    "updated": {
+                        "field": "value",
+                    }
+                },
+            )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_updated_fields_are_not_sent_if_not_requested(
+        self, is_initial: bool
+    ) -> None:
+        """
+        Test that profile extension response doesn't return field updates we didn't
+        request in initial and incremental sync.
+        """
+        if is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="anotherfield",
+                    new_value="value",
+                )
+            )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                    "fields": ["field"],
+                },
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        if is_initial:
+            response_body["extensions"].get("org.matrix.msc4262.profiles")
+
+        if not is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="anotherfield",
+                    new_value="value",
+                )
+            )
+            # Make an incremental Sliding Sync request
+            response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+
+            response_body["extensions"].get("org.matrix.msc4262.profiles")

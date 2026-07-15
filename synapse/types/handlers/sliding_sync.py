@@ -450,7 +450,7 @@ class SlidingSyncResult:
                 users: map (user_id -> [profile_updates])
             """
 
-            users: Mapping[str, JsonMapping]
+            users: Mapping[str, JsonMapping | None]
 
             def __bool__(self) -> bool:
                 return bool(self.users)
