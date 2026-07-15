@@ -25,6 +25,7 @@ use pyo3::{
 };
 use tokio::sync::oneshot;
 
+use crate::logging::context::set_current_context;
 use crate::tokio_runtime::runtime;
 
 create_exception!(
@@ -238,10 +239,7 @@ where
                 // awaitable in the current logcontext and follows the logcontext rules
                 // from there.
                 let previous = match &logcontext {
-                    Some(ctx) => Some(
-                        logging_context
-                            .call_method1(intern!(py, "set_current_context"), (ctx.as_py(py),))?,
-                    ),
+                    Some(ctx) => Some(set_current_context(py, ctx.as_py(py))?),
                     None => None,
                 };
 
@@ -263,8 +261,7 @@ where
                 // calling logcontext synchronously, so this leaves the reactor as we
                 // found it rather than leaking `ctx` into it.
                 if let Some(previous) = previous {
-                    logging_context
-                        .call_method1(intern!(py, "set_current_context"), (previous,))?;
+                    set_current_context(py, previous.into_bound(py))?;
                 }
 
                 Ok(py.None())

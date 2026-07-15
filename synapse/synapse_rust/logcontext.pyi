@@ -10,7 +10,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-import resource
 from types import TracebackType
 from typing import TYPE_CHECKING, Optional
 
@@ -56,7 +55,6 @@ class LoggingContext:
     name: str
     server_name: str
     parent_context: "Optional[LoggingContext]"
-    usage_start: "Optional[resource.struct_rusage]"
     main_thread: int
     finished: bool
     request: Optional[ContextRequest]
@@ -80,12 +78,9 @@ class LoggingContext:
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None: ...
-    def start(self, rusage: "Optional[resource.struct_rusage]") -> None: ...
-    def stop(self, rusage: "Optional[resource.struct_rusage]") -> None: ...
+    def start(self, rusage: "Optional[tuple[float, float]]") -> None: ...
+    def stop(self, rusage: "Optional[tuple[float, float]]") -> None: ...
     def get_resource_usage(self) -> ContextResourceUsage: ...
-    def _get_cputime(
-        self, current: "resource.struct_rusage"
-    ) -> tuple[float, float]: ...
     def add_cputime(self, utime_delta: float, stime_delta: float) -> None: ...
     def add_database_transaction(self, duration_sec: float) -> None: ...
     def add_database_scheduled(self, sched_sec: float) -> None: ...
@@ -106,8 +101,18 @@ def swap_current_context(
     previously current on this thread.
 
     This is the raw slot write only: no resource-usage accounting or
-    thread-affinity checks. `synapse.logging.context.set_current_context` wraps
-    this with the `getrusage` start/stop bookkeeping.
+    thread-affinity checks. `set_current_context` wraps this with the
+    `getrusage` start/stop bookkeeping.
+    """
+
+def set_current_context(
+    context: LoggingContextOrSentinel,
+) -> LoggingContextOrSentinel:
+    """Set the current logging context, returning the context that was previously
+    current.
+
+    Reads the thread CPU usage once via `getrusage(RUSAGE_THREAD)` and does the
+    `stop`/`start` accounting natively; raises `TypeError` if `context` is `None`.
     """
 
 def register_sentinel(sentinel: LoggingContextOrSentinel) -> None:

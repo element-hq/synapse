@@ -49,7 +49,7 @@ use std::{cell::RefCell, future::Future};
 use log::{debug, log_enabled, Level};
 use once_cell::sync::OnceCell;
 use pyo3::call::PyCallArgs;
-use pyo3::exceptions::{PyAssertionError, PyValueError};
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
@@ -256,10 +256,13 @@ impl ContextResourceUsage {
 ///
 /// After the module is first imported this is just a `sys.modules` lookup, so it
 /// is cheap enough to call on the switch path. We deliberately re-resolve
-/// `logcontext_error` / `set_current_context` / `logger` through the module on
-/// every call (rather than caching the callables) so that test patches of those
+/// `logcontext_error` / `logcontext_debug_logger` through the module on every
+/// call (rather than caching the callables) so that test patches of those
 /// module-level names take effect, and so we never import the module at Rust
-/// module-registration time (which would be a circular import).
+/// module-registration time (which would be a circular import). `set_current_context`
+/// is *not* re-resolved this way — it is our own native `#[pyfunction]`, nothing
+/// patches it, so callers below invoke it directly rather than round-tripping
+/// through the module.
 fn context_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     py.import("synapse.logging.context")
 }
@@ -290,17 +293,6 @@ fn none_to_option(obj: Bound<'_, PyAny>) -> Option<Py<PyAny>> {
     }
 }
 
-/// Python truthiness of an optional slot: `None` is falsy, otherwise the object's
-/// own `bool()`. Used for the "is this context active?" (`usage_start`) and "did
-/// we get a real rusage?" checks, matching Python's `if self.usage_start:` /
-/// `if not rusage:`.
-fn is_truthy(py: Python<'_>, slot: &Option<Py<PyAny>>) -> PyResult<bool> {
-    match slot {
-        Some(obj) => obj.bind(py).is_truthy(),
-        None => Ok(false),
-    }
-}
-
 /// Propagate a usage update to the parent context, if there is a (truthy) one.
 ///
 /// Dispatched via `call_method1` so subclass overrides are respected. The
@@ -320,6 +312,65 @@ fn forward_to_parent<'py>(
         }
     }
     Ok(())
+}
+
+/// The current thread's CPU usage as `(ru_utime, ru_stime)` in seconds, read
+/// directly via `getrusage(RUSAGE_THREAD)`.
+///
+/// Returns `None` where per-thread rusage isn't available — which we take to be
+/// any non-Linux target (`RUSAGE_THREAD` is Linux-only; macOS gets no per-context
+/// CPU accounting, matching the historical Python behaviour). Doing this in Rust
+/// avoids allocating a Python `resource.struct_rusage` object on every switch.
+#[cfg(target_os = "linux")]
+fn get_thread_rusage() -> Option<(f64, f64)> {
+    fn timeval_to_secs(tv: libc::timeval) -> f64 {
+        tv.tv_sec as f64 + tv.tv_usec as f64 / 1_000_000.0
+    }
+
+    // SAFETY: `getrusage` only writes into `usage`, and we only read it once it
+    // reports success.
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    let ret = unsafe { libc::getrusage(libc::RUSAGE_THREAD, usage.as_mut_ptr()) };
+    if ret != 0 {
+        return None;
+    }
+    let usage = unsafe { usage.assume_init() };
+    Some((
+        timeval_to_secs(usage.ru_utime),
+        timeval_to_secs(usage.ru_stime),
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_thread_rusage() -> Option<(f64, f64)> {
+    None
+}
+
+/// The `(user, system)` CPU seconds elapsed between `start` and `current`.
+///
+/// Mirrors the former `_get_cputime`: guards against the clock going backwards
+/// (clamping to zero and logging, as the accounting must never go negative).
+fn cputime_delta(py: Python<'_>, current: (f64, f64), start: (f64, f64)) -> PyResult<(f64, f64)> {
+    let mut utime_delta = current.0 - start.0;
+    let mut stime_delta = current.1 - start.1;
+
+    // sanity check
+    if utime_delta < 0.0 {
+        context_module(py)?.getattr("logger")?.call_method1(
+            "error",
+            ("utime went backwards! %f < %f", current.0, start.0),
+        )?;
+        utime_delta = 0.0;
+    }
+    if stime_delta < 0.0 {
+        context_module(py)?.getattr("logger")?.call_method1(
+            "error",
+            ("stime went backwards! %f < %f", current.1, start.1),
+        )?;
+        stime_delta = 0.0;
+    }
+
+    Ok((utime_delta, stime_delta))
 }
 
 /// Additional context for log formatting, tracking which request a unit of work
@@ -351,10 +402,12 @@ pub struct LoggingContext {
     /// Whether `__exit__` has run. Re-activating a finished context is an error.
     #[pyo3(get, set)]
     finished: bool,
-    /// The thread resource usage (`resource.struct_rusage`) captured when this
-    /// context became active, or `None` if it is not currently active.
-    #[pyo3(get, set)]
-    usage_start: Option<Py<PyAny>>,
+    /// The thread CPU usage `(ru_utime, ru_stime)` in seconds captured when this
+    /// context became active, or `None` if it is not currently active. Private
+    /// (native `(f64, f64)` rather than a Python `struct_rusage`) so the switch
+    /// path does no per-switch Python allocation; nothing outside this module
+    /// reads it.
+    usage_start: Option<(f64, f64)>,
     /// A short human-readable tag (e.g. the sync type); always a `str`.
     #[pyo3(get, set)]
     tag: String,
@@ -478,7 +531,10 @@ impl LoggingContext {
 
         debug!(target: DEBUG_LOGGER_NAME, "LoggingContext({name}).__enter__");
 
-        let old_context = module.getattr("set_current_context")?.call1((&slf,))?;
+        // Call the native `set_current_context` directly rather than resolving it
+        // through the module: it is re-exported unchanged as the module-level name
+        // and nothing patches it, so the round-trip would just circle back here.
+        let old_context = set_current_context(py, slf.as_any().clone())?.into_bound(py);
 
         let previous = previous.unwrap_or_else(|| py.None());
         if previous.bind(py).ne(&old_context)? {
@@ -523,9 +579,7 @@ impl LoggingContext {
             );
         }
 
-        let current = module
-            .getattr("set_current_context")?
-            .call1((previous.bind(py),))?;
+        let current = set_current_context(py, previous.bind(py).clone())?.into_bound(py);
 
         if !current.is(&slf) {
             if current.is(sentinel(py).bind(py)) {
@@ -549,79 +603,18 @@ impl LoggingContext {
 
     /// Record that this logcontext is currently running.
     ///
-    /// This should not be called directly: use `set_current_context`.
-    fn start(slf: Bound<'_, Self>, rusage: Option<Py<PyAny>>) -> PyResult<()> {
-        let py = slf.py();
-        let module = context_module(py)?;
-        let name = slf.borrow().name.clone();
-        let main_thread = slf.borrow().main_thread;
-
-        if get_thread_id(py)? != main_thread {
-            logcontext_error(
-                &module,
-                format!("Started logcontext {name} on different thread"),
-            )?;
-            return Ok(());
-        }
-
-        if slf.borrow().finished {
-            logcontext_error(&module, format!("Re-starting finished log context {name}"))?;
-        }
-
-        // If we haven't already started, record the thread resource usage so far.
-        if is_truthy(py, &slf.borrow().usage_start)? {
-            logcontext_error(
-                &module,
-                format!("Re-starting already-active log context {name}"),
-            )?;
-        } else {
-            slf.borrow_mut().usage_start = rusage;
-        }
-
-        Ok(())
+    /// This should not be called directly: use `set_current_context`. `rusage` is
+    /// the thread CPU usage `(ru_utime, ru_stime)` at the point of switching to
+    /// this context (`None` if the platform doesn't track it).
+    fn start(slf: Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
+        Self::start_inner(&slf, rusage)
     }
 
     /// Record that this logcontext is no longer running.
     ///
     /// This should not be called directly: use `set_current_context`.
-    fn stop(slf: Bound<'_, Self>, rusage: Option<Py<PyAny>>) -> PyResult<()> {
-        let py = slf.py();
-        let module = context_module(py)?;
-        let name = slf.borrow().name.clone();
-        let main_thread = slf.borrow().main_thread;
-
-        // Mirror Python's `try: ... finally: self.usage_start = None`.
-        let result = (|| -> PyResult<()> {
-            if get_thread_id(py)? != main_thread {
-                logcontext_error(
-                    &module,
-                    format!("Stopped logcontext {name} on different thread"),
-                )?;
-                return Ok(());
-            }
-
-            if !is_truthy(py, &rusage)? {
-                return Ok(());
-            }
-
-            // Record the cpu used since we started.
-            if !is_truthy(py, &slf.borrow().usage_start)? {
-                logcontext_error(
-                    &module,
-                    format!("Called stop on logcontext {name} without recording a start rusage"),
-                )?;
-                return Ok(());
-            }
-
-            let current = rusage.as_ref().expect("rusage is truthy").bind(py);
-            let (utime_delta, stime_delta): (f64, f64) =
-                slf.call_method1("_get_cputime", (current,))?.extract()?;
-            slf.call_method1("add_cputime", (utime_delta, stime_delta))?;
-            Ok(())
-        })();
-
-        slf.borrow_mut().usage_start = None;
-        result
+    fn stop(slf: Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
+        Self::stop_inner(&slf, rusage)
     }
 
     /// Get a *copy* of the resources used by this logcontext so far.
@@ -631,63 +624,24 @@ impl LoggingContext {
         // we always return a copy, for consistency
         let mut res = slf.borrow().resource_usage.borrow(py).clone();
 
-        let active = is_truthy(py, &slf.borrow().usage_start)?;
+        let (usage_start, main_thread) = {
+            let this = slf.borrow();
+            (this.usage_start, this.main_thread)
+        };
 
         // If we are on the correct thread and we're currently running then we can
         // include resource usage so far.
-        let is_main_thread = get_thread_id(py)? == slf.borrow().main_thread;
-        if active && is_main_thread {
-            let rusage = context_module(py)?
-                .getattr("get_thread_resource_usage")?
-                .call0()?;
-            if rusage.is_none() {
-                return Err(PyAssertionError::new_err(
-                    "get_thread_resource_usage() returned None while active",
-                ));
+        if let Some(start) = usage_start {
+            if get_thread_id(py)? == main_thread {
+                if let Some(current) = get_thread_rusage() {
+                    let (utime_delta, stime_delta) = cputime_delta(py, current, start)?;
+                    res.ru_utime += utime_delta;
+                    res.ru_stime += stime_delta;
+                }
             }
-            let (utime_delta, stime_delta): (f64, f64) =
-                slf.call_method1("_get_cputime", (rusage,))?.extract()?;
-            res.ru_utime += utime_delta;
-            res.ru_stime += stime_delta;
         }
 
         Ok(res)
-    }
-
-    /// Get the cpu usage time between `start()` and the given rusage. Returns
-    /// `(seconds in user mode, seconds in system mode)`.
-    fn _get_cputime(&self, py: Python<'_>, current: Bound<'_, PyAny>) -> PyResult<(f64, f64)> {
-        let usage_start = self
-            .usage_start
-            .as_ref()
-            .ok_or_else(|| PyAssertionError::new_err("usage_start is None"))?;
-        let usage_start = usage_start.bind(py);
-
-        let cur_utime: f64 = current.getattr("ru_utime")?.extract()?;
-        let cur_stime: f64 = current.getattr("ru_stime")?.extract()?;
-        let start_utime: f64 = usage_start.getattr("ru_utime")?.extract()?;
-        let start_stime: f64 = usage_start.getattr("ru_stime")?.extract()?;
-
-        let mut utime_delta = cur_utime - start_utime;
-        let mut stime_delta = cur_stime - start_stime;
-
-        // sanity check
-        if utime_delta < 0.0 {
-            context_module(py)?.getattr("logger")?.call_method1(
-                "error",
-                ("utime went backwards! %f < %f", cur_utime, start_utime),
-            )?;
-            utime_delta = 0.0;
-        }
-        if stime_delta < 0.0 {
-            context_module(py)?.getattr("logger")?.call_method1(
-                "error",
-                ("stime went backwards! %f < %f", cur_stime, start_stime),
-            )?;
-            stime_delta = 0.0;
-        }
-
-        Ok((utime_delta, stime_delta))
     }
 
     /// Update the CPU time usage of this context (and any parents, recursively).
@@ -784,6 +738,142 @@ impl LoggingContext {
     }
 }
 
+impl LoggingContext {
+    /// Native body of the `start` pymethod. Shared with the switch fast path in
+    /// [`set_current_context`], which calls this directly for a base
+    /// `LoggingContext` rather than dispatching through Python. Runs the same
+    /// thread-affinity and abuse checks on both paths.
+    fn start_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
+        let py = slf.py();
+        let module = context_module(py)?;
+        let name = slf.borrow().name.clone();
+        let main_thread = slf.borrow().main_thread;
+
+        if get_thread_id(py)? != main_thread {
+            logcontext_error(
+                &module,
+                format!("Started logcontext {name} on different thread"),
+            )?;
+            return Ok(());
+        }
+
+        if slf.borrow().finished {
+            logcontext_error(&module, format!("Re-starting finished log context {name}"))?;
+        }
+
+        // If we haven't already started, record the thread resource usage so far.
+        if slf.borrow().usage_start.is_some() {
+            logcontext_error(
+                &module,
+                format!("Re-starting already-active log context {name}"),
+            )?;
+        } else {
+            slf.borrow_mut().usage_start = rusage;
+        }
+
+        Ok(())
+    }
+
+    /// Native body of the `stop` pymethod. Shared with the switch fast path.
+    fn stop_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
+        let py = slf.py();
+        let module = context_module(py)?;
+        let name = slf.borrow().name.clone();
+        let main_thread = slf.borrow().main_thread;
+
+        // Mirror Python's `try: ... finally: self.usage_start = None`.
+        let result = (|| -> PyResult<()> {
+            if get_thread_id(py)? != main_thread {
+                logcontext_error(
+                    &module,
+                    format!("Stopped logcontext {name} on different thread"),
+                )?;
+                return Ok(());
+            }
+
+            // `if not rusage: return` — no rusage means this platform doesn't
+            // track per-thread CPU, so there is nothing to account.
+            let Some(current) = rusage else {
+                return Ok(());
+            };
+
+            // Record the cpu used since we started.
+            let Some(start) = slf.borrow().usage_start else {
+                logcontext_error(
+                    &module,
+                    format!("Called stop on logcontext {name} without recording a start rusage"),
+                )?;
+                return Ok(());
+            };
+
+            let (utime_delta, stime_delta) = cputime_delta(py, current, start)?;
+            slf.borrow().add_cputime(py, utime_delta, stime_delta)?;
+            Ok(())
+        })();
+
+        slf.borrow_mut().usage_start = None;
+        result
+    }
+}
+
+/// Dispatch a `stop`/`start` to a context during a switch, respecting subclass
+/// overrides.
+///
+/// For a base `LoggingContext` we call the native accounting directly (the hot
+/// path — no Python dispatch, no `struct_rusage` allocation). The sentinel is a
+/// no-op. Anything else is a Python subclass (e.g.
+/// `BackgroundProcessLoggingContext`), so we go through Python — materialising
+/// the rusage as a `(utime, stime)` tuple only here, off the hot path — so its
+/// overrides run.
+fn switch_context(
+    obj: &Bound<'_, PyAny>,
+    method: &str,
+    rusage: Option<(f64, f64)>,
+) -> PyResult<()> {
+    let py = obj.py();
+    if let Ok(base) = obj.cast_exact::<LoggingContext>() {
+        match method {
+            "start" => LoggingContext::start_inner(base, rusage),
+            _ => LoggingContext::stop_inner(base, rusage),
+        }
+    } else if obj.is(sentinel(py).bind(py)) {
+        Ok(())
+    } else {
+        obj.call_method1(method, (rusage,))?;
+        Ok(())
+    }
+}
+
+/// Set the current logging context, returning the context that was previously
+/// current.
+///
+/// The native replacement for the former Python `set_current_context`: it keeps
+/// the accounting policy (read the thread rusage once, `stop` the old context and
+/// `start` the new one) but does it all natively — `getrusage` via libc and, for
+/// the common base-`LoggingContext` case, the `stop`/`start` bookkeeping inline
+/// with no per-switch Python allocation.
+#[pyfunction]
+pub fn set_current_context(py: Python<'_>, context: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    // everything blows up if we allow current_context to be set to None, so
+    // sanity-check that now.
+    if context.is_none() {
+        return Err(PyTypeError::new_err("'context' argument may not be None"));
+    }
+
+    let current = current_context(py);
+
+    if !current.bind(py).is(&context) {
+        let rusage = get_thread_rusage();
+        switch_context(current.bind(py), "stop", rusage)?;
+        // Raw slot write; we already hold `current`, so ignore the previous value
+        // it returns.
+        swap_current_context(py, context.clone().unbind());
+        switch_context(&context, "start", rusage)?;
+    }
+
+    Ok(current)
+}
+
 /// Register the Python sentinel logcontext.
 ///
 /// Called once from `synapse.logging.context` at import time. Registering twice
@@ -851,6 +941,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<LoggingContext>()?;
     child_module.add_function(wrap_pyfunction!(current_context, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(swap_current_context, &child_module)?)?;
+    child_module.add_function(wrap_pyfunction!(set_current_context, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(register_sentinel, &child_module)?)?;
     child_module.add("DEBUG_LOGGER_NAME", DEBUG_LOGGER_NAME)?;
 

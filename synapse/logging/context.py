@@ -57,7 +57,7 @@ from synapse.synapse_rust.logcontext import (
     LoggingContext as LoggingContext,
     current_context as current_context,
     register_sentinel,
-    swap_current_context,
+    set_current_context as set_current_context,
 )
 from synapse.util.stringutils import random_string_insecure_fast
 
@@ -79,30 +79,6 @@ configuration and does not inherit the log level from the parent logger.
 """
 # Restore the original logger class
 logging.setLoggerClass(original_logger_class)
-
-try:
-    import resource
-
-    # Python doesn't ship with a definition of RUSAGE_THREAD but it's defined
-    # to be 1 on linux so we hard code it.
-    RUSAGE_THREAD = 1
-
-    # If the system doesn't support RUSAGE_THREAD then this should throw an
-    # exception.
-    resource.getrusage(RUSAGE_THREAD)
-
-    is_thread_resource_usage_supported = True
-
-    def get_thread_resource_usage() -> "resource.struct_rusage | None":
-        return resource.getrusage(RUSAGE_THREAD)
-
-except Exception:
-    # If the system doesn't support resource.getrusage(RUSAGE_THREAD) then we
-    # won't track resource usage.
-    is_thread_resource_usage_supported = False
-
-    def get_thread_resource_usage() -> "resource.struct_rusage | None":
-        return None
 
 
 # a hook which can be set during testing to assert that we aren't abusing logcontexts.
@@ -169,10 +145,10 @@ class _Sentinel:
     def __str__(self) -> str:
         return "sentinel"
 
-    def start(self, rusage: "resource.struct_rusage | None") -> None:
+    def start(self, rusage: "tuple[float, float] | None") -> None:
         pass
 
-    def stop(self, rusage: "resource.struct_rusage | None") -> None:
+    def stop(self, rusage: "tuple[float, float] | None") -> None:
         pass
 
     def add_database_transaction(self, duration_sec: float) -> None:
@@ -354,38 +330,6 @@ class PreserveLoggingContext:
                         context,
                     )
                 )
-
-
-def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSentinel:
-    """Set the current logging context.
-
-    The actual "current context" storage lives in Rust (see
-    `synapse.synapse_rust.logcontext` / `rust/src/logcontext.rs`) so that it is
-    visible from both Python (reactor + threadpool threads) and Rust (tokio
-    tasks). This function keeps the accounting policy: it does the CPU/resource
-    `getrusage` start/stop bookkeeping and delegates the raw slot write to
-    `swap_current_context`.
-
-    Args:
-        context: The context to activate.
-
-    Returns:
-        The context that was previously active
-    """
-    # everything blows up if we allow current_context to be set to None, so sanity-check
-    # that now.
-    if context is None:
-        raise TypeError("'context' argument may not be None")
-
-    current = current_context()
-
-    if current is not context:
-        rusage = get_thread_resource_usage()
-        current.stop(rusage)
-        swap_current_context(context)
-        context.start(rusage)
-
-    return current
 
 
 def nested_logging_context(suffix: str) -> LoggingContext:

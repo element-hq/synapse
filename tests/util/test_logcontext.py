@@ -21,7 +21,7 @@
 
 import logging
 from contextlib import contextmanager
-from typing import Any, Callable, Generator, cast
+from typing import Callable, Generator, cast
 from unittest.mock import patch
 
 from twisted.internet import defer, reactor as _reactor
@@ -706,10 +706,10 @@ class LoggingContextTestCase(unittest.TestCase):
             self.assertEqual(nested_context.name, "foo-bar")
 
 
-# A truthy stand-in for a `resource.struct_rusage`, for exercising the
-# `start()`/`stop()` code paths that only check whether an rusage is present
-# (never reading its fields), without depending on `RUSAGE_THREAD` support.
-_TRUTHY_RUSAGE = cast(Any, object())
+# A stand-in rusage `(ru_utime, ru_stime)` for exercising the `start()`/`stop()`
+# code paths that only check whether an rusage is present, without depending on
+# `RUSAGE_THREAD` support or the real value of the thread's CPU clock.
+_TRUTHY_RUSAGE = (0.0, 0.0)
 
 
 @contextmanager
