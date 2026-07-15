@@ -31,6 +31,7 @@ import sys
 import time
 import urllib.request
 from os import path
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -257,21 +258,16 @@ def _prepare() -> None:
     subprocess.check_output(["poetry", "version", new_version])
 
     # Update config schema $id.
-    schema_file = "schema/synapse-config.schema.yaml"
+    schema_file_path = Path("schema/synapse-config.schema.yaml")
     major_minor_version = ".".join(new_version.split(".")[:2])
     url = f"https://element-hq.github.io/synapse/schema/synapse/v{major_minor_version}/synapse-config.schema.json"
     # Find/replace the `$id: ...` line in `schema/synapse-config.schema.yaml` with a new
     # unique identifier for this release
-    #
-    # We use two `open(...)` blocks as it's easier to read/write then figure out the
-    # seek/truncate dance with one.
-    with open(schema_file) as f:
-        schema_file_content = f.read()
+    schema_file_content = schema_file_path.read_text()
     new_schema_file_content = re.sub(
         r"^\$id: .*", f"$id: {url}", schema_file_content, count=1, flags=re.MULTILINE
     )
-    with open(schema_file, "w") as f:
-        f.write(new_schema_file_content)
+    schema_file_path.write_text(new_schema_file_content)
 
     # Generate changelogs.
     generate_and_write_changelog(synapse_repo, current_version, new_version)
