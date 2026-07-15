@@ -110,7 +110,7 @@ logger = logging.getLogger(__name__)
 _SIGNING_KEY_VERSION_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-def read_signing_keys(lines: list[str]) -> list[SigningKey]:
+def load_signing_keys(lines: list[str]) -> list[SigningKey]:
     loaded_signing_keys = read_signing_keys(lines)
     for signing_key in loaded_signing_keys:
         expected_version = derive_signing_key_version(signing_key)
@@ -164,7 +164,7 @@ class KeyConfig(Config):
     ) -> None:
         # the signing key can be specified inline or in a separate file
         if "signing_key" in config:
-            self.signing_key = read_signing_keys([config["signing_key"]])
+            self.signing_key = load_signing_keys([config["signing_key"]])
         else:
             assert config_dir_path is not None
             signing_key_path = config.get("signing_key_path")
@@ -302,7 +302,7 @@ class KeyConfig(Config):
 
         signing_keys = self.read_file(signing_key_path, name)
         try:
-            loaded_signing_keys = read_signing_keys(
+            loaded_signing_keys = load_signing_keys(
                 [
                     signing_key_line
                     for signing_key_line in signing_keys.splitlines(keepends=False)
