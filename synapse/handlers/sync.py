@@ -2420,7 +2420,11 @@ class SyncHandler:
 
                         cache_value = hashlib.sha256(
                             json.dumps(
-                                [other_user_id, field_name, profile_data.get(field_name)],
+                                [
+                                    other_user_id,
+                                    field_name,
+                                    profile_data.get(field_name),
+                                ],
                                 sort_keys=True,
                                 separators=(",", ":"),
                                 ensure_ascii=False,
