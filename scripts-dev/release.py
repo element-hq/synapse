@@ -806,7 +806,6 @@ def full(gh_token: str) -> None:
     _prepare()
 
     click.echo("Deploy to matrix.org and ensure that it hasn't fallen over.")
-    click.echo("Remember to silence the alerts to prevent alert spam.")
     click.confirm("Deployed?", abort=True)
 
     click.echo("\n*** tag ***")
