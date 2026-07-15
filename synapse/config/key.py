@@ -42,6 +42,7 @@ from unpaddedbase64 import decode_base64
 
 from synapse.types import JsonDict
 from synapse.util.signing_key import (
+    PLACEHOLDER_SIGNING_KEY_ID,
     derive_signing_key_version,
     generate_content_derived_signing_key,
 )
@@ -131,6 +132,8 @@ def _load_signing_keys(lines: list[str]) -> list[SigningKey]:
                 signing_key.version,
             )
         else:
+            # TODO: phase out/reject newly introduced non-content-derived signing
+            # key ids loaded via `signing_key` or `signing_key_path`.
             logger.info(
                 "Signing key %s:%s is not content-derived; expected %s.",
                 signing_key.alg,
@@ -358,7 +361,9 @@ class KeyConfig(Config):
             if len(signing_keys.split("\n")[0].split()) == 1:
                 # handle keys in the old format.
                 key = decode_signing_key_base64(
-                    NACL_ED25519, "pending_key_id", signing_keys.split("\n")[0]
+                    NACL_ED25519,
+                    PLACEHOLDER_SIGNING_KEY_ID,
+                    signing_keys.split("\n")[0],
                 )
                 key.version = derive_signing_key_version(key)
                 with open(

@@ -16,6 +16,8 @@ import hashlib
 from signedjson.key import SigningKey, generate_signing_key
 from unpaddedbase64 import encode_base64
 
+PLACEHOLDER_SIGNING_KEY_ID = "PLACEHOLDER_SIGNING_KEY_ID"
+
 
 def derive_signing_key_version(signing_key: SigningKey) -> str:
     digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
@@ -25,6 +27,6 @@ def derive_signing_key_version(signing_key: SigningKey) -> str:
 
 
 def generate_content_derived_signing_key() -> SigningKey:
-    signing_key = generate_signing_key("pending_key_id")
+    signing_key = generate_signing_key(PLACEHOLDER_SIGNING_KEY_ID)
     signing_key.version = derive_signing_key_version(signing_key)
     return signing_key
