@@ -29,10 +29,8 @@ from typing import TYPE_CHECKING, Any, Iterator
 import attr
 import jsonschema
 from signedjson.key import (
-    NACL_ED25519,
     SigningKey,
     VerifyKey,
-    decode_signing_key_base64,
     decode_verify_key_bytes,
     generate_signing_key,
     is_signing_algorithm_supported,
@@ -349,15 +347,12 @@ class KeyConfig(Config):
         else:
             signing_keys = self.read_file(signing_key_path, "signing_key")
             if len(signing_keys.split("\n")[0].split()) == 1:
-                # handle keys in the old format.
-                key = decode_signing_key_base64(
-                    NACL_ED25519, "pending_key_id", signing_keys.split("\n")[0]
+                raise ConfigError(
+                    "Signing key file %s uses deprecated one-column format. "
+                    "Rotate the signing key explicitly or rewrite the file to "
+                    "the three-column 'algorithm version key' format."
+                    % (signing_key_path,)
                 )
-                key.version = _derive_signing_key_version(key)
-                with open(
-                    signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
-                ) as signing_key_file:
-                    write_signing_keys(signing_key_file, (key,))
 
 
 def _perspectives_to_key_servers(config: JsonDict) -> Iterator[JsonDict]:

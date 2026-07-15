@@ -28,6 +28,7 @@ from io import StringIO
 
 from signedjson.key import generate_signing_key, read_signing_keys, write_signing_keys
 
+from synapse.config import ConfigError
 from synapse.config.homeserver import HomeServerConfig
 
 from tests import unittest
@@ -86,6 +87,19 @@ class ConfigGenerationTestCase(unittest.TestCase):
 
         self.assertEqual("1", config.key.signing_key[0].version)
         self.assertIn("uses a numeric key id", "\n".join(logs.output))
+
+    def test_deprecated_one_column_signing_key_fails(self) -> None:
+        self.test_generate_config_generates_files()
+
+        signing_key_path = os.path.join(self.dir, "lemurs.win.signing.key")
+        with open(signing_key_path) as f:
+            signing_key = f.read().split()[2]
+
+        with open(signing_key_path, "w") as f:
+            f.write(signing_key + "\n")
+
+        with self.assertRaisesRegex(ConfigError, "deprecated one-column format"):
+            HomeServerConfig.load_or_generate_config("", ["-c", self.file])
 
     def assert_log_filename_is(self, log_config_file: str, expected: str) -> None:
         with open(log_config_file) as f:
