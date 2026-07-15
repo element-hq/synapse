@@ -271,13 +271,13 @@ class ProfileHandler:
             target_user: the user whose displayname is to be changed.
             requester: The user attempting to make this change.
             new_displayname: The displayname to give this user.
-            profile_update_target_user_ids: User id's to trigger profile updates stream
+            profile_update_target_user_ids: User IDs to trigger profile updates stream
                 updates for.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
 
         Returns:
-            Stream ID of the profile updates stream that was just inserted.
+            Stream ID of the profile updates stream row that was just inserted.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -397,13 +397,13 @@ class ProfileHandler:
             target_user: the user whose avatar URL is to be changed.
             requester: The user attempting to make this change.
             new_avatar_url: The avatar URL to give this user.
-            profile_update_target_user_ids: User ID's to trigger profile update stream
+            profile_update_target_user_ids: User IDs to trigger profile update stream
                 updates for.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
 
         Returns:
-            Stream ID of the profile updates stream that was just inserted.
+            Stream ID of the profile updates stream row that was just inserted.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -475,7 +475,7 @@ class ProfileHandler:
         if we're an events stream writer.
 
         Args:
-            target_user: User ID who'se profile is being deactivated.
+            target_user: User ID whose profile is being deactivated.
             requester: The requesting user.
             by_admin: Whether the action is being done by an admin.
         """
@@ -552,7 +552,7 @@ class ProfileHandler:
             field_names=profile_updates,
             target_users=profile_update_targets["users"],
         )
-        if stream_id and profile_update_targets["rooms"]:
+        if stream_id is not None and profile_update_targets["rooms"]:
             self._notifier.on_new_event(
                 StreamKeyType.PROFILE_UPDATES,
                 stream_id,
@@ -774,7 +774,7 @@ class ProfileHandler:
                 profile_update_target_user_ids=profile_update_targets["users"],
             )
 
-        if stream_id and profile_update_targets["rooms"]:
+        if stream_id is not None and profile_update_targets["rooms"]:
             self._notifier.on_new_event(
                 StreamKeyType.PROFILE_UPDATES,
                 stream_id,

@@ -273,7 +273,7 @@ class ReplicationDataHandler:
                 # Get all the rooms of the updated users, dict of
                 # User ID -> [Room ID]
                 users_and_rooms = await self.store.get_rooms_for_users(updated_user_ids)
-                # Loop through each users room ID's and add to our set of rooms
+                # Loop through each user's room IDs and add to our set of rooms
                 for user_room_ids in users_and_rooms.values():
                     room_ids.update(user_room_ids)
 

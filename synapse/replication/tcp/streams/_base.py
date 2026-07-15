@@ -778,7 +778,7 @@ class ProfileUpdatesStreamRow:
     """
     field_name: str | None
     """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles.
-    This can be None if `action` is not 'update'.
+    This is None if `action` is not 'update'.
     """
 
 
