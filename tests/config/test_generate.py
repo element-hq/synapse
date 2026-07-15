@@ -100,6 +100,7 @@ class ConfigGenerationTestCase(unittest.TestCase):
         with self.assertLogs("synapse.config.key", level="WARNING") as logs:
             config = HomeServerConfig.load_or_generate_config("", ["-c", self.file])
 
+        assert config is not None
         self.assertEqual("1", config.key.signing_key[0].version)
         self.assertIn("uses a numeric key id", "\n".join(logs.output))
 
