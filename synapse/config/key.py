@@ -102,14 +102,16 @@ config file.
 
 logger = logging.getLogger(__name__)
 
-_WEAK_SIGNING_KEY_VERSION = re.compile(r"^\d+$")
+_WEAK_SIGNING_KEY_VERSION = re.compile(r"^[0-9]+$")
 
 
 def _derive_signing_key_version(signing_key: SigningKey) -> str:
     """Derive a stable, path-safe key version from the Ed25519 verify key."""
 
     digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
-    fingerprint = encode_base64(digest[:16], urlsafe=True)
+    # Matrix key ids do not allow "-" in the version, so normalize the urlsafe
+    # base64 alphabet into the spec-allowed character set.
+    fingerprint = encode_base64(digest[:16], urlsafe=True).replace("-", "_")
     return f"k_{fingerprint}"
 
 
