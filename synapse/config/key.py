@@ -23,6 +23,7 @@
 import hashlib
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any, Iterator
 
 import attr
@@ -100,14 +101,50 @@ config file.
 """
 
 logger = logging.getLogger(__name__)
+_SIGNING_KEY_VERSION_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _derive_signing_key_version(signing_key: SigningKey) -> str:
+    digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
+    # Matrix key ids do not allow "-" (so, normalize b64url alphabet).
+    # NOTE: "version" is the term used in the codebase, not suffix or ID.
+    return encode_base64(digest[:16], urlsafe=True).replace("-", "_")
+
+
+def _load_signing_keys(lines: list[str]) -> list[SigningKey]:
+    loaded_signing_keys = read_signing_keys(lines)
+    for signing_key in loaded_signing_keys:
+        expected_version = _derive_signing_key_version(signing_key)
+        if signing_key.version == expected_version:
+            continue
+        if signing_key.version.isdigit():
+            logger.warning(
+                "Signing key %s:%s uses a numeric key id. Numeric signing key ids "
+                "are deprecated for compatibility reasons; preserving the existing "
+                "key id unchanged.",
+                signing_key.alg,
+                signing_key.version,
+            )
+        elif not _SIGNING_KEY_VERSION_RE.fullmatch(signing_key.version):
+            logger.error(
+                "Signing key %s:%s uses a non-spec-compliant key id. "
+                "Preserving the existing key id unchanged for compatibility.",
+                signing_key.alg,
+                signing_key.version,
+            )
+        else:
+            logger.info(
+                "Signing key %s:%s is not content-derived; expected %s.",
+                signing_key.alg,
+                signing_key.version,
+                expected_version,
+            )
+    return loaded_signing_keys
 
 
 def _generate_signing_key() -> SigningKey:
     signing_key = generate_signing_key("pending_key_id")
-    digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
-    # Matrix key ids do not allow "-" (so, normalize b64url alphabet).
-    # NOTE: "version" is the term used in the codebase, not suffix or ID.
-    signing_key.version = encode_base64(digest[:16], urlsafe=True).replace("-", "_")
+    signing_key.version = _derive_signing_key_version(signing_key)
     return signing_key
 
 
@@ -132,7 +169,7 @@ class KeyConfig(Config):
     ) -> None:
         # the signing key can be specified inline or in a separate file
         if "signing_key" in config:
-            self.signing_key = read_signing_keys([config["signing_key"]])
+            self.signing_key = _load_signing_keys([config["signing_key"]])
         else:
             assert config_dir_path is not None
             signing_key_path = config.get("signing_key_path")
@@ -270,7 +307,7 @@ class KeyConfig(Config):
 
         signing_keys = self.read_file(signing_key_path, name)
         try:
-            loaded_signing_keys = read_signing_keys(
+            loaded_signing_keys = _load_signing_keys(
                 [
                     signing_key_line
                     for signing_key_line in signing_keys.splitlines(keepends=False)
