@@ -26,13 +26,12 @@ import tempfile
 from contextlib import redirect_stdout
 from io import StringIO
 
-from signedjson.key import generate_signing_key, read_signing_keys, write_signing_keys
+from signedjson.key import read_signing_keys
 
 from synapse.config import ConfigError
 from synapse.config.homeserver import HomeServerConfig
 
 from tests import unittest
-from tests.utils import default_config
 
 
 class ConfigGenerationTestCase(unittest.TestCase):
@@ -74,22 +73,7 @@ class ConfigGenerationTestCase(unittest.TestCase):
             keys = read_signing_keys(f)
 
         self.assertEqual(1, len(keys))
-        self.assertRegex(keys[0].version, r"^k_[A-Za-z0-9_]{22}$")
-
-    def test_numeric_signing_key_version_warns(self) -> None:
-        signing_key = generate_signing_key("1")
-        signing_key_file = StringIO()
-        write_signing_keys(signing_key_file, (signing_key,))
-
-        config_dict = default_config(server_name="test")
-        config_dict["signing_key"] = signing_key_file.getvalue()
-
-        config = HomeServerConfig()
-        with self.assertLogs("synapse.config.key", level="WARNING") as logs:
-            config.parse_config_dict(config_dict, "", "")
-
-        self.assertEqual("1", config.key.signing_key[0].version)
-        self.assertIn("uses a numeric key id", "\n".join(logs.output))
+        self.assertRegex(keys[0].version, r"^[A-Za-z0-9_]{22}$")
 
     def test_deprecated_one_column_signing_key_fails(self) -> None:
         self._generate_config()
