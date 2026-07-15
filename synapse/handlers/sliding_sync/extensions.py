@@ -80,6 +80,7 @@ class SlidingSyncExtensionHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
         self._enable_sticky_events = hs.config.experimental.msc4354_enabled
+        self._enable_profiles = hs.config.server.include_profile_updates_in_sync
 
     @trace
     async def get_extensions_response(
@@ -197,6 +198,16 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
+        profiles_coro = None
+        if sync_config.extensions.profiles is not Absent and self._enable_profiles:
+            profiles_coro = self.get_profiles_extension_response(
+                sync_config=sync_config,
+                profiles_request=sync_config.extensions.profiles,
+                all_interested_room_ids=all_interested_room_ids,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         (
             to_device_response,
             e2ee_response,
@@ -205,6 +216,7 @@ class SlidingSyncExtensionHandler:
             typing_response,
             thread_subs_response,
             sticky_events_response,
+            profiles_response,
         ) = await gather_optional_coroutines(
             to_device_coro,
             e2ee_coro,
@@ -213,6 +225,7 @@ class SlidingSyncExtensionHandler:
             typing_coro,
             thread_subs_coro,
             sticky_events_coro,
+            profiles_coro,
         )
 
         return SlidingSyncResult.Extensions(
@@ -223,6 +236,7 @@ class SlidingSyncExtensionHandler:
             typing=typing_response,
             thread_subscriptions=thread_subs_response,
             sticky_events=sticky_events_response,
+            profiles=profiles_response,
         )
 
     def find_relevant_room_ids_for_extension(
@@ -1054,4 +1068,19 @@ class SlidingSyncExtensionHandler:
             next_batch=SlidingSyncStickyEventsToken(
                 sticky_events_stream_id=sticky_events_to_id
             ),
+        )
+
+    async def get_profiles_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        profiles_request: SlidingSyncConfig.Extensions.ProfilesExtension,
+        all_interested_room_ids: set[str],
+        to_token: StreamToken,
+        from_token: SlidingSyncStreamToken | None,
+    ) -> SlidingSyncResult.Extensions.ProfilesExtension | None:
+        if not profiles_request.enabled:
+            return None
+
+        return SlidingSyncResult.Extensions.ProfilesExtension(
+            users={},
         )
