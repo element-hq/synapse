@@ -20,6 +20,7 @@
 #
 
 import json
+from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -45,7 +46,7 @@ class RoomBackgroundUpdateStoreTestCase(HomeserverTestCase):
         self.user_id = self.register_user("foo", "pass")
         self.token = self.login("foo", "pass")
 
-    def _generate_room(self, room_version: str = "11") -> str:
+    def _generate_room(self, room_version: Optional[str] = None) -> str:
         """Create a room and return the room ID."""
         return self.helper.create_room_as(
             self.user_id,
