@@ -478,6 +478,18 @@ class SlidingSyncBody(RequestBodyModel):
             limit: NonNegativeStrictInt = 100
             since: SlidingSyncStickyEventsToken | AbsentType = Absent
 
+        class ProfilesExtension(RequestBodyModel):
+            """The Profile Updates extension (MSC4262)
+
+            Attributes:
+                enabled
+                fields: List of fields to filter upon (optional)
+            """
+
+            enabled: StrictBool | None = False
+            # Optionally filter on specific fields
+            fields: list[StrictStr] | None = []
+
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
         account_data: AccountDataExtension | None = None
@@ -488,6 +500,9 @@ class SlidingSyncBody(RequestBodyModel):
         )
         sticky_events: StickyEventsExtension | AbsentType = Field(
             Absent, alias="org.matrix.msc4354.sticky_events"
+        )
+        profiles: ProfilesExtension | AbsentType = Field(
+            Absent, alias="org.matrix.msc4262.profiles"
         )
 
     conn_id: StrictStr | None = None

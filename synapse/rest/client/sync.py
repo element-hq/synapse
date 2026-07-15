@@ -55,7 +55,13 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
-from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    Requester,
+    SlidingSyncStreamToken,
+    StreamToken,
+)
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
@@ -1139,7 +1145,22 @@ class SlidingSyncRestServlet(RestServlet):
                 requester, extensions.sticky_events, ref_rooms_results
             )
 
+        if extensions.profiles:
+            serialized_extensions[
+                "org.matrix.msc4262.profiles"
+            ] = await self._serialise_profiles(
+                requester, extensions.profiles, ref_rooms_results
+            )
+
         return serialized_extensions
+
+    async def _serialise_profiles(
+        self,
+        requester: Requester,
+        profiles: SlidingSyncResult.Extensions.ProfilesExtension,
+        ref_rooms_results: Mapping[str, SlidingSyncResult.RoomResult],
+    ) -> JsonMapping:
+        return profiles.users
 
     async def _serialise_sticky_events(
         self,
