@@ -34,14 +34,17 @@ from signedjson.key import (
     VerifyKey,
     decode_signing_key_base64,
     decode_verify_key_bytes,
-    generate_signing_key,
     is_signing_algorithm_supported,
     read_signing_keys,
     write_signing_keys,
 )
-from unpaddedbase64 import decode_base64, encode_base64
+from unpaddedbase64 import decode_base64
 
 from synapse.types import JsonDict
+from synapse.util.signing_key import (
+    derive_signing_key_version,
+    generate_content_derived_signing_key,
+)
 from synapse.util.stringutils import random_string_with_symbols
 
 from ._base import Config, ConfigError, read_file
@@ -106,17 +109,10 @@ logger = logging.getLogger(__name__)
 _SIGNING_KEY_VERSION_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-def _derive_signing_key_version(signing_key: SigningKey) -> str:
-    digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
-    # Matrix key ids do not allow "-" (so, normalize b64url alphabet).
-    # NOTE: "version" is the term used in the codebase, not suffix or ID.
-    return encode_base64(digest[:16], urlsafe=True).replace("-", "_")
-
-
 def _load_signing_keys(lines: list[str]) -> list[SigningKey]:
     loaded_signing_keys = read_signing_keys(lines)
     for signing_key in loaded_signing_keys:
-        expected_version = _derive_signing_key_version(signing_key)
+        expected_version = derive_signing_key_version(signing_key)
         if signing_key.version == expected_version:
             continue
         if signing_key.version.isdigit():
@@ -142,12 +138,6 @@ def _load_signing_keys(lines: list[str]) -> list[SigningKey]:
                 expected_version,
             )
     return loaded_signing_keys
-
-
-def _generate_signing_key() -> SigningKey:
-    signing_key = generate_signing_key("pending_key_id")
-    signing_key.version = _derive_signing_key_version(signing_key)
-    return signing_key
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -360,7 +350,9 @@ class KeyConfig(Config):
             with open(
                 signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
             ) as signing_key_file:
-                write_signing_keys(signing_key_file, (_generate_signing_key(),))
+                write_signing_keys(
+                    signing_key_file, (generate_content_derived_signing_key(),)
+                )
         else:
             signing_keys = self.read_file(signing_key_path, "signing_key")
             if len(signing_keys.split("\n")[0].split()) == 1:
@@ -368,7 +360,7 @@ class KeyConfig(Config):
                 key = decode_signing_key_base64(
                     NACL_ED25519, "pending_key_id", signing_keys.split("\n")[0]
                 )
-                key.version = _derive_signing_key_version(key)
+                key.version = derive_signing_key_version(key)
                 with open(
                     signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
                 ) as signing_key_file:
