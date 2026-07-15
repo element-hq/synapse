@@ -45,7 +45,7 @@ from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.events import EventBase
 from synapse.types import JsonDict, Requester, StrCollection
-from synapse.types.state import StateFilter
+from synapse.types.state import StateEventQuery, StateFilter
 from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
@@ -418,6 +418,7 @@ class RoomSummaryHandler:
         origin: str,
         requested_room_id: str,
         suggested_only: bool,
+        additional_state: Sequence[StateEventQuery] | None = None,
     ) -> JsonDict:
         """
         Implementation of the room hierarchy Federation API.
@@ -431,6 +432,9 @@ class RoomSummaryHandler:
             requested_room_id: The room ID to start the hierarchy at (the "root" room).
             suggested_only: whether we should only return children with the "suggested"
                 flag set.
+            additional_state: State events to include in the response if the room's
+                public state declaration allows them. None if the query parameter
+                was not present.
 
         Returns:
             The JSON hierarchy dictionary.

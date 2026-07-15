@@ -28,6 +28,8 @@ from typing import (
     Sequence,
 )
 
+from pydantic import BaseModel, StrictStr, ValidationError
+
 from synapse.api.constants import Direction, EduTypes
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersions
@@ -48,7 +50,8 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
-from synapse.types import JsonDict
+from synapse.types import Absent, AbsentType, JsonDict
+from synapse.types.state import StateEventQuery
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -720,6 +723,7 @@ class FederationRoomHierarchyServlet(BaseFederationServlet):
     ):
         super().__init__(hs, authenticator, ratelimiter, server_name)
         self.handler = hs.get_room_summary_handler()
+        self._msc4507_enabled = hs.config.experimental.msc4507_enabled
 
     async def on_GET(
         self,
@@ -729,9 +733,78 @@ class FederationRoomHierarchyServlet(BaseFederationServlet):
         room_id: str,
     ) -> tuple[int, JsonDict]:
         suggested_only = parse_boolean_from_args(query, "suggested_only", default=False)
-        return 200, await self.handler.get_federation_hierarchy(
-            origin, room_id, suggested_only
+        additional_state = (
+            _parse_msc4507_additional_state_from_args(query)
+            if self._msc4507_enabled
+            else None
         )
+        return 200, await self.handler.get_federation_hierarchy(
+            origin, room_id, suggested_only, additional_state
+        )
+
+
+class _MSC4507AdditionalStateQuery(BaseModel):
+    """
+    The expected shape of a single `org.matrix.msc4507.additional_state` query
+    parameter once decoded as JSON.
+
+    Note that multiple may be provided in a single `/hierarchy` request.
+    """
+
+    # A state event type.
+    type: StrictStr
+    # A specific state_key to query for. If absent, the query is for a state
+    # event of the `type` type with ANY state key.
+    state_key: StrictStr | AbsentType = Absent
+
+
+def _parse_msc4507_additional_state_from_args(
+    query: Mapping[bytes, Sequence[bytes]],
+) -> tuple[StateEventQuery, ...] | None:
+    """
+    Parse zero or more instances of the `org.matrix.msc4507.additional_state`
+    query parameter in a `/hierarchy` request.
+
+    Args:
+        query: A map of the request's query parameters to their values,
+            provided by twisted.
+
+    Returns:
+        A tuple containing parsed parameters for additional state, or `None` if
+        the query parameter was not present.
+    """
+    raw_values = parse_strings_from_args(
+        query, "org.matrix.msc4507.additional_state", encoding="utf-8"
+    )
+    if raw_values is None:
+        return None
+
+    additional_state: list[StateEventQuery] = []
+    for raw_value in raw_values:
+        try:
+            value = _MSC4507AdditionalStateQuery.model_validate_json(raw_value)
+        except ValidationError as e:
+            validation_errors = e.errors(include_input=False)
+            logger.debug(
+                "Failed to parse org.matrix.msc4507.additional_state query "
+                "parameter: %s",
+                validation_errors,
+            )
+            err_type = validation_errors[0]["type"]
+            errcode = (
+                Codes.NOT_JSON if err_type == "json_invalid" else Codes.INVALID_PARAM
+            )
+            raise SynapseError(
+                400,
+                "Query parameter org.matrix.msc4507.additional_state must be a valid "
+                "JSON object with a string 'type' and optional string 'state_key'",
+                errcode,
+            )
+
+        state_key = None if value.state_key is Absent else value.state_key
+        additional_state.append(StateEventQuery(value.type, state_key))
+
+    return tuple(additional_state)
 
 
 class RoomComplexityServlet(BaseFederationServlet):
