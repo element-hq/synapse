@@ -13,7 +13,7 @@
 #
 import hashlib
 
-from signedjson.key import SigningKey, generate_signing_key
+from signedjson.key import SigningKey, generate_signing_key as _generate_signing_key
 from unpaddedbase64 import encode_base64
 
 PLACEHOLDER_SIGNING_KEY_ID = "PLACEHOLDER_SIGNING_KEY_ID"
@@ -26,7 +26,7 @@ def derive_signing_key_version(signing_key: SigningKey) -> str:
     return encode_base64(digest[:16], urlsafe=True).replace("-", "_")
 
 
-def generate_content_derived_signing_key() -> SigningKey:
-    signing_key = generate_signing_key(PLACEHOLDER_SIGNING_KEY_ID)
+def generate_signing_key() -> SigningKey:
+    signing_key = _generate_signing_key(PLACEHOLDER_SIGNING_KEY_ID)
     signing_key.version = derive_signing_key_version(signing_key)
     return signing_key

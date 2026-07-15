@@ -35,7 +35,7 @@ from signedjson.key import (
     decode_signing_key_base64,
     decode_verify_key_bytes,
     is_signing_algorithm_supported,
-    read_signing_keys,
+    read_signing_keys as _read_signing_keys,
     write_signing_keys,
 )
 from unpaddedbase64 import decode_base64
@@ -44,7 +44,7 @@ from synapse.types import JsonDict
 from synapse.util.signing_key import (
     PLACEHOLDER_SIGNING_KEY_ID,
     derive_signing_key_version,
-    generate_content_derived_signing_key,
+    generate_signing_key,
 )
 from synapse.util.stringutils import random_string_with_symbols
 
@@ -110,8 +110,8 @@ logger = logging.getLogger(__name__)
 _SIGNING_KEY_VERSION_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-def _load_signing_keys(lines: list[str]) -> list[SigningKey]:
-    loaded_signing_keys = read_signing_keys(lines)
+def read_signing_keys(lines: list[str]) -> list[SigningKey]:
+    loaded_signing_keys = _read_signing_keys(lines)
     for signing_key in loaded_signing_keys:
         expected_version = derive_signing_key_version(signing_key)
         if signing_key.version == expected_version:
@@ -164,7 +164,7 @@ class KeyConfig(Config):
     ) -> None:
         # the signing key can be specified inline or in a separate file
         if "signing_key" in config:
-            self.signing_key = _load_signing_keys([config["signing_key"]])
+            self.signing_key = read_signing_keys([config["signing_key"]])
         else:
             assert config_dir_path is not None
             signing_key_path = config.get("signing_key_path")
@@ -302,7 +302,7 @@ class KeyConfig(Config):
 
         signing_keys = self.read_file(signing_key_path, name)
         try:
-            loaded_signing_keys = _load_signing_keys(
+            loaded_signing_keys = read_signing_keys(
                 [
                     signing_key_line
                     for signing_key_line in signing_keys.splitlines(keepends=False)
@@ -353,9 +353,7 @@ class KeyConfig(Config):
             with open(
                 signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
             ) as signing_key_file:
-                write_signing_keys(
-                    signing_key_file, (generate_content_derived_signing_key(),)
-                )
+                write_signing_keys(signing_key_file, (generate_signing_key(),))
         else:
             signing_keys = self.read_file(signing_key_path, "signing_key")
             if len(signing_keys.split("\n")[0].split()) == 1:

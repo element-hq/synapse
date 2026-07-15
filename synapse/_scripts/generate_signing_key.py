@@ -25,7 +25,7 @@ import sys
 
 from signedjson.key import write_signing_keys
 
-from synapse.util.signing_key import generate_content_derived_signing_key
+from synapse.util.signing_key import generate_signing_key
 
 
 def main() -> None:
@@ -40,7 +40,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    key = (generate_content_derived_signing_key(),)
+    key = (generate_signing_key(),)
     if args.output_file == "-":
         write_signing_keys(sys.stdout, key)
     else:
