@@ -102,18 +102,12 @@ config file.
 logger = logging.getLogger(__name__)
 
 
-def _derive_signing_key_version(signing_key: SigningKey) -> str:
-    """Derive a stable, path-safe key version from the Ed25519 verify key."""
-
-    digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
-    # Matrix key ids do not allow "-" in the version, so normalize the urlsafe
-    # base64 alphabet into the spec-allowed character set.
-    return encode_base64(digest[:16], urlsafe=True).replace("-", "_")
-
-
 def _generate_signing_key() -> SigningKey:
     signing_key = generate_signing_key("pending_key_id")
-    signing_key.version = _derive_signing_key_version(signing_key)
+    digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
+    # Matrix key ids do not allow "-" (so, normalize b64url alphabet).
+    # NOTE: "version" is the term used in the codebase, not suffix or ID.
+    signing_key.version = encode_base64(digest[:16], urlsafe=True).replace("-", "_")
     return signing_key
 
 
