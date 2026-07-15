@@ -23,6 +23,7 @@
 import hashlib
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any, Iterator
 
 import attr
@@ -38,10 +39,10 @@ from signedjson.key import (
     read_signing_keys,
     write_signing_keys,
 )
-from unpaddedbase64 import decode_base64
+from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.types import JsonDict
-from synapse.util.stringutils import random_string, random_string_with_symbols
+from synapse.util.stringutils import random_string_with_symbols
 
 from ._base import Config, ConfigError, read_file
 
@@ -103,6 +104,34 @@ config file.
 
 logger = logging.getLogger(__name__)
 
+_WEAK_SIGNING_KEY_VERSION = re.compile(r"^\d+$")
+
+
+def _derive_signing_key_version(signing_key: SigningKey) -> str:
+    """Derive a stable, path-safe key version from the Ed25519 verify key."""
+
+    digest = hashlib.sha256(signing_key.verify_key.encode()).digest()
+    fingerprint = encode_base64(digest[:16], urlsafe=True)
+    return f"k_{fingerprint}"
+
+
+def _generate_signing_key() -> SigningKey:
+    signing_key = generate_signing_key("pending_key_id")
+    signing_key.version = _derive_signing_key_version(signing_key)
+    return signing_key
+
+
+def _warn_on_weak_signing_key_versions(signing_keys: list[SigningKey]) -> None:
+    for signing_key in signing_keys:
+        if _WEAK_SIGNING_KEY_VERSION.match(signing_key.version):
+            logger.warning(
+                "Signing key %s:%s uses a numeric key id. Numeric signing key ids "
+                "are easy to reuse accidentally during key rotation; use a unique "
+                "key id for each distinct signing key.",
+                signing_key.alg,
+                signing_key.version,
+            )
+
 
 @attr.s(slots=True, auto_attribs=True)
 class TrustedKeyServer:
@@ -135,6 +164,8 @@ class KeyConfig(Config):
                 )
 
             self.signing_key = self.read_signing_keys(signing_key_path, "signing_key")
+
+        _warn_on_weak_signing_key_versions(self.signing_key)
 
         self.old_signing_keys = self.read_old_signing_keys(
             config.get("old_signing_keys")
@@ -314,16 +345,15 @@ class KeyConfig(Config):
             with open(
                 signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
             ) as signing_key_file:
-                key_id = "a_" + random_string(4)
-                write_signing_keys(signing_key_file, (generate_signing_key(key_id),))
+                write_signing_keys(signing_key_file, (_generate_signing_key(),))
         else:
             signing_keys = self.read_file(signing_key_path, "signing_key")
             if len(signing_keys.split("\n")[0].split()) == 1:
                 # handle keys in the old format.
-                key_id = "a_" + random_string(4)
                 key = decode_signing_key_base64(
-                    NACL_ED25519, key_id, signing_keys.split("\n")[0]
+                    NACL_ED25519, "pending_key_id", signing_keys.split("\n")[0]
                 )
+                key.version = _derive_signing_key_version(key)
                 with open(
                     signing_key_path, "w", opener=lambda p, f: os.open(p, f, mode=0o640)
                 ) as signing_key_file:
