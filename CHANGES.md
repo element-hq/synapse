@@ -6,7 +6,7 @@ Please check [the relevant section in the upgrade notes](https://github.com/elem
 
 - [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Limit how many delayed events a user may have scheduled at once. ([\#19539](https://github.com/element-hq/synapse/issues/19539))
 - Support [MSC4446](https://github.com/matrix-org/matrix-spec-proposals/pull/4446) for moving fully read markers backwards. Contributed by @SpiritCroc @ Beeper. ([\#19663](https://github.com/element-hq/synapse/issues/19663))
-- Add before and after time filters to the 'Redact events of a user' Admin API. ([\#19802](https://github.com/element-hq/synapse/issues/19802))
+- Add before and after time filters to the ['Redact events of a user'](https://element-hq.github.io/synapse/v1.157/admin_api/user_admin_api.html#redact-events-of-a-user) Admin API. ([\#19802](https://github.com/element-hq/synapse/issues/19802))
 - Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19808](https://github.com/element-hq/synapse/issues/19808))
 - Add an `exclude_rooms_from_presence` configuration option to stop presence being routed between users solely because they share one of the listed rooms. ([\#19935](https://github.com/element-hq/synapse/issues/19935))
 
