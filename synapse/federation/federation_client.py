@@ -2049,8 +2049,13 @@ class FederationClient(FederationBase):
             logger.debug("ending federated user directory sync: no known destinations")
             return
 
-        # De-duplicate by user id across destinations.
-        entries_by_user: dict[str, RemoteUserDirectoryEntry] = {}
+        # This job is only scheduled when the feature is enabled, in which case
+        # the homeserver exposes the federation-aware handler variant.
+        handler = cast(
+            "UserDirectoryFederationHandler", self.hs.get_user_directory_handler()
+        )
+
+        total_reconciled = 0
 
         for destination in destinations:
             if self._is_mine_server_name(destination):
@@ -2061,23 +2066,32 @@ class FederationClient(FederationBase):
                 self.user_directory_search_timeout,
             )
 
+            # De-duplicate by user id within a single destination's results.
+            entries_by_user: dict[str, RemoteUserDirectoryEntry] = {}
             for entry in self._parse_remote_user_directory_results(response):
                 entries_by_user[entry.user_id] = entry
 
-        if not entries_by_user:
-            logger.debug("Federated user directory sync found no remote users")
-            return
+            # In our logic we treat an empty result as a failed fetch and skip
+            # reconciliation for this destination. `user_directory_search`
+            # cannot signal failure via `None` (some callers rely on the dict
+            # shape) and returns `{"results": []}` on error, which is
+            # indistinguishable from a genuinely empty directory. Skipping the
+            # prune here avoids removing still-valid users just because the
+            # remote was temporarily unreachable, at the cost of not pruning a
+            # remote whose directory legitimately became empty.
+            if not entries_by_user:
+                continue
 
-        # This job is only scheduled when the feature is enabled, in which case
-        # the homeserver exposes the federation-aware handler variant.
-        handler = cast(
-            "UserDirectoryFederationHandler", self.hs.get_user_directory_handler()
-        )
-        await handler.upsert_remote_users(list(entries_by_user.values()))
+            # Reconcile per homeserver: upsert the current set and prune users
+            # that this destination no longer returns.
+            await handler.reconcile_remote_users(
+                destination, list(entries_by_user.values())
+            )
+            total_reconciled += len(entries_by_user)
 
         logger.debug(
-            "Federated user directory sync upserted %d remote users",
-            len(entries_by_user),
+            "Federated user directory sync reconciled %d remote users",
+            total_reconciled,
         )
 
     async def federation_download_media(

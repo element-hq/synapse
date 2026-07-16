@@ -895,10 +895,12 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
 class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
     """
-    Implements a federation API endpoint for searching a server's user directory.
-    POST /_matrix/federation/v3/user_directory/search
-    Request:
-    {}
+    Implements a federation API endpoint for fetching a server's user directory.
+
+    The endpoint takes no parameters and always returns the responding server's
+    full local directory, so it is a plain GET without a request body.
+
+    GET /_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search
     Response:
     {
         "results": [
@@ -915,8 +917,11 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
     PREFIX = FEDERATION_UNSTABLE_PREFIX + "/de.bwi.federated_user_dir"
     RATELIMIT = True
 
-    async def on_POST(
-        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
     ) -> tuple[int, JsonMapping]:
         return await self.handler.on_user_directory_search_request(origin)
 

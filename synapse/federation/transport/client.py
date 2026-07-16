@@ -875,10 +875,11 @@ class TransportLayerClient:
             FEDERATION_UNSTABLE_PREFIX,
             "/de.bwi.federated_user_dir" + "/user_directory/search",
         )
-        return await self.client.post_json(
+        # This endpoint takes no parameters and always returns the remote
+        # server's full local directory, so it is a plain GET with no body   my``{}`` body does not work. 
+        return await self.client.get_json(
             destination,
             path=path,
-            data={},
             # ignore backoff for user search as we will set a small user_directory_search_timeout
             ignore_backoff=True,
             timeout=timeout,
