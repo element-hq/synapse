@@ -572,9 +572,10 @@ What Rust code *does* need to be aware of: when you spawn a future onto the toki
 runtime, the current logcontext must be captured and carried along so that log
 records emitted while the future is polled (including any `log::` records from
 dependencies, and any Python invoked back from Rust) are attributed correctly.
-Use the provided helper that captures the caller's logcontext at the FFI boundary
-and scopes it onto the spawned task (this is what `create_deferred` does) rather
-than a bare `tokio::spawn`. `current_context()` resolves the task's captured
+Use the provided helper — `LogContext::capture(py)` plus `LogContext::scope` in
+`rust/src/logging/context.rs` — which captures the caller's logcontext at the FFI
+boundary and scopes it onto the spawned task (this is what `create_deferred`
+does), rather than a bare `tokio::spawn`. `current_context()` resolves the task's captured
 context first, so `LoggingContextFilter` — and therefore `pyo3-log` — just works
 on worker threads, with no per-log-record stamping.
 

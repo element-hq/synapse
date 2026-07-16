@@ -73,7 +73,13 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// Creates a twisted deferred from the given future, spawning the task on the
 /// tokio runtime.
 ///
-/// Does not handle deferred cancellation or contextvars.
+/// Does not handle contextvars.
+///
+/// TODO: propagate deferred cancellation to the tokio task (via
+/// `JoinHandle::abort`). Until then a cancelled request leaves its task
+/// running, so the task can outlive the request's logcontext —
+/// `run_python_awaitable` defends against the resulting finished-context case,
+/// but the work itself is wasted.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
     reactor: &Bound<'py, PyAny>,

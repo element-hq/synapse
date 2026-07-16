@@ -13,9 +13,9 @@
 """Cross-language logcontext attribution for Rust.
 
 The current logcontext lives in the Rust slot (`synapse.synapse_rust.logcontext`
-/ `rust/src/logcontext.rs`), visible from both Python (reactor/threadpool threads)
-and Rust (tokio tasks). These tests exercise the two guarantees that gives us,
-through real production code paths:
+/ `rust/src/logging/context.rs`), visible from both Python (reactor/threadpool
+threads) and Rust (tokio tasks). These tests exercise the two guarantees that
+gives us, through real production code paths:
 
 1. Log records emitted from Rust while a task is being polled (e.g. reqwest
    connecting) are attributed to the logcontext that was current when Python
@@ -51,9 +51,17 @@ from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
 
-# Loggers whose records originate on tokio worker threads inside Rust. Anything
-# emitted here while a task is being polled should be attributed to the caller's
-# logcontext, never the sentinel.
+# Log-target roots that Rust code emits under while running on tokio worker
+# threads: the reqwest dependency stack, plus "synapse"/"synapse_rust" because
+# the Rust crate is itself named `synapse` (see rust/Cargo.toml). Anything
+# emitted under these while a task is being polled should be attributed to the
+# caller's logcontext, never the sentinel.
+#
+# NB: bare "synapse" also matches every *Python* `synapse.*` record, so the
+# attribution assertion below implicitly relies on nothing else logging during
+# the pump (MemoryReactor with `advance(0)`, so no timed background work fires).
+# If this test starts flaking on unrelated records, tighten this filter rather
+# than weakening the assertion.
 _RUST_LOGGER_ROOTS = frozenset(
     {"reqwest", "hyper", "hyper_util", "h2", "rustls", "synapse_rust", "synapse"}
 )
@@ -92,7 +100,9 @@ class RustLogContextTestCase(HomeserverTestCase):
             for callbable, args, kwargs in triggers:
                 callbable(*args, **kwargs)
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
         self.user_id = self.register_user("user1", "pass")
 
     def _check_current_logcontext(self, expected: str) -> None:
@@ -116,6 +126,9 @@ class RustLogContextTestCase(HomeserverTestCase):
             body(result)
 
             with PreserveLoggingContext():
+                # Generous upper bound (the work is a real HTTP round-trip or DB
+                # hop on a possibly-loaded CI box); the loop exits early via
+                # `result["done"]`, and we fail below if it never gets set.
                 for _ in range(50000):
                     if result.get("done"):
                         break
@@ -207,8 +220,9 @@ class RustLogContextTestCase(HomeserverTestCase):
     def test_db_callback_runs_in_caller_logcontext(self) -> None:
         """The Rust `/versions` handler's per-user feature lookup calls back into
         Python via `run_python_awaitable`; the DB transaction it runs must be
-        accounted against the caller's logcontext (the resolved
-        `deferred.rs:223` FIXME)."""
+        accounted against the caller's logcontext. (Before the Rust storage
+        port, a FIXME in `run_python_awaitable` meant this ran in the
+        sentinel and the accounting was lost.)"""
         versions_handler = self.hs.get_rust_handlers().versions
 
         def body(result: dict[str, object]) -> None:

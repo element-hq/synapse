@@ -213,6 +213,10 @@ impl LogContext {
 /// (Measure, request/background-process metrics, task scheduler, ...) are
 /// unaffected. Keeping this native lets the switch machinery do its rusage
 /// accounting without allocating a Python object per operation.
+// `skip_from_py_object`: pyo3 0.28 requires `Clone` pyclasses to explicitly
+// opt in or out of a generated extract-by-clone `FromPyObject` (a bare
+// `#[pyclass]` is a deprecation warning, and we build with `-D warnings`).
+// Nothing extracts this type by value, so opt out.
 #[pyclass(skip_from_py_object, get_all, set_all)]
 #[derive(Clone, Default)]
 pub struct ContextResourceUsage {
@@ -272,7 +276,10 @@ impl ContextResourceUsage {
 
     fn __repr__(&self) -> String {
         // Matches the historical Python `__repr__` (values were interpolated with
-        // `%r`, i.e. `repr()`, inside single quotes).
+        // `%r`, i.e. `repr()`, inside single quotes) — except Rust's float
+        // formatting for exponent-form values (`1e-7` where Python writes
+        // `1e-07`). The only consumer of the string form is Measure's "Failed to
+        // save metrics!" warning, so we don't chase exact parity there.
         format!(
             "<ContextResourceUsage ru_stime='{:?}', ru_utime='{:?}', \
              db_txn_count='{}', db_txn_duration_sec='{:?}', \
@@ -330,7 +337,14 @@ thread_local! {
     static CACHED_THREAD_ID: Cell<Option<u64>> = const { Cell::new(None) };
 }
 
-/// The current OS thread id, matching Python's `threading.get_ident()`.
+/// This thread's `threading.get_ident()` value.
+///
+/// Note that (as the historical Python comment warned) `get_ident` is *not* an
+/// OS-level tid: on Linux it returns the same value either side of a `fork()`
+/// call. Synapse forks in exactly one place, so contexts created before the
+/// fork still pass the `main_thread` affinity check after it — and for the same
+/// reason the per-thread cache below stays correct across that fork. Getting a
+/// real tid isn't worth the hoop-jumping.
 fn get_thread_id(py: Python<'_>) -> PyResult<u64> {
     CACHED_THREAD_ID.with(|cell| {
         if let Some(id) = cell.get() {
@@ -459,8 +473,10 @@ pub struct LoggingContext {
     /// string for the same reason as `name` (read per log record).
     #[pyo3(get, set)]
     server_name: Py<PyString>,
-    /// The OS thread id (`threading.get_ident()`) this context was created on;
-    /// activity on any other thread is an error.
+    /// The `threading.get_ident()` value of the thread this context was created
+    /// on (see [`get_thread_id`] for why it is not a real OS tid); activity on
+    /// any other thread is an error. Settable only so tests can simulate
+    /// activity on the wrong thread.
     #[pyo3(get, set)]
     main_thread: u64,
     /// Whether `__exit__` has run. Re-activating a finished context is an error.
