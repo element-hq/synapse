@@ -53,12 +53,13 @@ from twisted.python.threadpool import ThreadPool
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.synapse_rust.logcontext import (
     DEBUG_LOGGER_NAME,
-    SENTINEL_CONTEXT as SENTINEL_CONTEXT,
-    ContextResourceUsage as ContextResourceUsage,
-    LoggingContext as LoggingContext,
-    _Sentinel as _Sentinel,
-    current_context as current_context,
-    set_current_context as set_current_context,
+    SENTINEL_CONTEXT,
+    # Not used in this module, but re-exported: callers import it from here.
+    ContextResourceUsage,  # noqa: F401
+    LoggingContext,
+    _Sentinel,
+    current_context,
+    set_current_context,
 )
 from synapse.util.stringutils import random_string_insecure_fast
 
