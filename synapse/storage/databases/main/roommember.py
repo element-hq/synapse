@@ -851,6 +851,49 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     ) -> bool:
         raise NotImplementedError()
 
+    def do_users_share_a_room_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: str,
+        other_user_ids: Collection[str],
+        exclude_room_id: str | None = None,
+    ) -> dict[str, bool]:
+        clause, args = make_in_list_sql_clause(
+            self.database_engine, "state_key", other_user_ids
+        )
+        # Build SQL args based on whether we are excluding a room ID or not
+        exclude_room_id_clause = ""
+        sql_args = [
+            user_id,
+        ]
+        if exclude_room_id:
+            exclude_room_id_clause = "AND room_id != ?"
+            sql_args.extend([exclude_room_id, *args, exclude_room_id])
+        else:
+            sql_args.extend([*args])
+
+        # This query works by fetching both the list of rooms for the target
+        # user and the set of other users, and then checking if there is any
+        # overlap.
+        sql = f"""
+            SELECT DISTINCT b.state_key
+            FROM (
+                SELECT room_id FROM current_state_events
+                WHERE type = 'm.room.member' AND membership = 'join' AND state_key = ?
+                    {exclude_room_id_clause}
+            ) AS a
+            INNER JOIN (
+                SELECT room_id, state_key FROM current_state_events
+                WHERE type = 'm.room.member' AND membership = 'join' AND {clause}
+                    {exclude_room_id_clause}
+            ) AS b using (room_id)
+        """
+        txn.execute(
+            sql,
+            sql_args,
+        )
+        return {u: True for (u,) in txn}
+
     @cachedList(
         cached_method_name="does_pair_of_users_share_a_room",
         list_name="other_user_ids",
@@ -870,49 +913,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         room.
         """
 
-        def do_users_share_a_room_txn(
-            txn: LoggingTransaction, user_ids: Collection[str]
-        ) -> dict[str, bool]:
-            clause, args = make_in_list_sql_clause(
-                self.database_engine, "state_key", user_ids
-            )
-            # Build SQL args based on whether we are excluding a room ID or not
-            exclude_room_id_clause = ""
-            sql_args = [
-                user_id,
-            ]
-            if exclude_room_id:
-                exclude_room_id_clause = "AND room_id != ?"
-                sql_args.extend([exclude_room_id, *args, exclude_room_id])
-            else:
-                sql_args.extend([*args])
-
-            # This query works by fetching both the list of rooms for the target
-            # user and the set of other users, and then checking if there is any
-            # overlap.
-            sql = f"""
-                SELECT DISTINCT b.state_key
-                FROM (
-                    SELECT room_id FROM current_state_events
-                    WHERE type = 'm.room.member' AND membership = 'join' AND state_key = ?
-                        {exclude_room_id_clause}
-                ) AS a
-                INNER JOIN (
-                    SELECT room_id, state_key FROM current_state_events
-                    WHERE type = 'm.room.member' AND membership = 'join' AND {clause}
-                        {exclude_room_id_clause}
-                ) AS b using (room_id)
-            """
-            txn.execute(
-                sql,
-                sql_args,
-            )
-            return {u: True for (u,) in txn}
-
         to_return = {}
         for batch_user_ids in batch_iter(other_user_ids, 1000):
             res = await self.db_pool.runInteraction(
-                "do_users_share_a_room", do_users_share_a_room_txn, batch_user_ids
+                "do_users_share_a_room",
+                self.do_users_share_a_room_txn,
+                user_id,
+                batch_user_ids,
+                exclude_room_id,
             )
             to_return.update(res)
 

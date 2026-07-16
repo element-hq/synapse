@@ -42,6 +42,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    ProfileUpdateAction,
     RelationTypes,
 )
 from synapse.api.errors import PartialStateConflictError
@@ -76,6 +77,7 @@ from synapse.types import (
     MutableStateMap,
     StateMap,
     StrCollection,
+    UserID,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -1209,14 +1211,6 @@ class PersistEventsStore:
                 txn, [ev for ev, _ in events_and_contexts]
             )
 
-        if self._msc4429_enabled:
-            self.store.record_profile_updates_for_membership_changes_from_events(
-                txn=txn,
-                events=[
-                    ev for ev, _ in events_and_contexts if ev.type == EventTypes.Member
-                ],
-            )
-
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
             txn, room_id, events_and_contexts
@@ -2125,6 +2119,102 @@ class PersistEventsStore:
         # unsubscribe from their device lists.
         self.store.handle_potentially_left_users_txn(
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
+        )
+
+        if self._msc4429_enabled:
+            # Handle changes to the profile updates stream.
+            # We've already done a bunch of work calculating the changes needed
+            # for the sliding sync tables, so we may as well re-use that information
+            # here to avoid parsing the state delta again, and handling various
+            # edge cases.
+            profile_update_joins = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id) and c.membership == Membership.JOIN
+            }
+            profile_update_leaves = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id) and c.membership == Membership.LEAVE
+            }
+            if profile_update_joins:
+                # Write the profile updates for JOIN events
+                self.store.record_profile_updates_from_membership_changes(
+                    txn=txn,
+                    joined_users=profile_update_joins,
+                )
+            if profile_update_leaves:
+                # Write the profile updates for LEAVE events
+                for user_id in profile_update_leaves:
+                    self._record_profile_updates_for_user_left_room_txn(
+                        txn=txn,
+                        user_id=UserID.from_string(user_id),
+                        room_id=room_id,
+                    )
+
+    def _record_profile_updates_for_user_left_room_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: UserID,
+        room_id: str,
+    ) -> None:
+        """
+        Record updates into the profile updates stream for when a user leaves
+        the last room with a set of users.
+
+        Doing this clears all old rows from the `profile_updates_per_user` table,
+        to avoid exposing any profile field changes past the point of not being
+        in any common rooms with the user.
+
+        Note, this method lives here in the events store file due to the profile
+        store not having access to the membership store, which we need to re-use
+        the `do_users_share_a_room_txn` method there.
+
+        Args:
+            user_id: The user who left the last common room with a set of users.
+            users_to_update: The set of users who no longer share rooms with the user.
+        """
+        rows = self.db_pool.simple_select_onecol_txn(
+            txn=txn,
+            table="local_current_membership",
+            retcol="user_id",
+            keyvalues={
+                "membership": Membership.JOIN,
+                "room_id": room_id,
+            },
+        )
+        # For each user check if we still share rooms
+        users_sharing_rooms = self.store.do_users_share_a_room_txn(
+            txn=txn,
+            user_id=user_id.to_string(),
+            other_user_ids=set(rows),
+        )
+        users_no_longer_sharing_rooms = set(rows) - set(users_sharing_rooms.keys())
+
+        # First clear the previous rows from the table
+        user_clause, user_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "user_id",
+            users_no_longer_sharing_rooms,
+        )
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {user_clause}
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE user_id = ?
+                    )
+            """,
+            (*user_args, user_id.to_string()),
+        )
+
+        # Now record the "left room" action in the stream
+        self.store.record_profile_updates_txn(
+            txn=txn,
+            user_id=user_id,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users=users_no_longer_sharing_rooms,
         )
 
     @classmethod
