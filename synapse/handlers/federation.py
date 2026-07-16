@@ -582,8 +582,8 @@ class FederationHandler:
 
         return pdu
 
-    async def on_event_auth(self, event_id: str) -> list[EventBase]:
-        event = await self.store.get_event(event_id)
+    async def on_event_auth(self, event_id: str, room_id: str) -> list[EventBase]:
+        event = await self.store.get_event(event_id, check_room_id=room_id)
         auth = await self.store.get_auth_chain(
             event.room_id, list(event.auth_event_ids()), include_given=True
         )

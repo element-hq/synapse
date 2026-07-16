@@ -27,7 +27,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import FederationError
+from synapse.api.errors import Codes, FederationError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.crypto.event_signing import add_hashes_and_signatures
@@ -847,6 +847,84 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
         self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
+
+
+class EventAuthFederationTests(unittest.FederatingHomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # Create a local user
+        self.user_id = self.register_user("alice", "password")
+        self.user_tok = self.login("alice", "password")
+
+        # Set up a room and join the remote server to it
+        self.room_id = self.helper.create_room_as(
+            self.user_id,
+            is_public=True,
+            room_version=RoomVersions.V10.identifier,
+            tok=self.user_tok,
+        )
+        self.inject_room_member(
+            self.room_id, f"@remote:{self.OTHER_SERVER_NAME}", Membership.JOIN
+        )
+
+        # Create a known event whose auth chain we can request back.
+        self.event_id = self.helper.send_messages(
+            self.room_id, num_events=1, tok=self.user_tok
+        )[0]
+
+        return super().prepare(reactor, clock, hs)
+
+    def test_event_auth_unknown_event_returns_404(self) -> None:
+        """
+        Tests that requesting the auth chain of an unknown event
+        returns 404 / M_NOT_FOUND.
+        """
+
+        # Request an event that doesn't exist in self.room_id.
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/event_auth/{self.room_id}/$unknownevent",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_FOUND, channel.json_body
+        )
+
+    def test_event_auth_wrong_room_returns_404(self) -> None:
+        """
+        Tests that a request whose `room_id` is wrong for the event
+        acts the same as though it were an unknown event.
+
+        Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-qcjr-46gf-7f4r
+        """
+
+        # Create a second room with its own event.
+        other_room_id = self.helper.create_room_as(
+            self.user_id,
+            is_public=True,
+            room_version=RoomVersions.V10.identifier,
+            tok=self.user_tok,
+        )
+        other_room_event_id = self.helper.send_messages(
+            other_room_id, num_events=1, tok=self.user_tok
+        )[0]
+
+        # Request the chain of other_room_id's event, but pretend it's part of the room
+        # we are in.
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/event_auth/{self.room_id}/{other_room_event_id}",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_FOUND, channel.json_body
+        )
 
 
 class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):

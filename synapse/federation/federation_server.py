@@ -1129,7 +1129,7 @@ class FederationServer(FederationBase):
             await self.check_server_matches_acl(origin_host, room_id)
 
             time_now = self._clock.time_msec()
-            auth_pdus = await self.handler.on_event_auth(event_id)
+            auth_pdus = await self.handler.on_event_auth(event_id, room_id)
             res = {"auth_chain": serialize_and_filter_pdus(auth_pdus, time_now)}
         return 200, res
 
