@@ -54,12 +54,72 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3::{PyTraverseError, PyVisit};
 
-/// The Python sentinel logcontext (`synapse.logging.context.SENTINEL_CONTEXT`).
-///
-/// Pushed in from Python at import time via [`register_sentinel`] rather than
-/// imported here, to avoid a circular import at module-registration time (Rust
-/// must not import `synapse.logging.context`; see [`crate::deferred`]).
+/// The sentinel logcontext singleton (`synapse.logging.context.SENTINEL_CONTEXT`),
+/// created lazily by [`sentinel`]. Owned natively: Rust defines the [`Sentinel`]
+/// type *and* holds the one instance, so there is no Python-side bootstrap and no
+/// import of `synapse.logging.context` at registration time (which would be a
+/// circular import; see [`crate::deferred`]).
 static SENTINEL: OnceCell<Py<PyAny>> = OnceCell::new();
+
+/// The root "no logcontext" marker (`synapse.logging.context.SENTINEL_CONTEXT`).
+///
+/// A drop-in for the former Python `_Sentinel`: a singleton whose fields are inert
+/// defaults and whose methods are no-ops, and which is *falsy* so callers can test
+/// `if not current_context()` to detect "no logcontext". [`switch_context`]
+/// special-cases it by identity, so its `start`/`stop` never run on the hot path;
+/// the other no-op methods exist only so code holding a `LoggingContextOrSentinel`
+/// can call them without first checking the concrete type.
+#[pyclass(name = "_Sentinel", get_all, set_all)]
+pub struct Sentinel {
+    previous_context: Option<Py<PyAny>>,
+    finished: bool,
+    scope: Option<Py<PyAny>>,
+    server_name: String,
+    request: Option<Py<PyAny>>,
+    tag: Option<Py<PyAny>>,
+}
+
+impl Sentinel {
+    /// The singleton's initial state (mirrors the former Python `_Sentinel.__init__`).
+    fn instance() -> Self {
+        Sentinel {
+            previous_context: None,
+            finished: false,
+            scope: None,
+            server_name: "unknown_server_from_sentinel_context".to_owned(),
+            request: None,
+            tag: None,
+        }
+    }
+}
+
+#[pymethods]
+impl Sentinel {
+    fn __str__(&self) -> &'static str {
+        "sentinel"
+    }
+
+    /// No-op: the sentinel is never actually running, so there is nothing to
+    /// account.
+    fn start(&self, _rusage: Option<(f64, f64)>) {}
+
+    /// No-op counterpart to [`Self::start`].
+    fn stop(&self, _rusage: Option<(f64, f64)>) {}
+
+    /// No-op: work done under the sentinel is attributed to no context.
+    fn add_database_transaction(&self, _duration_sec: f64) {}
+
+    /// No-op counterpart to [`Self::add_database_transaction`].
+    fn add_database_scheduled(&self, _sched_sec: f64) {}
+
+    /// No-op: event fetches under the sentinel are attributed to no context.
+    fn record_event_fetch(&self, _event_count: i64) {}
+
+    /// The sentinel is falsy, matching the former Python `_Sentinel.__bool__`.
+    fn __bool__(&self) -> bool {
+        false
+    }
+}
 
 /// Name of the opt-in logger for logcontext switch tracing.
 ///
@@ -830,26 +890,18 @@ pub fn set_current_context(py: Python<'_>, context: Bound<'_, PyAny>) -> PyResul
     Ok(current)
 }
 
-/// Register the Python sentinel logcontext.
+/// Get a reference to the sentinel logcontext singleton, creating it on first use.
 ///
-/// Called once from `synapse.logging.context` at import time. Registering twice
-/// is a no-op (the first registration wins); this keeps the identity of the
-/// sentinel object we return from [`current_context`] equal to Python's
-/// `SENTINEL_CONTEXT` singleton, preserving `context is SENTINEL_CONTEXT` and
-/// `bool(context)` semantics.
-#[pyfunction]
-pub fn register_sentinel(sentinel: Py<PyAny>) {
-    let _ = SENTINEL.set(sentinel);
-}
-
-/// Get a fresh reference to the sentinel logcontext.
+/// The instance is owned here (not pushed in from Python), so its identity is
+/// stable and equal to the `SENTINEL_CONTEXT` exported by [`register_module`],
+/// preserving `context is SENTINEL_CONTEXT` and `bool(context)` semantics.
 fn sentinel(py: Python<'_>) -> Py<PyAny> {
     SENTINEL
-        .get()
-        .expect(
-            "synapse.logging.context sentinel not registered with the Rust logcontext slot; \
-             synapse.logging.context must call register_sentinel() at import",
-        )
+        .get_or_init(|| {
+            Py::new(py, Sentinel::instance())
+                .expect("failed to create the sentinel logcontext")
+                .into_any()
+        })
         .clone_ref(py)
 }
 
@@ -895,11 +947,14 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module: Bound<'_, PyModule> = PyModule::new(py, "logcontext")?;
     child_module.add_class::<ContextResourceUsage>()?;
     child_module.add_class::<LoggingContext>()?;
+    child_module.add_class::<Sentinel>()?;
     child_module.add_function(wrap_pyfunction!(current_context, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(swap_current_context, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(set_current_context, &child_module)?)?;
-    child_module.add_function(wrap_pyfunction!(register_sentinel, &child_module)?)?;
     child_module.add("DEBUG_LOGGER_NAME", DEBUG_LOGGER_NAME)?;
+    // The sentinel singleton is owned by Rust; export the one instance so Python's
+    // `SENTINEL_CONTEXT` is that exact object (identity preserved).
+    child_module.add("SENTINEL_CONTEXT", sentinel(py))?;
 
     m.add_submodule(&child_module)?;
 
@@ -920,11 +975,9 @@ mod tests {
 
     use super::*;
 
-    /// Register a sentinel exactly once (the `OnceCell` keeps the first) and
-    /// return whichever object is actually registered, so identity assertions
-    /// hold regardless of which test ran first.
+    /// The native sentinel singleton (created lazily on first use), used for
+    /// identity assertions.
     fn registered_sentinel(py: Python<'_>) -> Py<PyAny> {
-        register_sentinel(PyString::new(py, "SENTINEL").into_any().unbind());
         sentinel(py)
     }
 

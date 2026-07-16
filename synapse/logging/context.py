@@ -53,10 +53,11 @@ from twisted.python.threadpool import ThreadPool
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.synapse_rust.logcontext import (
     DEBUG_LOGGER_NAME,
+    SENTINEL_CONTEXT as SENTINEL_CONTEXT,
     ContextResourceUsage as ContextResourceUsage,
     LoggingContext as LoggingContext,
+    _Sentinel as _Sentinel,
     current_context as current_context,
-    register_sentinel,
     set_current_context as set_current_context,
 )
 from synapse.util.stringutils import random_string_insecure_fast
@@ -109,69 +110,13 @@ class ContextRequest:
     user_agent: str
 
 
-LoggingContextOrSentinel = Union["LoggingContext", "_Sentinel"]
+LoggingContextOrSentinel = Union[LoggingContext, _Sentinel]
 
-
-class _Sentinel:
-    """
-    Sentinel to represent the root context
-
-    This should only be used for tasks outside of Synapse like when we yield control
-    back to the Twisted reactor (event loop) so we don't leak the current logging
-    context to other tasks that are scheduled next in the event loop.
-
-    Nothing from the Synapse homeserver should be logged with the sentinel context. i.e.
-    we should always know which server the logs are coming from.
-    """
-
-    __slots__ = [
-        "previous_context",
-        "finished",
-        "scope",
-        "server_name",
-        "request",
-        "tag",
-    ]
-
-    def __init__(self) -> None:
-        # Minimal set for compatibility with LoggingContext
-        self.previous_context = None
-        self.finished = False
-        self.server_name = "unknown_server_from_sentinel_context"
-        self.request = None
-        self.scope = None
-        self.tag = None
-
-    def __str__(self) -> str:
-        return "sentinel"
-
-    def start(self, rusage: "tuple[float, float] | None") -> None:
-        pass
-
-    def stop(self, rusage: "tuple[float, float] | None") -> None:
-        pass
-
-    def add_database_transaction(self, duration_sec: float) -> None:
-        pass
-
-    def add_database_scheduled(self, sched_sec: float) -> None:
-        pass
-
-    def record_event_fetch(self, event_count: int) -> None:
-        pass
-
-    def __bool__(self) -> Literal[False]:
-        return False
-
-
-SENTINEL_CONTEXT = _Sentinel()
-
-# Hand the sentinel to the Rust logcontext slot, which owns the "current context"
-# storage (see `synapse.synapse_rust.logcontext` / `rust/src/logcontext.rs`). Rust
-# returns this exact object when no context is set, so `context is SENTINEL_CONTEXT`
-# identity and `bool(context)` semantics are preserved. We push it in from here
-# rather than have Rust import this module, to avoid a circular import.
-register_sentinel(SENTINEL_CONTEXT)
+# `_Sentinel` (the root "no logcontext" marker) and its singleton `SENTINEL_CONTEXT`
+# are now defined and owned by the Rust logcontext module, which holds the "current
+# context" storage (see `synapse.synapse_rust.logcontext` / `rust/src/logging/context.rs`).
+# Rust returns this exact object when no context is set, so `context is SENTINEL_CONTEXT`
+# identity and `bool(context)` semantics are preserved without a Python-side bootstrap.
 
 
 class LoggingContextFilter(logging.Filter):

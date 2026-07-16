@@ -11,7 +11,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 from types import TracebackType
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from synapse.logging.context import ContextRequest, LoggingContextOrSentinel
 
@@ -86,6 +86,27 @@ class LoggingContext:
     def add_database_scheduled(self, sched_sec: float) -> None: ...
     def record_event_fetch(self, event_count: int) -> None: ...
 
+class _Sentinel:
+    """The root "no logcontext" marker. A falsy singleton (see `SENTINEL_CONTEXT`)
+    whose fields are inert defaults and whose methods are no-ops."""
+
+    previous_context: None
+    finished: bool
+    scope: None
+    server_name: str
+    request: None
+    tag: None
+
+    def __str__(self) -> str: ...
+    def start(self, rusage: "Optional[tuple[float, float]]") -> None: ...
+    def stop(self, rusage: "Optional[tuple[float, float]]") -> None: ...
+    def add_database_transaction(self, duration_sec: float) -> None: ...
+    def add_database_scheduled(self, sched_sec: float) -> None: ...
+    def record_event_fetch(self, event_count: int) -> None: ...
+    def __bool__(self) -> Literal[False]: ...
+
+SENTINEL_CONTEXT: _Sentinel
+
 def current_context() -> LoggingContextOrSentinel:
     """Get the current logging context.
 
@@ -113,12 +134,4 @@ def set_current_context(
 
     Reads the thread CPU usage once via `getrusage(RUSAGE_THREAD)` and does the
     `stop`/`start` accounting natively; raises `TypeError` if `context` is `None`.
-    """
-
-def register_sentinel(sentinel: LoggingContextOrSentinel) -> None:
-    """Register the Python sentinel logcontext with the Rust slot.
-
-    Called once from `synapse.logging.context` at import time so that the object
-    returned by `current_context()` when no context is set is Python's
-    `SENTINEL_CONTEXT` singleton (preserving identity and `bool()` semantics).
     """
