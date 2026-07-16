@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.156/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.157/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -202,6 +202,46 @@ properties:
           `include_offline_users_on_sync` to `true` will always include offline
           users in the results.
         default: false
+      last_active_granularity:
+        $ref: "#/$defs/duration"
+        description: >-
+          How long after a user was last active that they are still shown as
+          "currently active" to other users. Larger values reduce the rate of
+          presence updates sent to other users and servers.
+
+
+          *Added in Synapse 1.156.0.*
+        default: 1m
+        examples:
+          - 5m
+      sync_online_timeout:
+        $ref: "#/$defs/duration"
+        description: >-
+          How long after a client's last sync request their presence is
+          switched to offline. Clients are expected to keep a sync request
+          open at (almost) all times while online, so this only needs to
+          cover the gap between two consecutive sync requests. Note that if
+          `rc_presence` is set to ratelimit how often syncs can affect
+          presence, this must be greater than the ratelimit's interval or
+          users will incorrectly be marked as offline in between syncs.
+
+
+          *Added in Synapse 1.156.0.*
+        default: 30s
+        examples:
+          - 1m
+      idle_timeout:
+        $ref: "#/$defs/duration"
+        description: >-
+          How long after a user was last active that their presence is
+          switched to "unavailable" (idle) while they remain connected. Must
+          be greater than `last_active_granularity`.
+
+
+          *Added in Synapse 1.156.0.*
+        default: 5m
+        examples:
+          - 10m
     examples:
       - enabled: false
         include_offline_users_on_sync: false
@@ -5313,6 +5353,18 @@ properties:
       A list of rooms to exclude from sync responses. This is useful for server
       administrators wishing to group users into a room without these users
       being able to see it from their client.
+    items:
+      type: string
+    default: []
+    examples:
+      - - "!foo:example.com"
+  exclude_rooms_from_presence:
+    type: array
+    description: >-
+      A list of rooms to exclude from presence updates. Presence will not be
+      routed between two users solely because they share one of these rooms.
+      Users who also share a non-excluded room continue to exchange presence as
+      normal.
     items:
       type: string
     default: []

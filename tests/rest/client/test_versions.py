@@ -142,6 +142,17 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             channel.json_body,
         )
 
+    def test_msc4446_false_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertFalse(channel.json_body["unstable_features"]["com.beeper.msc4446"])
+
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_msc4446_true_if_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(channel.json_body["unstable_features"]["com.beeper.msc4446"])
+
     def _sanity_check_versions_response(self, versions_response: JsonDict) -> None:
         """
         Make sure this looks like a `/_matrix/client/versions` response
