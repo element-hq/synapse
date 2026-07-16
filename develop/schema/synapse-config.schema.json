@@ -237,8 +237,8 @@
     },
     "default_room_version": {
       "type": "string",
-      "description": "The default room version for newly created rooms on this server.\n\nKnown room versions are listed [here](https://spec.matrix.org/latest/rooms/#complete-list-of-room-versions)\n\nFor example, for room version 1, `default_room_version` should be set to \"1\".\n\n_Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).",
-      "default": "10",
+      "description": "The default room version for newly created rooms on this server.\n\nKnown room versions are listed [here](https://spec.matrix.org/latest/rooms/#complete-list-of-room-versions)\n\nFor example, for room version 1, `default_room_version` should be set to \"1\".\n\n_Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).\n_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).",
+      "default": "11",
       "examples": [
         "8"
       ]
