@@ -46,7 +46,7 @@
 
 use std::{cell::RefCell, future::Future};
 
-use log::{debug, log_enabled, Level};
+use log::{debug, error, log_enabled, Level};
 use once_cell::sync::OnceCell;
 use pyo3::call::PyCallArgs;
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -252,23 +252,9 @@ impl ContextResourceUsage {
     }
 }
 
-/// Import `synapse.logging.context`.
-///
-/// After the module is first imported this is just a `sys.modules` lookup, so it
-/// is cheap enough to call on the switch path. We deliberately re-resolve
-/// `logcontext_error` / `logcontext_debug_logger` through the module on every
-/// call (rather than caching the callables) so that test patches of those
-/// module-level names take effect, and so we never import the module at Rust
-/// module-registration time (which would be a circular import). `set_current_context`
-/// is *not* re-resolved this way — it is our own native `#[pyfunction]`, nothing
-/// patches it, so callers below invoke it directly rather than round-tripping
-/// through the module.
-fn context_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
-    py.import("synapse.logging.context")
-}
-
 /// Call the (possibly test-patched) module-level `logcontext_error(msg)`.
-fn logcontext_error(module: &Bound<'_, PyModule>, msg: String) -> PyResult<()> {
+fn logcontext_error(py: Python<'_>, msg: String) -> PyResult<()> {
+    let module = py.import("synapse.logging.context")?;
     module.getattr("logcontext_error")?.call1((msg,))?;
     Ok(())
 }
@@ -350,23 +336,17 @@ fn get_thread_rusage() -> Option<(f64, f64)> {
 ///
 /// Mirrors the former `_get_cputime`: guards against the clock going backwards
 /// (clamping to zero and logging, as the accounting must never go negative).
-fn cputime_delta(py: Python<'_>, current: (f64, f64), start: (f64, f64)) -> PyResult<(f64, f64)> {
+fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> PyResult<(f64, f64)> {
     let mut utime_delta = current.0 - start.0;
     let mut stime_delta = current.1 - start.1;
 
     // sanity check
     if utime_delta < 0.0 {
-        context_module(py)?.getattr("logger")?.call_method1(
-            "error",
-            ("utime went backwards! %f < %f", current.0, start.0),
-        )?;
+        error!("utime went backwards! {} < {}", current.0, start.0);
         utime_delta = 0.0;
     }
     if stime_delta < 0.0 {
-        context_module(py)?.getattr("logger")?.call_method1(
-            "error",
-            ("stime went backwards! %f < %f", current.1, start.1),
-        )?;
+        error!("stime went backwards! {} < {}", current.1, start.1);
         stime_delta = 0.0;
     }
 
@@ -519,8 +499,6 @@ impl LoggingContext {
     /// Enter this logging context, making it the current context.
     fn __enter__<'py>(slf: Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         let py = slf.py();
-        let module = context_module(py)?;
-
         let (name, previous) = {
             let this = slf.borrow();
             (
@@ -541,7 +519,7 @@ impl LoggingContext {
             let previous_repr: String = previous.bind(py).repr()?.extract()?;
             let old_repr: String = old_context.repr()?.extract()?;
             logcontext_error(
-                &module,
+                py,
                 format!("Expected previous context {previous_repr}, found {old_repr}"),
             )?;
         }
@@ -558,7 +536,6 @@ impl LoggingContext {
         _traceback: Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let py = slf.py();
-        let module = context_module(py)?;
 
         let (name, previous) = {
             let this = slf.borrow();
@@ -583,11 +560,11 @@ impl LoggingContext {
 
         if !current.is(&slf) {
             if current.is(sentinel(py).bind(py)) {
-                logcontext_error(&module, format!("Expected logging context {name} was lost"))?;
+                logcontext_error(py, format!("Expected logging context {name} was lost"))?;
             } else {
                 let current_str: String = current.str()?.extract()?;
                 logcontext_error(
-                    &module,
+                    py,
                     format!("Expected logging context {name} but found {current_str}"),
                 )?;
             }
@@ -634,7 +611,7 @@ impl LoggingContext {
         if let Some(start) = usage_start {
             if get_thread_id(py)? == main_thread {
                 if let Some(current) = get_thread_rusage() {
-                    let (utime_delta, stime_delta) = cputime_delta(py, current, start)?;
+                    let (utime_delta, stime_delta) = cputime_delta(current, start)?;
                     res.ru_utime += utime_delta;
                     res.ru_stime += stime_delta;
                 }
@@ -745,28 +722,21 @@ impl LoggingContext {
     /// thread-affinity and abuse checks on both paths.
     fn start_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
         let py = slf.py();
-        let module = context_module(py)?;
         let name = slf.borrow().name.clone();
         let main_thread = slf.borrow().main_thread;
 
         if get_thread_id(py)? != main_thread {
-            logcontext_error(
-                &module,
-                format!("Started logcontext {name} on different thread"),
-            )?;
+            logcontext_error(py, format!("Started logcontext {name} on different thread"))?;
             return Ok(());
         }
 
         if slf.borrow().finished {
-            logcontext_error(&module, format!("Re-starting finished log context {name}"))?;
+            logcontext_error(py, format!("Re-starting finished log context {name}"))?;
         }
 
         // If we haven't already started, record the thread resource usage so far.
         if slf.borrow().usage_start.is_some() {
-            logcontext_error(
-                &module,
-                format!("Re-starting already-active log context {name}"),
-            )?;
+            logcontext_error(py, format!("Re-starting already-active log context {name}"))?;
         } else {
             slf.borrow_mut().usage_start = rusage;
         }
@@ -777,17 +747,13 @@ impl LoggingContext {
     /// Native body of the `stop` pymethod. Shared with the switch fast path.
     fn stop_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
         let py = slf.py();
-        let module = context_module(py)?;
         let name = slf.borrow().name.clone();
         let main_thread = slf.borrow().main_thread;
 
         // Mirror Python's `try: ... finally: self.usage_start = None`.
         let result = (|| -> PyResult<()> {
             if get_thread_id(py)? != main_thread {
-                logcontext_error(
-                    &module,
-                    format!("Stopped logcontext {name} on different thread"),
-                )?;
+                logcontext_error(py, format!("Stopped logcontext {name} on different thread"))?;
                 return Ok(());
             }
 
@@ -800,13 +766,13 @@ impl LoggingContext {
             // Record the cpu used since we started.
             let Some(start) = slf.borrow().usage_start else {
                 logcontext_error(
-                    &module,
+                    py,
                     format!("Called stop on logcontext {name} without recording a start rusage"),
                 )?;
                 return Ok(());
             };
 
-            let (utime_delta, stime_delta) = cputime_delta(py, current, start)?;
+            let (utime_delta, stime_delta) = cputime_delta(current, start)?;
             slf.borrow().add_cputime(py, utime_delta, stime_delta)?;
             Ok(())
         })();
