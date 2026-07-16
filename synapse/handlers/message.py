@@ -1990,67 +1990,17 @@ class EventCreationHandler:
                     requester, is_admin_redaction=is_admin_redaction
                 )
 
-            # Run checks/actions on event based on type.
-
-            # This Member check runs for local users only, as we do a
-            # `notify_user_joined_room` notifier call or generate profile update
-            # stream updates for local users.
-            # If this needs to apply to remote users at some point, the
-            # `self.store.get_local_current_membership_for_user_in_room` below
-            # needs changing to something else.
-            if (
-                event.type == EventTypes.Member
-                and event.membership in (Membership.JOIN, Membership.LEAVE)
-                and self.hs.is_mine_id(event.state_key)
-            ):
+            # run checks/actions on event based on type
+            if event.type == EventTypes.Member and event.membership == Membership.JOIN:
                 (
                     current_membership,
                     _,
                 ) = await self.store.get_local_current_membership_for_user_in_room(
                     event.state_key, event.room_id
                 )
-
-                if current_membership:
-                    event.internal_metadata.prev_membership = current_membership
-
-                if (
-                    event.membership == Membership.LEAVE
-                    and current_membership != Membership.LEAVE
-                ):
-                    # The user left the room - calculate affected users for
-                    # the event internal metadata, for later usage when persisting
-                    # the actual membership event, which will generate rows into
-                    # the profile updates stream tables.
-                    users_left_in_room = set(
-                        await self.store.get_local_users_in_room(event.room_id)
-                    )
-                    users_left_in_room.discard(event.state_key)
-                    users_still_sharing_rooms = await self.store.do_users_share_a_room(
-                        event.state_key,
-                        users_left_in_room,
-                        exclude_room_id=event.room_id,
-                    )
-                    event.internal_metadata.membership_update_users_in_shared_rooms = (
-                        list(users_left_in_room - users_still_sharing_rooms)
-                    )
-
-                if (
-                    event.membership == Membership.JOIN
-                    and current_membership != Membership.JOIN
-                ):
+                if current_membership != Membership.JOIN:
                     self._notifier.notify_user_joined_room(
                         event.event_id, event.room_id
-                    )
-                    # The user joined a room - calculate affected users for
-                    # the event internal metadata, for later usage when persisting
-                    # the actual membership event, which will generate rows into
-                    # the profile updates stream tables.
-                    users_in_room = set(
-                        await self.store.get_local_users_in_room(event.room_id)
-                    )
-                    users_in_room.discard(event.state_key)
-                    event.internal_metadata.membership_update_users_in_shared_rooms = (
-                        list(users_in_room)
                     )
 
             if event.type == EventTypes.ServerACL:
