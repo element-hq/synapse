@@ -37,12 +37,13 @@
 //! task is being polled are attributed to the task's captured context with no
 //! per-record stamping machinery.
 //!
-//! Python keeps the accounting policy: `set_current_context` still does the
-//! `getrusage` start/stop bookkeeping and merely uses [`swap_current_context`] for
-//! the raw slot write. The switch primitive is only ever driven on the reactor
-//! (or threadpool) threads — never on tokio worker threads — so it always writes
-//! the thread-local, and the task-local (populated only by [`LogContext::scope`]
-//! at spawn time) takes read precedence during a poll.
+//! The accounting policy is native too: [`set_current_context`] reads the thread
+//! rusage via libc, runs the `stop`/`start` bookkeeping, and uses
+//! [`swap_current_context`] for the raw slot write. The switch primitive is only
+//! ever driven on the reactor (or threadpool) threads — never on tokio worker
+//! threads — so it always writes the thread-local, and the task-local (populated
+//! only by [`LogContext::scope`] at spawn time) takes read precedence during a
+//! poll. [`swap_current_context`] checks that invariant rather than trusting it.
 
 use std::{cell::RefCell, future::Future};
 
@@ -932,8 +933,8 @@ pub fn current_context(py: Python<'_>) -> Py<PyAny> {
 /// previously current *on this thread*.
 ///
 /// This is the raw slot write only — it does **not** do any resource-usage
-/// accounting or thread-affinity checks; `synapse.logging.context.set_current_context`
-/// wraps this with the `getrusage` start/stop bookkeeping.
+/// accounting or thread-affinity checks; [`set_current_context`] wraps this with
+/// the `getrusage` start/stop bookkeeping.
 ///
 /// Note this deliberately only touches the thread-local slot, never the tokio
 /// task-local: the switch primitive is only ever driven on reactor/threadpool
@@ -941,6 +942,18 @@ pub fn current_context(py: Python<'_>) -> Py<PyAny> {
 /// [`LogContext::scope`].
 #[pyfunction]
 pub fn swap_current_context(py: Python<'_>, context: Py<PyAny>) -> Py<PyAny> {
+    // Enforce the invariant above rather than trusting it: with a scoped
+    // task-local populated, `current_context` gives it read precedence, so this
+    // write would be invisible (and never restored) — everything that follows
+    // would be silently misattributed. `try_with` on an unset task-local is
+    // cheap, so the check costs nothing on the normal (reactor-thread) path.
+    if TASK_LOCAL_CONTEXT.try_with(|_| ()).is_ok() {
+        error!(
+            "swap_current_context called during a tokio-scoped poll; the switch is \
+             invisible to current_context() and will misattribute logs and metrics"
+        );
+    }
+
     let previous = THREAD_LOCAL_CONTEXT.with(|slot| slot.borrow_mut().replace(context));
     match previous {
         Some(ctx) => ctx,
