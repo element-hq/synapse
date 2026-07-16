@@ -345,15 +345,6 @@ fn get_thread_id(py: Python<'_>) -> PyResult<u64> {
     })
 }
 
-/// Normalise a Python value to `None` if it is `None`, else `Some`.
-fn none_to_option(obj: Bound<'_, PyAny>) -> Option<Py<PyAny>> {
-    if obj.is_none() {
-        None
-    } else {
-        Some(obj.unbind())
-    }
-}
-
 /// Propagate a usage update to the parent context, if there is a (truthy) one.
 ///
 /// A plain base `LoggingContext` parent — the overwhelmingly common case, e.g.
@@ -424,7 +415,7 @@ fn get_thread_rusage() -> Option<(f64, f64)> {
 ///
 /// Mirrors the former `_get_cputime`: guards against the clock going backwards
 /// (clamping to zero and logging, as the accounting must never go negative).
-fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> PyResult<(f64, f64)> {
+fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> (f64, f64) {
     let mut utime_delta = current.0 - start.0;
     let mut stime_delta = current.1 - start.1;
 
@@ -438,7 +429,7 @@ fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> PyResult<(f64, f64)>
         stime_delta = 0.0;
     }
 
-    Ok((utime_delta, stime_delta))
+    (utime_delta, stime_delta)
 }
 
 /// Additional context for log formatting, tracking which request a unit of work
@@ -568,9 +559,9 @@ impl LoggingContext {
         if let Some(parent) = &parent_context {
             let parent = parent.bind(py);
             // which request this corresponds to
-            self.request = none_to_option(parent.getattr("request")?);
+            self.request = parent.getattr("request")?.extract()?;
             // we also track the current scope
-            self.scope = none_to_option(parent.getattr("scope")?);
+            self.scope = parent.getattr("scope")?.extract()?;
         }
 
         if let Some(request) = request {
@@ -721,7 +712,7 @@ impl LoggingContext {
         if let Some(start) = usage_start {
             if get_thread_id(py)? == main_thread {
                 if let Some(current) = get_thread_rusage() {
-                    let (utime_delta, stime_delta) = cputime_delta(current, start)?;
+                    let (utime_delta, stime_delta) = cputime_delta(current, start);
                     res.ru_utime += utime_delta;
                     res.ru_stime += stime_delta;
                 }
@@ -907,7 +898,7 @@ impl LoggingContext {
                 return Ok(());
             };
 
-            let (utime_delta, stime_delta) = cputime_delta(current, start)?;
+            let (utime_delta, stime_delta) = cputime_delta(current, start);
             slf.borrow().add_cputime(py, utime_delta, stime_delta)?;
             Ok(())
         })();
@@ -915,6 +906,13 @@ impl LoggingContext {
         slf.borrow_mut().usage_start = None;
         result
     }
+}
+
+/// Which way a [`switch_context`] dispatch goes.
+#[derive(Clone, Copy)]
+enum SwitchDirection {
+    Start,
+    Stop,
 }
 
 /// Dispatch a `stop`/`start` to a context during a switch, respecting subclass
@@ -925,21 +923,26 @@ impl LoggingContext {
 /// no-op. Anything else is a Python subclass (e.g.
 /// `BackgroundProcessLoggingContext`), so we go through Python — materialising
 /// the rusage as a `(utime, stime)` tuple only here, off the hot path — so its
-/// overrides run.
+/// overrides run. Both arms match on the same [`SwitchDirection`], so the
+/// native and Python paths provably dispatch the same operation.
 fn switch_context(
     obj: &Bound<'_, PyAny>,
-    method: &str,
+    direction: SwitchDirection,
     rusage: Option<(f64, f64)>,
 ) -> PyResult<()> {
     let py = obj.py();
     if let Ok(base) = obj.cast_exact::<LoggingContext>() {
-        match method {
-            "start" => LoggingContext::start_inner(base, rusage),
-            _ => LoggingContext::stop_inner(base, rusage),
+        match direction {
+            SwitchDirection::Start => LoggingContext::start_inner(base, rusage),
+            SwitchDirection::Stop => LoggingContext::stop_inner(base, rusage),
         }
     } else if obj.is(sentinel(py).bind(py)) {
         Ok(())
     } else {
+        let method = match direction {
+            SwitchDirection::Start => intern!(py, "start"),
+            SwitchDirection::Stop => intern!(py, "stop"),
+        };
         obj.call_method1(method, (rusage,))?;
         Ok(())
     }
@@ -965,11 +968,11 @@ pub fn set_current_context(py: Python<'_>, context: Bound<'_, PyAny>) -> PyResul
 
     if !current.bind(py).is(&context) {
         let rusage = get_thread_rusage();
-        switch_context(current.bind(py), "stop", rusage)?;
+        switch_context(current.bind(py), SwitchDirection::Stop, rusage)?;
         // Raw slot write; we already hold `current`, so ignore the previous value
         // it returns.
         swap_current_context(py, context.clone().unbind());
-        switch_context(&context, "start", rusage)?;
+        switch_context(&context, SwitchDirection::Start, rusage)?;
     }
 
     Ok(current)
@@ -1075,17 +1078,11 @@ mod tests {
 
     use super::*;
 
-    /// The native sentinel singleton (created lazily on first use), used for
-    /// identity assertions.
-    fn registered_sentinel(py: Python<'_>) -> Py<PyAny> {
-        sentinel(py).clone_ref(py)
-    }
-
     #[test]
     fn thread_local_defaults_to_sentinel() {
         Python::initialize();
         Python::attach(|py| {
-            let sentinel = registered_sentinel(py);
+            let sentinel = sentinel(py);
             // Nothing set on this (fresh) test thread → sentinel.
             assert!(current_context(py).bind(py).is(sentinel.bind(py)));
         });
@@ -1095,7 +1092,7 @@ mod tests {
     fn swap_returns_previous_and_updates_thread_local() {
         Python::initialize();
         Python::attach(|py| {
-            let sentinel = registered_sentinel(py);
+            let sentinel = sentinel(py);
             let a = PyString::new(py, "A").into_any().unbind();
             let b = PyString::new(py, "B").into_any().unbind();
 
@@ -1111,7 +1108,7 @@ mod tests {
 
             // Restore the sentinel so we don't leak into any other test that
             // happens to reuse this OS thread from the test harness pool.
-            swap_current_context(py, sentinel);
+            swap_current_context(py, sentinel.clone_ref(py));
         });
     }
 
@@ -1119,7 +1116,7 @@ mod tests {
     fn task_local_takes_precedence_over_thread_local() {
         Python::initialize();
         Python::attach(|py| {
-            let sentinel = registered_sentinel(py);
+            let sentinel = sentinel(py);
             let task_ctx = PyString::new(py, "TASKCTX").into_any().unbind();
 
             // Outside any scoped task, `current_context` resolves the
