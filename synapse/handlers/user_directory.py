@@ -63,15 +63,6 @@ MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO = 5
 # every 15 seconds.
 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = Duration(seconds=15)
 
-# Sentinel "room" id used to mark remote users ingested via federated user
-# directory sync as visible in local user directory searches. This is not a real
-# room; it only reuses the `users_in_public_rooms` visibility mechanism.
-FEDERATED_USER_DIR_CACHE_ROOM_LOCALPART = "bwi-fed-user-dir-cache"
-
-
-def federated_user_dir_cache_room_id(server_name: str) -> str:
-    return f"!{FEDERATED_USER_DIR_CACHE_ROOM_LOCALPART}:{server_name}"
-
 
 def calculate_time_of_next_retry(now_ts: int, retry_count: int) -> int:
     """
@@ -521,7 +512,10 @@ class UserDirectoryHandler(StateDeltasHandler):
         if not self.is_mine_id(user_id):
             rooms_user_is_in = await self.store.get_user_dir_rooms_user_is_in(user_id)
 
-            if len(rooms_user_is_in) == 0:
+            if (
+                not rooms_user_is_in
+                and not await self.store.is_user_in_federated_search(user_id)
+            ):
                 logger.debug("Removing user %r from directory", user_id)
                 await self.store.remove_from_user_dir(user_id)
 
@@ -807,15 +801,6 @@ class UserDirectoryFederationHandler(UserDirectoryHandler):
     formats.
     """
 
-    def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
-
-        # Sentinel "room" used to make ingested remote users visible in local
-        # user directory searches via the `users_in_public_rooms` mechanism.
-        self._federated_cache_room_id = federated_user_dir_cache_room_id(
-            self.server_name
-        )
-
     async def upsert_remote_users(
         self, users: Sequence[RemoteUserDirectoryEntry]
     ) -> None:
@@ -838,6 +823,4 @@ class UserDirectoryFederationHandler(UserDirectoryHandler):
         if not profiles:
             return
 
-        await self.store.upsert_federated_remote_users(
-            self._federated_cache_room_id, profiles
-        )
+        await self.store.upsert_federated_remote_users(profiles)

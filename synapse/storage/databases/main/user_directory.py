@@ -659,13 +659,12 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
     async def upsert_federated_remote_users(
         self,
-        cache_room_id: str,
         users: Sequence[tuple[str, str | None, str | None]],
     ) -> None:
         """Upsert remote users discovered via federated user directory sync.
 
         Updates profile and search index entries and marks the users as visible
-        in user directory searches via the federated cache room.
+        in user directory searches via `users_in_federated_search`.
         """
         if not users:
             return
@@ -679,11 +678,13 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             self._update_profiles_in_user_dir_txn(txn, profiles)
             self.db_pool.simple_upsert_many_txn(
                 txn,
-                table="users_in_public_rooms",
-                key_names=["user_id", "room_id"],
-                key_values=[(profile.user_id, cache_room_id) for profile in profiles],
-                value_names=(),
-                value_values=(),
+                table="users_in_federated_search",
+                key_names=("user_id",),
+                key_values=[(profile.user_id,) for profile in profiles],
+                value_names=("homeserver",),
+                value_values=[
+                    (get_domain_from_id(profile.user_id),) for profile in profiles
+                ],
             )
 
         await self.db_pool.runInteraction(
@@ -837,6 +838,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             txn.execute(f"{truncate} user_directory_search")
             txn.execute(f"{truncate} users_in_public_rooms")
             txn.execute(f"{truncate} users_who_share_private_rooms")
+            txn.execute(f"{truncate} users_in_federated_search")
 
         await self.db_pool.runInteraction(
             "delete_all_from_user_dir", _delete_all_from_user_dir_txn
@@ -905,6 +907,11 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             )
             self.db_pool.simple_delete_txn(
                 txn, table="users_in_public_rooms", keyvalues={"user_id": user_id}
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="users_in_federated_search",
+                keyvalues={"user_id": user_id},
             )
             self.db_pool.simple_delete_txn(
                 txn,
@@ -1003,6 +1010,17 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         users.update(rows)
         return list(users)
 
+    async def is_user_in_federated_search(self, user_id: str) -> bool:
+        """Whether a user is visible through federated user directory sync."""
+        homeserver = await self.db_pool.simple_select_one_onecol(
+            table="users_in_federated_search",
+            keyvalues={"user_id": user_id},
+            retcol="homeserver",
+            allow_none=True,
+            desc="is_user_in_federated_search",
+        )
+        return homeserver is not None
+
     async def get_user_directory_stream_pos(self) -> int | None:
         """
         Get the stream ID of the user directory stream.
@@ -1053,8 +1071,15 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                         SELECT 1 FROM users_who_share_private_rooms
                         WHERE user_id = ? AND other_user_id = t.user_id
                     )
-                )
             """
+            if self.hs.config.experimental.bwi_federated_user_dir_enabled:
+                where_clause += """
+                    OR EXISTS (
+                        SELECT 1 FROM users_in_federated_search
+                        WHERE user_id = t.user_id
+                    )
+                """
+            where_clause += ")"
 
         if not show_locked_users:
             where_clause += " AND (u.locked IS NULL OR u.locked = FALSE)"
