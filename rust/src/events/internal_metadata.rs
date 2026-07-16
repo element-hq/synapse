@@ -585,7 +585,7 @@ impl EventInternalMetadata {
     }
 
     /// For membership events, this will contain a list of users who
-    /// would be interested in the users profile updates, triggered
+    /// would be interested in the user's profile updates, triggered
     /// by the membership change.
     pub fn membership_update_users_in_shared_rooms(&self) -> PyResult<Option<Vec<String>>> {
         Ok(self
