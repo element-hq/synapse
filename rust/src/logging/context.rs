@@ -449,9 +449,12 @@ pub struct LoggingContext {
     /// path does no per-switch Python allocation; nothing outside this module
     /// reads it.
     usage_start: Option<(f64, f64)>,
-    /// A short human-readable tag (e.g. the sync type); always a `str`.
+    /// A short human-readable tag (e.g. the sync type). Initialised to `""` and
+    /// treated as a `str` by everything in-tree, but kept `Option` so assigning
+    /// `None` (which the old untyped Python attribute accepted, and which the
+    /// sentinel's `tag` reports) keeps working rather than raising `TypeError`.
     #[pyo3(get, set)]
-    tag: String,
+    tag: Option<String>,
     /// The resources used by this context so far. Exposed to Python as
     /// `_resource_usage` (see the getter below); mutated in place.
     resource_usage: Py<ContextResourceUsage>,
@@ -489,7 +492,7 @@ impl LoggingContext {
             main_thread: 0,
             finished: false,
             usage_start: None,
-            tag: String::new(),
+            tag: Some(String::new()),
             resource_usage: Py::new(py, ContextResourceUsage::default())?,
             previous_context: None,
             parent_context: None,
@@ -520,7 +523,7 @@ impl LoggingContext {
         self.server_name = server_name.unbind();
         self.main_thread = get_thread_id(py)?;
         self.request = None;
-        self.tag = String::new();
+        self.tag = Some(String::new());
         self.scope = None;
 
         // keep track of whether we have hit the __exit__ block for this context
