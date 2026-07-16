@@ -592,3 +592,18 @@ loggers:
     synapse.logging.context.debug:
         level: DEBUG
 ```
+
+Note that some of these traces (`LoggingContext(...).__enter__`/`__exit__`) are
+emitted from Rust via `pyo3-log`, which caches logger levels for performance.
+Configuring the logger in the logging config (as above) works — the cache is
+flushed whenever the config is (re)loaded, including on `SIGHUP` — but enabling
+the logger *at runtime* (e.g. `setLevel(logging.DEBUG)` from the manhole) will
+not surface the Rust-emitted traces until you also flush the cache:
+
+```python
+import logging
+from synapse.synapse_rust import reset_logging_config
+
+logging.getLogger("synapse.logging.context.debug").setLevel(logging.DEBUG)
+reset_logging_config()
+```
