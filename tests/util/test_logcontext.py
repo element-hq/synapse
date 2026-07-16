@@ -729,10 +729,10 @@ class LogContextErrorMessageTestCase(unittest.TestCase):
     """Characterization tests pinning the exact `logcontext_error` message shapes
     and the abuse-detection code paths.
 
-    These exist to guard against accidental drift (e.g. when the switch machinery
-    is ported to Rust): the wording, argument order and the conditions that
-    trigger each warning are load-bearing — tests here and downstream log scraping
-    depend on them. Messages that interpolate a context via `%r` embed the
+    These exist to guard against accidental drift in the switch machinery (which
+    lives in Rust: `rust/src/logging/context.rs`): the wording, argument order
+    and the conditions that trigger each warning are load-bearing — tests here
+    and downstream log scraping depend on them. Messages that interpolate a context via `%r` embed the
     object's `repr()` (id/address), so we reconstruct the expected string from the
     *same* live objects rather than hard-coding an address.
     """

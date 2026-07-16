@@ -114,10 +114,10 @@ class ContextRequest:
 LoggingContextOrSentinel = Union[LoggingContext, _Sentinel]
 
 # `_Sentinel` (the root "no logcontext" marker) and its singleton `SENTINEL_CONTEXT`
-# are now defined and owned by the Rust logcontext module, which holds the "current
+# are defined and owned by the Rust logcontext module, which holds the "current
 # context" storage (see `synapse.synapse_rust.logcontext` / `rust/src/logging/context.rs`).
 # Rust returns this exact object when no context is set, so `context is SENTINEL_CONTEXT`
-# identity and `bool(context)` semantics are preserved without a Python-side bootstrap.
+# identity checks and `bool(context)` work without a Python-side bootstrap.
 
 
 class LoggingContextFilter(logging.Filter):

@@ -168,7 +168,7 @@ where
     // Rust (e.g. `DatabasePool.runInteraction`) runs in the same logcontext that was
     // current when Python originally called into Rust — its logging and DB-metrics
     // accounting are then attributed to the right request. `None` (called outside a
-    // scoped task) falls back to the sentinel, as before.
+    // scoped task) falls back to the sentinel.
     let logcontext = crate::logging::context::LogContext::current();
 
     Python::attach(move |py| -> PyResult<()> {

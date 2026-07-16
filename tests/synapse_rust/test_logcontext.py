@@ -220,9 +220,9 @@ class RustLogContextTestCase(HomeserverTestCase):
     def test_db_callback_runs_in_caller_logcontext(self) -> None:
         """The Rust `/versions` handler's per-user feature lookup calls back into
         Python via `run_python_awaitable`; the DB transaction it runs must be
-        accounted against the caller's logcontext. (Before the Rust storage
-        port, a FIXME in `run_python_awaitable` meant this ran in the
-        sentinel and the accounting was lost.)"""
+        accounted against the caller's logcontext. The failure mode is the
+        awaitable running in the sentinel instead, silently losing the
+        accounting."""
         versions_handler = self.hs.get_rust_handlers().versions
 
         def body(result: dict[str, object]) -> None:

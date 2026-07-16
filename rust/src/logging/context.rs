@@ -15,18 +15,17 @@
 
 //! Native storage for the Synapse "current logcontext".
 //!
-//! Historically the current logcontext lived in a Python `threading.local`
-//! (`synapse.logging.context._thread_local`). That is invisible to Rust: each
-//! tokio worker thread has its own slot which is permanently the sentinel, so
-//! logging emitted from Rust — including from spawned tokio tasks — could not be
-//! attributed to the request that caused it.
+//! The storage lives in Rust rather than in a Python `threading.local` because a
+//! Python thread-local is invisible to Rust: each tokio worker thread would see
+//! its own slot, permanently at the sentinel, and logging emitted from Rust —
+//! including from spawned tokio tasks — could not be attributed to the request
+//! that caused it.
 //!
-//! This module moves the storage into Rust and unifies two sources of truth so
-//! that a single [`current_context`] answer is correct from *both* worlds:
+//! This module holds that storage and unifies two sources of truth so that a
+//! single [`current_context`] answer is correct from *both* worlds:
 //!
-//! 1. a per-OS-thread slot ([`THREAD_LOCAL_CONTEXT`]), the direct replacement for
-//!    the old Python `threading.local` — used by the reactor thread and any
-//!    reactor-managed threadpool threads; and
+//! 1. a per-OS-thread slot ([`THREAD_LOCAL_CONTEXT`]) — used by the reactor
+//!    thread and any reactor-managed threadpool threads; and
 //! 2. a per-tokio-task slot ([`TASK_LOCAL_CONTEXT`]), which rides with a task as it
 //!    migrates between worker threads across `.await` points.
 //!
@@ -67,8 +66,8 @@ static SENTINEL: OnceCell<Py<PyAny>> = OnceCell::new();
 
 /// The root "no logcontext" marker (`synapse.logging.context.SENTINEL_CONTEXT`).
 ///
-/// A drop-in for the former Python `_Sentinel`: a singleton whose fields are inert
-/// defaults and whose methods are no-ops, and which is *falsy* so callers can test
+/// A singleton whose fields are inert defaults and whose methods are no-ops, and
+/// which is *falsy* so callers can test
 /// `if not current_context()` to detect "no logcontext". [`switch_context`]
 /// special-cases it by identity, so its `start`/`stop` never run on the hot path;
 /// the other no-op methods exist only so code holding a `LoggingContextOrSentinel`
@@ -87,7 +86,7 @@ pub struct Sentinel {
 }
 
 impl Sentinel {
-    /// The singleton's initial state (mirrors the former Python `_Sentinel.__init__`).
+    /// The singleton's initial state: inert defaults for every field.
     fn instance(py: Python<'_>) -> Self {
         Sentinel {
             previous_context: None,
@@ -124,7 +123,7 @@ impl Sentinel {
     /// No-op: event fetches under the sentinel are attributed to no context.
     fn record_event_fetch(&self, _event_count: i64) {}
 
-    /// The sentinel is falsy, matching the former Python `_Sentinel.__bool__`.
+    /// The sentinel is falsy: `if not context` detects "no logcontext".
     fn __bool__(&self) -> bool {
         false
     }
@@ -208,11 +207,11 @@ impl LogContext {
 
 /// Tracks the resources used by a log context.
 ///
-/// A native drop-in for the former Python `ContextResourceUsage` class; the
-/// public attribute surface, operators and `repr` are preserved so callers
-/// (Measure, request/background-process metrics, task scheduler, ...) are
-/// unaffected. Keeping this native lets the switch machinery do its rusage
-/// accounting without allocating a Python object per operation.
+/// The public attribute surface, operators and `repr` are a compatibility
+/// contract with the Python callers (Measure, request/background-process
+/// metrics, the task scheduler, ...) — change them in lockstep. Native so the
+/// switch machinery can do its rusage accounting without allocating a Python
+/// object per operation.
 // `skip_from_py_object`: pyo3 0.28 requires `Clone` pyclasses to explicitly
 // opt in or out of a generated extract-by-clone `FromPyObject` (a bare
 // `#[pyclass]` is a deprecation warning, and we build with `-D warnings`).
@@ -275,11 +274,12 @@ impl ContextResourceUsage {
     }
 
     fn __repr__(&self) -> String {
-        // Matches the historical Python `__repr__` (values were interpolated with
-        // `%r`, i.e. `repr()`, inside single quotes) — except Rust's float
-        // formatting for exponent-form values (`1e-7` where Python writes
-        // `1e-07`). The only consumer of the string form is Measure's "Failed to
-        // save metrics!" warning, so we don't chase exact parity there.
+        // The odd single-quoted, `repr()`-style value formatting is the shape
+        // this class logs in, and scrapers may match on it — keep it stable.
+        // Rust's `{:?}` renders exponent-form floats as e.g. `1e-7` (Python
+        // `repr` writes `1e-07`); the only consumer of the string form is
+        // Measure's "Failed to save metrics!" warning, so we don't chase exact
+        // parity with Python there.
         format!(
             "<ContextResourceUsage ru_stime='{:?}', ru_utime='{:?}', \
              db_txn_count='{}', db_txn_duration_sec='{:?}', \
@@ -339,7 +339,7 @@ thread_local! {
 
 /// This thread's `threading.get_ident()` value.
 ///
-/// Note that (as the historical Python comment warned) `get_ident` is *not* an
+/// Note that `get_ident` is *not* an
 /// OS-level tid: on Linux it returns the same value either side of a `fork()`
 /// call. Synapse forks in exactly one place, so contexts created before the
 /// fork still pass the `main_thread` affinity check after it — and for the same
@@ -398,8 +398,8 @@ where
 ///
 /// Returns `None` where per-thread rusage isn't available — which we take to be
 /// any non-Linux target (`RUSAGE_THREAD` is Linux-only; macOS gets no per-context
-/// CPU accounting, matching the historical Python behaviour). Doing this in Rust
-/// avoids allocating a Python `resource.struct_rusage` object on every switch.
+/// CPU accounting). Reading it natively avoids allocating a Python
+/// `resource.struct_rusage` object on every switch.
 #[cfg(target_os = "linux")]
 fn get_thread_rusage() -> Option<(f64, f64)> {
     fn timeval_to_secs(tv: libc::timeval) -> f64 {
@@ -427,7 +427,7 @@ fn get_thread_rusage() -> Option<(f64, f64)> {
 
 /// The `(user, system)` CPU seconds elapsed between `start` and `current`.
 ///
-/// Mirrors the former `_get_cputime`: guards against the clock going backwards
+/// Guards against the clock going backwards
 /// (clamping to zero and logging, as the accounting must never go negative).
 fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> (f64, f64) {
     let mut utime_delta = current.0 - start.0;
@@ -450,16 +450,15 @@ fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> (f64, f64) {
 /// belongs to and accounting CPU/DB usage against it. Contexts are scoped within
 /// a `with` block.
 ///
-/// A native port of the former Python `LoggingContext`; the attribute surface,
-/// methods, error-message wording and abuse-detection behaviour are preserved so
-/// callers (and Python subclasses) are unaffected.
+/// The attribute surface, methods, error-message wording and abuse-detection
+/// behaviour are a compatibility contract with Python callers and subclasses
+/// (notably `BackgroundProcessLoggingContext`) — change them in lockstep.
 ///
 /// Construction is deliberately split between `__new__` (which allocates a blank
-/// instance) and `__init__` (which does the real initialisation), mirroring how a
+/// instance) and `__init__` (which does the real initialisation), matching how a
 /// pure-Python class behaves. This lets Python subclasses — in particular
 /// `synapse.metrics.background_process_metrics.BackgroundProcessLoggingContext`,
-/// which composes a name and then calls `super().__init__(name=..., ...)` — work
-/// unchanged.
+/// which composes a name and then calls `super().__init__(name=..., ...)` — work.
 #[pyclass(subclass)]
 pub struct LoggingContext {
     /// Name for the context, used in logging. Stored as a Python string:
@@ -489,9 +488,9 @@ pub struct LoggingContext {
     /// reads it.
     usage_start: Option<(f64, f64)>,
     /// A short human-readable tag (e.g. the sync type). Initialised to `""` and
-    /// treated as a `str` by everything in-tree, but kept `Option` so assigning
-    /// `None` (which the old untyped Python attribute accepted, and which the
-    /// sentinel's `tag` reports) keeps working rather than raising `TypeError`.
+    /// treated as a `str` by everything in-tree, but `Option` so that assigning
+    /// `None` (which the sentinel's `tag` reports, and which out-of-tree callers
+    /// may assign) is accepted rather than raising `TypeError`.
     #[pyo3(get, set)]
     tag: Option<String>,
     /// The resources used by this context so far. Exposed to Python as
@@ -590,8 +589,9 @@ impl LoggingContext {
         Ok(())
     }
 
-    /// The resources used by this context so far (mutated in place). Named
-    /// `_resource_usage` to match the historical private attribute.
+    /// The resources used by this context so far (mutated in place). Exposed as
+    /// `_resource_usage` because that is the attribute name callers use
+    /// (nominally private, but read by tests and metrics code).
     #[getter(_resource_usage)]
     fn get_resource_usage_attr(&self, py: Python<'_>) -> Py<ContextResourceUsage> {
         self.resource_usage.clone_ref(py)
@@ -625,8 +625,8 @@ impl LoggingContext {
         }
 
         // Call the native `set_current_context` directly rather than resolving it
-        // through the module: it is re-exported unchanged as the module-level name
-        // and nothing patches it, so the round-trip would just circle back here.
+        // through the module: the module-level name is this exact function and
+        // nothing patches it, so the round-trip would just circle back here.
         let old_context = set_current_context(py, slf.as_any().clone())?.into_bound(py);
 
         let previous = previous.unwrap_or_else(|| py.None());
@@ -890,7 +890,7 @@ impl LoggingContext {
         let py = slf.py();
         let main_thread = slf.borrow().main_thread;
 
-        // Mirror Python's `try: ... finally: self.usage_start = None`.
+        // `finally`-style: `usage_start` must be cleared however we exit.
         let result = (|| -> PyResult<()> {
             if get_thread_id(py)? != main_thread {
                 let name = slf.borrow().name_string(py);
@@ -967,11 +967,9 @@ fn switch_context(
 /// Set the current logging context, returning the context that was previously
 /// current.
 ///
-/// The native replacement for the former Python `set_current_context`: it keeps
-/// the accounting policy (read the thread rusage once, `stop` the old context and
-/// `start` the new one) but does it all natively — `getrusage` via libc and, for
-/// the common base-`LoggingContext` case, the `stop`/`start` bookkeeping inline
-/// with no per-switch Python allocation.
+/// Reads the thread rusage once (`getrusage` via libc), `stop`s the old context
+/// and `start`s the new one; for the common base-`LoggingContext` case the
+/// bookkeeping runs inline, with no per-switch Python dispatch or allocation.
 #[pyfunction]
 pub fn set_current_context(py: Python<'_>, context: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     // everything blows up if we allow current_context to be set to None, so

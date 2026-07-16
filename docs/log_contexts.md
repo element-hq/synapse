@@ -560,9 +560,9 @@ lead to leaked logcontexts which are incredibly hard to track down.
 
 The "current" logcontext is stored in the Rust extension rather than in a Python
 thread-local, so that it is visible from both worlds. `current_context()` and
-`set_current_context()` are still imported from `synapse.logging.context` and
-behave exactly as before — this is an implementation detail, and Python code does
-not need to change.
+`set_current_context()` are imported from `synapse.logging.context` as usual —
+the Rust storage is an implementation detail that Python code does not need to
+care about.
 
 The switch itself (`set_current_context`) only ever runs on the reactor (or its
 thread pool) — the Python side — where it does the `getrusage` CPU accounting.
