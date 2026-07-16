@@ -219,25 +219,25 @@ impl ContextResourceUsage {
 
     /// `self += other`; mutate in place. pyo3 returns `self` for the in-place slot.
     fn __iadd__(&mut self, other: &ContextResourceUsage) {
-        self.add_assign(&other);
+        self.add_assign(other);
     }
 
     /// `self -= other`; mutate in place. pyo3 returns `self` for the in-place slot.
     fn __isub__(&mut self, other: &ContextResourceUsage) {
-        self.sub_assign(&other);
+        self.sub_assign(other);
     }
 
     /// `self + other`, returning a new object.
     fn __add__(&self, other: &ContextResourceUsage) -> ContextResourceUsage {
         let mut res = self.clone();
-        res.add_assign(&other);
+        res.add_assign(other);
         res
     }
 
     /// `self - other`, returning a new object.
     fn __sub__(&self, other: &ContextResourceUsage) -> ContextResourceUsage {
         let mut res = self.clone();
-        res.sub_assign(&other);
+        res.sub_assign(other);
         res
     }
 }
