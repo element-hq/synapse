@@ -768,29 +768,31 @@ class ProfileWorkerStore(SQLBaseStore):
         self, *, txn: LoggingTransaction, joined_users: set[str]
     ) -> None:
         """
-        Record profile updates from membership changes.
-
-        Note, currently only local user changes are reported.
+        Record profile updates from membership join events.
 
         Adds "joined_room" and "left_room" profile update actions into the
         profile updates stream tables.
 
+        Currently, updates are only recorded for local users.
+
         Args:
             txn: The transaction to use.
-            changes: A list of changes to room membership state, a tuple of
-                "user ID" and "membership".
+            joined_users: A list of users who have joined.
         """
         if not self._msc4429_enabled:
             return
 
         assert self._is_events_writer
 
-        # Get rooms for all the users in the changes
+        # Ensure we're working with local users only
+        users = {user_id for user_id in joined_users if self.hs.is_mine_id(user_id)}
+
+        # Get rooms for all the users in the changes in one go to save on queries.
         rows = self.db_pool.simple_select_many_txn(
             txn=txn,
             table="current_state_events",
             column="state_key",
-            iterable=joined_users,
+            iterable=users,
             retcols=(
                 "state_key",
                 "room_id",
@@ -800,11 +802,12 @@ class ProfileWorkerStore(SQLBaseStore):
                 "membership": Membership.JOIN,
             },
         )
-        user_rooms: dict[str, set[str]] = {user_id: set() for user_id in joined_users}
+        user_rooms: dict[str, set[str]] = {user_id: set() for user_id in users}
         for state_key, room_id in rows:
             user_rooms[state_key].add(room_id)
 
-        for user_id in joined_users:
+        # Record the profile updates for each user
+        for user_id in users:
             self.record_profile_updates_txn(
                 txn=txn,
                 user_id=UserID.from_string(user_id),
@@ -820,11 +823,13 @@ class ProfileWorkerStore(SQLBaseStore):
         user_id: UserID,
         action: ProfileUpdateAction,
         field_names: list[str] | None,
-        target_users: set[str] | None = None,
         user_rooms: set[str] | None = None,
+        target_users: set[str] | None = None,
     ) -> int | None:
         """
         Record updates into the profile updates stream tables.
+
+        Currently, updates are only recorded for local users.
 
         Args:
             txn: Transaction to use
@@ -832,7 +837,11 @@ class ProfileWorkerStore(SQLBaseStore):
             action: The profile update action, either `update`, `left_room` or
                 `joined_room`
             field_names: A list of fields that were set, if ProfileUpdateAction.UPDATE
-            target_users: Set of users to create profile update stream rows for
+            user_rooms: Optionally, a set of rooms that the update concerns. If not
+                given, a database lookup will be done to fetch all the users rooms.
+            target_users: Optionally, set of users to create profile update stream rows
+                for. If not given, a database lookup will be done based on `user_rooms`,
+                or if that is not set, the result of the rooms lookup.
 
         Returns:
             The latest stream ID created in this transaction
@@ -870,15 +879,19 @@ class ProfileWorkerStore(SQLBaseStore):
                 },
             )
             target_users = {row[0] for row in rows}
+
+        # Ensure we only write updates for local users
+        users = {user for user in target_users if self.hs.is_mine_id(user)}
+
         if action in (ProfileUpdateAction.JOINED_ROOM, ProfileUpdateAction.LEFT_ROOM):
-            target_users.discard(user_id.to_string())
-            if not target_users:
+            users.discard(user_id.to_string())
+            if not users:
                 # No point writing an update for ourselves, if a membership change and no
                 # other users interested
                 return None
         elif action == ProfileUpdateAction.UPDATE:
             # Always include ourselves when updating field values
-            target_users.add(user_id.to_string())
+            users.add(user_id.to_string())
 
         # Record the profile update
         inserted_ts = self.clock.time_msec()
@@ -927,7 +940,7 @@ class ProfileWorkerStore(SQLBaseStore):
         inserted_ts = self.clock.time_msec()
         per_user_values = [
             (stream_id, user_id, inserted_ts)
-            for user_id in target_users
+            for user_id in users
             for stream_id in stream_ids
         ]
         self.db_pool.simple_insert_many_txn(

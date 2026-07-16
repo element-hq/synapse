@@ -2159,22 +2159,25 @@ class PersistEventsStore:
         room_id: str,
     ) -> None:
         """
-        Record updates into the profile updates stream for when a user leaves
-        the last room with a set of users.
+        Record updates into the profile updates stream for when a user leaves a room.
 
-        Doing this clears all old rows from the `profile_updates_per_user` table,
-        to avoid exposing any profile field changes past the point of not being
-        in any common rooms with the user.
+        If this was the last shared room with a set of users, clear all old rows from
+        the `profile_updates_per_user` table relating to those users, to avoid exposing
+        any profile field changes past the point of not being in any common rooms with
+        the user.
+
+        Currently, updates are only recorded for local users.
 
         Note, this method lives here in the events store file due to the profile
-        store not having access to the membership store, which we need to re-use
-        the `do_users_share_a_room_txn` method there.
+        store not having access to the membership store (which the events store does),
+        which we need to re-use the `do_users_share_a_room_txn` method there.
 
         Args:
-            user_id: The user who left the last common room with a set of users.
-            users_to_update: The set of users who no longer share rooms with the user.
+            user_id: The user who left the room.
+            room_id: The room that was left.
         """
-        rows = self.db_pool.simple_select_onecol_txn(
+        # Get the local members of the room
+        room_members = self.db_pool.simple_select_onecol_txn(
             txn=txn,
             table="local_current_membership",
             retcol="user_id",
@@ -2187,9 +2190,11 @@ class PersistEventsStore:
         users_sharing_rooms = self.store.do_users_share_a_room_txn(
             txn=txn,
             user_id=user_id.to_string(),
-            other_user_ids=set(rows),
+            other_user_ids=set(room_members),
         )
-        users_no_longer_sharing_rooms = set(rows) - set(users_sharing_rooms.keys())
+        users_no_longer_sharing_rooms = set(room_members) - set(
+            users_sharing_rooms.keys()
+        )
 
         # First clear the previous rows from the table
         user_clause, user_args = make_in_list_sql_clause(

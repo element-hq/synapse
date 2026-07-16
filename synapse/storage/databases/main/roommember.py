@@ -858,6 +858,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         other_user_ids: Collection[str],
         exclude_room_id: str | None = None,
     ) -> dict[str, bool]:
+        """Return mapping from user ID to whether they share a room with the
+        given user.
+
+        Optionally, exclude a room when querying the database.
+
+        Note: `None` and `False` are equivalent and mean they don't share a
+        room.
+        """
         clause, args = make_in_list_sql_clause(
             self.database_engine, "state_key", other_user_ids
         )
