@@ -189,7 +189,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         # Create a remote room
         room_creator_user_id = f"@remote-user:{self.OTHER_SERVER_NAME}"
         remote_room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
-        room_version = RoomVersions.V10
+        room_version = RoomVersions.V11
 
         room_create_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
@@ -201,9 +201,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "type": EventTypes.Create,
                     "state_key": "",
                     "content": {
-                        # The `ROOM_CREATOR` field could be removed if we used a room
-                        # version > 10 (in favor of relying on `sender`)
-                        EventContentFields.ROOM_CREATOR: room_creator_user_id,
                         EventContentFields.ROOM_VERSION: room_version.identifier,
                     },
                     "auth_events": [],

@@ -176,7 +176,7 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fec0::/10",
 ]
 
-DEFAULT_ROOM_VERSION = "10"
+DEFAULT_ROOM_VERSION = "11"
 
 # Defaults for the presence state machine timers, in milliseconds. Overridden
 # by the corresponding options in the `presence` config section.
