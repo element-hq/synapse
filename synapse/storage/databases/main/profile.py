@@ -876,6 +876,9 @@ class ProfileWorkerStore(SQLBaseStore):
                 # No point writing an update for ourselves, if a membership change and no
                 # other users interested
                 return None
+        elif action == ProfileUpdateAction.UPDATE:
+            # Always include ourselves when updating field values
+            target_users.add(user_id.to_string())
 
         # Record the profile update
         inserted_ts = self.clock.time_msec()
