@@ -52,8 +52,8 @@ use once_cell::sync::OnceCell;
 use pyo3::call::PyCallArgs;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyTuple};
-use pyo3::{PyTraverseError, PyVisit};
+use pyo3::types::{PyDict, PyString, PyTuple};
+use pyo3::{intern, PyTraverseError, PyVisit};
 
 /// The sentinel logcontext singleton (`synapse.logging.context.SENTINEL_CONTEXT`),
 /// created lazily by [`sentinel`]. Owned natively: Rust defines the [`Sentinel`]
@@ -75,19 +75,22 @@ pub struct Sentinel {
     previous_context: Option<Py<PyAny>>,
     finished: bool,
     scope: Option<Py<PyAny>>,
-    server_name: String,
+    /// Stored as a Python string: `LoggingContextFilter` reads `server_name` on
+    /// every log record (most of which run under the sentinel), and a `Py<PyString>`
+    /// getter is INCREF-only where a `String` getter allocates a fresh `str`.
+    server_name: Py<PyString>,
     request: Option<Py<PyAny>>,
     tag: Option<Py<PyAny>>,
 }
 
 impl Sentinel {
     /// The singleton's initial state (mirrors the former Python `_Sentinel.__init__`).
-    fn instance() -> Self {
+    fn instance(py: Python<'_>) -> Self {
         Sentinel {
             previous_context: None,
             finished: false,
             scope: None,
-            server_name: "unknown_server_from_sentinel_context".to_owned(),
+            server_name: PyString::new(py, "unknown_server_from_sentinel_context").unbind(),
             request: None,
             tag: None,
         }
@@ -96,8 +99,10 @@ impl Sentinel {
 
 #[pymethods]
 impl Sentinel {
-    fn __str__(&self) -> &'static str {
-        "sentinel"
+    /// Interned so the per-log-record `str(context)` in `LoggingContextFilter`
+    /// returns the same `str` object every time rather than allocating one.
+    fn __str__(&self, py: Python<'_>) -> Py<PyString> {
+        intern!(py, "sentinel").clone().unbind()
     }
 
     /// No-op: the sentinel is never actually running, so there is nothing to
@@ -420,12 +425,17 @@ fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> PyResult<(f64, f64)>
 /// unchanged.
 #[pyclass(subclass)]
 pub struct LoggingContext {
-    /// Name for the context, used in logging.
+    /// Name for the context, used in logging. Stored as a Python string:
+    /// `LoggingContextFilter` calls `str(context)` on every log record, and a
+    /// `Py<PyString>` getter is INCREF-only where a `String` getter would
+    /// allocate a fresh `str` per record. Rust-side reads only happen on cold
+    /// error/debug paths (see [`Self::name_string`]).
     #[pyo3(get, set)]
-    name: String,
-    /// The homeserver name this context is associated with.
+    name: Py<PyString>,
+    /// The homeserver name this context is associated with. Stored as a Python
+    /// string for the same reason as `name` (read per log record).
     #[pyo3(get, set)]
-    server_name: String,
+    server_name: Py<PyString>,
     /// The OS thread id (`threading.get_ident()`) this context was created on;
     /// activity on any other thread is an error.
     #[pyo3(get, set)]
@@ -474,8 +484,8 @@ impl LoggingContext {
         _kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Self> {
         Ok(LoggingContext {
-            name: String::new(),
-            server_name: String::new(),
+            name: intern!(py, "").clone().unbind(),
+            server_name: intern!(py, "").clone().unbind(),
             main_thread: 0,
             finished: false,
             usage_start: None,
@@ -492,8 +502,8 @@ impl LoggingContext {
     fn __init__(
         &mut self,
         py: Python<'_>,
-        name: String,
-        server_name: String,
+        name: Bound<'_, PyString>,
+        server_name: Bound<'_, PyString>,
         parent_context: Option<Py<PyAny>>,
         request: Option<Py<PyAny>>,
     ) -> PyResult<()> {
@@ -506,8 +516,8 @@ impl LoggingContext {
         // the context is not currently active.
         self.usage_start = None;
 
-        self.name = name;
-        self.server_name = server_name;
+        self.name = name.unbind();
+        self.server_name = server_name.unbind();
         self.main_thread = get_thread_id(py)?;
         self.request = None;
         self.tag = String::new();
@@ -543,22 +553,32 @@ impl LoggingContext {
         self.resource_usage.clone_ref(py)
     }
 
-    fn __str__(&self) -> String {
-        self.name.clone()
+    /// Returns the stored name object itself (INCREF-only): this runs per log
+    /// record via `LoggingContextFilter`.
+    fn __str__(&self, py: Python<'_>) -> Py<PyString> {
+        self.name.clone_ref(py)
     }
 
     /// Enter this logging context, making it the current context.
     fn __enter__<'py>(slf: Bound<'py, Self>) -> PyResult<Bound<'py, Self>> {
         let py = slf.py();
-        let (name, previous) = {
-            let this = slf.borrow();
-            (
-                this.name.clone(),
-                this.previous_context.as_ref().map(|p| p.clone_ref(py)),
-            )
-        };
+        // An owned handle rather than a held borrow: `set_current_context`
+        // re-enters `slf` (borrow_mut in `start_inner`).
+        let previous = slf
+            .borrow()
+            .previous_context
+            .as_ref()
+            .map(|p| p.clone_ref(py));
 
-        debug!(target: DEBUG_LOGGER_NAME, "LoggingContext({name}).__enter__");
+        if log_enabled!(target: DEBUG_LOGGER_NAME, Level::Debug) {
+            // The name is only materialised when the opt-in debug logger is
+            // actually enabled: this runs on every context entry.
+            debug!(
+                target: DEBUG_LOGGER_NAME,
+                "LoggingContext({}).__enter__",
+                slf.borrow().name_string(py)
+            );
+        }
 
         // Call the native `set_current_context` directly rather than resolving it
         // through the module: it is re-exported unchanged as the module-level name
@@ -588,28 +608,30 @@ impl LoggingContext {
     ) -> PyResult<()> {
         let py = slf.py();
 
-        let (name, previous) = {
-            let this = slf.borrow();
-            (
-                this.name.clone(),
-                this.previous_context.as_ref().map(|p| p.clone_ref(py)),
-            )
-        };
-        let previous = previous.unwrap_or_else(|| py.None());
+        let previous = slf
+            .borrow()
+            .previous_context
+            .as_ref()
+            .map(|p| p.clone_ref(py))
+            .unwrap_or_else(|| py.None());
 
         if log_enabled!(target: DEBUG_LOGGER_NAME, Level::Debug) {
             // Match the Python `%s`: the str() of the previous context. Computed
-            // only when the opt-in debug logger is actually enabled.
+            // (along with the name) only when the opt-in debug logger is
+            // actually enabled: this runs on every context exit.
             let previous_str: String = previous.bind(py).str()?.extract()?;
             debug!(
                 target: DEBUG_LOGGER_NAME,
-                "LoggingContext({name}).__exit__ --> {previous_str}"
+                "LoggingContext({}).__exit__ --> {previous_str}",
+                slf.borrow().name_string(py)
             );
         }
 
         let current = set_current_context(py, previous.bind(py).clone())?.into_bound(py);
 
         if !current.is(&slf) {
+            // Cold path: the name is only materialised for the error message.
+            let name = slf.borrow().name_string(py);
             if current.is(sentinel(py).bind(py)) {
                 logcontext_error(py, format!("Expected logging context {name} was lost"))?;
             } else {
@@ -773,26 +795,40 @@ impl LoggingContext {
         self.finished
     }
 
+    /// The context name as an owned Rust string.
+    ///
+    /// This copies the string data, so it is for cold error/debug paths only —
+    /// the switch fast path must not allocate.
+    fn name_string(&self, py: Python<'_>) -> String {
+        self.name.bind(py).to_string_lossy().into_owned()
+    }
+
     /// Native body of the `start` pymethod. Shared with the switch fast path in
     /// [`set_current_context`], which calls this directly for a base
     /// `LoggingContext` rather than dispatching through Python. Runs the same
     /// thread-affinity and abuse checks on both paths.
+    ///
+    /// This (like [`Self::stop_inner`]) runs on every context switch: the error
+    /// branches materialise the name themselves so the fast path stays
+    /// allocation-free.
     fn start_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
         let py = slf.py();
-        let name = slf.borrow().name.clone();
         let main_thread = slf.borrow().main_thread;
 
         if get_thread_id(py)? != main_thread {
+            let name = slf.borrow().name_string(py);
             logcontext_error(py, format!("Started logcontext {name} on different thread"))?;
             return Ok(());
         }
 
         if slf.borrow().finished {
+            let name = slf.borrow().name_string(py);
             logcontext_error(py, format!("Re-starting finished log context {name}"))?;
         }
 
         // If we haven't already started, record the thread resource usage so far.
         if slf.borrow().usage_start.is_some() {
+            let name = slf.borrow().name_string(py);
             logcontext_error(py, format!("Re-starting already-active log context {name}"))?;
         } else {
             slf.borrow_mut().usage_start = rusage;
@@ -804,12 +840,12 @@ impl LoggingContext {
     /// Native body of the `stop` pymethod. Shared with the switch fast path.
     fn stop_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
         let py = slf.py();
-        let name = slf.borrow().name.clone();
         let main_thread = slf.borrow().main_thread;
 
         // Mirror Python's `try: ... finally: self.usage_start = None`.
         let result = (|| -> PyResult<()> {
             if get_thread_id(py)? != main_thread {
+                let name = slf.borrow().name_string(py);
                 logcontext_error(py, format!("Stopped logcontext {name} on different thread"))?;
                 return Ok(());
             }
@@ -822,6 +858,7 @@ impl LoggingContext {
 
             // Record the cpu used since we started.
             let Some(start) = slf.borrow().usage_start else {
+                let name = slf.borrow().name_string(py);
                 logcontext_error(
                     py,
                     format!("Called stop on logcontext {name} without recording a start rusage"),
@@ -905,7 +942,7 @@ pub fn set_current_context(py: Python<'_>, context: Bound<'_, PyAny>) -> PyResul
 fn sentinel(py: Python<'_>) -> Py<PyAny> {
     SENTINEL
         .get_or_init(|| {
-            Py::new(py, Sentinel::instance())
+            Py::new(py, Sentinel::instance(py))
                 .expect("failed to create the sentinel logcontext")
                 .into_any()
         })
