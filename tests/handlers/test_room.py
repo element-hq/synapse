@@ -1,6 +1,9 @@
+from unittest.mock import patch
+
 import synapse
 from synapse.api.constants import EventTypes, RoomEncryptionAlgorithms
 from synapse.rest.client import login, room
+from synapse.types import create_requester
 
 from tests import unittest
 from tests.unittest import override_config
@@ -106,3 +109,41 @@ class EncryptedByDefaultTestCase(unittest.HomeserverTestCase):
             tok=user_token,
             expect_code=404,
         )
+
+
+class RoomIDCollisionTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+    ]
+
+    def test_colliding_v12_room_ids_are_retried(self) -> None:
+        """In v12 room the room ID is the reference hash of the
+        create event, so two rooms whose create events have identical content
+        collide on the same room ID. This happens when the same user creates
+        several rooms at once (e.g. concurrent /createRoom requests with the
+        same config within the same millisecond).
+
+        Regression test: the collision must be retried transparently and both
+        rooms created with distinct IDs.
+        """
+        handler = self.hs.get_room_creation_handler()
+        user_id = self.register_user("alice", "pass")
+        requester = create_requester(user_id)
+
+        # Freeze the clock so both create events carry the same
+        # `origin_server_ts`; with identical config this forces the two room
+        # IDs to hash to the same value, reproducing the collision.
+        with patch.object(self.hs.get_clock(), "time_msec", return_value=1234567890000):
+            room_id1, _, _ = self.get_success(
+                handler.create_room(requester, {"room_version": "12"}, ratelimit=False)
+            )
+            room_id2, _, _ = self.get_success(
+                handler.create_room(requester, {"room_version": "12"}, ratelimit=False)
+            )
+
+        self.assertNotEqual(room_id1, room_id2)
+        # v12 room IDs are content hashes with no domain component.
+        self.assertNotIn(":", room_id1)
+        self.assertNotIn(":", room_id2)
