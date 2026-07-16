@@ -45,7 +45,10 @@
 //! only by [`LogContext::scope`] at spawn time) takes read precedence during a
 //! poll. [`swap_current_context`] checks that invariant rather than trusting it.
 
-use std::{cell::RefCell, future::Future};
+use std::{
+    cell::{Cell, RefCell},
+    future::Future,
+};
 
 use log::{debug, error, log_enabled, Level};
 use once_cell::sync::OnceCell;
@@ -318,12 +321,28 @@ fn logcontext_error(py: Python<'_>, msg: String) -> PyResult<()> {
 /// `threading.get_ident`, cached (it never changes and this is on a hot path).
 static GET_THREAD_ID: OnceCell<Py<PyAny>> = OnceCell::new();
 
+thread_local! {
+    /// This OS thread's `threading.get_ident()` value, cached: it is constant
+    /// for the lifetime of the thread, and [`get_thread_id`] runs up to twice
+    /// per context switch — a Python call each time would be pure overhead. A
+    /// fresh thread starts with a fresh (empty) slot, so recycled thread ids
+    /// cannot go stale.
+    static CACHED_THREAD_ID: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
 /// The current OS thread id, matching Python's `threading.get_ident()`.
 fn get_thread_id(py: Python<'_>) -> PyResult<u64> {
-    let get_ident = GET_THREAD_ID.get_or_try_init(|| -> PyResult<Py<PyAny>> {
-        Ok(py.import("threading")?.getattr("get_ident")?.unbind())
-    })?;
-    get_ident.bind(py).call0()?.extract()
+    CACHED_THREAD_ID.with(|cell| {
+        if let Some(id) = cell.get() {
+            return Ok(id);
+        }
+        let get_ident = GET_THREAD_ID.get_or_try_init(|| -> PyResult<Py<PyAny>> {
+            Ok(py.import("threading")?.getattr("get_ident")?.unbind())
+        })?;
+        let id = get_ident.bind(py).call0()?.extract()?;
+        cell.set(Some(id));
+        Ok(id)
+    })
 }
 
 /// Normalise a Python value to `None` if it is `None`, else `Some`.
@@ -337,18 +356,31 @@ fn none_to_option(obj: Bound<'_, PyAny>) -> Option<Py<PyAny>> {
 
 /// Propagate a usage update to the parent context, if there is a (truthy) one.
 ///
-/// Dispatched via `call_method1` so subclass overrides are respected. The
-/// truthiness guard matches Python's `if self.parent_context:` and is
-/// load-bearing: the sentinel is falsy *and* implements no `add_*` methods, so a
-/// bare `is_some()` check would call a nonexistent method on it.
-fn forward_to_parent<'py>(
+/// A plain base `LoggingContext` parent — the overwhelmingly common case, e.g.
+/// every `Measure`-created nested context — is dispatched via `native` directly,
+/// skipping the Python method call (attribute lookup, args tuple, call frame)
+/// that `add_cputime` would otherwise pay on every switch away from a parented
+/// context and `add_database_*` per DB operation. Anything else truthy is a
+/// Python subclass, dispatched via `call_method1` so its overrides are
+/// respected — the same split as `switch_context`. The truthiness guard matches
+/// Python's `if self.parent_context:` and is load-bearing: the sentinel is falsy
+/// *and* implements no `add_*` methods, so a bare `is_some()` check would call a
+/// nonexistent method on it.
+fn forward_to_parent<'py, N>(
     parent: &Option<Py<PyAny>>,
     py: Python<'py>,
     method: &str,
     args: impl PyCallArgs<'py>,
-) -> PyResult<()> {
+    native: N,
+) -> PyResult<()>
+where
+    N: FnOnce(&Bound<'py, LoggingContext>) -> PyResult<()>,
+{
     if let Some(parent) = parent {
         let parent = parent.bind(py);
+        if let Ok(base) = parent.cast_exact::<LoggingContext>() {
+            return native(base);
+        }
         if parent.is_truthy()? {
             parent.call_method1(method, args)?;
         }
@@ -512,8 +544,10 @@ impl LoggingContext {
     ) -> PyResult<()> {
         self.previous_context = Some(current_context(py));
 
-        // track the resources used by this context so far
-        self.resource_usage = Py::new(py, ContextResourceUsage::default())?;
+        // track the resources used by this context so far. `type.__call__` runs
+        // `__new__` (which allocated a zeroed tracker) immediately before this,
+        // so reset that object in place rather than allocating a second one.
+        self.resource_usage.borrow_mut(py).reset();
 
         // The thread resource usage when the logcontext became active. None if
         // the context is not currently active.
@@ -709,6 +743,7 @@ impl LoggingContext {
             py,
             "add_cputime",
             (utime_delta, stime_delta),
+            |p| p.borrow().add_cputime(py, utime_delta, stime_delta),
         )
     }
 
@@ -729,6 +764,7 @@ impl LoggingContext {
             py,
             "add_database_transaction",
             (duration_sec,),
+            |p| p.borrow().add_database_transaction(py, duration_sec),
         )
     }
 
@@ -748,6 +784,7 @@ impl LoggingContext {
             py,
             "add_database_scheduled",
             (sched_sec,),
+            |p| p.borrow().add_database_scheduled(py, sched_sec),
         )
     }
 
@@ -762,6 +799,7 @@ impl LoggingContext {
             py,
             "record_event_fetch",
             (event_count,),
+            |p| p.borrow().record_event_fetch(py, event_count),
         )
     }
 
@@ -942,14 +980,17 @@ pub fn set_current_context(py: Python<'_>, context: Bound<'_, PyAny>) -> PyResul
 /// The instance is owned here (not pushed in from Python), so its identity is
 /// stable and equal to the `SENTINEL_CONTEXT` exported by [`register_module`],
 /// preserving `context is SENTINEL_CONTEXT` and `bool(context)` semantics.
-fn sentinel(py: Python<'_>) -> Py<PyAny> {
-    SENTINEL
-        .get_or_init(|| {
-            Py::new(py, Sentinel::instance(py))
-                .expect("failed to create the sentinel logcontext")
-                .into_any()
-        })
-        .clone_ref(py)
+///
+/// Returns the static reference: the dominant callers are identity checks on the
+/// switch path (`switch_context`, every switch to/from the sentinel), which
+/// shouldn't pay an INCREF/DECREF pair per comparison. Callers handing a
+/// reference back to Python `clone_ref` explicitly.
+fn sentinel(py: Python<'_>) -> &'static Py<PyAny> {
+    SENTINEL.get_or_init(|| {
+        Py::new(py, Sentinel::instance(py))
+            .expect("failed to create the sentinel logcontext")
+            .into_any()
+    })
 }
 
 /// Get the current logging context.
@@ -965,7 +1006,7 @@ pub fn current_context(py: Python<'_>) -> Py<PyAny> {
 
     THREAD_LOCAL_CONTEXT.with(|slot| match &*slot.borrow() {
         Some(ctx) => ctx.clone_ref(py),
-        None => sentinel(py),
+        None => sentinel(py).clone_ref(py),
     })
 }
 
@@ -997,7 +1038,7 @@ pub fn swap_current_context(py: Python<'_>, context: Py<PyAny>) -> Py<PyAny> {
     let previous = THREAD_LOCAL_CONTEXT.with(|slot| slot.borrow_mut().replace(context));
     match previous {
         Some(ctx) => ctx,
-        None => sentinel(py),
+        None => sentinel(py).clone_ref(py),
     }
 }
 
@@ -1013,7 +1054,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add("DEBUG_LOGGER_NAME", DEBUG_LOGGER_NAME)?;
     // The sentinel singleton is owned by Rust; export the one instance so Python's
     // `SENTINEL_CONTEXT` is that exact object (identity preserved).
-    child_module.add("SENTINEL_CONTEXT", sentinel(py))?;
+    child_module.add("SENTINEL_CONTEXT", sentinel(py).clone_ref(py))?;
 
     m.add_submodule(&child_module)?;
 
@@ -1037,7 +1078,7 @@ mod tests {
     /// The native sentinel singleton (created lazily on first use), used for
     /// identity assertions.
     fn registered_sentinel(py: Python<'_>) -> Py<PyAny> {
-        sentinel(py)
+        sentinel(py).clone_ref(py)
     }
 
     #[test]
