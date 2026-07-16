@@ -18,6 +18,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use log::{debug, log_enabled, Level};
 use once_cell::sync::OnceCell;
 use pyo3::{
     create_exception, exceptions::PyException, exceptions::PyRuntimeError, intern, prelude::*,
@@ -25,7 +26,7 @@ use pyo3::{
 };
 use tokio::sync::oneshot;
 
-use crate::logging::context::set_current_context;
+use crate::logging::context::{set_current_context, LoggingContext, DEBUG_LOGGER_NAME};
 use crate::tokio_runtime::runtime;
 
 create_exception!(
@@ -238,31 +239,69 @@ where
                 // the awaitable is driven in it. `run_in_background` then starts the
                 // awaitable in the current logcontext and follows the logcontext rules
                 // from there.
+                //
+                // Never re-start a context that has already finished: the request may
+                // have completed (or been cancelled — `create_deferred` does not
+                // propagate cancellation) while this task was still running. Restoring
+                // it would trip the "Re-starting finished log context" abuse check and
+                // account our work against a context whose metrics are already
+                // finalised, so run in the reactor's current context (normally the
+                // sentinel) instead. Both `__exit__` (which sets `finished`) and this
+                // check run on the reactor thread, so the check cannot race.
                 let previous = match &logcontext {
-                    Some(ctx) => Some(set_current_context(py, ctx.as_py(py))?),
+                    Some(ctx) => {
+                        let ctx = ctx.as_py(py);
+                        let finished = ctx
+                            .cast::<LoggingContext>()
+                            .map(|c| c.borrow().is_finished())
+                            .unwrap_or(false);
+                        if finished {
+                            if log_enabled!(target: DEBUG_LOGGER_NAME, Level::Debug) {
+                                debug!(
+                                    target: DEBUG_LOGGER_NAME,
+                                    "run_python_awaitable: captured logcontext {} has \
+                                     finished; running in the sentinel",
+                                    ctx.str()?
+                                );
+                            }
+                            None
+                        } else {
+                            Some(set_current_context(py, ctx)?)
+                        }
+                    }
                     None => None,
                 };
 
                 // We fire-and-forget using `run_in_background`. Re-using
                 // `run_in_background` also makes sure the awaitable gets run with the
-                // current logcontext while following the logcontext rules.
-                let deferred = logging_context.call_method1(
-                    intern!(py, "run_in_background"),
-                    (awaitable_factory.bind(py),),
-                )?;
-                deferred.call_method1(
-                    intern!(py, "addCallbacks"),
-                    (on_success.bind(py), on_error.bind(py)),
-                )?;
+                // current logcontext while following the logcontext rules. Run inside
+                // a closure so that an error cannot skip the restore below — that
+                // would leak the restored context onto the reactor thread permanently,
+                // misattributing everything the reactor does next.
+                let result = (|| -> PyResult<()> {
+                    let deferred = logging_context.call_method1(
+                        intern!(py, "run_in_background"),
+                        (awaitable_factory.bind(py),),
+                    )?;
+                    deferred.call_method1(
+                        intern!(py, "addCallbacks"),
+                        (on_success.bind(py), on_error.bind(py)),
+                    )?;
+                    Ok(())
+                })();
 
                 // Return the reactor thread to its previous logcontext (normally the
-                // sentinel). `run_in_background` has already arranged for the
-                // awaitable's completion to reset to the sentinel and has restored the
-                // calling logcontext synchronously, so this leaves the reactor as we
-                // found it rather than leaking `ctx` into it.
-                if let Some(previous) = previous {
-                    set_current_context(py, previous.into_bound(py))?;
-                }
+                // sentinel) whether or not the above succeeded. `run_in_background`
+                // has already arranged for the awaitable's completion to reset to the
+                // sentinel and has restored the calling logcontext synchronously, so
+                // this leaves the reactor as we found it rather than leaking `ctx`
+                // into it. If both the drive and the restore fail, report the first
+                // error.
+                let restore = match previous {
+                    Some(previous) => set_current_context(py, previous.into_bound(py)).map(drop),
+                    None => Ok(()),
+                };
+                result.and(restore)?;
 
                 Ok(py.None())
             },

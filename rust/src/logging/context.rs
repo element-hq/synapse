@@ -766,6 +766,12 @@ impl LoggingContext {
 }
 
 impl LoggingContext {
+    /// Whether `__exit__` has run, for crate-internal callers (Python code reads
+    /// the `finished` attribute instead).
+    pub(crate) fn is_finished(&self) -> bool {
+        self.finished
+    }
+
     /// Native body of the `start` pymethod. Shared with the switch fast path in
     /// [`set_current_context`], which calls this directly for a base
     /// `LoggingContext` rather than dispatching through Python. Runs the same
