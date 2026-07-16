@@ -144,30 +144,20 @@ impl LogContext {
 /// (Measure, request/background-process metrics, task scheduler, ...) are
 /// unaffected. Keeping this native lets the switch machinery do its rusage
 /// accounting without allocating a Python object per operation.
-#[pyclass(
-    name = "ContextResourceUsage",
-    module = "synapse.logging.context",
-    from_py_object
-)]
+#[pyclass(skip_from_py_object, get_all, set_all)]
 #[derive(Clone, Default)]
 pub struct ContextResourceUsage {
     /// System CPU time, in seconds.
-    #[pyo3(get, set)]
     pub ru_stime: f64,
     /// User CPU time, in seconds.
-    #[pyo3(get, set)]
     pub ru_utime: f64,
     /// Number of database transactions done.
-    #[pyo3(get, set)]
     pub db_txn_count: i64,
     /// Time spent doing database transactions (excluding scheduling), in seconds.
-    #[pyo3(get, set)]
     pub db_txn_duration_sec: f64,
     /// Time spent waiting for a database connection, in seconds.
-    #[pyo3(get, set)]
     pub db_sched_duration_sec: f64,
     /// Number of events requested from the database.
-    #[pyo3(get, set)]
     pub evt_db_fetch_count: i64,
 }
 
@@ -197,8 +187,8 @@ impl ContextResourceUsage {
     /// stats; otherwise start at zero.
     #[new]
     #[pyo3(signature = (copy_from=None))]
-    fn new(copy_from: Option<ContextResourceUsage>) -> Self {
-        copy_from.unwrap_or_default()
+    fn new(copy_from: Option<&ContextResourceUsage>) -> Self {
+        copy_from.cloned().unwrap_or_default()
     }
 
     /// Return a copy of this object.
@@ -228,24 +218,24 @@ impl ContextResourceUsage {
     }
 
     /// `self += other`; mutate in place. pyo3 returns `self` for the in-place slot.
-    fn __iadd__(&mut self, other: ContextResourceUsage) {
+    fn __iadd__(&mut self, other: &ContextResourceUsage) {
         self.add_assign(&other);
     }
 
     /// `self -= other`; mutate in place. pyo3 returns `self` for the in-place slot.
-    fn __isub__(&mut self, other: ContextResourceUsage) {
+    fn __isub__(&mut self, other: &ContextResourceUsage) {
         self.sub_assign(&other);
     }
 
     /// `self + other`, returning a new object.
-    fn __add__(&self, other: ContextResourceUsage) -> ContextResourceUsage {
+    fn __add__(&self, other: &ContextResourceUsage) -> ContextResourceUsage {
         let mut res = self.clone();
         res.add_assign(&other);
         res
     }
 
     /// `self - other`, returning a new object.
-    fn __sub__(&self, other: ContextResourceUsage) -> ContextResourceUsage {
+    fn __sub__(&self, other: &ContextResourceUsage) -> ContextResourceUsage {
         let mut res = self.clone();
         res.sub_assign(&other);
         res
@@ -367,7 +357,7 @@ fn cputime_delta(current: (f64, f64), start: (f64, f64)) -> PyResult<(f64, f64)>
 /// `synapse.metrics.background_process_metrics.BackgroundProcessLoggingContext`,
 /// which composes a name and then calls `super().__init__(name=..., ...)` — work
 /// unchanged.
-#[pyclass(subclass, name = "LoggingContext", module = "synapse.logging.context")]
+#[pyclass(subclass)]
 pub struct LoggingContext {
     /// Name for the context, used in logging.
     #[pyo3(get, set)]
