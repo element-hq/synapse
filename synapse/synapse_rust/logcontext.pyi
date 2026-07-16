@@ -115,17 +115,6 @@ def current_context() -> LoggingContextOrSentinel:
     spawned), then this OS thread's slot, then the sentinel.
     """
 
-def swap_current_context(
-    context: LoggingContextOrSentinel,
-) -> LoggingContextOrSentinel:
-    """Set this OS thread's current logging context, returning the one that was
-    previously current on this thread.
-
-    This is the raw slot write only: no resource-usage accounting or
-    thread-affinity checks. `set_current_context` wraps this with the
-    `getrusage` start/stop bookkeeping.
-    """
-
 def set_current_context(
     context: LoggingContextOrSentinel,
 ) -> LoggingContextOrSentinel:

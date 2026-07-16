@@ -1024,8 +1024,11 @@ pub fn current_context(py: Python<'_>) -> Py<PyAny> {
 /// task-local: the switch primitive is only ever driven on reactor/threadpool
 /// threads (Python code), while the task-local is populated once at spawn time by
 /// [`LogContext::scope`].
-#[pyfunction]
-pub fn swap_current_context(py: Python<'_>, context: Py<PyAny>) -> Py<PyAny> {
+///
+/// Crate-internal on purpose: a raw slot write that bypasses the rusage
+/// accounting and thread-affinity checks has no legitimate Python caller, so it
+/// is not exported (Python uses [`set_current_context`]).
+fn swap_current_context(py: Python<'_>, context: Py<PyAny>) -> Py<PyAny> {
     // Enforce the invariant above rather than trusting it: with a scoped
     // task-local populated, `current_context` gives it read precedence, so this
     // write would be invisible (and never restored) — everything that follows
@@ -1052,7 +1055,6 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<LoggingContext>()?;
     child_module.add_class::<Sentinel>()?;
     child_module.add_function(wrap_pyfunction!(current_context, &child_module)?)?;
-    child_module.add_function(wrap_pyfunction!(swap_current_context, &child_module)?)?;
     child_module.add_function(wrap_pyfunction!(set_current_context, &child_module)?)?;
     child_module.add("DEBUG_LOGGER_NAME", DEBUG_LOGGER_NAME)?;
     // The sentinel singleton is owned by Rust; export the one instance so Python's
