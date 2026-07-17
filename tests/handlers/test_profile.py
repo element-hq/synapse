@@ -954,7 +954,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 user_id=self.frank,
                 field_name=ProfileFields.DISPLAYNAME,
                 new_value="Frank",
-                target_users=set(),
             )
         )
 
@@ -1042,7 +1041,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 user_id=self.frank,
                 field_name=ProfileFields.DISPLAYNAME,
                 new_value=None,
-                target_users=set(),
             )
         )
         self.get_success(
@@ -1050,7 +1048,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 user_id=self.frank,
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="http://my.server/me.png",
-                target_users=set(),
             )
         )
 

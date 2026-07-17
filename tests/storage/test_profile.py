@@ -45,7 +45,6 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                 user_id=self.u_frank,
                 field_name=ProfileFields.DISPLAYNAME,
                 new_value="Frank",
-                target_users=set(),
             )
         )
 
@@ -60,7 +59,6 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                 user_id=self.u_frank,
                 field_name=ProfileFields.DISPLAYNAME,
                 new_value=None,
-                target_users=set(),
             )
         )
 
@@ -76,7 +74,6 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                 user_id=self.u_frank,
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="http://my.site/here",
-                target_users=set(),
             )
         )
 
@@ -91,7 +88,6 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
                 user_id=self.u_frank,
                 field_name=ProfileFields.AVATAR_URL,
                 new_value=None,
-                target_users=set(),
             )
         )
 

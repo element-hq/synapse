@@ -589,7 +589,6 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
                 user_id=user_id,
                 field_name=ProfileFields.DISPLAYNAME,
                 new_value="Kermit the Frog",
-                target_users=set(),
             )
         )
         self.get_success(
@@ -597,7 +596,6 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
                 user_id=user_id,
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="http://test/Kermit.jpg",
-                target_users=set(),
             )
         )
 

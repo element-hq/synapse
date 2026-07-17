@@ -670,7 +670,6 @@ class ProfileWorkerStore(SQLBaseStore):
         user_id: UserID,
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
-        target_users: set[str],
     ) -> int | None:
         """
         Wrapper function to set a profile field value and write to the profile
@@ -681,7 +680,6 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id: The user to set the profile field for
             field_name: The field to set the value for
             new_value: New value for the profile field
-            target_users: Users to trigger a profile update stream row for
 
         Returns:
             The profile updates stream ID that was created in this transaction
@@ -942,7 +940,6 @@ class ProfileWorkerStore(SQLBaseStore):
         user_id: UserID,
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
-        target_users: set[str],
     ) -> int | None:
         """
         Set a custom profile field for a user.
@@ -951,7 +948,6 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id: The user's ID.
             field_name: The name of the custom profile field.
             new_value: The value of the custom profile field.
-            target_users: Set of users to trigger profile updates for.
         """
         return await self.db_pool.runInteraction(
             "set_profile_field",
@@ -959,11 +955,12 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id,
             field_name,
             new_value,
-            target_users,
         )
 
     async def delete_profile_field(
-        self, user_id: UserID, field_name: str, target_users: set[str]
+        self,
+        user_id: UserID,
+        field_name: str,
     ) -> int | None:
         """
         Remove a custom profile field for a user.

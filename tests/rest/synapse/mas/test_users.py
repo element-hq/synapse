@@ -59,7 +59,6 @@ class MasQueryUserResource(BaseTestCase):
                 user_id=alice,
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="mxc://example.com/avatar",
-                target_users=set(),
             )
         )
 
@@ -737,7 +736,6 @@ class MasDeleteUserResource(BaseTestCase):
                 user_id=alice,
                 field_name="io.element.example",
                 new_value="hello",
-                target_users=set(),
             )
         )
 

@@ -120,42 +120,6 @@ class ProfileHandler:
         self._set_profile_field_client = ReplicationProfileSetField.make_client(self.hs)
         self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
 
-    async def get_targets_for_profile_updates(
-        self, user_id: UserID
-    ) -> dict[str, set[str]]:
-        """
-        Get targets for the profile updates stream.
-
-        Collects the rooms and users that are in the same rooms, and thus would be
-        interested in profile changes of our user. This will always include the user
-        themselves, even if the user is not in any rooms.
-
-        Args:
-            user_id: The user ID that is updating a profile
-
-        Returns:
-            Dictionary containing two sets, one for `rooms`, one for `users`
-        """
-        if not self._msc4429_enabled:
-            return {
-                "rooms": set(),
-                "users": set(),
-            }
-
-        room_ids = await self.store.get_rooms_for_user(user_id.to_string())
-        if not room_ids:
-            return {
-                "rooms": set(),
-                "users": {user_id.to_string()},
-            }
-
-        return {
-            "rooms": set(room_ids),
-            "users": await self.store.get_local_users_who_share_room_with_user(
-                user_id.to_string()
-            ),
-        }
-
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
         Get a user's profile as a JSON dictionary.
@@ -252,7 +216,6 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         new_displayname: str,
-        profile_update_target_user_ids: set[str],
         by_admin: bool = False,
         propagate: bool = True,
     ) -> int | None:
@@ -271,8 +234,6 @@ class ProfileHandler:
             target_user: the user whose displayname is to be changed.
             requester: The user attempting to make this change.
             new_displayname: The displayname to give this user.
-            profile_update_target_user_ids: User IDs to trigger profile updates stream
-                updates for.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
 
@@ -321,7 +282,6 @@ class ProfileHandler:
             target_user,
             ProfileFields.DISPLAYNAME,
             displayname_to_set,
-            profile_update_target_user_ids,
         )
 
         profile = await self.store.get_profileinfo(target_user)
@@ -378,7 +338,6 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         new_avatar_url: str,
-        profile_update_target_user_ids: set[str],
         by_admin: bool = False,
         propagate: bool = True,
     ) -> int | None:
@@ -397,8 +356,6 @@ class ProfileHandler:
             target_user: the user whose avatar URL is to be changed.
             requester: The user attempting to make this change.
             new_avatar_url: The avatar URL to give this user.
-            profile_update_target_user_ids: User IDs to trigger profile update stream
-                updates for.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
 
@@ -445,7 +402,6 @@ class ProfileHandler:
             target_user,
             ProfileFields.AVATAR_URL,
             avatar_url_to_set,
-            profile_update_target_user_ids,
         )
 
         profile = await self.store.get_profileinfo(target_user)
@@ -709,8 +665,6 @@ class ProfileHandler:
         propagate: bool = True,
     ) -> None:
         """Wrapper function for setting any profile field for a user."""
-        profile_update_targets = await self.get_targets_for_profile_updates(target_user)
-
         if field_name == ProfileFields.DISPLAYNAME:
             if not isinstance(new_value, str):
                 raise SynapseError(
@@ -722,7 +676,6 @@ class ProfileHandler:
                 new_displayname=new_value,
                 by_admin=by_admin,
                 propagate=propagate,
-                profile_update_target_user_ids=profile_update_targets["users"],
             )
         elif field_name == ProfileFields.AVATAR_URL:
             if not isinstance(new_value, str):
@@ -735,7 +688,6 @@ class ProfileHandler:
                 new_avatar_url=new_value,
                 by_admin=by_admin,
                 propagate=propagate,
-                profile_update_target_user_ids=profile_update_targets["users"],
             )
         else:
             stream_id = await self.set_profile_field(
@@ -744,15 +696,16 @@ class ProfileHandler:
                 field_name=field_name,
                 new_value=new_value,
                 by_admin=by_admin,
-                profile_update_target_user_ids=profile_update_targets["users"],
             )
 
-        if stream_id is not None and profile_update_targets["rooms"]:
-            self._notifier.on_new_event(
-                StreamKeyType.PROFILE_UPDATES,
-                stream_id,
-                rooms=profile_update_targets["rooms"],
-            )
+        if stream_id is not None:
+            room_ids = await self.store.get_rooms_for_user(target_user.to_string())
+            if room_ids:
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    rooms=room_ids,
+                )
 
     async def set_profile_field(
         self,
@@ -761,7 +714,6 @@ class ProfileHandler:
         requester: Requester,
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
-        profile_update_target_user_ids: set[str],
         by_admin: bool = False,
     ) -> int | None:
         """Set a new profile field for a user.
@@ -778,8 +730,6 @@ class ProfileHandler:
             requester: The user attempting to make this change.
             field_name: The name of the profile field to update.
             new_value: The new field value for this user.
-            profile_update_target_user_ids: User ID's to trigger profile update stream
-                updates for.
             by_admin: Whether this change was made by an administrator.
         """
         if not self.hs.is_mine(target_user):
@@ -792,7 +742,6 @@ class ProfileHandler:
             target_user,
             field_name,
             new_value,
-            profile_update_target_user_ids,
         )
 
         # Custom fields do not propagate into the user directory *or* rooms.
@@ -872,9 +821,9 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's profile")
 
-        profile_update_targets = await self.get_targets_for_profile_updates(target_user)
         stream_id = await self.store.delete_profile_field(
-            target_user, field_name, profile_update_targets["users"]
+            target_user,
+            field_name,
         )
 
         # Custom fields do not propagate into the user directory *or* rooms.
@@ -884,11 +833,13 @@ class ProfileHandler:
         )
 
         if stream_id:
-            self._notifier.on_new_event(
-                StreamKeyType.PROFILE_UPDATES,
-                stream_id,
-                rooms=profile_update_targets["rooms"],
-            )
+            room_ids = await self.store.get_rooms_for_user(target_user.to_string())
+            if room_ids:
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    rooms=room_ids,
+                )
 
     async def on_profile_query(self, args: JsonDict) -> JsonDict:
         """Handles federation profile query requests."""
