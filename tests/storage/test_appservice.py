@@ -21,7 +21,7 @@
 import json
 import os
 import tempfile
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import yaml
@@ -29,7 +29,11 @@ import yaml
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.appservice import ApplicationService, ApplicationServiceState
+from synapse.appservice import (
+    SCOPE_QUERY_ROOM_MEMBERSHIP,
+    ApplicationService,
+    ApplicationServiceState,
+)
 from synapse.config._base import ConfigError
 from synapse.events import EventBase
 from synapse.server import HomeServer
@@ -38,7 +42,7 @@ from synapse.storage.databases.main.appservice import (
     ApplicationServiceStore,
     ApplicationServiceTransactionStore,
 )
-from synapse.types import DeviceListUpdates
+from synapse.types import DeviceListUpdates, JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -479,8 +483,8 @@ class TestTransactionStore(ApplicationServiceTransactionStore, ApplicationServic
 
 
 class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
-    def _write_config(self, suffix: str, **kwargs: str) -> str:
-        vals = {
+    def _write_config(self, suffix: str, **kwargs: Any) -> str:
+        vals: JsonDict = {
             "id": "id" + suffix,
             "url": "url" + suffix,
             "as_token": "as_token" + suffix,
@@ -566,3 +570,68 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
         self.assertIn(f1, str(e))
         self.assertIn(f2, str(e))
         self.assertIn("as_token", str(e))
+
+    def test_invalid_scopes_raises(self) -> None:
+        f = self._write_config(
+            suffix="1", **{"io.element.msc4502.scopes": "not-a-list"}
+        )
+
+        self.hs.config.appservice.app_service_config_files = [f]
+        self.hs.config.caches.event_cache_size = 1
+
+        server_name = self.hs.hostname
+        database = self.hs.get_datastores().databases[0]
+        with self.assertRaises(ValueError):
+            ApplicationServiceStore(
+                database,
+                make_conn(
+                    db_config=database._database_config,
+                    engine=database.engine,
+                    default_txn_name="test",
+                    server_name=server_name,
+                ),
+                self.hs,
+            )
+
+    def test_known_scope_works(self) -> None:
+        f = self._write_config(
+            suffix="1", **{"io.element.msc4502.scopes": [SCOPE_QUERY_ROOM_MEMBERSHIP]}
+        )
+
+        self.hs.config.appservice.app_service_config_files = [f]
+        self.hs.config.caches.event_cache_size = 1
+
+        server_name = self.hs.hostname
+        database = self.hs.get_datastores().databases[0]
+        ApplicationServiceStore(
+            database,
+            make_conn(
+                db_config=database._database_config,
+                engine=database.engine,
+                default_txn_name="test",
+                server_name=server_name,
+            ),
+            self.hs,
+        )
+
+    def test_unknown_scope_raises(self) -> None:
+        f = self._write_config(
+            suffix="1", **{"io.element.msc4502.scopes": ["does:not:exist"]}
+        )
+
+        self.hs.config.appservice.app_service_config_files = [f]
+        self.hs.config.caches.event_cache_size = 1
+
+        server_name = self.hs.hostname
+        database = self.hs.get_datastores().databases[0]
+        with self.assertRaises(ValueError):
+            ApplicationServiceStore(
+                database,
+                make_conn(
+                    db_config=database._database_config,
+                    engine=database.engine,
+                    default_txn_name="test",
+                    server_name=server_name,
+                ),
+                self.hs,
+            )
