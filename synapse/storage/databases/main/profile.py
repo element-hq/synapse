@@ -1015,24 +1015,16 @@ class ProfileWorkerStore(SQLBaseStore):
     async def delete_profile(
         self,
         user_id: UserID,
-        field_names: list[str],
-        target_users: set[str],
-    ) -> int | None:
+    ) -> None:
         """
         Deletes an entire user profile, including displayname, avatar_url and all
         custom fields. Used at user deactivation when erasure is requested.
 
         Args:
             user_id: User ID whose profile is going to be deleted.
-            field_names: List of profile fields the user had.
-            target_users: List of users who share rooms and are interested in
-                profile updates for this user.
-
-        Returns:
-            Latest stream ID for the profile updates stream.
         """
 
-        def _delete_profile_txn(txn: LoggingTransaction) -> int | None:
+        def _delete_profile_txn(txn: LoggingTransaction) -> None:
             # Delete the profile
             txn.execute(
                 """
@@ -1041,16 +1033,8 @@ class ProfileWorkerStore(SQLBaseStore):
                 """,
                 (user_id.to_string(),),
             )
-            # Update the profile updates stream
-            stream_id = self.record_profile_updates_txn(
-                txn=txn,
-                user_id=user_id,
-                action=ProfileUpdateAction.UPDATE,
-                field_names=field_names,
-            )
-            return stream_id
 
-        return await self.db_pool.runInteraction(
+        await self.db_pool.runInteraction(
             "delete_profile",
             _delete_profile_txn,
         )

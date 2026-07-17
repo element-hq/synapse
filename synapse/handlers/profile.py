@@ -512,6 +512,9 @@ class ProfileHandler:
         **leave** the room on the user's behalf, so there's no point sending new join events into
         rooms to propagate the profile deletion.
         See the `users_pending_deactivation` table and the associated user parter loop.
+
+        Profile update streams are NOT updated in any way; this happens when the
+        event persister processes the room leave events triggered elsewhere as above.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -524,40 +527,10 @@ class ProfileHandler:
             # have it.
             raise AuthError(400, "Cannot remove another user's profile")
 
-        profile_updates: list[str] = []
-        profile_update_targets: dict = {"rooms": set(), "users": set()}
-
-        if self._msc4429_enabled:
-            current_profile = await self.store.get_profileinfo(target_user)
-
-            if current_profile.display_name is not None:
-                profile_updates.append(ProfileFields.DISPLAYNAME)
-            if current_profile.avatar_url is not None:
-                profile_updates.append(ProfileFields.AVATAR_URL)
-
-            custom_fields = await self.store.get_profile_fields(target_user)
-            for field_name in custom_fields.keys():
-                profile_updates.append(field_name)
-
-            if profile_updates:
-                profile_update_targets = await self.get_targets_for_profile_updates(
-                    target_user
-                )
-                # Discard ourselves as we're deactivating this account
-                profile_update_targets["users"].discard(target_user.to_string())
-
-        # Record the profile delete and update the profile updates stream
-        stream_id = await self.store.delete_profile(
+        # Record the profile delete
+        await self.store.delete_profile(
             user_id=target_user,
-            field_names=profile_updates,
-            target_users=profile_update_targets["users"],
         )
-        if stream_id is not None and profile_update_targets["rooms"]:
-            self._notifier.on_new_event(
-                StreamKeyType.PROFILE_UPDATES,
-                stream_id,
-                rooms=profile_update_targets["rooms"],
-            )
 
         await self._third_party_rules.on_profile_update(
             target_user.to_string(),
