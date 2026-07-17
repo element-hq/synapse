@@ -20,7 +20,6 @@
 #
 
 import logging
-import resource
 from contextlib import contextmanager
 from typing import Callable, Generator, cast
 from unittest.mock import patch
@@ -707,10 +706,10 @@ class LoggingContextTestCase(unittest.TestCase):
             self.assertEqual(nested_context.name, "foo-bar")
 
 
-# A real (truthy) rusage for exercising the `start()`/`stop()` code paths that
-# only check whether an rusage is present. `RUSAGE_SELF` (not `RUSAGE_THREAD`)
-# so this works on platforms without per-thread rusage support.
-_TRUTHY_RUSAGE = resource.getrusage(resource.RUSAGE_SELF)
+# A stand-in rusage `(ru_utime, ru_stime)` for exercising the `start()`/`stop()`
+# code paths that only check whether an rusage is present, without depending on
+# `RUSAGE_THREAD` support or the real value of the thread's CPU clock.
+_TRUTHY_RUSAGE = (0.0, 0.0)
 
 
 @contextmanager
@@ -730,12 +729,12 @@ class LogContextErrorMessageTestCase(unittest.TestCase):
     """Characterization tests pinning the exact `logcontext_error` message shapes
     and the abuse-detection code paths.
 
-    These exist to guard against accidental drift in the switch machinery:
-    downstream log scraping depends on the wording, argument order and the
-    conditions that trigger each warning. Messages that interpolate a context
-    via `%r` embed the object's `repr()` (id/address), so we reconstruct the
-    expected string from the *same* live objects rather than hard-coding an
-    address.
+    These exist to guard against accidental drift in the switch machinery (which
+    lives in Rust: `rust/src/logging/context.rs`): downstream log scraping
+    depends on the wording, argument order and the conditions that trigger each
+    warning. Messages that interpolate a context via `%r` embed the object's
+    `repr()` (id/address), so we reconstruct the expected string from the *same*
+    live objects rather than hard-coding an address.
     """
 
     def setUp(self) -> None:
