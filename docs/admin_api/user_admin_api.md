@@ -1312,10 +1312,11 @@ The following parameters should be set in the URL:
 
 ## Override ratelimiting for users
 
-This API allows to override or disable ratelimiting for a specific user.
-There are specific APIs to set, get and delete a ratelimit.
+This API allows an administrator to set, retrieve, or remove a message rate limit
+override for a specific user. Removing an override restores the configured default
+rate limit.
 
-### Get status of ratelimit
+### Get message rate limit override
 
 The API is:
 
@@ -1343,10 +1344,10 @@ The following parameters should be set in the URL:
 
 The following fields are returned in the JSON response body:
 
-- `messages_per_second` - integer - The number of actions that can
-  be performed in a second. `0` mean that ratelimiting is disabled for this user.
-- `burst_count` - integer - How many actions that can be performed before
-  being limited.
+- `messages_per_second` - integer - The number of messages that can be sent per
+  second. `0` means that ratelimiting is disabled for this user.
+- `burst_count` - integer - The number of messages that can be sent before the user
+  is limited.
 
 If **no** custom ratelimit is set, an empty JSON dict is returned.
 
@@ -1354,7 +1355,7 @@ If **no** custom ratelimit is set, an empty JSON dict is returned.
 {}
 ```
 
-### Set ratelimit
+### Set message rate limit override
 
 The API is:
 
@@ -1380,23 +1381,23 @@ The following parameters should be set in the URL:
 
 Body parameters:
 
-- `messages_per_second` - positive integer, optional. The number of actions that can
-  be performed in a second. Defaults to `0`.
-- `burst_count` - positive integer, optional. How many actions that can be performed
-  before being limited. Defaults to `0`.
+- `messages_per_second` - non-negative integer, optional. The number of messages that can
+  be sent per second. Defaults to `0`.
+- `burst_count` - non-negative integer, optional. The number of messages that can be sent
+  before the user is limited. Defaults to `0`.
 
-To disable users' ratelimit set both values to `0`.
+To disable a user's rate limit, set both values to `0`.
 
 **Response**
 
 The following fields are returned in the JSON response body:
 
-- `messages_per_second` - integer - The number of actions that can
-  be performed in a second.
-- `burst_count` - integer - How many actions that can be performed before
-  being limited.
+- `messages_per_second` - integer - The number of messages that can be sent per
+  second.
+- `burst_count` - integer - The number of messages that can be sent before the user
+  is limited.
 
-### Delete ratelimit
+### Delete message rate limit override
 
 The API is:
 
