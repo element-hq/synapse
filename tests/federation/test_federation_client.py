@@ -377,7 +377,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
             self.federation_client.user_directory_search("other.example.com", 10)
         )
 
-        # Check that the result is an empty result set
+        # A failed fetch returns an empty result set (never None), as some
+        # callers rely on the dict shape.
         self.assertEqual(result, {"results": []})
 
 
@@ -437,6 +438,10 @@ class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
             self.user_dir_helper.get_profiles_in_user_directory()
         )
         self.assertIn("@bob:remote.example.com", profiles)
+        self.assertIn(
+            ("@bob:remote.example.com", "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
 
     def test_sync_skips_own_server(self) -> None:
         # Our own server name should never be queried, even if present in the DB.
@@ -447,3 +452,77 @@ class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
         self.get_success(self.federation_client._sync_federated_user_directory())
 
         self.federation_client.user_directory_search.assert_not_called()
+
+    def _run_sync_returning(self, results: list[dict]) -> None:
+        """Run a single sync where the remote returns the given results.
+
+        An empty list simulates a failed fetch, since our logic treats an
+        empty result as a failure and skips pruning.
+        """
+        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+            return_value={"results": results}
+        )
+        self.get_success(self.federation_client._sync_federated_user_directory())
+
+    def test_sync_prunes_users_absent_from_new_result(self) -> None:
+        """A user no longer returned by a successful sync is pruned."""
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        # First sync makes two remote users visible.
+        self._run_sync_returning(
+            [
+                {"user_id": "@bob:remote.example.com", "display_name": "Bob"},
+                {"user_id": "@carol:remote.example.com", "display_name": "Carol"},
+            ]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {
+                ("@bob:remote.example.com", "remote.example.com"),
+                ("@carol:remote.example.com", "remote.example.com"),
+            },
+        )
+
+        # Second successful sync only returns Bob -> Carol must be pruned.
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@bob:remote.example.com", profiles)
+        self.assertNotIn("@carol:remote.example.com", profiles)
+
+    def test_sync_empty_result_does_not_prune(self) -> None:
+        """An empty result is treated as a failed fetch and must not prune.
+
+        In our logic an empty ``results`` set is indistinguishable from a
+        failed request, so we deliberately keep previously visible users.
+        """
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+
+        # Empty result == treated as failure -> entries must be retained.
+        self._run_sync_returning([])
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )

@@ -1498,15 +1498,18 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             ),
         )
 
-        public_rooms = self.get_success(
-            self.user_dir_helper.get_users_in_public_rooms()
+        federated_users = self.get_success(
+            self.user_dir_helper.get_users_in_federated_search()
         )
         self.assertIn(
             (
                 "@alice:remote.example.com",
-                self.handler._federated_cache_room_id,
+                "remote.example.com",
             ),
-            public_rooms,
+            federated_users,
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_public_rooms()), set()
         )
 
     def test_upsert_remote_users_ignores_local_users(self) -> None:
@@ -1526,6 +1529,41 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.user_dir_helper.get_profiles_in_user_directory()
         )
         self.assertNotIn("@localuser:test", profiles)
+
+    def test_reconcile_remote_users_ignores_users_from_other_servers(self) -> None:
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@alice:remote.example.com",
+                        display_name="Alice Remote",
+                        avatar_url=None,
+                    ),
+                    RemoteUserDirectoryEntry(
+                        user_id="@mallory:third-party.example.com",
+                        display_name="Mallory",
+                        avatar_url=None,
+                    ),
+                    RemoteUserDirectoryEntry(
+                        user_id="not-a-valid-user-id",
+                        display_name="Malformed",
+                        avatar_url=None,
+                    ),
+                ],
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@alice:remote.example.com", profiles)
+        self.assertNotIn("@mallory:third-party.example.com", profiles)
+        self.assertNotIn("not-a-valid-user-id", profiles)
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@alice:remote.example.com", "remote.example.com")},
+        )
 
     def test_search_users_returns_cached_remote_users(self) -> None:
         self.get_success(
@@ -1547,4 +1585,81 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         self.assertIn(
             "@carol:remote.example.com",
             {user["user_id"] for user in results["results"]},
+        )
+
+    def test_remote_user_survives_leaving_last_real_room(self) -> None:
+        user_id = "@dave:remote.example.com"
+        room_id = "!real-room:test"
+
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id=user_id,
+                        display_name="Dave Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+        self.get_success(self.store.add_users_in_public_rooms(room_id, [user_id]))
+
+        self.get_success(self.handler._handle_remove_user(room_id, user_id))
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn(user_id, profiles)
+        self.assertIn(
+            (user_id, "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+        self.assertNotIn(
+            (user_id, room_id),
+            self.get_success(self.user_dir_helper.get_users_in_public_rooms()),
+        )
+
+    def test_remove_from_user_directory_clears_federated_visibility(self) -> None:
+        user_id = "@erin:remote.example.com"
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id=user_id,
+                        display_name="Erin Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        self.get_success(self.store.remove_from_user_dir(user_id))
+
+        self.assertNotIn(
+            user_id,
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+        )
+        self.assertNotIn(
+            (user_id, "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+
+    def test_delete_all_from_user_directory_clears_federated_visibility(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@frank:remote.example.com",
+                        display_name="Frank Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        self.get_success(self.store.delete_all_from_user_dir())
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            set(),
         )

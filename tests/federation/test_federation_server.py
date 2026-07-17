@@ -112,9 +112,8 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
 
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
-            "POST",
+            "GET",
             "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
-            content={},
         )
 
         # Check that the response is correct
@@ -130,9 +129,8 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
 
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
-            "POST",
+            "GET",
             "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
-            content={},
         )
 
         # Check that the response is correct
