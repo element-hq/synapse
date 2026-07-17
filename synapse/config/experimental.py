@@ -206,6 +206,9 @@ class ExperimentalConfig(Config):
         # MSC4502: Targeted and unrestricted room member queries
         self.msc4502_enabled: bool = experimental.get("msc4502_enabled", False)
 
+        # MSCXXXX: ...
+        self.mscXXXX_enabled: bool = experimental.get("mscXXXX_enabled", False)
+
         auth_delegated = (config.get("matrix_authentication_service") or {}).get(
             "enabled", False
         )

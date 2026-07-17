@@ -229,6 +229,21 @@ class DelayedEventsStore(SQLBaseStore):
 
         return delay_id, next_send_ts
 
+    async def get_delayed_event_creator(self, delay_id: str) -> str | None:
+        """
+        Retrieves the localpart of the user who created the matching delayed event.
+
+        Returns: The localpart of the creating user, or None if there is no matching
+            delayed event.
+        """
+        return await self.db_pool.simple_select_one_onecol(
+            table="delayed_events",
+            keyvalues={"delay_id": delay_id},
+            retcol="user_localpart",
+            allow_none=True,
+            desc="get_delayed_event_owner",
+        )
+
     async def restart_delayed_event(
         self,
         delay_id: str,

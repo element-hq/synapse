@@ -64,7 +64,18 @@ TransactionUnusedFallbackKeys = dict[str, dict[str, list[str]]]
 
 # Scopes assignable to application services for extended privileges.
 SCOPE_QUERY_ROOM_MEMBERSHIP = "urn:matrix:client:io.element.msc4502:rooms:is_joined"
-KNOWN_SCOPES = frozenset({SCOPE_QUERY_ROOM_MEMBERSHIP})
+SCOPE_RESTART_DELAYED_EVENT = (
+    "urn:matrix:client:io.element.mscXXXX:delayed_events:restart"
+)
+SCOPE_SEND_DELAYED_EVENT = "urn:matrix:client:io.element.mscXXXX:delayed_events:send"
+
+KNOWN_SCOPES = frozenset(
+    {
+        SCOPE_QUERY_ROOM_MEMBERSHIP,
+        SCOPE_RESTART_DELAYED_EVENT,
+        SCOPE_SEND_DELAYED_EVENT,
+    }
+)
 
 
 class ApplicationServiceState(Enum):

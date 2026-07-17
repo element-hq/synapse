@@ -15,17 +15,23 @@
 """Tests REST events for /delayed_events paths."""
 
 from http import HTTPStatus
+from unittest.mock import AsyncMock, patch
 
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
+from synapse.appservice import (
+    SCOPE_RESTART_DELAYED_EVENT,
+    SCOPE_SEND_DELAYED_EVENT,
+    ApplicationService,
+)
 from synapse.rest import admin
 from synapse.rest.client import delayed_events, login, room, sync, versions
 from synapse.server import HomeServer
 from synapse.synapse_rust.http_client import HttpClient
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -742,6 +748,224 @@ class DelayedEventsTestCase(HomeserverTestCase):
                 found = True
         if should_find and not found:
             self.fail("Did not find event with matching delay_id")
+
+
+AS_TOKEN = "i_am_an_app_service"
+AS_RESTART_TOKEN = "i_am_an_app_service_and_can_restart"
+AS_SEND_TOKEN = "i_am_an_app_service_and_can_send"
+
+_CANCEL_ACTION = "cancel"
+_RESTART_ACTION = "restart"
+_SEND_ACTION = "send"
+
+
+class DelayedEventsScopedActionsTestCase(HomeserverTestCase):
+    """Tests for scoped access to delayed-event management actions."""
+
+    servlets = [
+        admin.register_servlets,
+        delayed_events.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["max_event_delay_duration"] = "24h"
+        config["experimental_features"] = {
+            "mscXXXX_enabled": True,
+            **config.get("experimental_features", {}),
+        }
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user1_user_id = self.register_user("user1", "pass")
+        self.user1_access_token = self.login("user1", "pass")
+        self.user2_user_id = self.register_user("user2", "pass")
+        self.user2_access_token = self.login("user2", "pass")
+
+        self.room_id = self.helper.create_room_as(
+            self.user1_user_id,
+            tok=self.user1_access_token,
+            extra_content={
+                "preset": "public_chat",
+                "power_level_content_override": {
+                    "events": {
+                        _EVENT_TYPE: 0,
+                    }
+                },
+            },
+        )
+        self.helper.join(
+            room=self.room_id, user=self.user2_user_id, tok=self.user2_access_token
+        )
+
+        main_store = self.hs.get_datastores().main
+        main_store.services_cache.append(
+            ApplicationService(
+                AS_TOKEN,
+                id="as_without_scopes",
+                sender=UserID.from_string("@as1:test"),
+                scopes=[],
+            )
+        )
+        main_store.services_cache.append(
+            ApplicationService(
+                AS_RESTART_TOKEN,
+                id="as_with_restart_scope",
+                sender=UserID.from_string("@as_restart:test"),
+                scopes=[SCOPE_RESTART_DELAYED_EVENT],
+            )
+        )
+        main_store.services_cache.append(
+            ApplicationService(
+                AS_SEND_TOKEN,
+                id="as_with_send_scope",
+                sender=UserID.from_string("@as_send:test"),
+                scopes=[SCOPE_SEND_DELAYED_EVENT],
+            )
+        )
+
+        # Advance enough time that requests made during `prepare(...)` don't
+        # affect the ratelimits in the test itself.
+        self.reactor.advance(Duration(days=1).as_secs())
+
+    def _create_delayed_event(self, access_token: str, delay_ms: int = 100000) -> str:
+        channel = self.make_request(
+            "POST",
+            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay_ms),
+            {},
+            access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
+        return delay_id
+
+    def _update_delayed_event(
+        self, delay_id: str, action: str, access_token: str | None
+    ) -> FakeChannel:
+        return self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/{delay_id}/{action}",
+            {},
+            access_token,
+        )
+
+    def test_unauthenticated_forbidden(self) -> None:
+        for action in (_CANCEL_ACTION, _RESTART_ACTION, _SEND_ACTION):
+            delay_id = self._create_delayed_event(self.user1_access_token)
+            channel = self._update_delayed_event(delay_id, action, None)
+            self.assertEqual(HTTPStatus.UNAUTHORIZED, channel.code, channel.result)
+            self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
+
+    def test_creator_can_still_manage_own_delayed_event(self) -> None:
+        for action in (_CANCEL_ACTION, _RESTART_ACTION, _SEND_ACTION):
+            delay_id = self._create_delayed_event(self.user1_access_token)
+            channel = self._update_delayed_event(
+                delay_id, action, self.user1_access_token
+            )
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    def test_non_creator_without_scope_forbidden(self) -> None:
+        for action in (_CANCEL_ACTION, _RESTART_ACTION, _SEND_ACTION):
+            delay_id = self._create_delayed_event(self.user1_access_token)
+            channel = self._update_delayed_event(
+                delay_id, action, self.user2_access_token
+            )
+            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+            self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def test_non_creator_with_restart_scope_can_only_restart(self) -> None:
+        requester = create_requester(
+            self.user2_user_id,
+            scope={SCOPE_RESTART_DELAYED_EVENT},
+        )
+        for action in (_CANCEL_ACTION, _SEND_ACTION):
+            delay_id = self._create_delayed_event(self.user1_access_token)
+            with patch.object(
+                self.hs.get_auth(),
+                "get_user_by_req",
+                AsyncMock(return_value=requester),
+            ):
+                channel = self._update_delayed_event(delay_id, action, "doesnt-matter")
+            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+            self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+        delay_id = self._create_delayed_event(self.user1_access_token)
+        with patch.object(
+            self.hs.get_auth(), "get_user_by_req", AsyncMock(return_value=requester)
+        ):
+            channel = self._update_delayed_event(
+                delay_id, _RESTART_ACTION, "doesnt-matter"
+            )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    def test_non_creator_with_send_scope_can_only_restart(self) -> None:
+        requester = create_requester(
+            self.user2_user_id,
+            scope={SCOPE_SEND_DELAYED_EVENT},
+        )
+        for action in (_CANCEL_ACTION, _RESTART_ACTION):
+            delay_id = self._create_delayed_event(self.user1_access_token)
+            with patch.object(
+                self.hs.get_auth(),
+                "get_user_by_req",
+                AsyncMock(return_value=requester),
+            ):
+                channel = self._update_delayed_event(delay_id, action, "doesnt-matter")
+            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+            self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+        delay_id = self._create_delayed_event(self.user1_access_token)
+        with patch.object(
+            self.hs.get_auth(), "get_user_by_req", AsyncMock(return_value=requester)
+        ):
+            channel = self._update_delayed_event(
+                delay_id, _SEND_ACTION, "doesnt-matter"
+            )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    def test_appservice_without_scope_forbidden(self) -> None:
+        for action in (_CANCEL_ACTION, _RESTART_ACTION, _SEND_ACTION):
+            delay_id = self._create_delayed_event(AS_TOKEN)
+            channel = self._update_delayed_event(
+                delay_id, action, self.user2_access_token
+            )
+            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+            self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def test_appservice_with_restart_scope_can_only_restart(self) -> None:
+        for action in (_CANCEL_ACTION, _SEND_ACTION):
+            delay_id = self._create_delayed_event(self.user1_access_token)
+            channel = self._update_delayed_event(delay_id, action, AS_RESTART_TOKEN)
+            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+            self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+        delay_id = self._create_delayed_event(self.user1_access_token)
+        channel = self._update_delayed_event(
+            delay_id, _RESTART_ACTION, AS_RESTART_TOKEN
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    def test_appservice_with_send_scope_can_only_send(self) -> None:
+        for action in (_CANCEL_ACTION, _RESTART_ACTION):
+            delay_id = self._create_delayed_event(self.user1_access_token)
+            channel = self._update_delayed_event(delay_id, action, AS_SEND_TOKEN)
+            self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+            self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+        delay_id = self._create_delayed_event(self.user1_access_token)
+        channel = self._update_delayed_event(delay_id, _SEND_ACTION, AS_SEND_TOKEN)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    def test_unknown_delayed_event_cannot_be_managed(self) -> None:
+        for action in (_CANCEL_ACTION, _RESTART_ACTION, _SEND_ACTION):
+            channel = self._update_delayed_event(
+                "not-a-real-delay-id", action, self.user2_access_token
+            )
+            self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
 
 
 def _get_path_for_delayed_state(

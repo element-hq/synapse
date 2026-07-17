@@ -19,8 +19,15 @@ from typing import TYPE_CHECKING, Optional
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
-from synapse.api.errors import Codes, ShadowBanError, SynapseError
+from synapse.api.errors import (
+    AuthError,
+    Codes,
+    NotFoundError,
+    ShadowBanError,
+    SynapseError,
+)
 from synapse.api.ratelimiting import Ratelimiter
+from synapse.appservice import SCOPE_RESTART_DELAYED_EVENT, SCOPE_SEND_DELAYED_EVENT
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
@@ -430,7 +437,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._mgmt_ratelimit(request)
+        await self._authorise_and_ratelimit(request, delay_id, bypass_scope=None)
         await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(delay_id)
@@ -445,7 +452,9 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
-        await self._mgmt_ratelimit(request)
+        await self._authorise_and_ratelimit(
+            request, delay_id, bypass_scope=SCOPE_RESTART_DELAYED_EVENT
+        )
 
         # Note: We don't need to wait on `self._initialized_from_db` here as the
         # events that deals with are already marked as processed.
@@ -469,7 +478,9 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._mgmt_ratelimit(request)
+        await self._authorise_and_ratelimit(
+            request, delay_id, bypass_scope=SCOPE_SEND_DELAYED_EVENT
+        )
         await make_deferred_yieldable(self._initialized_from_db)
 
         event, next_send_ts = await self._store.process_target_delayed_event(delay_id)
@@ -491,6 +502,53 @@ class DelayedEventsHandler:
             requester = None
             key = request.getClientAddress().host
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester, key)
+
+    async def _authorise_and_ratelimit(
+        self,
+        request: SynapseRequest,
+        delay_id: str,
+        bypass_scope: Optional[str],
+    ) -> None:
+        """
+        Verify request authorization and perform rate limiting accordingly.
+        """
+        if not self._config.experimental.mscXXXX_enabled:
+            await self._mgmt_ratelimit(request)
+            return
+
+        requester = await self._auth.get_user_by_req(request)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
+
+        creator_localpart = await self._store.get_delayed_event_creator(delay_id)
+        if creator_localpart is None:
+            raise NotFoundError("Delayed event not found")
+
+        # The creator of the delayed event is always allowed to manage it.
+        if creator_localpart == requester.user.localpart:
+            return
+
+        # Other users (or appservices) can manage the delayed event if they
+        # have the required scopes.
+        if bypass_scope is not None and self._requester_has_scope(
+            requester, bypass_scope
+        ):
+            return
+
+        # Otherwise access is denied.
+        raise AuthError(
+            HTTPStatus.FORBIDDEN,
+            "You do not have permission to act on this delayed event",
+        )
+
+    def _requester_has_scope(self, requester: Requester, scope: str) -> bool:
+        app_service = (
+            self._store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
+        return (app_service is not None and app_service.has_scope(scope)) or (
+            scope in requester.scope
+        )
 
     async def _send_on_timeout(self) -> None:
         self._next_delayed_event_call = None
