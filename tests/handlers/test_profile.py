@@ -26,10 +26,16 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 import synapse.types
-from synapse.api.constants import EventTypes, ProfileFields, ProfileUpdateAction
+from synapse.api.constants import (
+    EventTypes,
+    JoinRules,
+    Membership,
+    ProfileFields,
+    ProfileUpdateAction,
+)
 from synapse.api.errors import AuthError, SynapseError
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.profile import ProfileUpdate
 from synapse.types import JsonDict, StreamKeyType, UserID
@@ -49,6 +55,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        knock.register_servlets,
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
@@ -442,6 +449,65 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     user_id=self.frank.to_string(),
                     action="update",
                     field_name="m.status",
+                ),
+            ],
+        )
+
+    @parameterized.expand(
+        [
+            Membership.JOIN,
+            Membership.KNOCK,
+            Membership.INVITE,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_membership_addition_to_room_adds_the_right_join_action_to_profile_streams(
+        self,
+        membership: str,
+    ) -> None:
+        """Test that a membership event that adds a user as joined, invited or knocked,
+        to a room, adds the relevant joined action to the profile update stream tables.
+
+        Here we consider join, knock and invite to all be additions to the room
+        list of members for answering the question "which profiles should we send
+        information about to clients based on memberships appearing".
+        """
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        if membership == Membership.JOIN:
+            self.helper.join(room_id, "@roger:test", tok=roger_token)
+        elif membership == Membership.INVITE:
+            self.helper.invite(
+                room_id, self.frank.to_string(), "@roger:test", tok=self.frank_token
+            )
+        elif membership == Membership.KNOCK:
+            self.helper.send_state(
+                room_id,
+                EventTypes.JoinRules,
+                {"join_rule": JoinRules.KNOCK},
+                tok=self.frank_token,
+            )
+            self.helper.knock(room_id, "@roger:test", tok=roger_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id=self.frank.to_string(),
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=2,
+                    user_id="@roger:test",
+                    action="joined_room",
+                    field_name=None,
                 ),
             ],
         )
