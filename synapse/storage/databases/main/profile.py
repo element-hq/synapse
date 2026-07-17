@@ -764,20 +764,21 @@ class ProfileWorkerStore(SQLBaseStore):
 
         return stream_id
 
-    def record_profile_updates_from_membership_changes(
-        self, *, txn: LoggingTransaction, joined_users: set[str]
+    def record_profile_updates_for_user_joined_room_txn(
+        self, *, txn: LoggingTransaction, room_id: str, joined_users: set[str]
     ) -> None:
         """
-        Record profile updates from membership join events.
-
-        Adds "joined_room" and "left_room" profile update actions into the
-        profile updates stream tables.
+        Record profile updates for membership additions to a room.
 
         Currently, updates are only recorded for local users.
 
         Args:
             txn: The transaction to use.
-            joined_users: A list of users who have joined.
+            room_id: The room ID concerned.
+            joined_users: A list of users who have "joined" the room, which here also
+                means "invited" or "knocked", as in either case we consider that the
+                users profile should be pushed to the client, should they need it
+                already even if the user hasn't actually joined the room.
         """
         if not self._msc4429_enabled:
             return
@@ -787,25 +788,6 @@ class ProfileWorkerStore(SQLBaseStore):
         # Ensure we're working with local users only
         users = {user_id for user_id in joined_users if self.hs.is_mine_id(user_id)}
 
-        # Get rooms for all the users in the changes in one go to save on queries.
-        rows = self.db_pool.simple_select_many_txn(
-            txn=txn,
-            table="current_state_events",
-            column="state_key",
-            iterable=users,
-            retcols=(
-                "state_key",
-                "room_id",
-            ),
-            keyvalues={
-                "type": EventTypes.Member,
-                "membership": Membership.JOIN,
-            },
-        )
-        user_rooms: dict[str, set[str]] = {user_id: set() for user_id in users}
-        for state_key, room_id in rows:
-            user_rooms[state_key].add(room_id)
-
         # Record the profile updates for each user
         for user_id in users:
             self.record_profile_updates_txn(
@@ -813,7 +795,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 user_id=UserID.from_string(user_id),
                 action=ProfileUpdateAction.JOINED_ROOM,
                 field_names=None,
-                user_rooms=user_rooms[user_id],
+                user_rooms={room_id},
             )
 
     def record_profile_updates_txn(

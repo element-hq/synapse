@@ -2127,21 +2127,27 @@ class PersistEventsStore:
             # for the sliding sync tables, so we may as well re-use that information
             # here to avoid parsing the state delta again, and handling various
             # edge cases.
-            profile_update_joins = {
+            # Note, we're skipped Membership.BAN, as we would expect there to also
+            # be a leave event?
+            profile_update_additions = {
                 c.user_id
                 for c in sliding_sync_table_changes.to_insert_membership_snapshots
-                if self.hs.is_mine_id(c.user_id) and c.membership == Membership.JOIN
+                if self.hs.is_mine_id(c.user_id)
+                and c.membership
+                in (Membership.JOIN, Membership.KNOCK, Membership.INVITE)
             }
             profile_update_leaves = {
                 c.user_id
                 for c in sliding_sync_table_changes.to_insert_membership_snapshots
                 if self.hs.is_mine_id(c.user_id) and c.membership == Membership.LEAVE
             }
-            if profile_update_joins:
-                # Write the profile updates for JOIN events
-                self.store.record_profile_updates_from_membership_changes(
+            if profile_update_additions:
+                # Write the profile updates for additions to the room, from either
+                # a join, knock, invite, etc.
+                self.store.record_profile_updates_for_user_joined_room_txn(
                     txn=txn,
-                    joined_users=profile_update_joins,
+                    room_id=room_id,
+                    joined_users=profile_update_additions,
                 )
             if profile_update_leaves:
                 # Write the profile updates for LEAVE events
