@@ -21,29 +21,36 @@
 //! including from spawned tokio tasks — could not be attributed to the request
 //! that caused it.
 //!
-//! This module holds that storage — a per-OS-thread slot
-//! ([`THREAD_LOCAL_CONTEXT`]) used by the reactor thread and any
-//! reactor-managed threadpool threads — along with the logcontext classes
-//! themselves. `LoggingContextFilter` (and therefore `pyo3-log`) resolves the
-//! context by calling [`current_context`] at log-record time.
+//! This module holds that storage and unifies two sources of truth so that a
+//! single [`current_context`] answer is correct from *both* worlds:
 //!
-//! The slot holds an `Option<Py<LoggingContext>>`: `None` means "no context" —
+//! 1. a per-OS-thread slot ([`THREAD_LOCAL_CONTEXT`]) — used by the reactor
+//!    thread and any reactor-managed threadpool threads; and
+//! 2. a per-tokio-task slot ([`TASK_LOCAL_CONTEXT`]), which rides with a task as it
+//!    migrates between worker threads across `.await` points.
+//!
+//! Both slots hold an `Option<Py<LoggingContext>>`: `None` means "no context" —
 //! what Synapse calls the sentinel. The `_Sentinel` marker object itself is pure
 //! Python (`synapse.logging.context.SENTINEL_CONTEXT`); the wrappers there
 //! convert between it and `None` at the boundary, so no Rust code ever sees or
 //! produces the sentinel object.
 //!
+//! [`current_context`] consults the task-local first (when called from inside a
+//! runtime task) and falls back to the thread-local. Because
+//! `LoggingContextFilter` (and therefore `pyo3-log`) resolves the context by
+//! calling [`current_context`] at log-record time, log records emitted while a
+//! task is being polled are attributed to the task's captured context with no
+//! per-record stamping machinery.
+//!
 //! The accounting policy is native too: [`set_current_context`] reads the thread
 //! rusage via libc, runs the `stop`/`start` bookkeeping, and uses
-//! [`swap_current_context`] for the raw slot write.
-//!
-//! TODO: tokio tasks do not yet see a logcontext — a worker thread's slot is
-//! always empty, so Rust-emitted log records still land in the sentinel. A
-//! task-scoped capture (carried with the task across `.await` points and
-//! consulted by [`current_context`] ahead of the thread slot) follows in the
-//! next change.
+//! [`swap_current_context`] for the raw slot write. The switch primitive is only
+//! ever driven on the reactor (or threadpool) threads — never on tokio worker
+//! threads — so it always writes the thread-local, and the task-local (populated
+//! only by [`LogContextHandle::scope`] at spawn time) takes read precedence during a
+//! poll. [`swap_current_context`] checks that invariant rather than trusting it.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, future::Future};
 
 use log::{debug, error, log_enabled, Level};
 use pyo3::call::PyCallArgs;
@@ -70,6 +77,64 @@ thread_local! {
     /// "no context set on this thread", i.e. the sentinel — a fresh thread (e.g.
     /// a new threadpool worker) therefore starts in the sentinel.
     static THREAD_LOCAL_CONTEXT: RefCell<Option<Py<LoggingContext>>> = const { RefCell::new(None) };
+}
+
+tokio::task_local! {
+    /// The logcontext captured for the current tokio task, set by
+    /// [`LogContextHandle::scope`] when the task is spawned. Only present inside a
+    /// scoped task; readable synchronously during any poll of that task,
+    /// regardless of which worker thread the poll runs on.
+    static TASK_LOCAL_CONTEXT: LogContextHandle;
+}
+
+/// A cheap, clone-able, GIL-free handle on a captured logcontext, in the same
+/// representation the storage slots use: a [`LoggingContext`] (possibly a
+/// Python subclass instance), or `None` for the sentinel.
+///
+/// `Py<LoggingContext>` is `Send + Sync`, so this can travel with a tokio task
+/// across worker threads and be dropped on a detached thread (pyo3 defers the
+/// decref). Cloning only needs the GIL for the underlying object, so we clone
+/// the `Py` eagerly (with the GIL) at capture time and hand out clones of the
+/// handle, which are GIL-free — see [`LogContextHandle::current`], called during
+/// a poll where the GIL may not be held.
+#[derive(Clone)]
+pub struct LogContextHandle {
+    // Held behind an `Arc` so that cloning the handle (e.g. `LogContextHandle::current`,
+    // called during a poll where the GIL may not be held) and dropping it are
+    // both GIL-free; cloning a bare `Py` would require the GIL.
+    context: std::sync::Arc<Option<Py<LoggingContext>>>,
+}
+
+impl LogContextHandle {
+    /// Capture the calling thread's current logcontext.
+    ///
+    /// Must be called with the GIL held, on the thread whose context we want
+    /// (i.e. at the FFI boundary, before spawning onto tokio).
+    pub fn capture(py: Python<'_>) -> Self {
+        LogContextHandle {
+            context: std::sync::Arc::new(current_context(py)),
+        }
+    }
+
+    /// The logcontext of the current tokio task, if we are running inside one
+    /// that was spawned through [`LogContextHandle::scope`].
+    pub fn current() -> Option<LogContextHandle> {
+        TASK_LOCAL_CONTEXT.try_with(|c| c.clone()).ok()
+    }
+
+    /// Run `fut` with this logcontext active (visible to [`current_context`] and
+    /// therefore to logging) for the duration of the task.
+    pub fn scope<F>(self, fut: F) -> impl Future<Output = F::Output>
+    where
+        F: Future,
+    {
+        TASK_LOCAL_CONTEXT.scope(self, fut)
+    }
+
+    /// The captured [`LoggingContext`], or `None` if the sentinel was captured.
+    pub fn logging_context(&self) -> Option<&Py<LoggingContext>> {
+        self.context.as_ref().as_ref()
+    }
 }
 
 /// Tracks the resources used by a log context.
@@ -686,6 +751,12 @@ impl LoggingContext {
 }
 
 impl LoggingContext {
+    /// Whether `__exit__` has run, for crate-internal callers (Python code reads
+    /// the `finished` attribute instead).
+    pub(crate) fn is_finished(&self) -> bool {
+        self.finished
+    }
+
     /// The context name as an owned Rust string.
     ///
     /// This copies the string data, so it is for cold error/debug paths only —
@@ -863,13 +934,41 @@ pub fn set_current_context(
     Ok(current)
 }
 
+/// Run `f` with `context` (a slot value: `None` is the sentinel) as the current
+/// logcontext, restoring the previously-current context afterwards — the Rust
+/// equivalent of Python's `with PreserveLoggingContext(context):`.
+///
+/// The restore runs whether or not `f` fails: an error must not skip it, or
+/// `context` would leak onto the calling thread, misattributing everything the
+/// thread does next. If both `f` and the restore fail, `f`'s error is
+/// reported.
+pub(crate) fn with_logcontext<R>(
+    py: Python<'_>,
+    context: Option<Py<LoggingContext>>,
+    f: impl FnOnce() -> PyResult<R>,
+) -> PyResult<R> {
+    let previous = set_current_context(py, context)?;
+    let result = f();
+    let restored = set_current_context(py, previous);
+
+    let value = result?;
+    restored?;
+    Ok(value)
+}
+
 /// Get the current logging context, or `None` for the sentinel.
 ///
-/// Resolves this OS thread's slot. This is not the Python-facing API:
-/// `synapse.logging.context.current_context` wraps this and returns
-/// `SENTINEL_CONTEXT` instead of `None`.
+/// Resolves the tokio task-local first (so logging emitted while a task is being
+/// polled is attributed to the context that was current when the task was
+/// spawned — even when that captured the sentinel), then this OS thread's slot.
+/// This is not the Python-facing API: `synapse.logging.context.current_context`
+/// wraps this and returns `SENTINEL_CONTEXT` instead of `None`.
 #[pyfunction]
 pub fn current_context(py: Python<'_>) -> Option<Py<LoggingContext>> {
+    if let Some(handle) = LogContextHandle::current() {
+        return handle.logging_context().map(|ctx| ctx.clone_ref(py));
+    }
+
     THREAD_LOCAL_CONTEXT.with(|slot| slot.borrow().as_ref().map(|ctx| ctx.clone_ref(py)))
 }
 
@@ -880,10 +979,27 @@ pub fn current_context(py: Python<'_>) -> Option<Py<LoggingContext>> {
 /// accounting or thread-affinity checks; [`set_current_context`] wraps this with
 /// the `getrusage` start/stop bookkeeping.
 ///
+/// Note this only touches the thread-local slot, never the tokio task-local:
+/// the switch primitive is only ever driven on reactor/threadpool threads
+/// (Python code), while the task-local is populated once at spawn time by
+/// [`LogContextHandle::scope`].
+///
 /// Crate-internal: a raw slot write that bypasses the rusage accounting and
 /// thread-affinity checks has no Python caller, so it is not exported (Python
 /// uses [`set_current_context`]).
 fn swap_current_context(context: Option<Py<LoggingContext>>) -> Option<Py<LoggingContext>> {
+    // Enforce the invariant above rather than trusting it: with a scoped
+    // task-local populated, `current_context` gives it read precedence, so this
+    // write would be invisible (and never restored) — everything that follows
+    // would be silently misattributed. `try_with` on an unset task-local is
+    // cheap on the normal (reactor-thread) path.
+    if TASK_LOCAL_CONTEXT.try_with(|_| ()).is_ok() {
+        error!(
+            "swap_current_context called during a tokio-scoped poll; the switch is \
+             invisible to current_context() and will misattribute logs and metrics"
+        );
+    }
+
     THREAD_LOCAL_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), context))
 }
 
@@ -909,6 +1025,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use pyo3::types::PyString;
 
     use super::*;
@@ -975,6 +1093,44 @@ mod tests {
             // Restore the empty slot (sentinel) so we don't leak into any other
             // test that happens to reuse this OS thread from the harness pool.
             swap_current_context(None);
+        });
+    }
+
+    #[test]
+    fn task_local_takes_precedence_over_thread_local() {
+        Python::initialize();
+        Python::attach(|py| {
+            let task_ctx = test_context(py, "TASKCTX");
+
+            // Outside any scoped task, `current_context` resolves the
+            // thread-local (here empty: the sentinel).
+            assert!(current_context(py).is_none());
+            assert!(LogContextHandle::current().is_none());
+
+            let log_context = LogContextHandle {
+                context: Arc::new(Some(task_ctx.clone_ref(py))),
+            };
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            rt.block_on(log_context.scope(async {
+                // Inside the scope, both the Rust handle and the pyfunction (the
+                // thing the log filter calls) resolve the task-local context —
+                // even though the thread-local is still empty.
+                assert!(LogContextHandle::current().is_some());
+                Python::attach(|py| {
+                    assert!(current_context(py)
+                        .expect("expected a current context")
+                        .bind(py)
+                        .is(task_ctx.bind(py)));
+                });
+            }));
+
+            // Once the scope ends, we fall back to the thread-local again.
+            assert!(LogContextHandle::current().is_none());
+            assert!(current_context(py).is_none());
         });
     }
 }

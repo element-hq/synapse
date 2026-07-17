@@ -136,7 +136,9 @@ class LoggingContext:
 def current_context() -> Optional[LoggingContext]:
     """Get the current logging context, or None for the sentinel.
 
-    Resolves this OS thread's slot. This is not the Python-facing API:
+    Resolves the tokio task-local first (so logging emitted while a Rust task is
+    being polled is attributed to the context that was current when the task was
+    spawned), then this OS thread's slot. This is not the Python-facing API:
     `synapse.logging.context.current_context` wraps this and returns
     `SENTINEL_CONTEXT` instead of `None`.
     """
