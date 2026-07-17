@@ -1,0 +1,1 @@
+Shorten DNS resolver timeout/retry sequence from 60s to 15s to ensure DNS failures are visible before federation HTTP request timeouts.
