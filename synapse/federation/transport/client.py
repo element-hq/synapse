@@ -876,7 +876,7 @@ class TransportLayerClient:
             "/de.bwi.federated_user_dir" + "/user_directory/search",
         )
         # This endpoint takes no parameters and always returns the remote
-        # server's full local directory, so it is a plain GET with no body   my``{}`` body does not work. 
+        # server's full local directory, so it is a plain GET with no body.
         return await self.client.get_json(
             destination,
             path=path,

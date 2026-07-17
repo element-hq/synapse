@@ -840,10 +840,29 @@ class UserDirectoryFederationHandler(UserDirectoryHandler):
             # Only the worker that owns the user directory should write to it.
             return
 
-        profiles = [
-            (entry.user_id, entry.display_name, entry.avatar_url)
-            for entry in users
-            if not self.is_mine_id(entry.user_id)
-        ]
+        profiles: list[tuple[str, str | None, str | None]] = []
+        for entry in users:
+            try:
+                user = UserID.from_string(entry.user_id)
+            except SynapseError:
+                logger.warning(
+                    "Ignoring malformed user ID returned by federated user "
+                    "directory [homeserver=%s, user_id=%r]",
+                    homeserver,
+                    entry.user_id,
+                )
+                continue
+
+            # Check if the user is from the same homeserver (we don`t want to sync 3rd party users.)
+            if user.domain != homeserver:
+                logger.warning(
+                    "Ignoring user from another homeserver returned by federated "
+                    "user directory [homeserver=%s, user_id=%s]",
+                    homeserver,
+                    entry.user_id,
+                )
+                continue
+
+            profiles.append((entry.user_id, entry.display_name, entry.avatar_url))
 
         await self.store.reconcile_federated_remote_users(homeserver, profiles)
