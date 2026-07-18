@@ -48,11 +48,19 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
 
     RUN mkdir -p /uv/etc/supervisor/conf.d
 
+    # Stage libicu preserving its (architecture-dependent) path, for the plain
+    # COPY in the final stage below. `COPY --parents` would do this directly,
+    # but buildah only gained that flag in v1.40 (podman 5.5), and distro-stable
+    # podman is older (Debian trixie ships 5.4) — these images are also built
+    # under rootless podman, e.g. by Complement in sandboxed environments
+    # without a Docker daemon.
+    RUN mkdir /libicu && cd / && cp --parents usr/lib/*-linux-gnu/libicu* /libicu
+
 # now build the final image, based on the the regular Synapse docker image
 FROM $FROM
 
     # Copy over dependencies
-    COPY --from=deps_base --parents /usr/lib/*-linux-gnu/libicu* /
+    COPY --from=deps_base /libicu /
     COPY --from=deps_base /usr/bin/redis-server /usr/local/bin
     COPY --from=deps_base /uv /
     COPY --from=deps_base /usr/sbin/nginx /usr/sbin
