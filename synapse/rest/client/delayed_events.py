@@ -134,6 +134,25 @@ class SendDelayedEventServlet(RestServlet):
         return 200, {}
 
 
+class DelayedEventServlet(RestServlet):
+    PATTERNS = client_patterns(
+        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)$",
+        releases=(),
+    )
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+
+    async def on_GET(
+        self, request: SynapseRequest, delay_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        return 200, await self.delayed_events_handler.get_for_user(requester, delay_id)
+
+
 class DelayedEventsServlet(RestServlet):
     PATTERNS = client_patterns(
         r"/org\.matrix\.msc4140/delayed_events$",
@@ -162,4 +181,5 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         CancelDelayedEventServlet(hs).register(http_server)
         SendDelayedEventServlet(hs).register(http_server)
     RestartDelayedEventServlet(hs).register(http_server)
+    DelayedEventServlet(hs).register(http_server)
     DelayedEventsServlet(hs).register(http_server)
