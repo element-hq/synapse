@@ -337,8 +337,7 @@ class ProfileWorkerStore(SQLBaseStore):
             retcol="fields",
             desc="get_profile_fields",
         )
-        # The SQLite driver doesn't automatically convert JSON to
-        # Python objects
+        # The SQLite driver doesn't have a JSON datatype.
         if isinstance(self.database_engine, Sqlite3Engine) and result:
             result = json.loads(result)
         return result or {}
@@ -572,8 +571,7 @@ class ProfileWorkerStore(SQLBaseStore):
         results: dict[str, dict[str, JsonValue | dict[str, JsonValue]]] = {}
         for full_user_id, displayname, avatar_url, fields in rows:
             user_fields = fields or {}
-            # The SQLite driver doesn't automatically convert JSON to
-            # Python objects
+            # The SQLite driver doesn't have a JSON datatype.
             if isinstance(self.database_engine, Sqlite3Engine) and fields:
                 user_fields = json.loads(fields)
             base_fields = {
