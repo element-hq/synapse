@@ -66,6 +66,15 @@ class StorageProvider(metaclass=abc.ABCMeta):
             Returns a Responder if the provider has the file, otherwise returns None.
         """
 
+    async def delete(self, path: str, file_info: FileInfo) -> None:
+        """Delete the file described by file_info.
+
+        Args:
+            path: Relative path of file in local cache
+            file_info: The metadata of the file.
+        """
+        return None
+
 
 class StorageProviderWrapper(StorageProvider):
     """Wraps a storage provider and provides various config options
@@ -133,6 +142,14 @@ class StorageProviderWrapper(StorageProvider):
         # against improper implementations.
         return await maybe_awaitable(self.backend.fetch(path, file_info))
 
+    @trace_with_opname("StorageProviderWrapper.delete")
+    async def delete(self, path: str, file_info: FileInfo) -> None:
+        # see: fetch
+        if file_info.url_cache:
+            return None
+
+        return await maybe_awaitable(self.backend.delete(path, file_info))
+
 
 class FileStorageProviderBackend(StorageProvider):
     """A storage provider that stores files in a directory on a filesystem.
@@ -195,3 +212,15 @@ class FileStorageProviderBackend(StorageProvider):
         just pull that out.
         """
         return Config.ensure_directory(config["directory"])
+
+    @trace_with_opname("FileStorageProviderBackend.delete")
+    async def delete(self, path: str, file_info: FileInfo) -> None:
+        # Convert to an absolute path.
+        fn = os.path.join(self.base_directory, path)
+        if os.path.isfile(fn):
+            os_remove: Callable[[str], None] = os.remove
+            await defer_to_thread(
+                self.reactor,
+                os_remove,
+                fn,
+            )
