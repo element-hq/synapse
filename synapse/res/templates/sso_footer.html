@@ -15,5 +15,11 @@
               </g>
           </g>
       </svg>
-      <p>An open network for secure, decentralized communication.<br>© 2023 The Matrix.org Foundation C.I.C.</p>
+      <p>An open network for secure, decentralized communication.<br>&copy; <span id="currentyear">2024</span> The Matrix.org Foundation C.I.C.</p>
 </footer>
+<script>
+	if (typeof document !== 'undefined' && document.getElementById) {
+		var currentYear = new Date().getFullYear();
+		document.getElementById('currentyear').textContent = currentYear;
+        }
+</script>
