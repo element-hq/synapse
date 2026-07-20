@@ -22,7 +22,6 @@
 import logging
 from typing import TYPE_CHECKING, Iterable, Mapping
 
-import attr
 from canonicaljson import encode_canonical_json
 from signedjson.key import VerifyKey, decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
@@ -35,6 +34,7 @@ from synapse.api.errors import CodeMessageException, Codes, NotFoundError, Synap
 from synapse.handlers.device import DeviceWriterHandler
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import log_kv, set_tag, tag_args, trace
+from synapse.synapse_rust.e2e_keys import SignatureListItem
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -1132,7 +1132,7 @@ class E2eKeysHandler:
 
     async def _process_self_signatures(
         self, user_id: str, signatures: JsonDict
-    ) -> tuple[list["SignatureListItem"], dict[str, dict[str, dict]]]:
+    ) -> tuple[list[SignatureListItem], dict[str, dict[str, dict]]]:
         """Process uploaded signatures of the user's own keys.
 
         Signatures of the user's own keys from this API come in two forms:
@@ -1150,7 +1150,7 @@ class E2eKeysHandler:
         Raises:
             SynapseError: if the input is malformed
         """
-        signature_list: list["SignatureListItem"] = []
+        signature_list: list[SignatureListItem] = []
         failures: dict[str, dict[str, JsonDict]] = {}
         if not signatures:
             return signature_list, failures
@@ -1252,7 +1252,7 @@ class E2eKeysHandler:
         signed_master_key: JsonDict,
         stored_master_key: JsonMapping,
         devices: dict[str, dict[str, JsonDict]],
-    ) -> list["SignatureListItem"]:
+    ) -> list[SignatureListItem]:
         """Check signatures of a user's master key made by their devices.
 
         Args:
@@ -1296,7 +1296,7 @@ class E2eKeysHandler:
 
     async def _process_other_signatures(
         self, user_id: str, signatures: dict[str, dict]
-    ) -> tuple[list["SignatureListItem"], dict[str, dict[str, dict]]]:
+    ) -> tuple[list[SignatureListItem], dict[str, dict[str, dict]]]:
         """Process uploaded signatures of other users' keys.  These will be the
         target user's master keys, signed by the uploading user's user-signing
         key.
@@ -1312,7 +1312,7 @@ class E2eKeysHandler:
         Raises:
             SynapseError: if the input is malformed
         """
-        signature_list: list["SignatureListItem"] = []
+        signature_list: list[SignatureListItem] = []
         failures: dict[str, dict[str, JsonDict]] = {}
         if not signatures:
             return signature_list, failures
@@ -1745,16 +1745,6 @@ def _one_time_keys_match(old_key_json: str, new_key: JsonDict) -> bool:
     new_key_copy.pop("signatures", None)
 
     return old_key == new_key_copy
-
-
-@attr.s(slots=True, auto_attribs=True)
-class SignatureListItem:
-    """An item in the signature list as used by upload_signatures_for_device_keys."""
-
-    signing_key_id: str
-    target_user_id: str
-    target_device_id: str
-    signature: JsonDict
 
 
 class SigningKeyEduUpdater:
