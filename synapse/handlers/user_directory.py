@@ -788,19 +788,6 @@ class UserDirectoryHandler(StateDeltasHandler):
                     ),
                 )
 
-
-class UserDirectoryFederationHandler(UserDirectoryHandler):
-    """Extends the user directory handler with the ability to ingest remote
-    users discovered via federated user directory sync.
-
-    The federation layer (which knows how to talk to other homeservers, how
-    often to sync and which destinations to contact) hands over already-parsed
-    `RemoteUserDirectoryEntry` objects. This handler is solely responsible for
-    persisting them into the same database tables used for locally discovered
-    users, so it has no knowledge of federation clients, transports or wire
-    formats.
-    """
-
     async def upsert_remote_users(
         self, users: Sequence[RemoteUserDirectoryEntry]
     ) -> None:

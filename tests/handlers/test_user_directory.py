@@ -28,7 +28,6 @@ from synapse.api.constants import UserTypes
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.appservice import ApplicationService
-from synapse.handlers.user_directory import UserDirectoryFederationHandler
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
@@ -1466,8 +1465,8 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
         # Enable updating the user directory on this (main) process.
         config["update_user_directory_from_worker"] = None
-        # Enabling the feature makes get_user_directory_handler() return the
-        # federation-aware subclass.
+        # Match production: these methods are only called by the federation
+        # sync while the experimental feature is enabled.
         config["experimental_features"] = {
             "bwi_federated_user_dir_enabled": True,
         }
@@ -1475,10 +1474,7 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        handler = hs.get_user_directory_handler()
-        # Enabling the feature makes the getter return the federation subclass.
-        assert isinstance(handler, UserDirectoryFederationHandler)
-        self.handler = handler
+        self.handler = hs.get_user_directory_handler()
         self.user_dir_helper = GetUserDirectoryTables(self.store)
 
     def test_upsert_remote_users_persists_profiles_and_visibility(self) -> None:

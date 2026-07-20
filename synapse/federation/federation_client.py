@@ -36,7 +36,6 @@ from typing import (
     Optional,
     Sequence,
     TypeVar,
-    cast,
 )
 
 import attr
@@ -85,7 +84,6 @@ from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 
 if TYPE_CHECKING:
-    from synapse.handlers.user_directory import UserDirectoryFederationHandler
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -2049,11 +2047,8 @@ class FederationClient(FederationBase):
             logger.debug("ending federated user directory sync: no known destinations")
             return
 
-        # This job is only scheduled when the feature is enabled, in which case
-        # the homeserver exposes the federation-aware handler variant.
-        handler = cast(
-            "UserDirectoryFederationHandler", self.hs.get_user_directory_handler()
-        )
+        # This job is only scheduled when the experimental feature is enabled.
+        handler = self.hs.get_user_directory_handler()
 
         total_reconciled = 0
 
