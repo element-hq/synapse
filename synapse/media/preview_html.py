@@ -242,10 +242,9 @@ def _map_twitter_to_open_graph(key: str) -> str | None:
         be ignored.
     """
     # Twitter card properties with no analogous Open Graph property.
-    if key == "twitter:card" or key == "twitter:creator":
+    # twitter:site is the user's handle - https://web.archive.org/web/20200828150337/https://developer.twitter.com/en/docs/twitter-for-websites/cards/overview/markup
+    if key == "twitter:card" or key == "twitter:creator" or key == "twitter:site":
         return None
-    if key == "twitter:site":
-        return "og:site_name"
     # Otherwise, swap twitter to og.
     return "og" + key[7:]
 
