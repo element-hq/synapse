@@ -742,10 +742,16 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         with sticky event stream positions <= `max_sent_sticky_events_stream_position`.
         """
 
-        def _txn(txn: LoggingTransaction) -> None:
-            # TODO
-            pass
-
-        return await self.db_pool.runInteraction(
-            "mark_backlogged_sticky_events_sent", _txn
+        await self.db_pool.simple_upsert(
+            desc="mark_backlogged_sticky_events_sent",
+            table="destination_room_sticky_events_backlog",
+            keyvalues={
+                "destination": destination,
+                "room_id": room_id.to_string(),
+            },
+            values={
+                # TODO not super nice
+                "sticky_events_stream_position": max_sent_sticky_events_stream_position
+                + 1,
+            },
         )
