@@ -4910,6 +4910,21 @@ properties:
     default: "off"
     examples:
       - invite
+  event_types_to_copy_on_room_upgrade:
+    type: array
+    description: >-
+      A list of additional state event types to copy when a room is upgraded.
+      Each entry should be a list containing an event type and a state key.
+      Defaults to `[]`.
+    items:
+      type: array
+      description: "Array of state event type and optionnaly a state key"
+      items:
+        - type: string
+    default: []
+    examples:
+      - ["im.vector.room.access_rules", ""]
+      - ["custom.room.policy", ""]
   user_directory:
     type: object
     description: This setting defines options related to the user directory.
