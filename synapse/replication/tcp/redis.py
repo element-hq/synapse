@@ -508,3 +508,51 @@ def lazyUnixConnection(
     )
 
     return factory.handler
+
+
+def lazySentinelConnection(
+    hs: "HomeServer",
+    sentinel_hosts: list[tuple[str, int]],
+    master_name: str,
+    dbid: int | None = None,
+    password: str | None = None,
+    sentinel_password: str | None = None,
+    replyTimeout: int = 30,
+) -> ConnectionHandler:
+    """Creates a connection to Redis via Sentinel that is lazily set up and
+    automatically handles failover.
+
+    Args:
+        hs: The HomeServer instance
+        sentinel_hosts: List of (host, port) tuples for sentinel servers
+        master_name: The name of the master service in sentinel
+        dbid: The redis database ID to use
+        password: Password for the redis master/slave
+        sentinel_password: Password for the sentinel servers (if different from redis password)
+        replyTimeout: Timeout for redis operations
+
+    Returns:
+        A ConnectionHandler that will automatically connect to the current master
+    """
+    from txredisapi import Sentinel
+
+    # Build sentinel kwargs if sentinel has its own password
+    sentinel_kwargs = {}
+    if sentinel_password:
+        sentinel_kwargs["password"] = sentinel_password
+
+    # Create the sentinel instance
+    sentinel = Sentinel(
+        sentinel_addresses=sentinel_hosts,
+        **sentinel_kwargs,
+    )
+
+    # Get a connection handler to the master
+    connection = sentinel.master_for(
+        service_name=master_name,
+        dbid=dbid,
+        password=password,
+        poolsize=1,
+    )
+
+    return connection
