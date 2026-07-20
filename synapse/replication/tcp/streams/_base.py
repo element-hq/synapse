@@ -768,7 +768,7 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
 
 @attr.s(slots=True, auto_attribs=True)
 class ProfileUpdatesStreamRow:
-    """Stream to inform workers about profile updates."""
+    """Profile update stream row detailing what the profile update changes."""
 
     user_id: UserID
     """The full user ID with the profile update."""
@@ -783,7 +783,7 @@ class ProfileUpdatesStreamRow:
 
 
 class ProfileUpdatesStream(_StreamFromIdGen):
-    """A user profile field was changed."""
+    """Stream to inform users about profile updates."""
 
     NAME = "profile_updates"
     ROW_TYPE = ProfileUpdatesStreamRow
