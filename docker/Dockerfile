@@ -118,7 +118,7 @@ RUN \
 ###
 ### Stage 2: runtime dependencies download for ARM64 and AMD64
 ###
-FROM --platform=$BUILDPLATFORM docker.io/library/debian:${DEBIAN_VERSION} AS runtime-deps
+FROM --platform=$BUILDPLATFORM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS runtime-deps
 
 # Tell apt to keep downloaded package files, as we're using cache mounts.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
