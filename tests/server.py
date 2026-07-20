@@ -1222,6 +1222,11 @@ def setup_test_homeserver(
                 "port": POSTGRES_PORT,
                 "cp_min": 1,
                 "cp_max": 5,
+                # Tolerate data loss for testing speedup.
+                # https://postgresqlco.nf/doc/en/param/synchronous_commit/
+                # (Mechanically: means we ask Postgres not to wait to flush data to disk before
+                # telling us transactions are committed.)
+                "synchronous_commit": False,
             },
         }
     else:
