@@ -50,7 +50,7 @@ from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.replication.tcp.streams._base import StickyEventStreamPosition
 from synapse.storage import DataStore
-from synapse.types import JsonDict, ReadReceipt, RoomID
+from synapse.types import JsonDict, ReadReceipt, RoomID, unwrap
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
 
@@ -497,6 +497,8 @@ class PerDestinationQueue:
             # needs catching up — so catching up is futile; let's stop.
             self._catching_up = False
             return
+        # (We just proved above that this is not None)
+        assert self._last_successful_stream_ordering is not None
 
         last_successful_stream_ordering: int = _tmp_last_successful_stream_ordering
 
@@ -643,6 +645,19 @@ class PerDestinationQueue:
 
                 # We pulled this from the DB, so it'll be non-null
                 assert pdu.internal_metadata.stream_ordering
+
+                # When advancing our `last_successful_stream_ordering` position,
+                # there may be unsent sticky events 'in the gap'; note that down as a backlog.
+                await self._store.mark_backlogged_sticky_events_after_catchup_transaction(
+                    self._destination,
+                    old_last_successfully_sent_stream_ordering=self._last_successful_stream_ordering,
+                    new_last_successfully_sent_stream_ordering=pdu.internal_metadata.stream_ordering,
+                    # These are the events we actually sent in this successful catch-up transaction
+                    event_stream_orderings_sent_in_transaction={
+                        unwrap(pdu.internal_metadata.stream_ordering)
+                        for pdu in room_catchup_pdus
+                    },
+                )
 
                 # Note that we mark the last successful stream ordering as that
                 # from the *original* PDU, rather than the PDU(s) we actually

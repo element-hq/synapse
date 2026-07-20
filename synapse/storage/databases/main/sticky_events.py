@@ -589,6 +589,146 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             _get_backlogged_sticky_events_for_destination_txn,
         )
 
+    async def mark_backlogged_sticky_events_after_catchup_transaction(
+        self,
+        destination: str,
+        *,
+        old_last_successfully_sent_stream_ordering: int,
+        new_last_successfully_sent_stream_ordering: int,
+        event_stream_orderings_sent_in_transaction: Collection[int],
+    ) -> None:
+        """
+        For the given `destination`, update the `destination_room_sticky_events_backlog`
+        table to potentially mark rooms as backlogged, following the successful
+        transmission of PDUs in a catch-up (federation) transaction.
+
+        Only catch-up transactions skip over PDUs in the 'outbox' (so to speak),
+        or in other words: they produce a 'gap' of unsent events (PDUs).
+        This implies that they can produce a gap of unsent *sticky* events,
+        which we need to carefully track and ensure we make a best-effort attempt
+        to send them later.
+
+        As a brief reminder: a catch-up transaction sends a subset of one room's
+        forward extremities, then advances `last_successfully_sent_stream_ordering`
+        for the destination.
+
+
+        Let's imagine this situation, with 3 rooms containing events that have not
+        yet been sent to the destination:
+
+        ```
+                legend: . = event
+                        S = sticky event
+
+                    -----------> event stream_ordering
+
+                   |
+            room1  |  .    .    .    S   .   .
+            room2  |   .     S    .    S   .    S
+            room3  |    .      .   S    .   .    .
+                   |
+                   |
+                   ^
+                   last_successfully_sent_stream_ordering
+        ```
+
+        A catch-up transaction then happens, which selects room1 as it has the oldest
+        (in stream_ordering terms) forward extremity.
+        After the transaction is sent successfully, the `last_successfully_sent_stream_ordering`
+        is advanced in kind.
+
+        ```
+                    -----------> event stream_ordering
+
+                                             |
+            room1     .    .    .    S   .   .
+            room2      .     S    .    S   . |  S
+            room3       .      .   S    .   .|   .
+                                             |
+                                             |
+                                             ^
+                   last_successfully_sent_stream_ordering
+        ```
+
+        In the gap left by this advancement of the `last_successfully_sent_stream_ordering`
+        position, there are 4 sticky events.
+
+        These are the sticky events that this function tracks in the
+        `destination_room_sticky_events_backlog` table.
+        Without us doing this, no other mechanism would provide a way of knowing
+        that those 4 sticky events hadn't yet been sent to the destination.
+
+        Arguments:
+            old_last_successfully_sent_stream_ordering:
+                The old position of `last_successfully_sent_stream_ordering`
+            new_last_successfully_sent_stream_ordering:
+                The new position of `last_successfully_sent_stream_ordering`
+            event_stream_orderings_sent_in_transaction:
+                event `stream_ordering`s of events that were actually sent in this transaction.
+                These events will not be considered eligible for triggering a backlog.
+        """
+
+        def _txn(txn: LoggingTransaction) -> None:
+            not_event_stream_ordering_in_clause, not_event_stream_ordering_in_args = (
+                make_in_list_sql_clause(
+                    self.database_engine,
+                    "se.event_stream_ordering",
+                    event_stream_orderings_sent_in_transaction,
+                    negative=True,
+                )
+            )
+
+            # This is a pipeline:
+            # 1. In `destination_rooms`, find all rooms associated with this destination,
+            #    unless the room didn't have any events after `old_last_successfully_sent_stream_ordering`
+            # 2. For each room, consider all sticky events with `stream_ordering` within the range
+            #    `old_last_successfully_sent_stream_ordering` < x < `new_last_successfully_sent_stream_ordering`
+            #   3. Except those that were just sent (according to `event_stream_orderings_sent_in_transaction`).
+            #   4. Get the least `sticky_events.stream_id` out of all of those events for the room.
+            # 5. Insert those positions into the backlog, unless the backlog already exists with a smaller position.
+            txn.execute(
+                f"""
+                INSERT INTO destination_room_sticky_events_backlog AS backlog
+                (destination, room_id, sticky_events_stream_position)
+
+                    SELECT ?, room_id, MIN(se.stream_id)
+                    FROM destination_rooms AS dr
+                    INNER JOIN sticky_events se USING (room_id)
+                    WHERE
+                        -- Only consider rooms that could possibly have events in the gap (1)
+                        ? < dr.stream_ordering
+
+                        -- Only consider events in the gap (2):
+                        AND ? < se.stream_ordering
+                        AND se.stream_ordering < ?
+
+                        -- Exclude sticky events that we in fact did just send (3)
+                        -- se.stream_ordering NOT IN $event_stream_orderings_sent_in_transaction
+                        AND {not_event_stream_ordering_in_clause}
+
+                    GROUP BY room_id
+
+                ON CONFLICT (destination, room_id)
+                DO
+                    -- Insert backlogs, unless already exists with smaller position (5)
+                    UPDATE SET backlog.stream_id = MIN(backlog.stream_id, EXCLUDED.stream_id)
+                    -- Prevent no-op row updates to avoid needless dead tuples
+                    WHERE backlog.stream_id <> EXCLUDED.stream_id
+                """,
+                (
+                    destination,
+                    old_last_successfully_sent_stream_ordering,
+                    old_last_successfully_sent_stream_ordering,
+                    new_last_successfully_sent_stream_ordering,
+                    *not_event_stream_ordering_in_args,
+                ),
+            )
+
+        return await self.db_pool.runInteraction(
+            "mark_backlogged_sticky_events_after_catchup_transaction",
+            _txn,
+        )
+
     async def mark_backlogged_sticky_events_sent(
         self,
         destination: str,
