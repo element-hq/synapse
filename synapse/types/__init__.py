@@ -1714,3 +1714,17 @@ class EventOrderings:
         stream = event.internal_metadata.stream_ordering
         assert stream is not None
         return EventOrderings(stream, event.depth)
+
+
+def unwrap(val: T | None) -> T:
+    """
+    Assert that a value is non-None.
+
+    Analogous to `Option<T>.unwrap` in Rust.
+
+    Useful as an inline alternative to `assert val is not None`,
+    e.g. in set comprehensions.
+    """
+
+    assert val is not None
+    return val
