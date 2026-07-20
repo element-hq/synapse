@@ -111,13 +111,15 @@ class ProfileWorkerStore(SQLBaseStore):
         lower_bound_id = progress.get("lower_bound_id", "")
 
         def _get_last_id(txn: LoggingTransaction) -> str | None:
-            sql = """
-                    SELECT user_id FROM profiles
-                    WHERE user_id > ?
-                    ORDER BY user_id
-                    LIMIT 1 OFFSET 1000
-                  """
-            txn.execute(sql, (lower_bound_id,))
+            txn.execute(
+                """
+                SELECT user_id FROM profiles
+                WHERE user_id > ?
+                ORDER BY user_id
+                LIMIT 1 OFFSET 1000
+                """,
+                (lower_bound_id,),
+            )
             res = txn.fetchone()
             if res:
                 upper_bound_id = res[0]
@@ -128,21 +130,22 @@ class ProfileWorkerStore(SQLBaseStore):
         def _process_batch(
             txn: LoggingTransaction, lower_bound_id: str, upper_bound_id: str
         ) -> None:
-            sql = """
-                    UPDATE profiles
-                    SET full_user_id = '@' || user_id || ?
-                    WHERE ? < user_id AND user_id <= ? AND full_user_id IS NULL
-                   """
-            txn.execute(sql, (f":{self.server_name}", lower_bound_id, upper_bound_id))
+            txn.execute(
+                """
+                UPDATE profiles
+                SET full_user_id = '@' || user_id || ?
+                WHERE ? < user_id AND user_id <= ? AND full_user_id IS NULL
+                """,
+                (f":{self.server_name}", lower_bound_id, upper_bound_id),
+            )
 
         def _final_batch(txn: LoggingTransaction, lower_bound_id: str) -> None:
-            sql = """
-                    UPDATE profiles
-                    SET full_user_id = '@' || user_id || ?
-                    WHERE ? < user_id AND full_user_id IS NULL
-                   """
             txn.execute(
-                sql,
+                """
+                UPDATE profiles
+                SET full_user_id = '@' || user_id || ?
+                WHERE ? < user_id AND full_user_id IS NULL
+                """,
                 (
                     f":{self.server_name}",
                     lower_bound_id,
@@ -150,10 +153,11 @@ class ProfileWorkerStore(SQLBaseStore):
             )
 
             if isinstance(self.database_engine, PostgresEngine):
-                sql = """
-                        ALTER TABLE profiles VALIDATE CONSTRAINT full_user_id_not_null
-                      """
-                txn.execute(sql)
+                txn.execute(
+                    """
+                    ALTER TABLE profiles VALIDATE CONSTRAINT full_user_id_not_null
+                    """,
+                )
 
         upper_bound_id = await self.db_pool.runInteraction(
             "populate_full_user_id_profiles", _get_last_id
@@ -274,13 +278,12 @@ class ProfileWorkerStore(SQLBaseStore):
             field_path = f'$."{field_name}"'
 
             if isinstance(self.database_engine, PostgresEngine):
-                sql = """
-                SELECT JSONB_PATH_EXISTS(fields, ?), JSONB_EXTRACT_PATH(fields, ?)
-                FROM profiles
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    SELECT JSONB_PATH_EXISTS(fields, ?), JSONB_EXTRACT_PATH(fields, ?)
+                    FROM profiles
+                    WHERE user_id = ?
+                    """,
                     (field_path, field_name, user_id.localpart),
                 )
 
@@ -294,13 +297,12 @@ class ProfileWorkerStore(SQLBaseStore):
                 return value
 
             else:
-                sql = """
-                SELECT JSON_TYPE(fields, ?), JSON_EXTRACT(fields, ?)
-                FROM profiles
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    SELECT JSON_TYPE(fields, ?), JSON_EXTRACT(fields, ?)
+                    FROM profiles
+                    WHERE user_id = ?
+                    """,
                     (field_path, field_path, user_id.localpart),
                 )
 
@@ -369,15 +371,17 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_updated_profile_updates_txn(
             txn: LoggingTransaction,
         ) -> list[tuple[int, str, str, str | None]]:
-            sql = """
-            SELECT
-                stream_id, user_id, action, field_name
-            FROM profile_updates
-            WHERE
-                ? < stream_id AND stream_id <= ?
-            ORDER BY stream_id ASC LIMIT ?
-            """
-            txn.execute(sql, (from_id, to_id, limit))
+            txn.execute(
+                """
+                SELECT
+                    stream_id, user_id, action, field_name
+                FROM profile_updates
+                WHERE
+                    ? < stream_id AND stream_id <= ?
+                ORDER BY stream_id ASC LIMIT ?
+                """,
+                (from_id, to_id, limit),
+            )
             return cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
@@ -415,14 +419,16 @@ class ProfileWorkerStore(SQLBaseStore):
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "field_name", field_names
             )
-            sql = (
-                "SELECT stream_id, user_id, action, field_name"
-                " FROM profile_updates"
-                f" WHERE ? < stream_id AND stream_id <= ? AND ({clause}"
-                " OR action != ?) "
-                " ORDER BY stream_id ASC"
+            txn.execute(
+                f"""
+                SELECT stream_id, user_id, action, field_name
+                    FROM profile_updates
+                WHERE ? < stream_id AND stream_id <= ?
+                    AND ({clause} OR action != ?)
+                ORDER BY stream_id ASC
+                """,
+                (from_id, to_id, *args, ProfileUpdateAction.UPDATE.value),
             )
-            txn.execute(sql, (from_id, to_id, *args, ProfileUpdateAction.UPDATE.value))
             rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
             updates: list[ProfileUpdate] = []
@@ -497,20 +503,18 @@ class ProfileWorkerStore(SQLBaseStore):
             # Retrieve profile updates where there's a corresponding row in
             # `profile_updates_per_user` within the given `stream_id` bounds
             # and the `user_id` and `field_names` match.
-            sql = f"""
-                SELECT pu.stream_id, pu.user_id, pu.action, pu.field_name
-                  FROM profile_updates AS pu
-                  INNER JOIN profile_updates_per_user AS puf
-                  ON pu.stream_id = puf.stream_id
-                  WHERE ? < pu.stream_id AND pu.stream_id <= ?
-                  AND puf.user_id = ?
-                  {user_clause}
-                  AND ({field_clause} OR pu.action != ?)
-                  ORDER BY pu.stream_id ASC
-            """
-
             txn.execute(
-                sql,
+                f"""
+                SELECT pu.stream_id, pu.user_id, pu.action, pu.field_name
+                FROM profile_updates AS pu
+                    INNER JOIN profile_updates_per_user AS puf
+                    ON pu.stream_id = puf.stream_id
+                WHERE ? < pu.stream_id AND pu.stream_id <= ?
+                    AND puf.user_id = ?
+                    {user_clause}
+                    AND ({field_clause} OR pu.action != ?)
+                ORDER BY pu.stream_id ASC
+                """,
                 (
                     from_id,
                     to_id,
@@ -707,14 +711,13 @@ class ProfileWorkerStore(SQLBaseStore):
 
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
-                sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
-                ON CONFLICT (user_id)
-                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
-                """
-
                 txn.execute(
-                    sql,
+                    """
+                    INSERT INTO profiles
+                        (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
+                    ON CONFLICT (user_id)
+                        DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
+                    """,
                     (
                         user_id.localpart,
                         user_id.to_string(),
@@ -725,19 +728,18 @@ class ProfileWorkerStore(SQLBaseStore):
                     ),
                 )
             else:
-                # You may be tempted to use json_patch instead of providing the parameters
-                # twice, but that recursively merges objects instead of replacing.
-                sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
-                ON CONFLICT (user_id)
-                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
-                """
                 # This will error if field_name has double quotes in it, but that's not
                 # possible due to the grammar.
                 json_field_name = f'$."{field_name}"'
 
                 txn.execute(
-                    sql,
+                    # You may be tempted to use json_patch instead of providing the parameters
+                    # twice, but that recursively merges objects instead of replacing.
+                    """
+                    INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
+                    ON CONFLICT (user_id)
+                        DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
+                    """,
                     (
                         user_id.localpart,
                         user_id.to_string(),
@@ -974,21 +976,19 @@ class ProfileWorkerStore(SQLBaseStore):
 
         def delete_profile_field(txn: LoggingTransaction) -> int | None:
             if isinstance(self.database_engine, PostgresEngine):
-                sql = """
-                UPDATE profiles SET fields = fields - ?
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    UPDATE profiles SET fields = fields - ?
+                    WHERE user_id = ?
+                    """,
                     (field_name, user_id.localpart),
                 )
             else:
-                sql = """
-                UPDATE profiles SET fields = json_remove(fields, ?)
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    UPDATE profiles SET fields = json_remove(fields, ?)
+                    WHERE user_id = ?
+                    """,
                     # This will error if field_name has double quotes in it.
                     (f'$."{field_name}"', user_id.localpart),
                 )
