@@ -77,6 +77,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.reactor, self.clock = get_clock()
 
         hs = Mock()
+        hs.hostname = "test_server"
 
         def test_run_as_background_process(
             desc: "LiteralString",
