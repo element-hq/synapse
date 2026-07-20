@@ -1,6 +1,6 @@
 # Account validity API
 
-**Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
+**Note:** This API is disabled when Matrix Authentication Service integration is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 
 This API allows a server administrator to manage the validity of an account. To
 use it, you must enable the account validity feature (under

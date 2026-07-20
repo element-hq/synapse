@@ -146,7 +146,7 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
         )
 
         # the message should now get delivered
-        self.get_success(d, by=0.1)
+        self.get_success(d)
 
         # check it arrived
         self.assertEqual(len(message_delivery.messages), 1)
@@ -213,7 +213,7 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
         )
 
         # the message should now get delivered
-        self.get_success(d, by=0.1)
+        self.get_success(d)
 
         # check it arrived
         self.assertEqual(len(message_delivery.messages), 1)

@@ -284,6 +284,24 @@ This setting has the following sub-options:
 
 * `include_offline_users_on_sync` (boolean): When clients perform an initial or `full_state` sync, presence results for offline users are not included by default. Setting `include_offline_users_on_sync` to `true` will always include offline users in the results. Defaults to `false`.
 
+* `last_active_granularity` (duration): How long after a user was last active that they are still shown as "currently active" to other users. Larger values reduce the rate of presence updates sent to other users and servers.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"1m"`.
+
+* `sync_online_timeout` (duration): How long after a client's last sync request their presence is switched to offline. Clients are expected to keep a sync request open at (almost) all times while online, so this only needs to cover the gap between two consecutive sync requests. Note that if `rc_presence` is set to ratelimit how often syncs can affect presence, this must be greater than the ratelimit's interval or users will incorrectly be marked as offline in between syncs.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"30s"`.
+
+* `idle_timeout` (duration): How long after a user was last active that their presence is switched to "unavailable" (idle) while they remain connected. Must be greater than `last_active_granularity`.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"5m"`.
+
 Example configuration:
 ```yaml
 presence:
@@ -345,8 +363,9 @@ Known room versions are listed [here](https://spec.matrix.org/latest/rooms/#comp
 For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
+_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
 
-Defaults to `"10"`.
+Defaults to `"11"`.
 
 Example configuration:
 ```yaml
@@ -4289,6 +4308,16 @@ forget_rooms_on_leave: true
 Example configuration:
 ```yaml
 exclude_rooms_from_sync:
+- '!foo:example.com'
+```
+---
+### `exclude_rooms_from_presence`
+
+*(array)* A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to `[]`.
+
+Example configuration:
+```yaml
+exclude_rooms_from_presence:
 - '!foo:example.com'
 ```
 ---

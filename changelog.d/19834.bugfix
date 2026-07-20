@@ -1,1 +1,0 @@
-Fix notification counts being inflated after a `/purge_history` when notifications had already been rotated into the summary table.

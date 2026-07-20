@@ -37,6 +37,7 @@ from twisted.conch.ssh.keys import Key
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.types import JsonDict, StrSequence
+from synapse.util.duration import Duration
 from synapse.util.module_loader import load_module
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -175,7 +176,20 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fec0::/10",
 ]
 
-DEFAULT_ROOM_VERSION = "10"
+DEFAULT_ROOM_VERSION = "11"
+
+# Defaults for the presence state machine timers, in milliseconds. Overridden
+# by the corresponding options in the `presence` config section.
+#
+# How long after a user was last active that they are still considered
+# "currently_active".
+DEFAULT_LAST_ACTIVE_GRANULARITY = 60 * 1000
+# How long to wait until a new /events or /sync request before assuming the
+# client has gone.
+DEFAULT_SYNC_ONLINE_TIMEOUT = 30 * 1000
+# How long to wait before marking the user as idle. Compared against last
+# active.
+DEFAULT_IDLE_TIMER = 5 * 60 * 1000
 
 ROOM_COMPLEXITY_TOO_GREAT = (
     "Your homeserver is unable to join rooms this large or complex. "
@@ -504,6 +518,32 @@ class ServerConfig(Config):
         self.presence_include_offline_users_on_sync = presence_config.get(
             "include_offline_users_on_sync", False
         )
+
+        # Timers controlling the presence state machine.
+        self.presence_last_active_granularity = self.parse_duration(
+            presence_config.get(
+                "last_active_granularity", DEFAULT_LAST_ACTIVE_GRANULARITY
+            )
+        )
+        self.presence_sync_online_timeout = self.parse_duration(
+            presence_config.get("sync_online_timeout", DEFAULT_SYNC_ONLINE_TIMEOUT)
+        )
+        self.presence_idle_timeout = self.parse_duration(
+            presence_config.get("idle_timeout", DEFAULT_IDLE_TIMER)
+        )
+        if self.presence_last_active_granularity <= 0:
+            raise ConfigError(
+                "'presence.last_active_granularity' must be a positive duration"
+            )
+        if self.presence_sync_online_timeout <= 0:
+            raise ConfigError(
+                "'presence.sync_online_timeout' must be a positive duration"
+            )
+        if self.presence_idle_timeout <= self.presence_last_active_granularity:
+            raise ConfigError(
+                "'presence.idle_timeout' must be greater than "
+                "'presence.last_active_granularity'"
+            )
 
         # Custom presence router module
         # This is the legacy way of configuring it (the config should now be put in the modules section)
@@ -896,6 +936,10 @@ class ServerConfig(Config):
             config.get("exclude_rooms_from_sync") or []
         )
 
+        self.rooms_to_exclude_from_presence: list[str] = (
+            config.get("exclude_rooms_from_presence") or []
+        )
+
         delete_stale_devices_after: str | None = (
             config.get("delete_stale_devices_after") or None
         )
@@ -910,13 +954,33 @@ class ServerConfig(Config):
         # The maximum allowed delay duration for delayed events (MSC4140).
         max_event_delay_duration = config.get("max_event_delay_duration")
         if max_event_delay_duration is not None:
-            self.max_event_delay_ms: int | None = self.parse_duration(
-                max_event_delay_duration
-            )
-            if self.max_event_delay_ms <= 0:
-                raise ConfigError("max_event_delay_duration must be a positive value")
+            max_event_delay_ms = self.parse_duration(max_event_delay_duration)
+            if max_event_delay_ms <= 0:
+                raise ConfigError(
+                    "'max_event_delay_duration' must be a positive value if set",
+                    ("max_event_delay_duration",),
+                )
+            self.max_event_delay_duration = Duration(milliseconds=max_event_delay_ms)
         else:
-            self.max_event_delay_ms = None
+            self.max_event_delay_duration = Duration()
+
+        # The maximum number of delayed events a user may have scheduled at a time.
+        # (Defined here despite being experimental to be near the other MSC4140 config)
+        self.max_delayed_events_per_user: int = config.get(
+            "experimental_features", {}
+        ).get("msc4140_max_delayed_events_per_user", 100)
+        if (
+            not isinstance(self.max_delayed_events_per_user, int)
+            or self.max_delayed_events_per_user < 0
+        ):
+            raise ConfigError(
+                "'msc4140_max_delayed_events_per_user' must be a non-negative integer",
+                ("experimental", "msc4140_max_delayed_events_per_user"),
+            )
+
+        self.msc4140_enabled = bool(
+            self.max_delayed_events_per_user and self.max_event_delay_duration
+        )
 
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)

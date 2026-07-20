@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, NewType
 
 import attr
 
-from synapse.api.errors import NotFoundError
+from synapse.api.errors import LimitExceededError, NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -28,6 +28,7 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -122,20 +123,84 @@ class DelayedEventsStore(SQLBaseStore):
         state_key: str | None,
         origin_server_ts: int | None,
         content: JsonDict,
-        delay: int,
+        delay: Duration,
         sticky_duration_ms: int | None,
+        limit: int,
     ) -> tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
 
+        Args:
+            user_localpart: The localpart of the requester of the delayed event, who will be its owner.
+            device_id: The device ID of the requester.
+            creation_ts: The timestamp of when the request to add the delayed event was made.
+            room_id: The ID of the room where the event should be sent to.
+            event_type: The type of event to be sent.
+            state_key: The state key of the event to be sent, or None if it is not a state event.
+            origin_server_ts: The custom timestamp to send the event with.
+                If None, the timestamp will be the actual time when the event is sent.
+            content: The content of the event to be sent.
+            delay: How long to wait before automatically sending the event.
+            sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
+                The event will be attempted to be reliably delivered to clients and remote servers
+                during its sticky period.
+            limit: The maximum number of delayed events the DB may store for the given requester.
+                Must be greater than 0.
         Returns: The generated ID assigned to the added delayed event,
             and the send time of the next delayed event to be sent,
             which is either the event just added or one added earlier.
+
+        Raises:
+            LimitExceededError: if the DB has reached the limit of
+                how many delayed events it may store for the given requester.
+            AssertionError: if the limit is not greater than 0.
         """
+        assert limit > 0, "limit must be greater than 0"
+
         delay_id = _generate_delay_id()
-        send_ts = Timestamp(creation_ts + delay)
+        delay_ms = delay.as_millis()
+        send_ts = creation_ts + delay_ms
 
         def add_delayed_event_txn(txn: LoggingTransaction) -> Timestamp:
+            num_existing: int = self.db_pool.simple_select_one_onecol_txn(
+                txn,
+                table="delayed_events",
+                keyvalues={"user_localpart": user_localpart},
+                retcol="COUNT(*)",
+            )
+            if num_existing >= limit:
+                # Find the send_ts threshold that will bring the queue back under the limit.
+                # When the amount of existing delayed events has reached the limit,
+                # this will be the send time of the next delayed event to be sent.
+                # When the amount has exceeded the limit (e.g., due to config changes),
+                # this will be the send time of the delayed event that will be sent
+                # once all earlier events that exceed the limit have been sent.
+                #
+                # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
+                txn.execute(
+                    """
+                    SELECT MAX(send_ts) FROM (
+                        SELECT * FROM delayed_events
+                        WHERE user_localpart = ?
+                        ORDER BY send_ts ASC
+                        LIMIT ?
+                    ) AS subquery
+                    """,
+                    (
+                        user_localpart,
+                        num_existing - limit + 1,
+                    ),
+                )
+                row = txn.fetchone()
+                assert row
+                retry_after_ms = row[0] - self.clock.time_msec()
+                err = LimitExceededError(
+                    limiter_name="add_delayed_event",
+                    retry_after_ms=retry_after_ms if retry_after_ms > 0 else None,
+                )
+                err.msg = "The maximum number of delayed events has been reached."
+                raise err
+
             self.db_pool.simple_insert_txn(
                 txn,
                 table="delayed_events",
@@ -143,7 +208,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "delay_id": delay_id,
                     "user_localpart": user_localpart,
                     "device_id": device_id,
-                    "delay": delay,
+                    "delay": delay_ms,
                     "send_ts": send_ts,
                     "room_id": room_id,
                     "event_type": event_type,

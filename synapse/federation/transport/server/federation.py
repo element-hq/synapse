@@ -37,6 +37,7 @@ from synapse.federation.transport.server._base import (
     BaseFederationServlet,
 )
 from synapse.http.servlet import (
+    parse_boolean,
     parse_boolean_from_args,
     parse_integer,
     parse_integer_from_args,
@@ -48,6 +49,8 @@ from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.types import JsonDict, JsonMapping
+from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
+from synapse.types import JsonDict
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -875,8 +878,9 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")
+        animated = parse_boolean(request, "animated", default=False)
         # TODO Parse the Accept header to get an prioritised list of thumbnail types.
-        m_type = "image/png"
+        m_type = ANIMATED_THUMBNAIL_TYPE if animated else "image/png"
         max_timeout_ms = parse_integer(
             request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
         )
@@ -884,7 +888,15 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
         if self.dynamic_thumbnails:
             await self.thumbnail_provider.select_or_generate_local_thumbnail(
-                request, media_id, width, height, method, m_type, max_timeout_ms, True
+                request,
+                media_id,
+                width,
+                height,
+                method,
+                m_type,
+                max_timeout_ms,
+                True,
+                animated=animated,
             )
         else:
             await self.thumbnail_provider.respond_local_thumbnail(

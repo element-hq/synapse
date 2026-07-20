@@ -68,7 +68,11 @@ from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
 )
-from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
+from synapse.media.thumbnailer import (
+    ANIMATED_THUMBNAIL_TYPE,
+    Thumbnailer,
+    ThumbnailError,
+)
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import UserID
@@ -1127,6 +1131,7 @@ class MediaRepository:
         t_height: int,
         t_method: str,
         t_type: str,
+        animated: bool = False,
     ) -> BytesIO | None:
         m_width = thumbnailer.width
         m_height = thumbnailer.height
@@ -1144,12 +1149,12 @@ class MediaRepository:
             m_width, m_height = thumbnailer.transpose()
 
         if t_method == "crop":
-            return thumbnailer.crop(t_width, t_height, t_type)
+            return thumbnailer.crop(t_width, t_height, t_type, animated=animated)
         elif t_method == "scale":
             t_width, t_height = thumbnailer.aspect(t_width, t_height)
             t_width = min(m_width, t_width)
             t_height = min(m_height, t_height)
-            return thumbnailer.scale(t_width, t_height, t_type)
+            return thumbnailer.scale(t_width, t_height, t_type, animated=animated)
 
         return None
 
@@ -1161,6 +1166,7 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         url_cache: bool,
+        animated: bool = False,
     ) -> tuple[str, FileInfo] | None:
         async with self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(None, media_id, url_cache=url_cache)
@@ -1186,6 +1192,7 @@ class MediaRepository:
                     t_height,
                     t_method,
                     t_type,
+                    animated,
                 )
 
         if t_byte_source:
@@ -1199,7 +1206,7 @@ class MediaRepository:
                         height=t_height,
                         method=t_method,
                         type=t_type,
-                        length=t_byte_source.tell(),
+                        length=t_byte_source.getbuffer().nbytes,
                     ),
                 )
 
@@ -1236,6 +1243,7 @@ class MediaRepository:
         t_height: int,
         t_method: str,
         t_type: str,
+        animated: bool = False,
     ) -> str | None:
         async with self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(server_name, file_id)
@@ -1262,6 +1270,7 @@ class MediaRepository:
                     t_height,
                     t_method,
                     t_type,
+                    animated,
                 )
 
         if t_byte_source:
@@ -1274,7 +1283,7 @@ class MediaRepository:
                         height=t_height,
                         method=t_method,
                         type=t_type,
-                        length=t_byte_source.tell(),
+                        length=t_byte_source.getbuffer().nbytes,
                     ),
                 )
 
@@ -1389,6 +1398,12 @@ class MediaRepository:
                         )
 
                 # Now we generate the thumbnails for each dimension, store it
+                #
+                # For animated source images we also generate and cache an
+                # animated WebP thumbnail per (size, method), served only when a
+                # client requests `?animated=true`. These are deduplicated since
+                # the animated thumbnail is always WebP regardless of `t_type`.
+                animated_done: set[tuple[int, int, str]] = set()
                 for (t_width, t_height, t_type), t_method in thumbnails.items():
                     # Generate the thumbnail
                     if t_method == "crop":
@@ -1411,80 +1426,126 @@ class MediaRepository:
                         logger.error("Unrecognized method: %r", t_method)
                         continue
 
-                    if not t_byte_source:
-                        continue
+                    if t_byte_source:
+                        await self._store_thumbnail(
+                            server_name,
+                            media_id,
+                            file_id,
+                            url_cache,
+                            t_width,
+                            t_height,
+                            t_method,
+                            t_type,
+                            t_byte_source,
+                        )
 
-                    file_info = FileInfo(
-                        server_name=server_name,
-                        file_id=file_id,
-                        url_cache=url_cache,
-                        thumbnail=ThumbnailInfo(
-                            width=t_width,
-                            height=t_height,
-                            method=t_method,
-                            type=t_type,
-                            length=t_byte_source.tell(),
-                        ),
-                    )
-
-                    async with self.media_storage.store_into_file(file_info) as (
-                        f,
-                        fname,
+                    if (
+                        thumbnailer.is_animated
+                        and (t_width, t_height, t_method) not in animated_done
                     ):
-                        try:
-                            await self.media_storage.write_to_file(t_byte_source, f)
-                        finally:
-                            t_byte_source.close()
-
-                        # We flush and close the file to ensure that the bytes have
-                        # been written before getting the size.
-                        f.flush()
-                        f.close()
-
-                        t_len = os.path.getsize(fname)
-
-                        # Write to database
-                        if server_name:
-                            # Multiple remote media download requests can race (when
-                            # using multiple media repos), so this may throw a violation
-                            # constraint exception. If it does we'll delete the newly
-                            # generated thumbnail from disk (as we're in the ctx
-                            # manager).
-                            #
-                            # However: we've already called `finish()` so we may have
-                            # also written to the storage providers. This is preferable
-                            # to the alternative where we call `finish()` *after* this,
-                            # where we could end up having an entry in the DB but fail
-                            # to write the files to the storage providers.
-                            try:
-                                await self.store.store_remote_media_thumbnail(
-                                    server_name,
-                                    media_id,
-                                    file_id,
-                                    t_width,
-                                    t_height,
-                                    t_type,
-                                    t_method,
-                                    t_len,
-                                )
-                            except Exception as e:
-                                thumbnail_exists = (
-                                    await self.store.get_remote_media_thumbnail(
-                                        server_name,
-                                        media_id,
-                                        t_width,
-                                        t_height,
-                                        t_type,
-                                    )
-                                )
-                                if not thumbnail_exists:
-                                    raise e
-                        else:
-                            await self.store.store_local_thumbnail(
-                                media_id, t_width, t_height, t_type, t_method, t_len
+                        animated_done.add((t_width, t_height, t_method))
+                        a_byte_source = await defer_to_thread(
+                            self.hs.get_reactor(),
+                            thumbnailer.crop
+                            if t_method == "crop"
+                            else thumbnailer.scale,
+                            t_width,
+                            t_height,
+                            ANIMATED_THUMBNAIL_TYPE,
+                            True,
+                        )
+                        if a_byte_source:
+                            await self._store_thumbnail(
+                                server_name,
+                                media_id,
+                                file_id,
+                                url_cache,
+                                t_width,
+                                t_height,
+                                t_method,
+                                ANIMATED_THUMBNAIL_TYPE,
+                                a_byte_source,
                             )
 
         return {"width": m_width, "height": m_height}
+
+    async def _store_thumbnail(
+        self,
+        server_name: str | None,
+        media_id: str,
+        file_id: str,
+        url_cache: bool,
+        t_width: int,
+        t_height: int,
+        t_method: str,
+        t_type: str,
+        t_byte_source: BytesIO,
+    ) -> None:
+        """Store a generated thumbnail to the configured storage and database."""
+        file_info = FileInfo(
+            server_name=server_name,
+            file_id=file_id,
+            url_cache=url_cache,
+            thumbnail=ThumbnailInfo(
+                width=t_width,
+                height=t_height,
+                method=t_method,
+                type=t_type,
+                length=t_byte_source.getbuffer().nbytes,
+            ),
+        )
+
+        async with self.media_storage.store_into_file(file_info) as (f, fname):
+            try:
+                await self.media_storage.write_to_file(t_byte_source, f)
+            finally:
+                t_byte_source.close()
+
+            # We flush and close the file to ensure that the bytes have
+            # been written before getting the size.
+            f.flush()
+            f.close()
+
+            t_len = os.path.getsize(fname)
+
+            # Write to database
+            if server_name:
+                # Multiple remote media download requests can race (when
+                # using multiple media repos), so this may throw a violation
+                # constraint exception. If it does we'll delete the newly
+                # generated thumbnail from disk (as we're in the ctx
+                # manager).
+                #
+                # However: we've already called `finish()` so we may have
+                # also written to the storage providers. This is preferable
+                # to the alternative where we call `finish()` *after* this,
+                # where we could end up having an entry in the DB but fail
+                # to write the files to the storage providers.
+                try:
+                    await self.store.store_remote_media_thumbnail(
+                        server_name,
+                        media_id,
+                        file_id,
+                        t_width,
+                        t_height,
+                        t_type,
+                        t_method,
+                        t_len,
+                    )
+                except Exception as e:
+                    thumbnail_exists = await self.store.get_remote_media_thumbnail(
+                        server_name,
+                        media_id,
+                        t_width,
+                        t_height,
+                        t_type,
+                    )
+                    if not thumbnail_exists:
+                        raise e
+            else:
+                await self.store.store_local_thumbnail(
+                    media_id, t_width, t_height, t_type, t_method, t_len
+                )
 
     async def _apply_media_retention_rules(self) -> None:
         """
