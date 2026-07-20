@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, Collection, Iterable, cast
+from typing import TYPE_CHECKING, Collection, cast
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -389,7 +389,7 @@ class ProfileWorkerStore(SQLBaseStore):
         *,
         from_id: int,
         to_id: int,
-        field_names: Iterable[str],
+        field_names: Collection[str],
     ) -> list[ProfileUpdate]:
         """Get profile update markers for the given fields in a stream range.
 
@@ -406,7 +406,6 @@ class ProfileWorkerStore(SQLBaseStore):
         if from_id >= to_id:
             return []
 
-        field_names = list(field_names)
         if not field_names:
             return []
 
