@@ -37,7 +37,6 @@ class ReplicationProfileSetField(ReplicationEndpoint):
         POST /_synapse/replication/profile_set_field/<user_id>
 
         {
-            "target_user": "@user:hs",
             "requester": "@admin:hs",
             "field_name": "displayname",
             "new_value": "Alice",
@@ -70,7 +69,6 @@ class ReplicationProfileSetField(ReplicationEndpoint):
         propagate: bool,
     ) -> JsonDict:
         return {
-            "target_user": user_id,
             "requester": requester.user.to_string(),
             "field_name": field_name,
             "new_value": new_value,
@@ -101,7 +99,6 @@ class ReplicationProfileDeleteField(ReplicationEndpoint):
         POST /_synapse/replication/profile_delete_field/<user_id>
 
         {
-            "target_user": "@user:hs",
             "requester": "@admin:hs",
             "field_name": "displayname",
             "by_admin": true
@@ -130,7 +127,6 @@ class ReplicationProfileDeleteField(ReplicationEndpoint):
         by_admin: bool,
     ) -> JsonDict:
         return {
-            "target_user": user_id,
             "requester": requester.user.to_string(),
             "field_name": field_name,
             "by_admin": by_admin,
