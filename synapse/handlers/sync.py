@@ -352,7 +352,7 @@ class SyncHandler:
         #       sha256(Other User ID + Field Name) -> sha256(Field value)
         #   )
         self.lazy_loaded_profile_fields_cache: ExpiringCache[
-            tuple[str, str | None], LruCache[str, str]
+            tuple[str, str | None], LruCache[bytes, bytes]
         ] = ExpiringCache(
             cache_name="lazy_loaded_profile_fields_cache",
             server_name=self.server_name,
@@ -1079,7 +1079,7 @@ class SyncHandler:
 
     def get_lazy_loaded_profile_fields_cache(
         self, cache_key: tuple[str, str | None]
-    ) -> LruCache[str, str]:
+    ) -> LruCache[bytes, bytes]:
         """This cache contains fields and values we have sent to clients as profile
         updates, for a particular user + device combo. The cache entry is a sha256
         of the user + field name, with the value being a sha256 of the field value.
@@ -1089,8 +1089,8 @@ class SyncHandler:
         We don't manually remove entries from this cache, though it may be ignored
         in cases where the sync must send the field down to the client.
         """
-        cache: LruCache[str, str] | None = self.lazy_loaded_profile_fields_cache.get(
-            cache_key
+        cache: LruCache[bytes, bytes] | None = (
+            self.lazy_loaded_profile_fields_cache.get(cache_key)
         )
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
@@ -2421,7 +2421,7 @@ class SyncHandler:
                         # thus sending the field update to the syncing user.
                         cache_value = hashlib.sha256(
                             f"{other_user_id}-{field_name}".encode("utf8"),
-                        ).hexdigest()
+                        ).digest()
                         value_hash = hashlib.sha256(
                             json.dumps(
                                 [
@@ -2431,7 +2431,7 @@ class SyncHandler:
                                 separators=(",", ":"),
                                 ensure_ascii=False,
                             ).encode("utf8")
-                        ).hexdigest()
+                        ).digest()
                         if cache.get(cache_value) != value_hash:
                             per_user_updates[field_name] = profile_data.get(field_name)
                             # Update our cache to indicate this user/field combo
