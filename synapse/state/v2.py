@@ -30,6 +30,7 @@ from typing import (
     Literal,
     Protocol,
     Sequence,
+    cast,
     overload,
 )
 
@@ -40,6 +41,7 @@ from synapse.api.room_versions import RoomVersion, StateResolutionVersions
 from synapse.events import EventBase, is_creator
 from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import MutableStateMap, StateMap, StrCollection
+from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
@@ -141,11 +143,23 @@ async def resolve_events_with_store(
         )
     )
 
-    events = await state_res_store.get_events(
-        [eid for eid in full_conflicted_set if eid not in event_map],
-        allow_rejected=True,
-    )
-    event_map.update(events)
+    # Prefetch the conflicted set and its auth chain concurrently so later
+    # auth checks can stay on the in-memory fast path.
+    to_fetch = {eid for eid in full_conflicted_set if eid not in event_map}
+    to_fetch.update(eid for eid in unconflicted_state.values() if eid not in event_map)
+
+    while to_fetch:
+        fetched = await state_res_store.get_events(list(to_fetch), allow_rejected=True)
+        event_map.update(fetched)
+
+        new_to_fetch = set()
+        for eid in to_fetch:
+            ev = event_map.get(eid)
+            if ev:
+                for aid in ev.auth_event_ids():
+                    if aid not in event_map:
+                        new_to_fetch.add(aid)
+        to_fetch = new_to_fetch
 
     # everything in the event map should be in the right room
     for event in event_map.values():
@@ -157,6 +171,27 @@ async def resolve_events_with_store(
                     event.event_id,
                     event.room_id,
                 )
+            )
+
+    # Attempt to run high-performance state resolution in Rust via rezzy's lattice fold
+    if room_version.state_res == StateResolutionVersions.V2:
+        try:
+            import synapse.synapse_rust.state_res as rust_res
+
+            resolve_v2_via_lattice_fold = rust_res.resolve_v2_via_lattice_fold
+
+            logger.debug("Resolving state v2 via Rust rezzy lattice fold")
+
+            resolved_state_rust: StateMap[str] = resolve_v2_via_lattice_fold(
+                dict(unconflicted_state),
+                list(full_conflicted_set),
+                event_map,
+            )
+            return resolved_state_rust
+        except Exception as e:
+            logger.exception(
+                "Failed to run Rust state resolution via lattice fold, falling back to python",
+                exc_info=e,
             )
 
     full_conflicted_set = {eid for eid in full_conflicted_set if eid in event_map}
@@ -335,6 +370,22 @@ async def _get_auth_chain_difference(
         len(conflicted_state) if conflicted_state is not None else None
     )
 
+    if not is_state_res_v21:
+        try:
+            import synapse.synapse_rust.state_res as rust_res
+
+            return cast(
+                set[str],
+                cast(Any, rust_res).get_auth_chain_difference_from_event_graph(
+                    state_sets,
+                    unpersisted_events,
+                ),
+            )
+        except Exception:
+            # Fall back to the Python/store path if the Rust fast path cannot
+            # handle the graph we were given.
+            pass
+
     # The `StateResolutionStore.get_auth_chain_difference` function assumes that
     # all events passed to it (and their auth chains) have been persisted
     # previously. We need to manually handle any other events that are yet to be
@@ -348,27 +399,62 @@ async def _get_auth_chain_difference(
     #      the set of persisted events belonging to the auth difference.
     #   3. Adding the results of 1 and 2 together.
 
-    # Map from event ID in `unpersisted_events` to their auth event IDs, and their auth
-    # event IDs if they appear in the `unpersisted_events`. This is the intersection of
-    # the event's auth chain with the events in `unpersisted_events` *plus* their
-    # auth event IDs.
+    # Map from event ID in `unpersisted_events` to the auth chain reachable from it.
+    #
+    # We memoize the transitive closure so shared auth chains are only traversed once.
     events_to_auth_chain: dict[str, set[str]] = {}
-    # remember the forward links when doing the graph traversal, we'll need it for v2.1 checks
-    # This is a map from an event to the set of events that contain it as an auth event.
-    event_to_next_event: dict[str, set[str]] = {}
-    for event in unpersisted_events.values():
-        chain = {event.event_id}
-        events_to_auth_chain[event.event_id] = chain
 
-        to_search = [event]
-        while to_search:
-            next_event = to_search.pop()
-            for auth_id in next_event.auth_event_ids():
+    # Forward links are needed later for v2.1 conflicted-subgraph expansion.
+    # This maps an event to the set of events that reference it directly in auth_events.
+    event_to_next_event: dict[str, set[str]] = {}
+    direct_auth_events: dict[str, list[str]] = {}
+    for event in unpersisted_events.values():
+        auth_ids = list(event.auth_event_ids())
+        direct_auth_events[event.event_id] = auth_ids
+        for auth_id in auth_ids:
+            event_to_next_event.setdefault(auth_id, set()).add(event.event_id)
+
+    def _build_auth_chain(root_event_id: str) -> set[str]:
+        """Return the full auth closure for an unpersisted event."""
+
+        cached = events_to_auth_chain.get(root_event_id)
+        if cached is not None:
+            return cached
+
+        postorder: list[str] = []
+        stack: list[tuple[str, bool]] = [(root_event_id, False)]
+
+        while stack:
+            event_id, expanded = stack.pop()
+
+            if expanded:
+                postorder.append(event_id)
+                continue
+
+            if event_id in events_to_auth_chain:
+                continue
+
+            stack.append((event_id, True))
+            for auth_id in direct_auth_events.get(event_id, []):
+                if (
+                    auth_id in unpersisted_events
+                    and auth_id not in events_to_auth_chain
+                ):
+                    stack.append((auth_id, False))
+
+        for event_id in postorder:
+            chain = {event_id}
+            for auth_id in direct_auth_events.get(event_id, []):
                 chain.add(auth_id)
-                event_to_next_event.setdefault(auth_id, set()).add(next_event.event_id)
-                auth_event = unpersisted_events.get(auth_id)
-                if auth_event:
-                    to_search.append(auth_event)
+                auth_chain = events_to_auth_chain.get(auth_id)
+                if auth_chain is not None:
+                    chain.update(auth_chain)
+            events_to_auth_chain[event_id] = chain
+
+        return events_to_auth_chain[root_event_id]
+
+    for event_id in unpersisted_events:
+        _build_auth_chain(event_id)
 
     # We now 1) calculate the auth chain difference for the unpersisted events
     # and 2) work out the state sets to pass to the store.
@@ -698,9 +784,11 @@ async def _iterative_auth_checks(
 
         auth_events = {}
         for aid in event.auth_event_ids():
-            ev = await _get_event(
-                room_id, aid, event_map, state_res_store, allow_none=True
-            )
+            ev = event_map.get(aid)
+            if not ev:
+                ev = await _get_event(
+                    room_id, aid, event_map, state_res_store, allow_none=True
+                )
 
             if not ev:
                 logger.warning(
@@ -713,7 +801,9 @@ async def _iterative_auth_checks(
         for key in event_auth.auth_types_for_event(room_version, event):
             if key in resolved_state:
                 ev_id = resolved_state[key]
-                ev = await _get_event(room_id, ev_id, event_map, state_res_store)
+                ev = event_map.get(ev_id)
+                if not ev:
+                    ev = await _get_event(room_id, ev_id, event_map, state_res_store)
 
                 if ev.rejected_reason is None:
                     auth_events[key] = event_map[ev_id]
@@ -806,16 +896,14 @@ async def _mainline_sort(
     event_ids = list(event_ids)
 
     order_map = {}
-    for idx, ev_id in enumerate(event_ids, start=1):
+
+    async def get_depth(ev_id: str) -> None:
         depth = await _get_mainline_depth_for_event(
             clock, event_map[ev_id], mainline_map, event_map, state_res_store
         )
         order_map[ev_id] = (depth, event_map[ev_id].origin_server_ts, ev_id)
 
-        # We await occasionally when we're working with large data sets to
-        # ensure that we don't block the reactor loop for too long.
-        if idx % _AWAIT_AFTER_ITERATIONS == 0:
-            await clock.sleep(Duration(seconds=0))
+    await yieldable_gather_results(get_depth, event_ids)
 
     event_ids.sort(key=lambda ev_id: order_map[ev_id])
 

@@ -20,7 +20,7 @@
 #
 #
 import tempfile
-from typing import Callable
+from typing import Any, Callable, cast
 from unittest import mock
 
 import yaml
@@ -37,10 +37,13 @@ try:
 except ImportError:
     authlib = None
 
+hiredis: Any = None
 try:
-    import hiredis
+    import hiredis as _hiredis
 except ImportError:
-    hiredis = None  # type: ignore
+    pass
+else:
+    hiredis = cast(Any, _hiredis)
 
 
 class ConfigLoadingFileTestCase(ConfigFileTestCase):
