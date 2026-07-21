@@ -785,6 +785,10 @@ class ProfileUpdatesStreamRow:
 class ProfileUpdatesStream(_StreamFromIdGen):
     """Stream to inform users about profile updates."""
 
+    # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+    # for concerns around the current implementation of the profile
+    # updates stream.
+
     NAME = "profile_updates"
     ROW_TYPE = ProfileUpdatesStreamRow
 

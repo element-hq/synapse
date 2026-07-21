@@ -353,6 +353,9 @@ class SyncRestServlet(RestServlet):
             response["to_device"] = {"events": sync_result.to_device}
 
         if self._msc4429_enabled and sync_result.profile_updates:
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
             response["org.matrix.msc4429.users"] = {
                 user_id: {"profile_updates": updates}
                 for user_id, updates in sync_result.profile_updates.items()

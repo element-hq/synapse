@@ -2127,6 +2127,9 @@ class PersistEventsStore:
             # for the sliding sync tables, so we may as well re-use that information
             # here to avoid parsing the state delta again, and handling various
             # edge cases.
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
             # Note, we're skipped Membership.BAN, as we would expect there to also
             # be a leave event?
             profile_update_additions = {
