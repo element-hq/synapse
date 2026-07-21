@@ -665,6 +665,31 @@ class FilterEventsOutOfBandEventsForClientTestCase(
             [],
         )
 
+        # ... unless the events are in `always_include_ids`. This mirrors what
+        # happens when an out-of-band membership event is later de-outliered
+        # (because we are also in the room and received it over federation) and
+        # enters the current state — which sync passes as `always_include_ids`
+        # — while the copy of the event being filtered still carries the
+        # outlier flag. We can't compute the requesting user's membership at
+        # such an event (we have no state for it), but it must be let through
+        # without a membership annotation rather than failing the whole
+        # request.
+        #
+        # Regression test for https://github.com/element-hq/synapse/issues/19858.
+        filtered_events = self.get_success(
+            filter_and_transform_events_for_client(
+                self.hs.get_storage_controllers(),
+                "@other:test",
+                [invite_event, reject_event],
+                always_include_ids=frozenset({invite_event_id}),
+            )
+        )
+        self.assertEqual(
+            [e.event.event_id for e in filtered_events],
+            [invite_event_id],
+        )
+        self.assertEqual([e.membership for e in filtered_events], [None])
+
 
 async def inject_visibility_event(
     hs: HomeServer,
