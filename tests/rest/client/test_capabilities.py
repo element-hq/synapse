@@ -204,6 +204,79 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             ["avatar_url"],
         )
 
+    @override_config(
+        {"experimental_features": {"msc4133_key_allowlist": ["allowed_field"]}}
+    )
+    def test_get_profile_fields_capabilities_allowlist_requires_msc4133_enabled(
+        self,
+    ) -> None:
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(capabilities["m.profile_fields"], {"enabled": True})
+        self.assertNotIn("uk.tcpip.msc4133.profile_fields", capabilities)
+
+    @override_config(
+        {
+            "enable_set_displayname": False,
+            "experimental_features": {
+                "msc4133_enabled": True,
+                "msc4133_key_allowlist": ["allowed_field"],
+            },
+        }
+    )
+    def test_get_profile_fields_capabilities_allowlist_displayname_disabled(
+        self,
+    ) -> None:
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["m.profile_fields"]["disallowed"], ["displayname"]
+        )
+        self.assertNotIn("allowed", capabilities["m.profile_fields"])
+        self.assertEqual(
+            capabilities["uk.tcpip.msc4133.profile_fields"]["allowed"],
+            ["allowed_field", "avatar_url"],
+        )
+        self.assertEqual(
+            capabilities["uk.tcpip.msc4133.profile_fields"]["disallowed"],
+            ["displayname"],
+        )
+
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4133_enabled": True,
+                "msc4133_key_allowlist": ["allowed_field"],
+                "msc4133_key_denylist": ["denied_field"],
+            }
+        }
+    )
+    def test_get_profile_fields_capabilities_allowlist_and_denylist(
+        self,
+    ) -> None:
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["uk.tcpip.msc4133.profile_fields"]["allowed"],
+            ["allowed_field", "displayname", "avatar_url"],
+        )
+        self.assertEqual(
+            capabilities["uk.tcpip.msc4133.profile_fields"]["disallowed"],
+            ["denied_field"],
+        )
+
     def test_get_delayed_events_capabilities_default_config_msc4140(self) -> None:
         access_token = self.login(self.localpart, self.password)
 
