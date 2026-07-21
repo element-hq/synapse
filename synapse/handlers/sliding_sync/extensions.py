@@ -1113,9 +1113,13 @@ class SlidingSyncExtensionHandler:
                 # in initial sync.
                 continue
             per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
-            for field_name in fields:
-                if field_name in profile_data.keys():
-                    per_user_updates[field_name] = profile_data[field_name]
+            # Include the fields the client asked for, or all, if not specified
+            if fields:
+                user_fields = set(profile_data.keys()).intersection(fields)
+            else:
+                user_fields = set(profile_data.keys())
+            for field_name in user_fields:
+                per_user_updates[field_name] = profile_data[field_name]
 
             if per_user_updates:
                 response[profile_user_id] = {
@@ -1150,12 +1154,7 @@ class SlidingSyncExtensionHandler:
             return None
 
         user_id = sync_config.user.to_string()
-
-        if not profiles_request.fields:
-            return SlidingSyncResult.Extensions.ProfilesExtension(
-                users={},
-            )
-        fields = set(profiles_request.fields)
+        fields = set(profiles_request.fields) if profiles_request.fields else set()
 
         response: dict[str, JsonDict | None] = {}
 
@@ -1173,7 +1172,8 @@ class SlidingSyncExtensionHandler:
             from_id=from_token.stream_token.profile_updates_key,
             to_id=to_token.profile_updates_key,
             user_id=user_id,
-            field_names=set(fields),
+            field_names=fields,
+            field_names_empty_means_all_fields=False if fields else True,
         )
         profile_user_ids = set()
         updated_users = {
@@ -1192,7 +1192,7 @@ class SlidingSyncExtensionHandler:
             # interested in this user.
             if (
                 not update.field_name
-                or update.field_name not in fields
+                or (update.field_name not in fields and fields)
                 or update.user_id not in profile_user_ids
             ):
                 continue
@@ -1219,9 +1219,12 @@ class SlidingSyncExtensionHandler:
                 if is_lazy:
                     # TODO lazy cache
 
-                    # Include all the fields the client asked for
-                    fields = set(profile_data.keys()).intersection(fields)
-                    for field_name in fields:
+                    # Include the fields the client asked for, or all, if not specified
+                    if fields:
+                        user_fields = set(profile_data.keys()).intersection(fields)
+                    else:
+                        user_fields = set(profile_data.keys())
+                    for field_name in user_fields:
                         per_user_updates[field_name] = profile_data.get(field_name)
                 else:
                     # Include only the diff, unless the user recently joined,
@@ -1229,14 +1232,14 @@ class SlidingSyncExtensionHandler:
                     # We don't use a cache here as for non-lazy sync we always
                     # send changes and/or fields the client asked for, if relevant
                     # as above joined condition.
-                    fields = (
+                    user_fields = (
                         fields
                         # TODO joined_room_user_ids
                         if profile_user_id in []
                         else set(updated_user_fields.get(profile_user_id, []))
                     )
-                    fields = set(profile_data.keys()).intersection(fields)
-                    for field_name in fields:
+                    user_fields = set(profile_data.keys()).intersection(user_fields)
+                    for field_name in user_fields:
                         per_user_updates[field_name] = profile_data[field_name]
 
                 if per_user_updates:

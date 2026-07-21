@@ -454,6 +454,7 @@ class ProfileWorkerStore(SQLBaseStore):
         to_id: int,
         user_id: str,
         field_names: set[str],
+        field_names_empty_means_all_fields: bool = False,
         include_users: set[str] | None = None,
     ) -> list[ProfileUpdate]:
         """Get profile update markers for a user in a stream range.
@@ -468,6 +469,8 @@ class ProfileWorkerStore(SQLBaseStore):
             to_id: The ending stream ID (inclusive).
             user_id: The full user ID to filter on.
             field_names: Set of field names to filter update actions against.
+            field_names_empty_means_all_fields: If `field_names` is empty and this
+                is `True`, include all field names. Defaults to `False`.
             include_users: If given, only include updates for these user IDs.
 
         Returns:
@@ -476,7 +479,7 @@ class ProfileWorkerStore(SQLBaseStore):
         if from_id >= to_id:
             return []
 
-        if len(field_names) == 0:
+        if not field_names_empty_means_all_fields and len(field_names) == 0:
             return []
 
         if include_users is not None and len(include_users) == 0:
@@ -486,9 +489,13 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_profile_updates_for_user_and_fields_txn(
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
-            field_clause, field_args = make_in_list_sql_clause(
-                txn.database_engine, "pu.field_name", field_names
-            )
+            if field_names_empty_means_all_fields:
+                field_clause = "pu.field_name NOT NULL"
+                field_args: list[str] = []
+            else:
+                field_clause, field_args = make_in_list_sql_clause(
+                    txn.database_engine, "pu.field_name", field_names
+                )
             user_clause = ""
             user_args: list[str] = []
             if include_users is not None:
