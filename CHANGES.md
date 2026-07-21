@@ -1,6 +1,11 @@
-# Synapse 1.157.0rc1 (2026-07-14)
+# synapse 1.157.0 (2026-07-21)
+
+No significant changes since 1.157.0rc1.
 
 Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11570) as this release removes support for the deprecated MSC3861 Auth Delegation (`experimental_features.msc3861`).
+
+
+# Synapse 1.157.0rc1 (2026-07-14)
 
 ## Features
 
