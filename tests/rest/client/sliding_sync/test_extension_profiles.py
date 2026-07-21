@@ -271,7 +271,10 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         }
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
         if is_initial:
-            response_body["extensions"].get("org.matrix.msc4262.profiles")
+            # Nothing returned since we didn't ask for the updated field
+            self.assertIsNone(
+                response_body["extensions"].get("org.matrix.msc4262.profiles")
+            )
 
         if not is_initial:
             self.get_success(
@@ -284,5 +287,76 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
             # Make an incremental Sliding Sync request
             response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+            # Nothing returned since we didn't ask for the updated field
+            self.assertIsNone(
+                response_body["extensions"].get("org.matrix.msc4262.profiles")
+            )
 
-            response_body["extensions"].get("org.matrix.msc4262.profiles")
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_all_fields_returned_if_no_fields_specified(self, is_initial: bool) -> None:
+        """
+        Test that profile extension response returns all profile fields if we didn't
+        request any particular fields in initial and incremental sync.
+        """
+        if is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                },
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        if is_initial:
+            # As this is an initial sync, we get all profile fields
+            self.assertEqual(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                    "@other_user:test"
+                ],
+                {
+                    "updated": {
+                        "avatar_url": None,
+                        "displayname": "other_user",
+                        "field": "value",
+                    }
+                },
+            )
+
+        if not is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
+            # Make an incremental Sliding Sync request
+            response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+            # As this is an incremental sync, we only get actual updates back
+            self.assertEqual(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                    "@other_user:test"
+                ],
+                {
+                    "updated": {
+                        "field": "value",
+                    }
+                },
+            )
