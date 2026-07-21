@@ -2880,6 +2880,26 @@ class SyncHandler:
                 # An out of band room won't have any state changes.
                 state = {}
 
+                # ...however, clients using `state_after` (MSC4222) no longer
+                # apply timeline events to room state, so we must reflect the
+                # out-of-band membership event itself in `state_after`:
+                # otherwise the client never learns of the membership change
+                # (e.g. an invite rejection, or a knock rescission or denial).
+                if sync_config.use_state_after:
+                    for timeline_event in batch.events:
+                        if (
+                            timeline_event.event.type == EventTypes.Member
+                            and timeline_event.event.state_key
+                            == sync_config.user.to_string()
+                            and timeline_event.event.internal_metadata.is_out_of_band_membership()
+                        ):
+                            state[
+                                (
+                                    timeline_event.event.type,
+                                    timeline_event.event.state_key,
+                                )
+                            ] = timeline_event.event
+
             summary: JsonDict | None = {}
 
             # we include a summary in room responses when we're lazy loading
