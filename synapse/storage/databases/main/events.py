@@ -2147,6 +2147,12 @@ class PersistEventsStore:
             if profile_update_additions:
                 # Write the profile updates for additions to the room, from either
                 # a join, knock, invite, etc.
+                # FIXME this will add rows also when a display name changes due to
+                # the facts that `sliding_sync_table_changes` contains a JOIN
+                # membership event in that case. We should aim to filter these
+                # unnecessary rows out, as we're also generating an UPDATE profile
+                # update action row for the actual display name change itself.
+                # See https://github.com/element-hq/synapse/issues/19981
                 self.store.record_profile_updates_for_user_joined_room_txn(
                     txn=txn,
                     room_id=room_id,
