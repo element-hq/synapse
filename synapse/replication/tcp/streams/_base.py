@@ -768,7 +768,7 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
 
 @attr.s(slots=True, auto_attribs=True)
 class ProfileUpdatesStreamRow:
-    """Stream to inform workers about profile updates."""
+    """Profile update stream row detailing what the profile update changes."""
 
     user_id: UserID
     """The full user ID with the profile update."""
@@ -778,12 +778,16 @@ class ProfileUpdatesStreamRow:
     """
     field_name: str | None
     """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles.
-    This can be None if `action` is not 'update'.
+    This is None if `action` is not 'update'.
     """
 
 
 class ProfileUpdatesStream(_StreamFromIdGen):
-    """A user profile field was changed."""
+    """Stream to inform users about profile updates."""
+
+    # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+    # for concerns around the current implementation of the profile
+    # updates stream.
 
     NAME = "profile_updates"
     ROW_TYPE = ProfileUpdatesStreamRow

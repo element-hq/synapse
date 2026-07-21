@@ -1,1 +1,0 @@
-Fix a bug causing device list pruning to skip some rows when the transaction gets retried.

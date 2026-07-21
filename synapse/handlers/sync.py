@@ -20,7 +20,9 @@
 #
 import hashlib
 import itertools
+import json
 import logging
+import os
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -118,6 +120,13 @@ LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE = 100
 # Remember the last 100 profile field updates we sent to a client for the purposes of
 # avoiding redundantly sending the same lazy-loaded full profiles to the client
 LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_SIZE = 100
+
+# The digest size for the lazy loaded profile fields cache.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE = 16
+
+# A random key generated on server startup, for the lazy loaded profile fields cache.
+# Since this is a per-process cache, we don't care if the key is different per process.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY = os.urandom(32)
 
 
 SyncRequestKey = tuple[Any, ...]
@@ -348,10 +357,10 @@ class SyncHandler:
         )
         # ExpiringCache((User, Device))
         #   -> LruCache(
-        #       sha256(Other User ID + Field Name + Field value) -> bool
+        #       blake2b(Other User ID + Field Name) -> blake2b(Field value)
         #   )
         self.lazy_loaded_profile_fields_cache: ExpiringCache[
-            tuple[str, str | None], LruCache[str, bool]
+            tuple[str, str | None], LruCache[bytes, bytes]
         ] = ExpiringCache(
             cache_name="lazy_loaded_profile_fields_cache",
             server_name=self.server_name,
@@ -361,11 +370,10 @@ class SyncHandler:
             expiry_ms=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
         )
         """This cache contains fields and values we have sent to clients as profile
-        updates, for a particular user + device combo. The cache entry is a combination
-        of the user + field name + value, all hashed into sha256, an existing value
-        indicating the field has recently been sent. The boolean value does not hold
-        other significance. A missing cache entry means "we have not sent this user +
-        field name + value combo to the syncing user".
+        updates, for a particular user + device combo. The cache entry is a blake2b hash
+        of the user + field name, with the value being a blake2b hash of the field value.
+        If the field value changes for a particular user, the hash will change
+        and the cache will be missed.
 
         We don't manually remove entries from this cache, though it may be ignored
         in cases where the sync must send the field down to the client.
@@ -1064,6 +1072,8 @@ class SyncHandler:
     def get_lazy_loaded_members_cache(
         self, cache_key: tuple[str, str | None]
     ) -> LruCache[str, str]:
+        # FIXME: This cache may be subject to losing members in the case that
+        # a sync is interrupted and retried, see https://github.com/element-hq/synapse/issues/19978
         cache: LruCache[str, str] | None = self.lazy_loaded_members_cache.get(cache_key)
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
@@ -1079,19 +1089,20 @@ class SyncHandler:
 
     def get_lazy_loaded_profile_fields_cache(
         self, cache_key: tuple[str, str | None]
-    ) -> LruCache[str, bool]:
+    ) -> LruCache[bytes, bytes]:
         """This cache contains fields and values we have sent to clients as profile
-        updates, for a particular user + device combo. The cache entry is a combination
-        of the user + field name + value, all hashed into sha256, an existing value
-        indicating the field has recently been sent. The boolean value does not hold
-        other significance. A missing cache entry means "we have not sent this user +
-        field name + value combo to the syncing user".
+        updates, for a particular user + device combo. The cache entry is a blake2b hash
+        of the user + field name, with the value being a blake2b hash of the field value.
+        If the field value changes for a particular user, the hash will change
+        and the cache will be missed.
 
         We don't manually remove entries from this cache, though it may be ignored
         in cases where the sync must send the field down to the client.
         """
-        cache: LruCache[str, bool] | None = self.lazy_loaded_profile_fields_cache.get(
-            cache_key
+        # FIXME: This cache may be subject to losing field updates in the case that
+        # a sync is interrupted and retried, see https://github.com/element-hq/synapse/issues/19978
+        cache: LruCache[bytes, bytes] | None = (
+            self.lazy_loaded_profile_fields_cache.get(cache_key)
         )
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
@@ -2390,6 +2401,10 @@ class SyncHandler:
             # Hopefully clients can just filter these out.
             profile_data_by_user = await self.store.get_profile_data_for_users(users)
 
+            # Note, we've already collected field updates above via `updates`,
+            # outside of events in the timeline when lazy loading. When lazy loading,
+            # we're already always sending the fields that have changed, regardless
+            # of the lazy loading cache.
             for other_user_id in users:
                 profile_data = profile_data_by_user.get(other_user_id)
                 if profile_data is None:
@@ -2412,31 +2427,34 @@ class SyncHandler:
                         )
                         cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
                         # Only send this users field if we haven't recently sent it.
-                        # Our cache value to check against is a sha256 of a string of
-                        # user ID + field name + value, which ensures if the value
-                        # changes, we'll miss the cache, thus sending the field update
-                        # to the syncing user.
-                        import json
-
-                        cache_value = hashlib.sha256(
+                        # Our cache contains previously set values as pairs of
+                        # blake2b(other_used_id + field_name) -> blake2b(value),
+                        # which ensures if the value changes, we'll miss the cache,
+                        # thus sending the field update to the syncing user.
+                        cache_value = hashlib.blake2b(
+                            f"{other_user_id}-{field_name}".encode("utf8"),
+                            key=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY,
+                            digest_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE,
+                        ).digest()
+                        value_hash = hashlib.blake2b(
                             json.dumps(
                                 [
-                                    other_user_id,
-                                    field_name,
                                     profile_data.get(field_name),
                                 ],
                                 sort_keys=True,
                                 separators=(",", ":"),
                                 ensure_ascii=False,
-                            ).encode("utf8")
-                        ).hexdigest()
-                        if cache.get(cache_value) is None:
+                            ).encode("utf8"),
+                            key=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY,
+                            digest_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE,
+                        ).digest()
+                        if cache.get(cache_value) != value_hash:
                             per_user_updates[field_name] = profile_data.get(field_name)
                             # Update our cache to indicate this user/field combo
                             # has been recently sent.
                             cache.set(
                                 cache_value,
-                                True,
+                                value_hash,
                             )
                 else:
                     # Include only the diff, unless the user recently joined,

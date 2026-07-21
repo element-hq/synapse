@@ -1180,7 +1180,6 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 user_id=UserID.from_string(self.user),
                 field_name="m.status",
                 new_value={"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
-                target_users=set(),
             )
         )
         self.helper.join(
@@ -2271,7 +2270,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
 
     @parameterized.expand([[True, False], [True, True], [False, False], [False, True]])
     @override_config({"include_profile_updates_in_sync": True})
-    def test_incremental_sync_join_leave_join_leave(
+    def test_incremental_sync_join_leave_join_leave_includes_user_joining_and_leaving(
         self,
         eager_sync: bool,
         is_lazy: bool,
@@ -2282,6 +2281,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         In the first variant we sync and check after each iteration of join/leave.
         In the second variant we only sync at the end of all the join/leaves.
         We do both of these as lazy and not-lazy variants.
+
+        This test checks that for a syncing user that is joining and leaving, a member
+        of the room gets the right profile information down the line.
         """
         # Use third_user for this test as other_user is already joined
         third_user = self.register_user("third_user", "password")
@@ -2479,6 +2481,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 new_value=cast(JsonValue | dict[str, JsonValue], value),
             )
         )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 requester,
@@ -2518,6 +2523,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 new_value=cast(JsonValue | dict[str, JsonValue], new_value),
             )
         )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 requester,
@@ -2545,6 +2553,143 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(
             incremental_result.profile_updates["@other_user:test"]["field"],
             new_value,
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_cache_and_multiple_updates_to_the_same_field(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental lazy sync response
+        includes an update to a field, even when the value changes back to a
+        value set and cached previously.
+        """
+        requester = create_requester(self.user)
+        filter_json = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+            "room": {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            },
+        }
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertFalse(
+            "@other_user:test" in initial_result.profile_updates,
+        )
+
+        # Update the field
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # We should have the field change in our sync response.
+        # It will also be added to the lazy loading cache, so the same field value
+        # isn't sent again immediately.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            "value",
+        )
+
+        # Update the field again, busting our cache
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="new value",
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Even though the field was added to the lazy loading members cache,
+        # it should come through as an update, as the field value changed.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            "new value",
+        )
+
+        # Update the field again, but to the previous value
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Even though we've quite recently sent down this value, we should still
+        # see it again as it is a change
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            "value",
         )
 
 

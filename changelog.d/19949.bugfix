@@ -1,1 +1,0 @@
-Fix `SYNAPSE_ASYNC_IO_REACTOR=1` on Python 3.14.

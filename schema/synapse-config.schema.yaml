@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.156/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.157/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -281,8 +281,12 @@ properties:
       Use this option to include updates of other users' profiles in sync responses,
       for users who share rooms.
       
-      Note, requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429)
+      Requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429)
       compatible client, and is currently limited to legacy sync and local users only.
+      
+      This feature is under development and should be used with caution on busy servers or
+      servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring
+      profile information doesn't leak across rooms.
     default: false
     examples:
       - true
@@ -320,7 +324,11 @@ properties:
       _Changed in Synapse 1.76:_ the default version room version was increased
       from [9](https://spec.matrix.org/v1.5/rooms/v9/) to
       [10](https://spec.matrix.org/v1.5/rooms/v10/).
-    default: "10"
+
+      _Changed in Synapse 1.157:_ the default version room version was increased
+      from [10](https://spec.matrix.org/v1.12/rooms/v10/) to
+      [11](https://spec.matrix.org/v1.12/rooms/v11/).
+    default: "11"
     examples:
       - "8"
   gc_thresholds:

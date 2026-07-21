@@ -339,7 +339,8 @@ include_profile_data_on_invite: false
 ### `include_profile_updates_in_sync`
 
 *(boolean)* Use this option to include updates of other users' profiles in sync responses, for users who share rooms.
-Note, requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatible client, and is currently limited to legacy sync and local users only. Defaults to `false`.
+Requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatible client, and is currently limited to legacy sync and local users only.
+This feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -373,8 +374,9 @@ Known room versions are listed [here](https://spec.matrix.org/latest/rooms/#comp
 For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
+_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
 
-Defaults to `"10"`.
+Defaults to `"11"`.
 
 Example configuration:
 ```yaml

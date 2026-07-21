@@ -19,14 +19,18 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, Collection, Iterable, cast
+from typing import TYPE_CHECKING, Collection, cast
 
 import attr
 from canonicaljson import encode_canonical_json
 
-from synapse.api.constants import Membership, ProfileFields, ProfileUpdateAction
+from synapse.api.constants import (
+    EventTypes,
+    Membership,
+    ProfileFields,
+    ProfileUpdateAction,
+)
 from synapse.api.errors import Codes, StoreError
-from synapse.events import EventBase
 from synapse.replication.tcp.streams._base import ProfileUpdatesStream
 from synapse.storage._base import SQLBaseStore, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -107,13 +111,15 @@ class ProfileWorkerStore(SQLBaseStore):
         lower_bound_id = progress.get("lower_bound_id", "")
 
         def _get_last_id(txn: LoggingTransaction) -> str | None:
-            sql = """
-                    SELECT user_id FROM profiles
-                    WHERE user_id > ?
-                    ORDER BY user_id
-                    LIMIT 1 OFFSET 1000
-                  """
-            txn.execute(sql, (lower_bound_id,))
+            txn.execute(
+                """
+                SELECT user_id FROM profiles
+                WHERE user_id > ?
+                ORDER BY user_id
+                LIMIT 1 OFFSET 1000
+                """,
+                (lower_bound_id,),
+            )
             res = txn.fetchone()
             if res:
                 upper_bound_id = res[0]
@@ -124,21 +130,22 @@ class ProfileWorkerStore(SQLBaseStore):
         def _process_batch(
             txn: LoggingTransaction, lower_bound_id: str, upper_bound_id: str
         ) -> None:
-            sql = """
-                    UPDATE profiles
-                    SET full_user_id = '@' || user_id || ?
-                    WHERE ? < user_id AND user_id <= ? AND full_user_id IS NULL
-                   """
-            txn.execute(sql, (f":{self.server_name}", lower_bound_id, upper_bound_id))
+            txn.execute(
+                """
+                UPDATE profiles
+                SET full_user_id = '@' || user_id || ?
+                WHERE ? < user_id AND user_id <= ? AND full_user_id IS NULL
+                """,
+                (f":{self.server_name}", lower_bound_id, upper_bound_id),
+            )
 
         def _final_batch(txn: LoggingTransaction, lower_bound_id: str) -> None:
-            sql = """
-                    UPDATE profiles
-                    SET full_user_id = '@' || user_id || ?
-                    WHERE ? < user_id AND full_user_id IS NULL
-                   """
             txn.execute(
-                sql,
+                """
+                UPDATE profiles
+                SET full_user_id = '@' || user_id || ?
+                WHERE ? < user_id AND full_user_id IS NULL
+                """,
                 (
                     f":{self.server_name}",
                     lower_bound_id,
@@ -146,10 +153,11 @@ class ProfileWorkerStore(SQLBaseStore):
             )
 
             if isinstance(self.database_engine, PostgresEngine):
-                sql = """
-                        ALTER TABLE profiles VALIDATE CONSTRAINT full_user_id_not_null
-                      """
-                txn.execute(sql)
+                txn.execute(
+                    """
+                    ALTER TABLE profiles VALIDATE CONSTRAINT full_user_id_not_null
+                    """,
+                )
 
         upper_bound_id = await self.db_pool.runInteraction(
             "populate_full_user_id_profiles", _get_last_id
@@ -270,13 +278,12 @@ class ProfileWorkerStore(SQLBaseStore):
             field_path = f'$."{field_name}"'
 
             if isinstance(self.database_engine, PostgresEngine):
-                sql = """
-                SELECT JSONB_PATH_EXISTS(fields, ?), JSONB_EXTRACT_PATH(fields, ?)
-                FROM profiles
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    SELECT JSONB_PATH_EXISTS(fields, ?), JSONB_EXTRACT_PATH(fields, ?)
+                    FROM profiles
+                    WHERE user_id = ?
+                    """,
                     (field_path, field_name, user_id.localpart),
                 )
 
@@ -290,13 +297,12 @@ class ProfileWorkerStore(SQLBaseStore):
                 return value
 
             else:
-                sql = """
-                SELECT JSON_TYPE(fields, ?), JSON_EXTRACT(fields, ?)
-                FROM profiles
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    SELECT JSON_TYPE(fields, ?), JSON_EXTRACT(fields, ?)
+                    FROM profiles
+                    WHERE user_id = ?
+                    """,
                     (field_path, field_path, user_id.localpart),
                 )
 
@@ -331,8 +337,7 @@ class ProfileWorkerStore(SQLBaseStore):
             retcol="fields",
             desc="get_profile_fields",
         )
-        # The SQLite driver doesn't automatically convert JSON to
-        # Python objects
+        # The SQLite driver doesn't have a JSON datatype.
         if isinstance(self.database_engine, Sqlite3Engine) and result:
             result = json.loads(result)
         return result or {}
@@ -365,15 +370,17 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_updated_profile_updates_txn(
             txn: LoggingTransaction,
         ) -> list[tuple[int, str, str, str | None]]:
-            sql = """
-            SELECT
-                stream_id, user_id, action, field_name
-            FROM profile_updates
-            WHERE
-                ? < stream_id AND stream_id <= ?
-            ORDER BY stream_id ASC LIMIT ?
-            """
-            txn.execute(sql, (from_id, to_id, limit))
+            txn.execute(
+                """
+                SELECT
+                    stream_id, user_id, action, field_name
+                FROM profile_updates
+                WHERE
+                    ? < stream_id AND stream_id <= ?
+                ORDER BY stream_id ASC LIMIT ?
+                """,
+                (from_id, to_id, limit),
+            )
             return cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
         return await self.db_pool.runInteraction(
@@ -385,7 +392,7 @@ class ProfileWorkerStore(SQLBaseStore):
         *,
         from_id: int,
         to_id: int,
-        field_names: Iterable[str],
+        field_names: Collection[str],
     ) -> list[ProfileUpdate]:
         """Get profile update markers for the given fields in a stream range.
 
@@ -402,7 +409,6 @@ class ProfileWorkerStore(SQLBaseStore):
         if from_id >= to_id:
             return []
 
-        field_names = list(field_names)
         if not field_names:
             return []
 
@@ -412,14 +418,16 @@ class ProfileWorkerStore(SQLBaseStore):
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "field_name", field_names
             )
-            sql = (
-                "SELECT stream_id, user_id, action, field_name"
-                " FROM profile_updates"
-                f" WHERE ? < stream_id AND stream_id <= ? AND ({clause}"
-                " OR action != ?) "
-                " ORDER BY stream_id ASC"
+            txn.execute(
+                f"""
+                SELECT stream_id, user_id, action, field_name
+                    FROM profile_updates
+                WHERE ? < stream_id AND stream_id <= ?
+                    AND ({clause} OR action != ?)
+                ORDER BY stream_id ASC
+                """,
+                (from_id, to_id, *args, ProfileUpdateAction.UPDATE.value),
             )
-            txn.execute(sql, (from_id, to_id, *args, ProfileUpdateAction.UPDATE.value))
             rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
             updates: list[ProfileUpdate] = []
@@ -494,20 +502,18 @@ class ProfileWorkerStore(SQLBaseStore):
             # Retrieve profile updates where there's a corresponding row in
             # `profile_updates_per_user` within the given `stream_id` bounds
             # and the `user_id` and `field_names` match.
-            sql = f"""
-                SELECT pu.stream_id, pu.user_id, pu.action, pu.field_name
-                  FROM profile_updates AS pu
-                  INNER JOIN profile_updates_per_user AS puf
-                  ON pu.stream_id = puf.stream_id
-                  WHERE ? < pu.stream_id AND pu.stream_id <= ?
-                  AND puf.user_id = ?
-                  {user_clause}
-                  AND ({field_clause} OR pu.action != ?)
-                  ORDER BY pu.stream_id ASC
-            """
-
             txn.execute(
-                sql,
+                f"""
+                SELECT pu.stream_id, pu.user_id, pu.action, pu.field_name
+                FROM profile_updates AS pu
+                    INNER JOIN profile_updates_per_user AS puf
+                    ON pu.stream_id = puf.stream_id
+                WHERE ? < pu.stream_id AND pu.stream_id <= ?
+                    AND puf.user_id = ?
+                    {user_clause}
+                    AND ({field_clause} OR pu.action != ?)
+                ORDER BY pu.stream_id ASC
+                """,
                 (
                     from_id,
                     to_id,
@@ -565,8 +571,7 @@ class ProfileWorkerStore(SQLBaseStore):
         results: dict[str, dict[str, JsonValue | dict[str, JsonValue]]] = {}
         for full_user_id, displayname, avatar_url, fields in rows:
             user_fields = fields or {}
-            # The SQLite driver doesn't automatically convert JSON to
-            # Python objects
+            # The SQLite driver doesn't have a JSON datatype.
             if isinstance(self.database_engine, Sqlite3Engine) and fields:
                 user_fields = json.loads(fields)
             base_fields = {
@@ -666,7 +671,6 @@ class ProfileWorkerStore(SQLBaseStore):
         user_id: UserID,
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
-        target_users: set[str],
     ) -> int | None:
         """
         Wrapper function to set a profile field value and write to the profile
@@ -677,7 +681,6 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id: The user to set the profile field for
             field_name: The field to set the value for
             new_value: New value for the profile field
-            target_users: Users to trigger a profile update stream row for
 
         Returns:
             The profile updates stream ID that was created in this transaction
@@ -706,14 +709,13 @@ class ProfileWorkerStore(SQLBaseStore):
 
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
-                sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
-                ON CONFLICT (user_id)
-                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
-                """
-
                 txn.execute(
-                    sql,
+                    """
+                    INSERT INTO profiles
+                        (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
+                    ON CONFLICT (user_id)
+                        DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
+                    """,
                     (
                         user_id.localpart,
                         user_id.to_string(),
@@ -724,19 +726,18 @@ class ProfileWorkerStore(SQLBaseStore):
                     ),
                 )
             else:
-                # You may be tempted to use json_patch instead of providing the parameters
-                # twice, but that recursively merges objects instead of replacing.
-                sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
-                ON CONFLICT (user_id)
-                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
-                """
                 # This will error if field_name has double quotes in it, but that's not
                 # possible due to the grammar.
                 json_field_name = f'$."{field_name}"'
 
                 txn.execute(
-                    sql,
+                    # You may be tempted to use json_patch instead of providing the parameters
+                    # twice, but that recursively merges objects instead of replacing.
+                    """
+                    INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
+                    ON CONFLICT (user_id)
+                        DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
+                    """,
                     (
                         user_id.localpart,
                         user_id.to_string(),
@@ -751,76 +752,63 @@ class ProfileWorkerStore(SQLBaseStore):
             return None
 
         # Record updates in the profile updates stream
-        stream_id = self._record_profile_updates_txn(
+        stream_id = self.record_profile_updates_txn(
             txn=txn,
             user_id=user_id,
             action=ProfileUpdateAction.UPDATE,
             field_names=[field_name],
-            target_users=target_users,
         )
 
         return stream_id
 
-    def record_profile_updates_for_membership_changes_from_events(
-        self, *, txn: LoggingTransaction, events: list[EventBase]
+    def record_profile_updates_for_user_joined_room_txn(
+        self, *, txn: LoggingTransaction, room_id: str, joined_users: set[str]
     ) -> None:
         """
-        Record profile updates from membership events.
+        Record profile updates for membership additions to a room.
 
-        Adds "joined_room" and "left_room" profile update actions into the
-        profile updates stream tables.
+        Currently, updates are only recorded for local users.
 
         Args:
             txn: The transaction to use.
-            events: A list of membership events.
+            room_id: The room ID concerned.
+            joined_users: A list of users who have "joined" the room, which here also
+                means "invited" or "knocked", as in either case we consider that the
+                users profile should be pushed to the client, should they need it
+                already even if the user hasn't actually joined the room.
         """
         if not self._msc4429_enabled:
             return
 
         assert self._is_events_writer
 
-        for event in events:
-            if (
-                event.membership not in (Membership.JOIN, Membership.LEAVE)
-                or not event.internal_metadata.membership_update_users_in_shared_rooms
-            ):
-                continue
-            if (
-                event.membership == Membership.JOIN
-                and event.internal_metadata.prev_membership != Membership.JOIN
-            ):
-                self._record_profile_updates_txn(
-                    txn=txn,
-                    user_id=UserID.from_string(event.sender),
-                    action=ProfileUpdateAction.JOINED_ROOM,
-                    target_users=set(
-                        event.internal_metadata.membership_update_users_in_shared_rooms
-                    ),
-                    field_names=None,
-                )
-            elif (
-                event.membership == Membership.LEAVE
-                and event.internal_metadata.prev_membership != Membership.LEAVE
-            ):
-                self._record_profile_updates_for_user_left_room_txn(
-                    txn=txn,
-                    user_id=UserID.from_string(event.sender),
-                    users_to_update=set(
-                        event.internal_metadata.membership_update_users_in_shared_rooms
-                    ),
-                )
+        # Ensure we're working with local users only
+        users = {user_id for user_id in joined_users if self.hs.is_mine_id(user_id)}
 
-    def _record_profile_updates_txn(
+        # Record the profile updates for each user
+        for user_id in users:
+            self.record_profile_updates_txn(
+                txn=txn,
+                user_id=UserID.from_string(user_id),
+                action=ProfileUpdateAction.JOINED_ROOM,
+                field_names=None,
+                user_rooms={room_id},
+            )
+
+    def record_profile_updates_txn(
         self,
         *,
         txn: LoggingTransaction,
         user_id: UserID,
         action: ProfileUpdateAction,
         field_names: list[str] | None,
-        target_users: set[str],
+        user_rooms: set[str] | None = None,
+        target_users: set[str] | None = None,
     ) -> int | None:
         """
         Record updates into the profile updates stream tables.
+
+        Currently, updates are only recorded for local users.
 
         Args:
             txn: Transaction to use
@@ -828,7 +816,11 @@ class ProfileWorkerStore(SQLBaseStore):
             action: The profile update action, either `update`, `left_room` or
                 `joined_room`
             field_names: A list of fields that were set, if ProfileUpdateAction.UPDATE
-            target_users: Set of users to create profile update stream rows for
+            user_rooms: Optionally, a set of rooms that the update concerns. If not
+                given, a database lookup will be done to fetch all the users rooms.
+            target_users: Optionally, set of users to create profile update stream rows
+                for. If not given, a database lookup will be done based on `user_rooms`,
+                or if that is not set, the result of the rooms lookup.
 
         Returns:
             The latest stream ID created in this transaction
@@ -840,6 +832,45 @@ class ProfileWorkerStore(SQLBaseStore):
             assert field_names
         else:
             assert not field_names
+
+        if not target_users:
+            if not user_rooms:
+                rows = self.db_pool.simple_select_onecol_txn(
+                    txn=txn,
+                    table="current_state_events",
+                    keyvalues={
+                        "type": EventTypes.Member,
+                        "membership": Membership.JOIN,
+                        "state_key": user_id.to_string(),
+                    },
+                    retcol="room_id",
+                )
+                user_rooms = set(rows)
+
+            rows = self.db_pool.simple_select_many_txn(
+                txn=txn,
+                table="local_current_membership",
+                column="room_id",
+                iterable=user_rooms,
+                retcols=("user_id",),
+                keyvalues={
+                    "membership": Membership.JOIN,
+                },
+            )
+            target_users = {row[0] for row in rows}
+
+        # Ensure we only write updates for local users
+        users = {user for user in target_users if self.hs.is_mine_id(user)}
+
+        if action in (ProfileUpdateAction.JOINED_ROOM, ProfileUpdateAction.LEFT_ROOM):
+            users.discard(user_id.to_string())
+            if not users:
+                # No point writing an update for ourselves, if a membership change and no
+                # other users interested
+                return None
+        elif action == ProfileUpdateAction.UPDATE:
+            # Always include ourselves when updating field values
+            users.add(user_id.to_string())
 
         # Record the profile update
         inserted_ts = self.clock.time_msec()
@@ -888,7 +919,7 @@ class ProfileWorkerStore(SQLBaseStore):
         inserted_ts = self.clock.time_msec()
         per_user_values = [
             (stream_id, user_id, inserted_ts)
-            for user_id in target_users
+            for user_id in users
             for stream_id in stream_ids
         ]
         self.db_pool.simple_insert_many_txn(
@@ -908,7 +939,6 @@ class ProfileWorkerStore(SQLBaseStore):
         user_id: UserID,
         field_name: str,
         new_value: JsonValue | dict[str, JsonValue],
-        target_users: set[str],
     ) -> int | None:
         """
         Set a custom profile field for a user.
@@ -917,7 +947,6 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id: The user's ID.
             field_name: The name of the custom profile field.
             new_value: The value of the custom profile field.
-            target_users: Set of users to trigger profile updates for.
         """
         return await self.db_pool.runInteraction(
             "set_profile_field",
@@ -925,11 +954,12 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id,
             field_name,
             new_value,
-            target_users,
         )
 
     async def delete_profile_field(
-        self, user_id: UserID, field_name: str, target_users: set[str]
+        self,
+        user_id: UserID,
+        field_name: str,
     ) -> int | None:
         """
         Remove a custom profile field for a user.
@@ -944,21 +974,19 @@ class ProfileWorkerStore(SQLBaseStore):
 
         def delete_profile_field(txn: LoggingTransaction) -> int | None:
             if isinstance(self.database_engine, PostgresEngine):
-                sql = """
-                UPDATE profiles SET fields = fields - ?
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    UPDATE profiles SET fields = fields - ?
+                    WHERE user_id = ?
+                    """,
                     (field_name, user_id.localpart),
                 )
             else:
-                sql = """
-                UPDATE profiles SET fields = json_remove(fields, ?)
-                WHERE user_id = ?
-                """
                 txn.execute(
-                    sql,
+                    """
+                    UPDATE profiles SET fields = json_remove(fields, ?)
+                    WHERE user_id = ?
+                    """,
                     # This will error if field_name has double quotes in it.
                     (f'$."{field_name}"', user_id.localpart),
                 )
@@ -966,12 +994,11 @@ class ProfileWorkerStore(SQLBaseStore):
             if not self._msc4429_enabled:
                 return None
 
-            stream_id = self._record_profile_updates_txn(
+            stream_id = self.record_profile_updates_txn(
                 txn=txn,
                 user_id=user_id,
                 action=ProfileUpdateAction.UPDATE,
                 field_names=[field_name],
-                target_users=target_users,
             )
             return stream_id
 
@@ -982,24 +1009,16 @@ class ProfileWorkerStore(SQLBaseStore):
     async def delete_profile(
         self,
         user_id: UserID,
-        field_names: list[str],
-        target_users: set[str],
-    ) -> int | None:
+    ) -> None:
         """
         Deletes an entire user profile, including displayname, avatar_url and all
         custom fields. Used at user deactivation when erasure is requested.
 
         Args:
             user_id: User ID whose profile is going to be deleted.
-            field_names: List of profile fields the user had.
-            target_users: List of users who share rooms and are interested in
-                profile updates for this user.
-
-        Returns:
-            Latest stream ID for the profile updates stream.
         """
 
-        def _delete_profile_txn(txn: LoggingTransaction) -> int | None:
+        def _delete_profile_txn(txn: LoggingTransaction) -> None:
             # Delete the profile
             txn.execute(
                 """
@@ -1008,63 +1027,10 @@ class ProfileWorkerStore(SQLBaseStore):
                 """,
                 (user_id.to_string(),),
             )
-            # Update the profile updates stream
-            stream_id = self._record_profile_updates_txn(
-                txn=txn,
-                user_id=user_id,
-                action=ProfileUpdateAction.UPDATE,
-                field_names=field_names,
-                target_users=target_users,
-            )
-            return stream_id
 
-        return await self.db_pool.runInteraction(
+        await self.db_pool.runInteraction(
             "delete_profile",
             _delete_profile_txn,
-        )
-
-    def _record_profile_updates_for_user_left_room_txn(
-        self,
-        txn: LoggingTransaction,
-        user_id: UserID,
-        users_to_update: set[str],
-    ) -> None:
-        """
-        Record updates into the profile updates stream for when a user leaves
-        the last room with a set of users.
-
-        Doing this clears all old rows from the `profile_updates_per_user` table,
-        to avoid exposing any profile field changes past the point of not being
-        in any common rooms with the user.
-
-        Args:
-            user_id: The user who left the last common room with a set of users.
-            users_to_update: The set of users who no longer share rooms with the user.
-        """
-        # First clear the previous rows from the table
-        user_clause, user_args = make_in_list_sql_clause(
-            txn.database_engine,
-            "user_id",
-            users_to_update,
-        )
-        txn.execute(
-            f"""
-                DELETE FROM profile_updates_per_user
-                    WHERE {user_clause}
-                    AND stream_id IN (
-                        SELECT stream_id FROM profile_updates WHERE user_id = ?
-                    )
-            """,
-            (*user_args, user_id.to_string()),
-        )
-
-        # Now record the "left room" action in the stream
-        self._record_profile_updates_txn(
-            txn=txn,
-            user_id=user_id,
-            action=ProfileUpdateAction.LEFT_ROOM,
-            field_names=[],
-            target_users=users_to_update,
         )
 
 

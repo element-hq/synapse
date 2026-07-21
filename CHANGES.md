@@ -1,3 +1,59 @@
+# synapse 1.157.0 (2026-07-21)
+
+No significant changes since 1.157.0rc1.
+
+Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11570) as this release removes support for the deprecated MSC3861 Auth Delegation (`experimental_features.msc3861`).
+
+
+# Synapse 1.157.0rc1 (2026-07-14)
+
+## Features
+
+- [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Limit how many delayed events a user may have scheduled at once. ([\#19539](https://github.com/element-hq/synapse/issues/19539))
+- Support [MSC4446](https://github.com/matrix-org/matrix-spec-proposals/pull/4446) for moving fully read markers backwards. Contributed by @SpiritCroc @ Beeper. ([\#19663](https://github.com/element-hq/synapse/issues/19663))
+- Add before and after time filters to the ['Redact events of a user'](https://element-hq.github.io/synapse/v1.157/admin_api/user_admin_api.html#redact-events-of-a-user) Admin API. ([\#19802](https://github.com/element-hq/synapse/issues/19802))
+- Updated experimental support for [MSC4388: Secure out-of-band channel for sign in with QR](https://github.com/matrix-org/matrix-spec-proposals/pull/4388). ([\#19808](https://github.com/element-hq/synapse/issues/19808))
+- Add an `exclude_rooms_from_presence` configuration option to stop presence being routed between users solely because they share one of the listed rooms. ([\#19935](https://github.com/element-hq/synapse/issues/19935))
+
+## Bugfixes
+
+- [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Update error responses to match their format in the current draft of the MSC. ([\#19539](https://github.com/element-hq/synapse/issues/19539))
+- Lock Sliding Sync connections when inserting lazy members, to prevent repeated deadlocks. ([\#19826](https://github.com/element-hq/synapse/issues/19826))
+- Fix the `flag_existing_quarantined_media` background update skipping some quarantined remote media. Introduced in v1.152.0. ([\#19901](https://github.com/element-hq/synapse/issues/19901))
+- Fix a bug introduced in Synapse v1.150.0 where reactivating a deactivated and erased user did not restore their profile, breaking login, name changes, and invitations.
+  Contributed by @m4us1ne. ([\#19902](https://github.com/element-hq/synapse/issues/19902))
+- Fix a regression where application services that opted into ephemeral events using the legacy `de.sorunome.msc2409.push_ephemeral` registration flag stopped receiving ephemeral events (including to-device messages used for encryption). Introduced in v1.156.0. ([\#19928](https://github.com/element-hq/synapse/issues/19928))
+- Fix a bug causing device list pruning to skip some rows when the transaction gets retried. ([\#19947](https://github.com/element-hq/synapse/issues/19947))
+- Fix presence states being shown to clients forever after presence is disabled, by marking any previously only users as offline. ([\#19948](https://github.com/element-hq/synapse/issues/19948))
+- Fix `SYNAPSE_ASYNC_IO_REACTOR=1` on Python 3.14. ([\#19949](https://github.com/element-hq/synapse/issues/19949))
+
+## Deprecations and Removals
+
+- Remove support for experimental [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) auth delegation, in favour of the stable Matrix Authentication Service integration support. See [the upgrade notes](https://element-hq.github.io/synapse/v1.157/upgrade.html#upgrading-to-v11570). ([\#19895](https://github.com/element-hq/synapse/issues/19895))
+
+## Internal Changes
+
+- Port the synchronous core of client event serialization to Rust. ([\#19837](https://github.com/element-hq/synapse/issues/19837), [\#19922](https://github.com/element-hq/synapse/issues/19922))
+- Update `HomeserverTestCase.get_success(...)` and friends to drive async Rust (Tokio runtime/thread pool). ([\#19871](https://github.com/element-hq/synapse/issues/19871), [\#19879](https://github.com/element-hq/synapse/issues/19879))
+- Allow Rust code to have database access via Python database connection pool. ([\#19878](https://github.com/element-hq/synapse/issues/19878))
+- Add `golangci-lint` to CI. ([\#19888](https://github.com/element-hq/synapse/issues/19888))
+- Remove wall-clock dependency of `test_redact_messages_all_rooms` test, as this caused flakiness. ([\#19890](https://github.com/element-hq/synapse/issues/19890))
+- Change the [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814) dehydrated device `/events` endpoint from `POST` to `GET`. ([\#19896](https://github.com/element-hq/synapse/issues/19896))
+- Change the [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814) dehydrated device `/events` endpoint paging to match spec conventions. ([\#19897](https://github.com/element-hq/synapse/issues/19897))
+- Fix storage type mismatches where values were bound with a type that didn't match their database column. ([\#19911](https://github.com/element-hq/synapse/issues/19911))
+- Speed up deletion of old sliding sync connections by adding an index. ([\#19912](https://github.com/element-hq/synapse/issues/19912))
+- Add note to 3PID email token request unit tests that the endpoint being tested can have an expected, artificial delay of up to 1s. ([\#19916](https://github.com/element-hq/synapse/issues/19916))
+- Add an index to `sliding_sync_connection_lazy_members` to speed up deleting old sliding sync connection positions. ([\#19923](https://github.com/element-hq/synapse/issues/19923))
+- Fix `test_lock_contention` being flaky when running against PostgreSQL by budgeting CPU time rather than wall-clock time. ([\#19929](https://github.com/element-hq/synapse/issues/19929))
+- Fix Complement test flake when restarting Synapse workers (cross-test pollution caused by nginx upstreams being temporarily unavailable). ([\#19936](https://github.com/element-hq/synapse/issues/19936))
+- Add clean deploy `FIXME` note for `TestOIDCProviderUnavailable` (problem tracked by [#19937](https://github.com/element-hq/synapse/issues/19937)). ([\#19938](https://github.com/element-hq/synapse/issues/19938))
+- Minor presence performance improvements for large servers. ([\#19939](https://github.com/element-hq/synapse/issues/19939))
+- Reduce replication traffic caused by presence. ([\#19941](https://github.com/element-hq/synapse/issues/19941))
+- Add `last_active_granularity`, `sync_online_timeout` and `idle_timeout` options to the `presence` config section to allow tuning the presence state machine timers. ([\#19942](https://github.com/element-hq/synapse/issues/19942))
+
+
+
+
 # Synapse 1.156.0 (2026-07-07)
 
 No significant changes since 1.156.0rc1.

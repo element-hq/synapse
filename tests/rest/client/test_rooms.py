@@ -4916,7 +4916,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -4924,7 +4924,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -4959,7 +4959,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5010,7 +5010,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5035,7 +5035,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5043,7 +5043,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -5078,7 +5078,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5119,7 +5119,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         # user should be able to join again
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5167,7 +5167,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5281,7 +5281,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5289,7 +5289,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -5324,7 +5324,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5375,7 +5375,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5397,7 +5397,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5405,7 +5405,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -5440,7 +5440,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5476,7 +5476,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         # user re-joins after kick
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5484,7 +5484,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -5524,7 +5524,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(

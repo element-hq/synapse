@@ -41,7 +41,6 @@ class DataStoreTestCase(unittest.HomeserverTestCase):
                 user_id=self.user,
                 field_name=ProfileFields.DISPLAYNAME,
                 new_value=self.displayname,
-                target_users=set(),
             )
         )
 

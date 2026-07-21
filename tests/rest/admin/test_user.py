@@ -948,7 +948,6 @@ class UsersListTestCase(unittest.HomeserverTestCase):
                 user_id=UserID.from_string("@user1:test"),
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="mxc://url3",
-                target_users=set(),
             )
         )
         self.get_success(
@@ -956,7 +955,6 @@ class UsersListTestCase(unittest.HomeserverTestCase):
                 user_id=UserID.from_string("@user2:test"),
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="mxc://url2",
-                target_users=set(),
             )
         )
         self.get_success(
@@ -964,7 +962,6 @@ class UsersListTestCase(unittest.HomeserverTestCase):
                 user_id=UserID.from_string("@admin:test"),
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="mxc://url1",
-                target_users=set(),
             )
         )
 
@@ -1560,7 +1557,6 @@ class DeactivateAccountTestCase(unittest.HomeserverTestCase):
                 user_id=UserID.from_string("@user:test"),
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="mxc://servername/mediaid",
-                target_users=set(),
             )
         )
         self.get_success(
@@ -1696,7 +1692,6 @@ class DeactivateAccountTestCase(unittest.HomeserverTestCase):
                 user_id=UserID.from_string("@user:test"),
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="",
-                target_users=set(),
             )
         )
 
@@ -2780,7 +2775,6 @@ class UserRestTestCase(unittest.HomeserverTestCase):
                 user_id=UserID.from_string("@user:test"),
                 field_name=ProfileFields.AVATAR_URL,
                 new_value="mxc://servername/mediaid",
-                target_users=set(),
             )
         )
         self.get_success(

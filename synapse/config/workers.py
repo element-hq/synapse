@@ -127,7 +127,7 @@ class WriterLocations:
     """Specifies the instances that write various streams.
 
     Attributes:
-        events: The instances that write to the event, backfill, `sticky_events` and
+        events: The instances that write to the `event`, `backfill`, `sticky_events` and
             `profile_updates` streams.
             (`sticky_events` and `profile_updates` are written to during event
             persistence so must be handled by the same stream writers.)

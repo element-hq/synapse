@@ -66,8 +66,6 @@ enum EventInternalMetadataData {
     TokenId(i64),
     DeviceId(Box<str>),
     CalculatedAuthEventIDs(Vec<String>), // MSC4242: State DAGs
-    PrevMembership(Box<str>),
-    MembershipUpdateUsersInSharedRooms(Vec<String>),
 }
 
 impl EventInternalMetadataData {
@@ -145,14 +143,6 @@ impl EventInternalMetadataData {
             ),
             EventInternalMetadataData::CalculatedAuthEventIDs(o) => (
                 pyo3::intern!(py, "calculated_auth_event_ids"),
-                o.into_pyobject(py).unwrap().into_any(),
-            ),
-            EventInternalMetadataData::PrevMembership(o) => (
-                pyo3::intern!(py, "prev_membership"),
-                o.into_pyobject(py).unwrap_infallible().into_any(),
-            ),
-            EventInternalMetadataData::MembershipUpdateUsersInSharedRooms(o) => (
-                pyo3::intern!(py, "membership_update_users_in_shared_rooms"),
                 o.into_pyobject(py).unwrap().into_any(),
             ),
         }
@@ -238,19 +228,6 @@ impl EventInternalMetadataData {
                     .extract()
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
-            "prev_membership" => EventInternalMetadataData::PrevMembership(
-                value
-                    .extract()
-                    .map(String::into_boxed_str)
-                    .with_context(|| format!("'{key_str}' has invalid type"))?,
-            ),
-            "membership_update_users_in_shared_rooms" => {
-                EventInternalMetadataData::MembershipUpdateUsersInSharedRooms(
-                    value
-                        .extract()
-                        .with_context(|| format!("'{key_str}' has invalid type"))?,
-                )
-            }
             _ => return Ok(None),
         };
 
@@ -428,14 +405,6 @@ impl EventInternalMetadataInner {
         get_property_opt!(self, DelayId).map(|s| s.deref())
     }
 
-    pub fn get_prev_membership(&self) -> Option<&str> {
-        get_property_opt!(self, PrevMembership).map(|s| s.deref())
-    }
-
-    pub fn get_membership_update_users_in_shared_rooms(&self) -> Option<&Vec<String>> {
-        get_property_opt!(self, MembershipUpdateUsersInSharedRooms)
-    }
-
     pub fn get_calculated_auth_event_ids(&self) -> Option<&Vec<String>> {
         get_property_opt!(self, CalculatedAuthEventIDs)
     }
@@ -505,14 +474,6 @@ impl EventInternalMetadataInner {
     pub fn set_calculated_auth_event_ids(&mut self, obj: Vec<String>) {
         set_property!(self, CalculatedAuthEventIDs, obj);
     }
-
-    pub fn set_prev_membership(&mut self, obj: String) {
-        set_property!(self, PrevMembership, obj.into_boxed_str());
-    }
-
-    pub fn set_membership_update_users_in_shared_rooms(&mut self, obj: Vec<String>) {
-        set_property!(self, MembershipUpdateUsersInSharedRooms, obj);
-    }
 }
 
 #[pyclass(frozen, skip_from_py_object)]
@@ -574,24 +535,6 @@ impl EventInternalMetadata {
     /// Whether the policy server marked this event as spammy.
     pub fn policy_server_spammy(&self) -> PyResult<bool> {
         Ok(self.read_inner()?.get_policy_server_spammy())
-    }
-
-    /// The previous membership, set only if this is a membership event.
-    pub fn prev_membership(&self) -> PyResult<Option<String>> {
-        Ok(self
-            .read_inner()?
-            .get_prev_membership()
-            .map(|s| s.to_owned()))
-    }
-
-    /// For membership events, this will contain a list of users who
-    /// would be interested in the users profile updates, triggered
-    /// by the membership change.
-    pub fn membership_update_users_in_shared_rooms(&self) -> PyResult<Option<Vec<String>>> {
-        Ok(self
-            .read_inner()?
-            .get_membership_update_users_in_shared_rooms()
-            .cloned())
     }
 }
 
@@ -885,30 +828,6 @@ impl EventInternalMetadata {
     #[setter]
     fn set_device_id(&self, obj: String) -> PyResult<()> {
         self.write_inner()?.set_device_id(obj);
-        Ok(())
-    }
-
-    /// The previous membership, set only if this is a membership event.
-    #[getter]
-    fn get_prev_membership(&self) -> PyResult<Option<String>> {
-        let guard = self.read_inner()?;
-        Ok(guard.get_prev_membership().map(|s| s.to_owned()))
-    }
-    #[setter]
-    fn set_prev_membership(&self, obj: String) -> PyResult<()> {
-        self.write_inner()?.set_prev_membership(obj);
-        Ok(())
-    }
-
-    #[getter]
-    pub fn get_membership_update_users_in_shared_rooms(&self) -> PyResult<Option<Vec<String>>> {
-        let guard = self.read_inner()?;
-        Ok(guard.get_membership_update_users_in_shared_rooms().cloned())
-    }
-    #[setter]
-    fn set_membership_update_users_in_shared_rooms(&self, obj: Vec<String>) -> PyResult<()> {
-        self.write_inner()?
-            .set_membership_update_users_in_shared_rooms(obj);
         Ok(())
     }
 }
