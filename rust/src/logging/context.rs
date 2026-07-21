@@ -982,22 +982,30 @@ pub fn current_context(py: Python<'_>) -> Option<Py<LoggingContext>> {
 /// Note this only touches the thread-local slot, never the tokio task-local:
 /// the switch primitive is only ever driven on reactor/threadpool threads
 /// (Python code), while the task-local is populated once at spawn time by
-/// [`LogContextHandle::scope`].
+/// [`LogContextHandle::scope`]. Called during a scoped poll (an invariant
+/// violation), it logs, leaves the slot **untouched** and returns `None` — see
+/// the comment in the body for why writing would be worse.
 ///
 /// Crate-internal: a raw slot write that bypasses the rusage accounting and
 /// thread-affinity checks has no Python caller, so it is not exported (Python
 /// uses [`set_current_context`]).
 fn swap_current_context(context: Option<Py<LoggingContext>>) -> Option<Py<LoggingContext>> {
     // Enforce the invariant above rather than trusting it: with a scoped
-    // task-local populated, `current_context` gives it read precedence, so this
-    // write would be invisible (and never restored) — everything that follows
-    // would be silently misattributed. `try_with` on an unset task-local is
-    // cheap on the normal (reactor-thread) path.
+    // task-local populated, `current_context` gives it read precedence, so a
+    // write here would be invisible — and worse, permanent: the paired restore
+    // via `set_current_context` compares against the task-local and so skips
+    // its swap as a no-op, leaving the stray value in the slot (and dropping
+    // the slot's real occupant) long after the scope ends. Everything the
+    // thread does next would be misattributed to it. So on violation we log
+    // and leave the slot alone, confining the damage to the scoped poll.
+    // `try_with` on an unset task-local is cheap on the normal
+    // (reactor-thread) path.
     if TASK_LOCAL_CONTEXT.try_with(|_| ()).is_ok() {
         error!(
             "swap_current_context called during a tokio-scoped poll; the switch is \
              invisible to current_context() and will misattribute logs and metrics"
         );
+        return None;
     }
 
     THREAD_LOCAL_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), context))
@@ -1131,6 +1139,54 @@ mod tests {
             // Once the scope ends, we fall back to the thread-local again.
             assert!(LogContextHandle::current().is_none());
             assert!(current_context(py).is_none());
+        });
+    }
+
+    #[test]
+    fn swap_during_scoped_poll_leaves_thread_local_untouched() {
+        Python::initialize();
+        Python::attach(|py| {
+            let thread_ctx = test_context(py, "THREAD");
+            let task_ctx = test_context(py, "TASK");
+            let stray = test_context(py, "STRAY");
+
+            // Give this thread's slot a real occupant.
+            swap_current_context(Some(thread_ctx.clone_ref(py)));
+
+            let log_context = LogContextHandle {
+                context: Arc::new(Some(task_ctx.clone_ref(py))),
+            };
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+
+            rt.block_on(log_context.scope(async {
+                Python::attach(|py| {
+                    // Swapping during a scoped poll violates the invariant: the
+                    // write would be invisible to `current_context` and the
+                    // paired restore skipped, so the slot must stay untouched.
+                    // The violating call reports no previous value.
+                    assert!(swap_current_context(Some(stray.clone_ref(py))).is_none());
+
+                    // The task-local still governs reads inside the scope.
+                    assert!(current_context(py)
+                        .expect("expected a current context")
+                        .bind(py)
+                        .is(task_ctx.bind(py)));
+                });
+            }));
+
+            // The scope has ended: the slot still holds its original occupant,
+            // not the stray value from the invalid swap.
+            assert!(current_context(py)
+                .expect("expected a current context")
+                .bind(py)
+                .is(thread_ctx.bind(py)));
+
+            // Restore the empty slot (sentinel) so we don't leak into any other
+            // test that happens to reuse this OS thread from the harness pool.
+            swap_current_context(None);
         });
     }
 }
