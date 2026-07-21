@@ -1975,6 +1975,25 @@ class RoomContextHandler:
         if not filtered:
             raise AuthError(403, "You don't have permission to access that event.")
 
+        if event.internal_metadata.outlier:
+            # The only outliers that pass the visibility filter are the user's own
+            # out-of-band membership events (e.g. an invite or knock received over
+            # federation). They have no stream position or state group, so we cannot
+            # compute surrounding events or state — return the event with an empty
+            # context rather than failing. Clients legitimately fetch such events,
+            # e.g. to render a push notification for an invite after the room has
+            # already been joined.
+            dummy_token = await StreamToken.START.to_string(self.store)
+            return EventContext(
+                events_before=[],
+                event=filtered[0],
+                events_after=[],
+                state=[],
+                aggregations={},
+                start=dummy_token,
+                end=dummy_token,
+            )
+
         results = await self.store.get_events_around(
             room_id, event_id, before_limit, after_limit, event_filter
         )
