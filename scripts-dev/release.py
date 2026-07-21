@@ -373,6 +373,7 @@ def _tag(gh_token: str | None) -> None:
         )
         click.get_current_context().abort()
 
+    # We simply point to the changelog instead of duplicating the content into the git tag/release
     tag_message = f"Changelog: https://github.com/element-hq/synapse/blob/{repo.active_branch.name}/CHANGES.md"
 
     repo.create_tag(tag_name, message=tag_message, sign=True)
@@ -410,7 +411,7 @@ def _tag(gh_token: str | None) -> None:
     release = gh_repo.create_git_release(
         tag=tag_name,
         name=tag_name,
-        message=changes,
+        message=tag_message,
         draft=True,
         prerelease=current_version.is_prerelease,
     )
