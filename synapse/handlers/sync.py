@@ -22,6 +22,7 @@ import hashlib
 import itertools
 import json
 import logging
+import os
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -119,6 +120,13 @@ LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE = 100
 # Remember the last 100 profile field updates we sent to a client for the purposes of
 # avoiding redundantly sending the same lazy-loaded full profiles to the client
 LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_SIZE = 100
+
+# The digest size for the lazy loaded profile fields cache.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE = 16
+
+# A random key generated on server startup, for the lazy loaded profile fields cache.
+# Since this is a per-process cache, we don't care if the key is different per process.
+LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY = os.urandom(32)
 
 
 SyncRequestKey = tuple[Any, ...]
@@ -349,7 +357,7 @@ class SyncHandler:
         )
         # ExpiringCache((User, Device))
         #   -> LruCache(
-        #       sha256(Other User ID + Field Name) -> sha256(Field value)
+        #       blake2b(Other User ID + Field Name) -> blake2b(Field value)
         #   )
         self.lazy_loaded_profile_fields_cache: ExpiringCache[
             tuple[str, str | None], LruCache[bytes, bytes]
@@ -362,8 +370,8 @@ class SyncHandler:
             expiry_ms=LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
         )
         """This cache contains fields and values we have sent to clients as profile
-        updates, for a particular user + device combo. The cache entry is a sha256
-        of the user + field name, with the value being a sha256 of the field value.
+        updates, for a particular user + device combo. The cache entry is a blake2b hash
+        of the user + field name, with the value being a blake2b hash of the field value.
         If the field value changes for a particular user, the hash will change
         and the cache will be missed.
 
@@ -1081,8 +1089,8 @@ class SyncHandler:
         self, cache_key: tuple[str, str | None]
     ) -> LruCache[bytes, bytes]:
         """This cache contains fields and values we have sent to clients as profile
-        updates, for a particular user + device combo. The cache entry is a sha256
-        of the user + field name, with the value being a sha256 of the field value.
+        updates, for a particular user + device combo. The cache entry is a blake2b hash
+        of the user + field name, with the value being a blake2b hash of the field value.
         If the field value changes for a particular user, the hash will change
         and the cache will be missed.
 
@@ -2416,13 +2424,15 @@ class SyncHandler:
                         cache = self.get_lazy_loaded_profile_fields_cache(cache_key)
                         # Only send this users field if we haven't recently sent it.
                         # Our cache contains previously set values as pairs of
-                        # sha256(other_used_id + field_name) -> sha256(value),
+                        # blake2b(other_used_id + field_name) -> blake2b(value),
                         # which ensures if the value changes, we'll miss the cache,
                         # thus sending the field update to the syncing user.
-                        cache_value = hashlib.sha256(
+                        cache_value = hashlib.blake2b(
                             f"{other_user_id}-{field_name}".encode("utf8"),
+                            key=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY,
+                            digest_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE,
                         ).digest()
-                        value_hash = hashlib.sha256(
+                        value_hash = hashlib.blake2b(
                             json.dumps(
                                 [
                                     profile_data.get(field_name),
@@ -2430,7 +2440,9 @@ class SyncHandler:
                                 sort_keys=True,
                                 separators=(",", ":"),
                                 ensure_ascii=False,
-                            ).encode("utf8")
+                            ).encode("utf8"),
+                            key=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_KEY,
+                            digest_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE,
                         ).digest()
                         if cache.get(cache_value) != value_hash:
                             per_user_updates[field_name] = profile_data.get(field_name)
