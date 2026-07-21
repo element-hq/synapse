@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-8ba4ece5.js";
+            window.path_to_searchindex_js = "searchindex-aba0db49.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -2012,7 +2012,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.155.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.157.0</td><td>v1.100.0</td></tr>
 </tbody>
 </table>
 </div>
@@ -2032,6 +2032,14 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11570"><a class="header" href="#upgrading-to-v11570">Upgrading to v1.157.0</a></h1>
+<h2 id="msc3861-auth-delegation-must-be-migrated-to-stable-matrix-authentication-service-integration"><a class="header" href="#msc3861-auth-delegation-must-be-migrated-to-stable-matrix-authentication-service-integration">MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration</a></h2>
+<p>Support for the deprecated MSC3861 Auth Delegation (<code>experimental_features.msc3861</code>)
+has been dropped in this version, in favour of the stable Matrix Authentication Service
+integration.</p>
+<p>See <a href="#stable-integration-with-matrix-authentication-service">the previous upgrade notes</a>
+and the <a href="#matrix_authentication_service"><code>matrix_authentication_service</code> section in the Configuration Manual</a>
+for more information.</p>
 <h1 id="upgrading-to-v11520"><a class="header" href="#upgrading-to-v11520">Upgrading to v1.152.0</a></h1>
 <h2 id="workers-which-quarantine-media-must-be-stream-writers"><a class="header" href="#workers-which-quarantine-media-must-be-stream-writers">Workers which quarantine media must be stream writers</a></h2>
 <p>A new <a href="#the-quarantined_media_changes-stream"><code>quarantined_media_changes</code> stream writer</a> is
@@ -2173,7 +2181,8 @@ using these metrics.</p>
 <h2 id="stable-integration-with-matrix-authentication-service"><a class="header" href="#stable-integration-with-matrix-authentication-service">Stable integration with Matrix Authentication Service</a></h2>
 <p>Support for <a href="https://github.com/element-hq/matrix-authentication-service">Matrix Authentication Service (MAS)</a> is now stable, with a simplified configuration.
 This stable integration requires MAS 0.20.0 or later.</p>
-<p>The existing <code>experimental_features.msc3861</code> configuration option is now deprecated and will be removed in Synapse v1.137.0.</p>
+<p>The existing <code>experimental_features.msc3861</code> configuration option is now deprecated and will be removed in Synapse v1.157.0.
+(<em>Note</em>: this previously read v1.137.0 but the removal date was missed.)</p>
 <p>Synapse deployments already using MAS should now use the new configuration options:</p>
 <pre><code class="language-yaml">matrix_authentication_service:
   # Enable the MAS integration
@@ -4407,6 +4416,21 @@ shown.</p>
 <li>
 <p><code>include_offline_users_on_sync</code> (boolean): When clients perform an initial or <code>full_state</code> sync, presence results for offline users are not included by default. Setting <code>include_offline_users_on_sync</code> to <code>true</code> will always include offline users in the results. Defaults to <code>false</code>.</p>
 </li>
+<li>
+<p><code>last_active_granularity</code> (duration): How long after a user was last active that they are still shown as “currently active” to other users. Larger values reduce the rate of presence updates sent to other users and servers.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"1m"</code>.</p>
+</li>
+<li>
+<p><code>sync_online_timeout</code> (duration): How long after a client’s last sync request their presence is switched to offline. Clients are expected to keep a sync request open at (almost) all times while online, so this only needs to cover the gap between two consecutive sync requests. Note that if <code>rc_presence</code> is set to ratelimit how often syncs can affect presence, this must be greater than the ratelimit’s interval or users will incorrectly be marked as offline in between syncs.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"30s"</code>.</p>
+</li>
+<li>
+<p><code>idle_timeout</code> (duration): How long after a user was last active that their presence is switched to “unavailable” (idle) while they remain connected. Must be greater than <code>last_active_granularity</code>.</p>
+<p><em>Added in Synapse 1.156.0.</em></p>
+<p>Defaults to <code>"5m"</code>.</p>
+</li>
 </ul>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">presence:
@@ -5918,7 +5942,7 @@ For more details, see the <a href="#using-a-forward-proxy-with-synapse">forward 
 <hr>
 <h3 id="rc_delayed_event_mgmt"><a class="header" href="#rc_delayed_event_mgmt"><code>rc_delayed_event_mgmt</code></a></h3>
 <p><em>(object)</em> Ratelimiting settings for delayed event management.</p>
-<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account and device ID.</p>
+<p>This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client’s account, or its source IP when requests are unauthenticated.</p>
 <p>Attempts to create or send delayed events are ratelimited not by this setting, but by <code>rc_message</code>.</p>
 <p>Setting this to a high value allows clients to make delayed event management requests often (such as repeatedly restarting a delayed event with a short timeout, or restarting several different delayed events all at once) without the risk of being ratelimited.</p>
 <p>This setting has the following sub-options:</p>
@@ -6601,6 +6625,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <h3 id="auto_join_rooms"><a class="header" href="#auto_join_rooms"><code>auto_join_rooms</code></a></h3>
 <p><em>(array)</em> Users who register on this homeserver will automatically be joined to the rooms listed under this option.</p>
 <p>By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to <code>public</code>. You can find more options relating to auto-joining rooms below.</p>
+<p>Invite-only rooms can also be auto-joined when setting <code>auto_join_mxid_localpart</code> to a user who’s part of the invite-only rooms.</p>
 <p>As Spaces are just rooms under the hood, Space aliases may also be used.</p>
 <p>Defaults to <code>[]</code>.</p>
 <p>Example configuration:</p>
@@ -7850,6 +7875,13 @@ process (i.e. not workerized) and media is stored locally Defaults to <code>fals
 <p><em>(array)</em> A list of rooms to exclude from sync responses. This is useful for server administrators wishing to group users into a room without these users being able to see it from their client. Defaults to <code>[]</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">exclude_rooms_from_sync:
+- '!foo:example.com'
+</code></pre>
+<hr>
+<h3 id="exclude_rooms_from_presence"><a class="header" href="#exclude_rooms_from_presence"><code>exclude_rooms_from_presence</code></a></h3>
+<p><em>(array)</em> A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to <code>[]</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">exclude_rooms_from_presence:
 - '!foo:example.com'
 </code></pre>
 <hr>
@@ -12409,6 +12441,7 @@ information.</p>
 ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
 ^/_matrix/client/v1/rooms/.*/threads$
 ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
+^/_matrix/client/v1/room_summary/.*$
 ^/_matrix/client/(r0|v3|unstable)/account/3pid$
 ^/_matrix/client/(r0|v3|unstable)/account/whoami$
 ^/_matrix/client/(r0|v3|unstable)/account/deactivate$
@@ -12503,13 +12536,6 @@ using):</p>
 For multiple workers not handling the SSO endpoints properly, see
 <a href="https://github.com/matrix-org/synapse/issues/7530">#7530</a> and
 <a href="https://github.com/matrix-org/synapse/issues/9427">#9427</a>.</p>
-<p>Additionally, when MSC3861 is enabled (<code>experimental_features.msc3861.enabled</code>
-set to <code>true</code>), the following endpoints can be handled by the worker:</p>
-<pre><code>^/_synapse/admin/v2/users/[^/]+$
-^/_synapse/admin/v1/username_available$
-^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
-^/_synapse/admin/v1/users/[^/]+/devices$
-</code></pre>
 <p>Note that a <a href="#listeners">HTTP listener</a>
 with <code>client</code> and <code>federation</code> <code>resources</code> must be configured in the
 <a href="#worker_listeners"><code>worker_listeners</code></a>
@@ -13243,7 +13269,7 @@ information from the Admin API.</p>
 <a href="https://matrix.org/docs/spec/client_server/r0.6.1#using-access-tokens">matrix spec documentation</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="account-validity-api"><a class="header" href="#account-validity-api">Account validity API</a></h1>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
 <p>This API allows a server administrator to manage the validity of an account. To
 use it, you must enable the account validity feature (under
 <code>account_validity</code>) in Synapse’s configuration.</p>
@@ -13939,7 +13965,8 @@ a purge id:</p>
 <p><a href="https://www.postgresql.org/docs/current/sql-vacuum.html">https://www.postgresql.org/docs/current/sql-vacuum.html</a></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="shared-secret-registration"><a class="header" href="#shared-secret-registration">Shared-Secret Registration</a></h1>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled.
+Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> or <a href="https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-register-user">the MAS CLI</a> instead.</p>
 <p>This API allows for the creation of users in an administrative and
 non-interactive way. This is generally used for bootstrapping a Synapse
 instance with administrator accounts.</p>
@@ -14015,7 +14042,7 @@ def generate_mac(nonce, user, password, admin=False, user_type=None):
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="registration-tokens"><a class="header" href="#registration-tokens">Registration Tokens</a></h1>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> or <a href="https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-issue-user-registration-token">the MAS CLI</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>This API allows you to manage tokens which can be used to authenticate
 registration requests, as proposed in
 <a href="https://github.com/matrix-org/matrix-doc/blob/main/proposals/3231-token-authenticated-registration.md">MSC3231</a>
@@ -15550,11 +15577,11 @@ for a server admin: see <a href="usage/administration/admin_api">Admin API</a>.<
         }
     ],
     "avatar_url": "&lt;avatar_url&gt;",  // can be null if not set
-    "is_guest": 0,
-    "admin": 0,
-    "deactivated": 0,
+    "is_guest": false,
+    "admin": false,
+    "deactivated": false,
     "erased": false,
-    "shadow_banned": 0,
+    "shadow_banned": false,
     "creation_ts": 1560432506,
     "last_seen_ts": 1732919539393,
     "appservice_id": null,
@@ -15709,24 +15736,24 @@ By default, the response is ordered by ascending user ID.</p>
     "users": [
         {
             "name": "&lt;user_id1&gt;",
-            "is_guest": 0,
-            "admin": 0,
+            "is_guest": false,
+            "admin": false,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "&lt;User One&gt;",
             "avatar_url": null,
             "creation_ts": 1560432668000,
             "locked": false
         }, {
             "name": "&lt;user_id2&gt;",
-            "is_guest": 0,
-            "admin": 1,
+            "is_guest": false,
+            "admin": true,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "&lt;User Two&gt;",
             "avatar_url": "&lt;avatar_url&gt;",
             "creation_ts": 1561550621000,
@@ -15754,7 +15781,7 @@ that contain this value. This parameter is ignored when using the <code>name</co
 </li>
 <li>
 <p><code>guests</code> - string representing a bool - Is optional and if <code>false</code> will <strong>exclude</strong> guest users.
-Defaults to <code>true</code> to include guest users. This parameter is not supported when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+Defaults to <code>true</code> to include guest users. This parameter is not supported when Matrix Authentication Service integration is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
 </li>
 <li>
 <p><code>admins</code> - Optional flag to filter admins. If <code>true</code>, only admins are queried. If <code>false</code>, admins are excluded from
@@ -15958,7 +15985,7 @@ prohibited from sending invites, joining or knocking on rooms, sending messages,
 }
 </code></pre>
 <h2 id="reset-password"><a class="header" href="#reset-password">Reset password</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> or <a href="https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-set-password">the MAS CLI</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>Changes the password of another user. This will automatically log the user out of all their devices.</p>
 <p>The api is:</p>
 <pre><code>POST /_synapse/admin/v1/reset_password/&lt;user_id&gt;
@@ -15972,7 +15999,7 @@ prohibited from sending invites, joining or knocking on rooms, sending messages,
 <p>The parameter <code>new_password</code> is required.
 The parameter <code>logout_devices</code> is optional and defaults to <code>true</code>.</p>
 <h2 id="get-whether-a-user-is-a-server-administrator-or-not"><a class="header" href="#get-whether-a-user-is-a-server-administrator-or-not">Get whether a user is a server administrator or not</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>The api is:</p>
 <pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/admin
 </code></pre>
@@ -15982,7 +16009,7 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
 }
 </code></pre>
 <h2 id="change-whether-a-user-is-a-server-administrator-or-not"><a class="header" href="#change-whether-a-user-is-a-server-administrator-or-not">Change whether a user is a server administrator or not</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> or <a href="https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-promote-admin">the MAS CLI</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>Note that you cannot demote yourself.</p>
 <p>The api is:</p>
 <pre><code>PUT /_synapse/admin/v1/users/&lt;user_id&gt;/admin
@@ -16332,7 +16359,7 @@ after deleting media the remaining media have a new order.</p>
 With the parameters you can for example limit the number of files to delete at once or
 delete largest/smallest or newest/oldest files first.</p>
 <h2 id="login-as-a-user"><a class="header" href="#login-as-a-user">Login as a user</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use <a href="https://element-hq.github.io/matrix-authentication-service/topics/authorization.html#personal-sessions-personal-access-tokens">Personal sessions</a> through the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>Get an access token that can be used to authenticate as that user. Useful for
 when admins wish to do actions on behalf of a user.</p>
 <p>The API is:</p>
@@ -16803,21 +16830,25 @@ for more information.</p>
 }
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
-<h2 id="redact-all-the-events-of-a-user"><a class="header" href="#redact-all-the-events-of-a-user">Redact all the events of a user</a></h2>
+<h2 id="redact-events-of-a-user"><a class="header" href="#redact-events-of-a-user">Redact events of a user</a></h2>
 <p>This endpoint allows an admin to redact the events of a given user. There are no restrictions on
 redactions for a local user. By default, we puppet the user who sent the message to redact it themselves.
 Redactions for non-local users are issued using the admin user, and will fail in rooms where the
 admin user is not admin/does not have the specified power level to issue redactions. An option
-is provided to override the default and allow the admin to issue the redactions in all cases.</p>
+is provided to override the default and allow the admin to issue the redactions in all cases.
+There are optional parameters to filter for events that happened in the given time period.</p>
 <p>The API is</p>
 <pre><code>POST /_synapse/admin/v1/user/&lt;user_id&gt;/redact
 
 {
-  "rooms": ["!roomid1", "!roomid2"]
+  "rooms": ["!roomid1", "!roomid2"],
+  "after_ts": 1779564103728,
+  "before_ts": 1779564103730
 }
 </code></pre>
 <p>If an empty list is provided as the key for <code>rooms</code>, all events in all the rooms the user is member of will be redacted,
-otherwise all the events in the rooms provided in the request will be redacted.</p>
+otherwise all the events in the rooms provided in the request will be redacted.
+If neither <code>after_ts</code> nor <code>before_ts</code> is provided, events will be redacted regardless of when they happened. If only one parameter is provided, all events occurring on or before/after given time will be redacted.</p>
 <p>The API starts redaction process running, and returns immediately with a JSON body with
 a redact id which can be used to query the status of the redaction process:</p>
 <pre><code class="language-json">{
@@ -16841,6 +16872,8 @@ the user is a member of will be redacted</li>
 <li><code>use_admin</code> - If set to <code>true</code>, the admin user is used to issue the redactions, rather than puppeting the user. Useful
 when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
 where the admin does not have the sufficient power level to issue the redactions.</li>
+<li><code>after_ts</code> - Redact only events that were sent at this time or after. Format: milliseconds timestamp. <em>Added in Synapse 1.157.0.</em></li>
+<li><code>before_ts</code> - Redact only events that were sent at this time or before. Format: milliseconds timestamp. <em>Added in Synapse 1.157.0.</em></li>
 </ul>
 <p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
@@ -21449,14 +21482,17 @@ they don’t have their own system-level dependencies.</p>
 concerned about the criteria for selecting minimum versions. The only thing of concern
 is making sure we’re not making it unnecessarily difficult for downstream package
 maintainers. Generally, this just means avoiding the bleeding edge for a few months.</p>
-<p>The situation for Rust dependencies is fundamentally different. For packagers, the
-concerns around Python dependency versions do not apply. The <code>cargo</code> tool handles
-downloading and building all libraries to satisfy dependencies, and these libraries are
-statically linked into the final binary. This means that from a packager’s perspective,
-the Rust dependency versions are an internal build detail, not a runtime dependency to
-be managed on the target system. Consequently, we have even greater flexibility to
-upgrade Rust dependencies as needed for the project. Some distros (e.g. Fedora) do
-package Rust libraries, but this appears to be the outlier rather than the norm.</p>
+<p>The situation for Rust dependencies is typically different and
+the concerns around Python dependency versions typically do not apply.
+For example, for packagers of Debian, the packagers have the choice of either
+using a crate packaged in the distro, or vendoring crates in the source package for the
+application.</p>
+<p>This freedom to vendor a dependency crate for a specific application consequently gives
+us even greater flexibility to upgrade Rust dependencies as needed for the project.</p>
+<p>(This is in contrast with Python dependencies, which are generally
+installed system-wide by mainstream distributions’ official packages.)</p>
+<p>Some distros (e.g. Fedora) do not vendor Rust dependencies in their
+official application packages, but these cases appear to be less common.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="running-synapse-on-a-single-board-computer"><a href="#running-synapse-on-a-single-board-computer" class="header">Running Synapse on a Single-Board Computer</a></h1>
 <h2 id="summary-of-performance-impact-of-running-on-resource-constrained-devices-such-as-sbcs"><a class="header" href="#summary-of-performance-impact-of-running-on-resource-constrained-devices-such-as-sbcs">Summary of performance impact of running on resource constrained devices such as SBCs</a></h2>

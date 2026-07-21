@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-8ba4ece5.js";
+            window.path_to_searchindex_js = "../searchindex-aba0db49.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-4dc10a98.js"></script>
@@ -224,11 +224,11 @@ for a server admin: see <a href="../usage/administration/admin_api/">Admin API</
         }
     ],
     "avatar_url": "&lt;avatar_url&gt;",  // can be null if not set
-    "is_guest": 0,
-    "admin": 0,
-    "deactivated": 0,
+    "is_guest": false,
+    "admin": false,
+    "deactivated": false,
     "erased": false,
-    "shadow_banned": 0,
+    "shadow_banned": false,
     "creation_ts": 1560432506,
     "last_seen_ts": 1732919539393,
     "appservice_id": null,
@@ -383,24 +383,24 @@ By default, the response is ordered by ascending user ID.</p>
     "users": [
         {
             "name": "&lt;user_id1&gt;",
-            "is_guest": 0,
-            "admin": 0,
+            "is_guest": false,
+            "admin": false,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "&lt;User One&gt;",
             "avatar_url": null,
             "creation_ts": 1560432668000,
             "locked": false
         }, {
             "name": "&lt;user_id2&gt;",
-            "is_guest": 0,
-            "admin": 1,
+            "is_guest": false,
+            "admin": true,
             "user_type": null,
-            "deactivated": 0,
+            "deactivated": false,
             "erased": false,
-            "shadow_banned": 0,
+            "shadow_banned": false,
             "displayname": "&lt;User Two&gt;",
             "avatar_url": "&lt;avatar_url&gt;",
             "creation_ts": 1561550621000,
@@ -428,7 +428,7 @@ that contain this value. This parameter is ignored when using the <code>name</co
 </li>
 <li>
 <p><code>guests</code> - string representing a bool - Is optional and if <code>false</code> will <strong>exclude</strong> guest users.
-Defaults to <code>true</code> to include guest users. This parameter is not supported when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+Defaults to <code>true</code> to include guest users. This parameter is not supported when Matrix Authentication Service integration is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
 </li>
 <li>
 <p><code>admins</code> - Optional flag to filter admins. If <code>true</code>, only admins are queried. If <code>false</code>, admins are excluded from
@@ -632,7 +632,7 @@ prohibited from sending invites, joining or knocking on rooms, sending messages,
 }
 </code></pre>
 <h2 id="reset-password"><a class="header" href="#reset-password">Reset password</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> or <a href="https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-set-password">the MAS CLI</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>Changes the password of another user. This will automatically log the user out of all their devices.</p>
 <p>The api is:</p>
 <pre><code>POST /_synapse/admin/v1/reset_password/&lt;user_id&gt;
@@ -646,7 +646,7 @@ prohibited from sending invites, joining or knocking on rooms, sending messages,
 <p>The parameter <code>new_password</code> is required.
 The parameter <code>logout_devices</code> is optional and defaults to <code>true</code>.</p>
 <h2 id="get-whether-a-user-is-a-server-administrator-or-not"><a class="header" href="#get-whether-a-user-is-a-server-administrator-or-not">Get whether a user is a server administrator or not</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>The api is:</p>
 <pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/admin
 </code></pre>
@@ -656,7 +656,7 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
 }
 </code></pre>
 <h2 id="change-whether-a-user-is-a-server-administrator-or-not"><a class="header" href="#change-whether-a-user-is-a-server-administrator-or-not">Change whether a user is a server administrator or not</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> or <a href="https://element-hq.github.io/matrix-authentication-service/reference/cli/manage.html#manage-promote-admin">the MAS CLI</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>Note that you cannot demote yourself.</p>
 <p>The api is:</p>
 <pre><code>PUT /_synapse/admin/v1/users/&lt;user_id&gt;/admin
@@ -1006,7 +1006,7 @@ after deleting media the remaining media have a new order.</p>
 With the parameters you can for example limit the number of files to delete at once or
 delete largest/smallest or newest/oldest files first.</p>
 <h2 id="login-as-a-user"><a class="header" href="#login-as-a-user">Login as a user</a></h2>
-<p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
+<p><strong>Note:</strong> This API is disabled when Matrix Authentication Service integration is enabled. Use <a href="https://element-hq.github.io/matrix-authentication-service/topics/authorization.html#personal-sessions-personal-access-tokens">Personal sessions</a> through the <a href="https://element-hq.github.io/matrix-authentication-service/topics/admin-api.html">MAS Admin API</a> instead. An easy way to make use of this functionality is provided by <a href="https://element.io/en/server-suite/admin">Element Admin</a> as part of <a href="https://element.io/en/server-suite">ESS</a> Community and Pro.</p>
 <p>Get an access token that can be used to authenticate as that user. Useful for
 when admins wish to do actions on behalf of a user.</p>
 <p>The API is:</p>
@@ -1477,21 +1477,25 @@ for more information.</p>
 }
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
-<h2 id="redact-all-the-events-of-a-user"><a class="header" href="#redact-all-the-events-of-a-user">Redact all the events of a user</a></h2>
+<h2 id="redact-events-of-a-user"><a class="header" href="#redact-events-of-a-user">Redact events of a user</a></h2>
 <p>This endpoint allows an admin to redact the events of a given user. There are no restrictions on
 redactions for a local user. By default, we puppet the user who sent the message to redact it themselves.
 Redactions for non-local users are issued using the admin user, and will fail in rooms where the
 admin user is not admin/does not have the specified power level to issue redactions. An option
-is provided to override the default and allow the admin to issue the redactions in all cases.</p>
+is provided to override the default and allow the admin to issue the redactions in all cases.
+There are optional parameters to filter for events that happened in the given time period.</p>
 <p>The API is</p>
 <pre><code>POST /_synapse/admin/v1/user/&lt;user_id&gt;/redact
 
 {
-  "rooms": ["!roomid1", "!roomid2"]
+  "rooms": ["!roomid1", "!roomid2"],
+  "after_ts": 1779564103728,
+  "before_ts": 1779564103730
 }
 </code></pre>
 <p>If an empty list is provided as the key for <code>rooms</code>, all events in all the rooms the user is member of will be redacted,
-otherwise all the events in the rooms provided in the request will be redacted.</p>
+otherwise all the events in the rooms provided in the request will be redacted.
+If neither <code>after_ts</code> nor <code>before_ts</code> is provided, events will be redacted regardless of when they happened. If only one parameter is provided, all events occurring on or before/after given time will be redacted.</p>
 <p>The API starts redaction process running, and returns immediately with a JSON body with
 a redact id which can be used to query the status of the redaction process:</p>
 <pre><code class="language-json">{
@@ -1515,6 +1519,8 @@ the user is a member of will be redacted</li>
 <li><code>use_admin</code> - If set to <code>true</code>, the admin user is used to issue the redactions, rather than puppeting the user. Useful
 when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
 where the admin does not have the sufficient power level to issue the redactions.</li>
+<li><code>after_ts</code> - Redact only events that were sent at this time or after. Format: milliseconds timestamp. <em>Added in Synapse 1.157.0.</em></li>
+<li><code>before_ts</code> - Redact only events that were sent at this time or before. Format: milliseconds timestamp. <em>Added in Synapse 1.157.0.</em></li>
 </ul>
 <p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
