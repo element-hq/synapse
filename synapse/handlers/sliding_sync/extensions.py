@@ -1082,6 +1082,7 @@ class SlidingSyncExtensionHandler:
         self,
         user_id: UserID,
         fields: set[str],
+        rooms: set[str],
     ) -> dict[str, JsonDict | None]:
         """
         Build an initial sync response for the profiles extension.
@@ -1089,15 +1090,16 @@ class SlidingSyncExtensionHandler:
         Args:
             user_id: The syncing user UserID
             fields: A set of fields to include in the response.
+            rooms: A set of rooms to limit the user profiles for.
 
         Returns:
             A dictionary containing the profile updates in an `updated` dictionary.
         """
         response: dict[str, JsonDict | None] = {}
 
-        # TODO should be filtered for the rooms for this sync
         profile_user_ids = await self.store.get_local_users_who_share_room_with_user(
             user_id.to_string(),
+            limit_to_rooms=rooms,
         )
         # Ensure we're in the list even if we don't belong to any rooms
         profile_user_ids.add(user_id.to_string())
@@ -1164,6 +1166,7 @@ class SlidingSyncExtensionHandler:
                 users=await self._get_profiles_extension_initial_sync_response(
                     user_id=sync_config.user,
                     fields=fields,
+                    rooms=all_interested_room_ids,
                 ),
             )
 

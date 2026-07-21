@@ -1035,12 +1035,26 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return user_who_share_room
 
-    async def get_local_users_who_share_room_with_user(self, user_id: str) -> set[str]:
-        """Returns the set of local users who share a room with `user_id`.
+    async def get_local_users_who_share_room_with_user(
+        self,
+        user_id: str,
+        limit_to_rooms: set[str] | None = None,
+    ) -> set[str]:
+        """
+        Returns the set of local users who share a room with `user_id`.
 
         This also includes the `user_id` themselves.
+
+        Args:
+            user_id: The user ID to find the local users who share rooms.
+            limit_to_rooms: Optional set of rooms to limit to.
+
+        Returns:
+            Set of local user ID's who share a room with the given user.
         """
         room_ids = await self.get_rooms_for_user(user_id)
+        if limit_to_rooms:
+            room_ids = room_ids.intersection(limit_to_rooms)
 
         user_who_share_room: set[str] = set()
         for room_id in room_ids:

@@ -299,6 +299,80 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         ]
     )
     @override_config({"include_profile_updates_in_sync": True})
+    def test_updated_fields_are_not_if_not_in_requested_rooms(
+        self, is_initial: bool
+    ) -> None:
+        """
+        Test that profile extension response respects the room subscriptions, by:
+        * for initial sync returning updates for only those users in the given rooms
+        * for incremental sync returning all updates in shared rooms
+        """
+        new_room = self.helper.create_room_as(self.user, tok=self.tok)
+        if is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                new_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+            },
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                    "fields": ["field"],
+                },
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        if is_initial:
+            # Nothing returned since even though user and other_user share a room,
+            # we didn't ask for that room.
+            self.assertIsNone(
+                response_body["extensions"].get("org.matrix.msc4262.profiles")
+            )
+
+        if not is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="field",
+                    new_value="value",
+                )
+            )
+            # Make an incremental Sliding Sync request
+            response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+            # Even though we only asked for a room other_user is not in,
+            # since these users share a room, updates are always sent via incremental
+            # sync.
+            self.assertEqual(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                    "@other_user:test"
+                ],
+                {
+                    "updated": {
+                        "field": "value",
+                    }
+                },
+            )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
     def test_all_fields_returned_if_no_fields_specified(self, is_initial: bool) -> None:
         """
         Test that profile extension response returns all profile fields if we didn't
