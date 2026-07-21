@@ -1072,6 +1072,8 @@ class SyncHandler:
     def get_lazy_loaded_members_cache(
         self, cache_key: tuple[str, str | None]
     ) -> LruCache[str, str]:
+        # FIXME: This cache may be subject to losing members in the case that
+        # a sync is interrupted and retried, see https://github.com/element-hq/synapse/issues/19978
         cache: LruCache[str, str] | None = self.lazy_loaded_members_cache.get(cache_key)
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
@@ -1097,6 +1099,8 @@ class SyncHandler:
         We don't manually remove entries from this cache, though it may be ignored
         in cases where the sync must send the field down to the client.
         """
+        # FIXME: This cache may be subject to losing field updates in the case that
+        # a sync is interrupted and retried, see https://github.com/element-hq/synapse/issues/19978
         cache: LruCache[bytes, bytes] | None = (
             self.lazy_loaded_profile_fields_cache.get(cache_key)
         )
