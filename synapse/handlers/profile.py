@@ -559,6 +559,20 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(403, "Cannot set another user's profile")
 
+        allowlist = self.hs.config.experimental.msc4133_key_allowlist
+        denylist = self.hs.config.experimental.msc4133_key_denylist
+        if allowlist is not None:
+            field_disallowed = field_name not in allowlist
+        else:
+            field_disallowed = denylist is not None and field_name in denylist
+
+        if field_disallowed:
+            raise SynapseError(
+                403,
+                "Changing this profile field is disabled on this server",
+                Codes.FORBIDDEN,
+            )
+
         await self.store.set_profile_field(target_user, field_name, new_value)
 
         # Custom fields do not propagate into the user directory *or* rooms.
