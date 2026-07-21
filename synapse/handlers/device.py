@@ -139,6 +139,9 @@ class DeviceHandler:
             hs.config.registration.dont_notify_new_devices_for
         )
 
+        self.device_management_linearizer = Linearizer(
+            name="device_management", clock=self.clock
+        )
         self.device_list_updater = DeviceListWorkerUpdater(hs)
 
         self._task_scheduler.register_action(
@@ -890,21 +893,22 @@ class DeviceHandler:
         device_id = task.params["device_id"]
         up_to_stream_id = task.params["up_to_stream_id"]
 
-        # Delete the messages in batches to avoid too much DB load.
-        from_stream_id = None
-        while True:
-            from_stream_id, _ = await self.store.delete_messages_for_device_between(
-                user_id=user_id,
-                device_id=device_id,
-                from_stream_id=from_stream_id,
-                to_stream_id=up_to_stream_id,
-                limit=DeviceWriterHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT,
-            )
+        async with self.device_management_linearizer.queue(user_id):
+            # Delete the messages in batches to avoid too much DB load.
+            from_stream_id = None
+            while True:
+                from_stream_id, _ = await self.store.delete_messages_for_device_between(
+                    user_id=user_id,
+                    device_id=device_id,
+                    from_stream_id=from_stream_id,
+                    to_stream_id=up_to_stream_id,
+                    limit=DeviceWriterHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT,
+                )
 
-            if from_stream_id is None:
-                return TaskStatus.COMPLETE, None, None
+                if from_stream_id is None:
+                    return TaskStatus.COMPLETE, None, None
 
-            await self.clock.sleep(DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP)
+                await self.clock.sleep(DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP)
 
 
 class DeviceWriterHandler(DeviceHandler):
