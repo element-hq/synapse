@@ -251,6 +251,9 @@ pub struct UnstableFeatureMap {
     /// MSC4169: Backwards-compatible redaction sending using `/send`
     #[serde(rename = "com.beeper.msc4169")]
     msc4169: bool,
+    /// MSC4262: Profile updates for simplified sliding sync.
+    #[serde(rename = "org.matrix.msc4262")]
+    msc4262: bool,
     /// MSC4354: Sticky events
     #[serde(rename = "org.matrix.msc4354")]
     msc4354: bool,
@@ -317,6 +320,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4155: config.experimental.msc4155_enabled,
         msc4306: config.experimental.msc4306_enabled,
         msc4169: config.experimental.msc4169_enabled,
+        msc4262: config.server.include_profile_updates_in_sync,
         msc4354: config.experimental.msc4354_enabled,
         msc4380: true,
         msc4429: config.server.include_profile_updates_in_sync,
