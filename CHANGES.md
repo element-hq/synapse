@@ -1,4 +1,11 @@
-# synapse 1.157.0 (2026-07-21)
+# Synapse 1.157.1 (2026-07-22)
+
+## Bugfixes
+
+- Fix config regression around falsy `experimental_features` no longer being accepted. ([\#19987](https://github.com/element-hq/synapse/issues/19987))
+
+
+# Synapse 1.157.0 (2026-07-21)
 
 No significant changes since 1.157.0rc1.
 
