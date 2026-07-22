@@ -187,6 +187,8 @@ class EventTypes:
 
     RoomPolicy: Final = "m.room.policy"
 
+    MSC4507PublicState: Final = "org.matrix.msc4507.public_state"
+
 
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"
