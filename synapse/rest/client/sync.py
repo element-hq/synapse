@@ -462,7 +462,8 @@ class SyncRestServlet(RestServlet):
             invited_state = list(invited_state)
             # Add the invite itself
             #
-            # FIXME: Doesn't seem to be in the spec
+            # FIXME: Doesn't seem to be in the spec but tracked by
+            # [MSC4319](https://github.com/matrix-org/matrix-spec-proposals/pull/4319)
             invited_state.append(strip_event(room.invite))
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
@@ -514,7 +515,8 @@ class SyncRestServlet(RestServlet):
             #
             # * A knock state event that they can use for easier internal tracking
             #
-            # FIXME: Doesn't seem to be in the spec
+            # FIXME: Doesn't seem to be in the spec but tracked by
+            # [MSC4319](https://github.com/matrix-org/matrix-spec-proposals/pull/4319)
             knocked_state.append(strip_event(room.knock))
 
             # Build the `knock_state` dictionary, which will contain the state of the

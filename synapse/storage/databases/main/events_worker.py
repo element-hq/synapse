@@ -1178,7 +1178,8 @@ class EventsWorkerStore(SQLBaseStore):
         # We want to send membership events of the inviter, so that the invitee can
         # display the inviter's profile information if the room lacks any.
         #
-        # FIXME: Doesn't seem to be in the spec
+        # FIXME: Doesn't seem to be in the spec but tracked by
+        # [MSC4319](https://github.com/matrix-org/matrix-spec-proposals/pull/4319)
         is_invite_event = (
             event.type == EventTypes.Member and event.membership == Membership.INVITE
         )
