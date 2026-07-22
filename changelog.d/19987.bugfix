@@ -1,0 +1,1 @@
+Fix config regression around falsy `experimental_features` no longer being accepted.
