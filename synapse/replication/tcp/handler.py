@@ -47,6 +47,7 @@ from synapse.replication.tcp.commands import (
     ReplicateCommand,
     UserIpCommand,
     UserSyncCommand,
+    UserSyncKeepaliveCommand,
 )
 from synapse.replication.tcp.context import ClientContextFactory
 from synapse.replication.tcp.protocol import IReplicationConnection
@@ -472,6 +473,7 @@ class ReplicationCommandHandler:
                 cmd.user_id,
                 cmd.device_id,
                 cmd.is_syncing,
+                cmd.presence_state,
                 cmd.last_sync_ms,
             )
         else:
@@ -482,6 +484,16 @@ class ReplicationCommandHandler:
     ) -> Awaitable[None] | None:
         if self._is_presence_writer:
             return self._presence_handler.update_external_syncs_clear(cmd.instance_id)
+        else:
+            return None
+
+    def on_USER_SYNC_KEEPALIVE(
+        self, conn: IReplicationConnection, cmd: UserSyncKeepaliveCommand
+    ) -> Awaitable[None] | None:
+        if self._is_presence_writer:
+            return self._presence_handler.update_external_syncs_keepalive(
+                cmd.instance_id
+            )
         else:
             return None
 
@@ -787,9 +799,16 @@ class ReplicationCommandHandler:
         )
 
         now = self._clock.time_msec()
-        for user_id, device_id in currently_syncing:
+        for user_id, device_id, presence_state in currently_syncing:
             connection.send_command(
-                UserSyncCommand(self._instance_id, user_id, device_id, True, now)
+                UserSyncCommand(
+                    self._instance_id,
+                    user_id,
+                    device_id,
+                    True,
+                    presence_state,
+                    now,
+                )
             )
 
     def lost_connection(self, connection: IReplicationConnection) -> None:
@@ -846,12 +865,24 @@ class ReplicationCommandHandler:
         user_id: str,
         device_id: str | None,
         is_syncing: bool,
+        presence_state: str,
         last_sync_ms: int,
     ) -> None:
         """Poke the master that a user has started/stopped syncing."""
         self.send_command(
-            UserSyncCommand(instance_id, user_id, device_id, is_syncing, last_sync_ms)
+            UserSyncCommand(
+                instance_id,
+                user_id,
+                device_id,
+                is_syncing,
+                presence_state,
+                last_sync_ms,
+            )
         )
+
+    def send_user_sync_keepalive(self, instance_id: str) -> None:
+        """Poke the master that this worker's syncing users are still live."""
+        self.send_command(UserSyncKeepaliveCommand(instance_id))
 
     def send_user_ip(
         self,

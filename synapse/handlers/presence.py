@@ -206,6 +206,12 @@ EXTERNAL_PROCESS_EXPIRY = 5 * 60 * 1000
 # syncing.
 UPDATE_SYNCING_USERS = Duration(seconds=10)
 
+# How often a worker reminds the presence writer that its set of syncing users
+# is still live. Must be comfortably shorter than EXTERNAL_PROCESS_EXPIRY,
+# otherwise a worker whose users are all quietly syncing (and so sends no
+# USER_SYNC commands) would be expired and its users marked offline.
+SYNC_PRESENCE_KEEPALIVE_INTERVAL = Duration(minutes=1)
+
 
 class BasePresenceHandler(abc.ABC):
     """Parts of the PresenceHandler that are shared between workers and presence
@@ -282,15 +288,16 @@ class BasePresenceHandler(abc.ABC):
     @abc.abstractmethod
     def get_currently_syncing_users_for_replication(
         self,
-    ) -> Iterable[tuple[str, str | None]]:
+    ) -> Iterable[tuple[str, str | None, str]]:
         """Get an iterable of syncing users and devices on this worker, to send to the presence handler
 
         This is called when a replication connection is established. It should return
-        a list of tuples of user ID & device ID, which are then sent as USER_SYNC commands
-        to inform the process handling presence about those users/devices.
+        a list of tuples of user ID, device ID & the presence state the device is
+        syncing with, which are then sent as USER_SYNC commands to inform the
+        process handling presence about those users/devices.
 
         Returns:
-            An iterable of tuples of user ID and device ID.
+            An iterable of tuples of user ID, device ID and presence state.
         """
 
     async def get_state(self, target_user: UserID) -> UserPresenceState:
@@ -383,6 +390,7 @@ class BasePresenceHandler(abc.ABC):
         user_id: str,
         device_id: str | None,
         is_syncing: bool,
+        presence_state: str,
         sync_time_msec: int,
     ) -> None:
         """Update the syncing users for an external process as a delta.
@@ -396,7 +404,18 @@ class BasePresenceHandler(abc.ABC):
             user_id: The user who has started or stopped syncing
             device_id: The user's device that has started or stopped syncing
             is_syncing: Whether or not the user is now syncing
+            presence_state: The presence state the device is syncing with. Only
+                meaningful when the device is starting (or changing) its sync.
             sync_time_msec: Time in ms when the user was last syncing
+        """
+
+    async def update_external_syncs_keepalive(  # noqa: B027 (no-op by design)
+        self, process_id: str
+    ) -> None:
+        """Refresh the "last updated" time for an external process, so that its
+        syncing users aren't expired while it is quiet.
+
+        This is a no-op when presence is handled by a different worker.
         """
 
     async def update_external_syncs_clear(  # noqa: B027 (no-op by design)
@@ -538,25 +557,29 @@ class WorkerPresenceHandler(BasePresenceHandler):
         # syncing but we haven't notified the presence writer of that yet
         self._user_devices_going_offline: dict[tuple[str, str | None], int] = {}
 
-        # How often to relay an unchanged sync-driven presence state to the
-        # presence writer. The relayed updates are what feed the writer's device
-        # last_sync_ts/last_active_ts timers, so this must sit comfortably below
-        # the timers it feeds — the (configurable) sync online timeout and
-        # last-active granularity — or users would flap offline / lose
-        # "currently active" between relays. We use 5/6 of the tighter of the
-        # two, i.e. the historic 25s at the default 30s sync online timeout.
-        self._sync_presence_relay_interval = (
+        # How often to relay repeated activity bumps for a device to the
+        # presence writer. The relayed bumps are what feed the writer's device
+        # last_active_ts timer, so this must sit comfortably below the
+        # (configurable) last-active granularity — or users would drop out of
+        # "currently active" between relays. We use 5/6 of the tighter of it
+        # and the sync online timeout, i.e. the historic 25s at the defaults.
+        self._bump_relay_interval = (
             min(self._sync_online_timeout, self._last_active_granularity) * 5 // 6
         )
 
-        # (user_id, device_id) -> (state, last_sent_ms) of the most recent
-        # sync-driven presence update we proxied to the presence writer. Used
-        # to suppress the per-sync-request set_state/bump calls, which are
-        # no-ops on the writer at finer granularity than its timers: while
-        # the state is unchanged there is no point relaying more than one
-        # update per relay interval. Entries older than the window are swept by
-        # `_sweep_last_sent_presence`.
-        self._last_sent_presence: dict[tuple[str, str | None], tuple[str, int]] = {}
+        # (user_id, device_id) -> the time we last relayed an activity bump for
+        # the device to the presence writer. Used to suppress the per-user-action
+        # bump calls, which are no-ops on the writer at finer granularity than
+        # its timers: one bump per relay interval is enough to keep them fed.
+        # Entries older than the window are swept by `_sweep_last_relayed_bumps`.
+        self._last_relayed_bump_ms: dict[tuple[str, str | None], int] = {}
+
+        # (user_id, device_id) -> presence state. The presence state we last told
+        # the presence writer each syncing device is in. Used to avoid re-sending
+        # a USER_SYNC when a sync repeats the same state, and to work out what to
+        # send on reconnect. An entry exists iff the writer believes the device is
+        # syncing.
+        self._user_device_last_sync_state: dict[tuple[str, str | None], str] = {}
 
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
@@ -564,7 +587,10 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if self._track_presence:
             self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS)
             self.clock.looping_call(
-                self._sweep_last_sent_presence, Duration(minutes=30)
+                self.send_sync_keepalive, SYNC_PRESENCE_KEEPALIVE_INTERVAL
+            )
+            self.clock.looping_call(
+                self._sweep_last_relayed_bumps, Duration(minutes=30)
             )
 
         hs.register_async_shutdown_handler(
@@ -585,22 +611,57 @@ class WorkerPresenceHandler(BasePresenceHandler):
         user_id: str,
         device_id: str | None,
         is_syncing: bool,
+        presence_state: str,
         last_sync_ms: int,
     ) -> None:
         if self._track_presence:
             self.hs.get_replication_command_handler().send_user_sync(
-                self.instance_id, user_id, device_id, is_syncing, last_sync_ms
+                self.instance_id,
+                user_id,
+                device_id,
+                is_syncing,
+                presence_state,
+                last_sync_ms,
             )
 
-    def mark_as_coming_online(self, user_id: str, device_id: str | None) -> None:
-        """A user has started syncing. Send a UserSync to the presence writer,
-        unless they had recently stopped syncing.
+    def send_sync_keepalive(self) -> None:
+        """Periodically remind the presence writer that our syncing users are
+        still live, so it doesn't expire us during quiet periods (when no device
+        is starting, stopping or changing its sync).
         """
-        going_offline = self._user_devices_going_offline.pop((user_id, device_id), None)
-        if not going_offline:
-            # Safe to skip because we haven't yet told the presence writer they
-            # were offline
-            self.send_user_sync(user_id, device_id, True, self.clock.time_msec())
+        if self._track_presence and any(
+            self._user_device_to_num_current_syncs.values()
+        ):
+            self.hs.get_replication_command_handler().send_user_sync_keepalive(
+                self.instance_id
+            )
+
+    def mark_as_coming_online(
+        self, user_id: str, device_id: str | None, presence_state: str
+    ) -> None:
+        """A user's device has started syncing, or changed the presence state it
+        is syncing with. Tell the presence writer, unless it already believes the
+        device is syncing in this exact state (e.g. the device only briefly
+        stopped syncing, or the state is unchanged since the last sync).
+        """
+        key = (user_id, device_id)
+        # Cancel any pending "stopped syncing" notification: the device is (still)
+        # syncing.
+        self._user_devices_going_offline.pop(key, None)
+
+        if self._user_device_last_sync_state.get(key) == presence_state:
+            # The writer already knows this device is syncing in this state, so
+            # there's nothing to send.
+            return
+
+        self._user_device_last_sync_state[key] = presence_state
+        # The device's state on the writer is about to change; drop its
+        # bump-throttle entry so a following bump (which may un-idle the new
+        # state) is relayed immediately.
+        self._last_relayed_bump_ms.pop(key, None)
+        self.send_user_sync(
+            user_id, device_id, True, presence_state, self.clock.time_msec()
+        )
 
     def mark_as_going_offline(self, user_id: str, device_id: str | None) -> None:
         """A user has stopped syncing. We wait before notifying the presence
@@ -621,24 +682,29 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self._user_devices_going_offline.items()
         ):
             if now - last_sync_ms > UPDATE_SYNCING_USERS.as_millis():
-                self._user_devices_going_offline.pop((user_id, device_id), None)
-                self.send_user_sync(user_id, device_id, False, last_sync_ms)
-                # Once the writer knows the device stopped syncing it may time
-                # the user out, so if the device comes back we must relay its
-                # state again rather than suppress it as a repeat.
-                self._last_sent_presence.pop((user_id, device_id), None)
+                key = (user_id, device_id)
+                self._user_devices_going_offline.pop(key, None)
+                # The writer no longer believes this device is syncing; forget the
+                # state we last sent so a fresh sync re-sends it, and drop the
+                # device's bump-throttle entry.
+                last_state = self._user_device_last_sync_state.pop(
+                    key, PresenceState.OFFLINE
+                )
+                self._last_relayed_bump_ms.pop(key, None)
+                self.send_user_sync(user_id, device_id, False, last_state, last_sync_ms)
 
-    def _sweep_last_sent_presence(self) -> None:
-        """Drop expired presence-throttling entries.
+    def _sweep_last_relayed_bumps(self) -> None:
+        """Drop expired bump-throttling entries.
 
-        Entries should be dropped in `send_stop_syncing`, but we add a safety
-        net here to ensure that the dict deesn't grow unbounded.
+        Entries are dropped in `send_stop_syncing` when a device stops syncing,
+        but we add a safety net here to ensure that the dict doesn't grow
+        unbounded.
         """
         now = self.clock.time_msec()
 
-        for key, (_, last_sent_ms) in list(self._last_sent_presence.items()):
-            if now - last_sent_ms >= self._sync_presence_relay_interval:
-                self._last_sent_presence.pop(key, None)
+        for key, last_relayed_ms in list(self._last_relayed_bump_ms.items()):
+            if now - last_relayed_ms >= self._bump_relay_interval:
+                self._last_relayed_bump_ms.pop(key, None)
 
     async def user_syncing(
         self,
@@ -655,23 +721,19 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if not affect_presence or not self._track_presence:
             return _NullContextManager()
 
-        # Note that this causes last_active_ts to be incremented which is not
-        # what the spec wants. (This call is throttled in `set_state`: while
-        # the state is unchanged, only one update per relay interval is relayed
-        # to the presence writer.)
-        await self.set_state(
-            UserID.from_string(user_id),
-            device_id,
-            state={"presence": presence_state},
-            is_sync=True,
-        )
-
         curr_sync = self._user_device_to_num_current_syncs.get((user_id, device_id), 0)
         self._user_device_to_num_current_syncs[(user_id, device_id)] = curr_sync + 1
 
-        # If this is the first in-flight sync, notify replication
-        if self._user_device_to_num_current_syncs[(user_id, device_id)] == 1:
-            self.mark_as_coming_online(user_id, device_id)
+        # Tell the presence writer that this device is syncing (and with what
+        # presence state). This is a no-op if the writer already believes the
+        # device is syncing in this state, so an ongoing sync loop that keeps
+        # requesting the same state generates no replication traffic; only the
+        # first sync and any change of state are sent.
+        #
+        # Note that, unlike the old behaviour, we no longer proxy a set_state to
+        # the writer on every sync: the writer treats a syncing device as active
+        # for as long as it is syncing (see PresenceHandler.handle_timeout).
+        self.mark_as_coming_online(user_id, device_id, presence_state)
 
         def _end() -> None:
             # We check that the user_id is in user_to_num_current_syncs because
@@ -762,10 +824,18 @@ class WorkerPresenceHandler(BasePresenceHandler):
 
     def get_currently_syncing_users_for_replication(
         self,
-    ) -> Iterable[tuple[str, str | None]]:
+    ) -> Iterable[tuple[str, str | None, str]]:
         return [
-            user_id_device_id
-            for user_id_device_id, count in self._user_device_to_num_current_syncs.items()
+            (
+                user_id,
+                device_id,
+                self._user_device_last_sync_state.get(
+                    (user_id, device_id), PresenceState.ONLINE
+                ),
+            )
+            for (user_id, device_id), count in (
+                self._user_device_to_num_current_syncs.items()
+            )
             if count > 0
         ]
 
@@ -800,27 +870,16 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if not self._track_presence:
             return
 
-        now = self.clock.time_msec()
-        if is_sync and not force_notify:
-            # Sync-driven updates arrive on every /sync request, which is far
-            # finer-grained than any of the writer's presence timers need:
-            # while the state is unchanged, relaying one update per relay
-            # interval is enough to keep them fed. State changes always go
-            # through immediately.
-            last_sent = self._last_sent_presence.get((user_id, device_id))
-            if last_sent is not None:
-                last_presence, last_sent_ms = last_sent
-                if (
-                    presence == last_presence
-                    and now - last_sent_ms < self._sync_presence_relay_interval
-                ):
-                    return
-            self._last_sent_presence[(user_id, device_id)] = (presence, now)
-        else:
-            # An explicit (non-sync) update doesn't refresh the writer's
-            # last_sync_ts, so it must not count as a recent relay: drop any
-            # entry so the next sync-driven update goes through.
-            self._last_sent_presence.pop((user_id, device_id), None)
+        if not is_sync:
+            # An explicit state change (e.g. a client PUT /presence) is applied
+            # on the writer directly below. Forget the state we last told the
+            # writer this device was syncing with, so that the device's next sync
+            # re-asserts its sync state (which may differ from the state just set).
+            self._user_device_last_sync_state.pop((user_id, device_id), None)
+            # Also forget the last relayed bump: the state just set may be one
+            # that a bump would un-idle, so the next bump must be relayed
+            # immediately rather than suppressed.
+            self._last_relayed_bump_ms.pop((user_id, device_id), None)
 
         # Proxy request to instance that writes presence
         await self._set_state_client(
@@ -845,20 +904,20 @@ class WorkerPresenceHandler(BasePresenceHandler):
         user_id = user.to_string()
 
         # A bump's only effects on the writer are updating last_active_ts and
-        # flipping an idle device back online. Going idle takes far longer
-        # than the relay window, so if we relayed an *online* update within
-        # the window the user cannot have gone idle since, and this bump is a
-        # no-op: skip it. Bumps after any other state (or an unknown one) go
-        # through immediately, as they may un-idle the device.
+        # flipping an idle device back online. If we relayed a bump within the
+        # relay window the writer's last_active_ts is already fresh and this
+        # bump is a no-op: skip it. (Entries are dropped whenever the device's
+        # state may have changed on the writer — an explicit set_state, a change
+        # of sync state, or the device stopping syncing — so a bump that might
+        # un-idle the device always goes through immediately.)
         now = self.clock.time_msec()
-        last_sent = self._last_sent_presence.get((user_id, device_id))
+        last_relayed_ms = self._last_relayed_bump_ms.get((user_id, device_id))
         if (
-            last_sent is not None
-            and last_sent[0] == PresenceState.ONLINE
-            and now - last_sent[1] < self._sync_presence_relay_interval
+            last_relayed_ms is not None
+            and now - last_relayed_ms < self._bump_relay_interval
         ):
             return
-        self._last_sent_presence[(user_id, device_id)] = (PresenceState.ONLINE, now)
+        self._last_relayed_bump_ms[(user_id, device_id)] = now
 
         # Proxy request to instance that writes presence
         await self._bump_active_client(
@@ -944,6 +1003,12 @@ class PresenceHandler(BasePresenceHandler):
         # Keeps track of the number of *ongoing* syncs on this process. While
         # this is non zero a user will never go offline.
         self._user_device_to_num_current_syncs: dict[tuple[str, str | None], int] = {}
+
+        # (user_id, device_id) -> presence state we last applied for a local sync.
+        # Used to edge-trigger: we only re-apply a device's sync state when it
+        # first starts syncing or changes the state it is syncing with, rather
+        # than on every sync request.
+        self._user_device_last_sync_state: dict[tuple[str, str | None], str] = {}
 
         # Keeps track of the number of *ongoing* syncs on other processes.
         #
@@ -1084,6 +1149,7 @@ class PresenceHandler(BasePresenceHandler):
         self,
         new_states: Iterable[UserPresenceState],
         force_notify: bool = False,
+        syncing_user_ids: AbstractSet[str] = frozenset(),
     ) -> None:
         """Updates presence of users. Sets the appropriate timeouts. Pokes
         the notifier and federation if and only if the changed presence state
@@ -1095,6 +1161,9 @@ class PresenceHandler(BasePresenceHandler):
                 even if it doesn't change the state of a user's presence (e.g online -> online).
                 This is currently used to bump the max presence stream ID without changing any
                 user's presence (see PresenceHandler.add_users_to_send_full_presence_to).
+            syncing_user_ids: Users with an active sync. Such users are treated as
+                currently active for as long as they keep syncing, matching the
+                historic behaviour where each sync bumped their last active time.
         """
         if not self._presence_enabled:
             # We shouldn't get here if presence is disabled, but we check anyway
@@ -1144,6 +1213,7 @@ class PresenceHandler(BasePresenceHandler):
                     idle_timer=self._idle_timer,
                     sync_online_timeout=self._sync_online_timeout,
                     last_active_granularity=self._last_active_granularity,
+                    is_syncing=user_id in syncing_user_ids,
                 )
 
                 if force_notify:
@@ -1262,7 +1332,8 @@ class PresenceHandler(BasePresenceHandler):
             last_active_granularity=self._last_active_granularity,
         )
 
-        return await self._update_states(changes)
+        syncing_user_ids = {user_id for user_id, _ in syncing_user_devices}
+        return await self._update_states(changes, syncing_user_ids=syncing_user_ids)
 
     async def bump_presence_active_time(
         self, user: UserID, device_id: str | None
@@ -1326,30 +1397,44 @@ class PresenceHandler(BasePresenceHandler):
         if not affect_presence or not self._track_presence:
             return _NullContextManager()
 
-        curr_sync = self._user_device_to_num_current_syncs.get((user_id, device_id), 0)
-        self._user_device_to_num_current_syncs[(user_id, device_id)] = curr_sync + 1
+        key = (user_id, device_id)
+        curr_sync = self._user_device_to_num_current_syncs.get(key, 0)
+        self._user_device_to_num_current_syncs[key] = curr_sync + 1
 
-        # Note that this causes last_active_ts to be incremented which is not
-        # what the spec wants.
-        await self.set_state(
-            UserID.from_string(user_id),
-            device_id,
-            state={"presence": presence_state},
-            is_sync=True,
-        )
+        # Edge-trigger the presence state: apply it when the device first starts
+        # syncing or when the requested state changes, rather than on every sync.
+        # While the device keeps syncing it is treated as active (see
+        # handle_timeout), so repeating the same state is a no-op.
+        if (
+            curr_sync == 0
+            or self._user_device_last_sync_state.get(key) != presence_state
+        ):
+            self._user_device_last_sync_state[key] = presence_state
+            await self._apply_sync_state(user_id, device_id, presence_state)
 
         async def _end() -> None:
             try:
-                self._user_device_to_num_current_syncs[(user_id, device_id)] -= 1
+                # `_user_device_to_num_current_syncs` may have been cleared if we
+                # are shutting down.
+                if key not in self._user_device_to_num_current_syncs:
+                    return
 
-                prev_state = await self.current_state_for_user(user_id)
-                await self._update_states(
-                    [
-                        prev_state.copy_and_replace(
-                            last_user_sync_ts=self.clock.time_msec()
-                        )
-                    ]
-                )
+                count = self._user_device_to_num_current_syncs[key] - 1
+                self._user_device_to_num_current_syncs[key] = count
+
+                # Only when the last in-flight sync for the device ends do we
+                # record it as no longer syncing (bumping last_user_sync_ts so it
+                # can time out) and forget the state we were tracking.
+                if count == 0:
+                    self._user_device_last_sync_state.pop(key, None)
+                    prev_state = await self.current_state_for_user(user_id)
+                    await self._update_states(
+                        [
+                            prev_state.copy_and_replace(
+                                last_user_sync_ts=self.clock.time_msec()
+                            )
+                        ]
+                    )
             except Exception:
                 logger.exception("Error updating presence after sync")
 
@@ -1364,7 +1449,7 @@ class PresenceHandler(BasePresenceHandler):
 
     def get_currently_syncing_users_for_replication(
         self,
-    ) -> Iterable[tuple[str, str | None]]:
+    ) -> Iterable[tuple[str, str | None, str]]:
         # since we are the process handling presence, there is nothing to do here.
         return []
 
@@ -1374,6 +1459,7 @@ class PresenceHandler(BasePresenceHandler):
         user_id: str,
         device_id: str | None,
         is_syncing: bool,
+        presence_state: str,
         sync_time_msec: int,
     ) -> None:
         """Update the syncing users for an external process as a delta.
@@ -1385,30 +1471,32 @@ class PresenceHandler(BasePresenceHandler):
             user_id: The user who has started or stopped syncing
             device_id: The user's device that has started or stopped syncing
             is_syncing: Whether or not the user is now syncing
+            presence_state: The presence state the device is syncing with. Only
+                used when the device is starting (or changing) its sync.
             sync_time_msec: Time in ms when the user was last syncing
         """
         async with self.external_sync_linearizer.queue(process_id):
-            prev_state = await self.current_state_for_user(user_id)
-
             process_presence = self.external_process_to_current_syncs.setdefault(
                 process_id, set()
             )
 
-            # USER_SYNC is sent when a user's device starts or stops syncing on
-            # a remote # process. (But only for the initial and last sync for that
-            # device.)
+            # A worker sends USER_SYNC "start" when a device first starts syncing
+            # and whenever the presence state it is syncing with changes, and
+            # "end" when the device stops syncing (see WorkerPresenceHandler).
             #
-            # When a device *starts* syncing it also calls set_state(...) which
-            # will update the state, last_active_ts, and last_user_sync_ts.
-            # Simply ensure the user & device is tracked as syncing in this case.
+            # On start (or a state change) apply the presence state and mark the
+            # device as syncing. The device is then treated as active for as long
+            # as it remains in `process_presence` (see handle_timeout), so — unlike
+            # the old per-sync set_state relay — no further updates are needed
+            # until the state changes or the device stops.
             #
-            # When a device *stops* syncing, update the last_user_sync_ts and mark
-            # them as no longer syncing. Note this doesn't quite match the
-            # monolith behaviour, which updates last_user_sync_ts at the end of
-            # every sync, not just the last in-flight sync.
-            if is_syncing and (user_id, device_id) not in process_presence:
+            # On stop, update last_user_sync_ts and mark the device as no longer
+            # syncing, so it can time out.
+            if is_syncing:
                 process_presence.add((user_id, device_id))
-            elif not is_syncing and (user_id, device_id) in process_presence:
+                await self._apply_sync_state(user_id, device_id, presence_state)
+            elif (user_id, device_id) in process_presence:
+                prev_state = await self.current_state_for_user(user_id)
                 devices = self._user_to_device_to_current_state.setdefault(user_id, {})
                 device_state = devices.setdefault(
                     device_id, UserDevicePresenceState.default(user_id, device_id)
@@ -1423,6 +1511,22 @@ class PresenceHandler(BasePresenceHandler):
                 process_presence.discard((user_id, device_id))
 
             self.external_process_last_updated_ms[process_id] = self.clock.time_msec()
+
+    async def update_external_syncs_keepalive(self, process_id: str) -> None:
+        """Refresh the "last updated" time for an external process so that its
+        syncing users aren't expired during quiet periods.
+
+        Sent periodically by workers that have syncing users but haven't had any
+        starts/stops/state-changes to report (see
+        WorkerPresenceHandler.send_sync_keepalive).
+        """
+        async with self.external_sync_linearizer.queue(process_id):
+            # Only refresh a process we're actually tracking; a keepalive for an
+            # unknown process (e.g. one we've already expired) is ignored.
+            if process_id in self.external_process_last_updated_ms:
+                self.external_process_last_updated_ms[process_id] = (
+                    self.clock.time_msec()
+                )
 
     async def update_external_syncs_clear(self, process_id: str) -> None:
         """Marks all users that had been marked as syncing by a given process
@@ -1538,6 +1642,58 @@ class PresenceHandler(BasePresenceHandler):
             ).inc(len(updates))
             await self._update_states(updates)
 
+    async def _apply_sync_state(
+        self, user_id: str, device_id: str | None, presence_state: str
+    ) -> None:
+        """Mark a device as actively syncing in the given presence state.
+
+        This is the equivalent of ``set_state(..., is_sync=True)`` but is driven
+        directly by USER_SYNC (rather than a per-sync ``set_state`` relay). It is
+        applied when a device first starts syncing and whenever the presence
+        state it is syncing with changes; the device is then treated as active
+        for as long as it keeps syncing (see ``handle_timeout``).
+        """
+        presence = presence_state
+        if presence not in self.VALID_PRESENCE:
+            logger.warning(
+                "Ignoring invalid presence state %r from a sync for %s",
+                presence_state,
+                user_id,
+            )
+            presence = PresenceState.ONLINE
+
+        now = self.clock.time_msec()
+        prev_state = await self.current_state_for_user(user_id)
+
+        # Syncs do not override a previous presence of busy.
+        #
+        # TODO: This is a hack for lack of multi-device support. Unfortunately
+        # removing this requires coordination with clients.
+        if prev_state.state == PresenceState.BUSY:
+            presence = PresenceState.BUSY
+
+        # Update the device specific information.
+        devices = self._user_to_device_to_current_state.setdefault(user_id, {})
+        device_state = devices.setdefault(
+            device_id,
+            UserDevicePresenceState.default(user_id, device_id),
+        )
+        device_state.state = presence
+        device_state.last_active_ts = now
+        device_state.last_sync_ts = now
+
+        # Based on the state of each user's device calculate the new presence state.
+        presence = _combine_device_states(devices.values())
+
+        new_fields: JsonDict = {"state": presence, "last_user_sync_ts": now}
+        if presence == PresenceState.ONLINE or presence == PresenceState.BUSY:
+            new_fields["last_active_ts"] = now
+
+        await self._update_states(
+            [prev_state.copy_and_replace(**new_fields)],
+            syncing_user_ids={user_id},
+        )
+
     async def set_state(
         self,
         target_user: UserID,
@@ -1570,6 +1726,10 @@ class PresenceHandler(BasePresenceHandler):
 
         user_id = target_user.to_string()
         now = self.clock.time_msec()
+
+        # Forget any state we were tracking for a sync on this device: an
+        # explicit state change means the next sync should re-assert its state.
+        self._user_device_last_sync_state.pop((user_id, device_id), None)
 
         prev_state = await self.current_state_for_user(user_id)
 
@@ -2356,17 +2516,34 @@ def handle_timeout(
         # due to timeouts.
         device_changed = False
         offline_devices = []
+        # Whether any of the user's devices is currently syncing. A syncing
+        # device is treated as active (see below), so this keeps the user
+        # `currently_active` without relying on a periodic sync bumping their
+        # last active time.
+        user_is_syncing = False
         for device_id, device_state in user_devices.items():
+            device_is_syncing = (state.user_id, device_id) in syncing_device_ids
+            user_is_syncing = user_is_syncing or device_is_syncing
+
             if device_state.state == PresenceState.ONLINE:
-                if now - device_state.last_active_ts > idle_timer:
+                if (
+                    not device_is_syncing
+                    and now - device_state.last_active_ts > idle_timer
+                ):
                     # Currently online, but last activity ages ago so auto
-                    # idle
+                    # idle.
+                    #
+                    # A device that is actively syncing is treated as active and
+                    # never auto-idled: historically each sync bumped the device's
+                    # last active time, so a syncing device never idled. (Clients
+                    # that want to appear idle say so via the sync's presence
+                    # state.)
                     device_state.state = PresenceState.UNAVAILABLE
                     device_changed = True
 
             # If there are have been no sync for a while (and none ongoing),
             # set presence to offline.
-            if (state.user_id, device_id) not in syncing_device_ids:
+            if not device_is_syncing:
                 # If the user has done something recently but hasn't synced,
                 # don't set them as offline.
                 sync_or_active = max(
@@ -2398,9 +2575,13 @@ def handle_timeout(
                 state = state.copy_and_replace(state=new_presence)
                 changed = True
 
-        if now - state.last_active_ts > last_active_granularity:
-            # So that we send down a notification that we've
-            # stopped updating.
+        if not user_is_syncing and now - state.last_active_ts > last_active_granularity:
+            # So that we send down a notification that we've stopped updating.
+            #
+            # Skipped while the user is syncing: they are treated as active (and
+            # kept `currently_active` in handle_update), so we neither notify that
+            # they've stopped nor busy-loop re-firing this timer against a last
+            # active time that no longer advances on every sync.
             changed = True
 
         if now - state.last_federation_update_ts > FEDERATION_PING_INTERVAL:
@@ -2431,6 +2612,7 @@ def handle_update(
     idle_timer: int,
     sync_online_timeout: int,
     last_active_granularity: int,
+    is_syncing: bool = False,
 ) -> tuple[UserPresenceState, bool, bool]:
     """Given a presence update:
         1. Add any appropriate timers.
@@ -2450,6 +2632,9 @@ def handle_update(
             is marked as offline.
         last_active_granularity: How long in ms a user counts as
             "currently active" after their last activity.
+        is_syncing: Whether the user currently has an active sync. Such a user is
+            treated as currently active for as long as they keep syncing, matching
+            the historic behaviour where each sync bumped their last active time.
 
     Returns:
         3-tuple: `(new_state, persist_and_notify, federation_ping)` where:
@@ -2472,10 +2657,16 @@ def handle_update(
                     now=now, obj=user_id, then=new_state.last_active_ts + idle_timer
                 )
 
-            active = now - new_state.last_active_ts < last_active_granularity
+            # A syncing user is treated as active for as long as they sync, so
+            # that they don't lose `currently_active` (and flip back and forth)
+            # now that a sync no longer bumps their last active time on every
+            # request.
+            active = (
+                is_syncing or now - new_state.last_active_ts < last_active_granularity
+            )
             new_state = new_state.copy_and_replace(currently_active=active)
 
-            if active and not persist:
+            if active and not persist and not is_syncing:
                 wheel_timer.insert(
                     now=now,
                     obj=user_id,
@@ -2490,6 +2681,21 @@ def handle_update(
                     obj=user_id,
                     then=new_state.last_user_sync_ts + sync_online_timeout,
                 )
+
+                # A quietly-syncing user generates no other presence updates, so
+                # once their idle/sync timers lapse nothing would re-check them
+                # and we'd stop sending federation keep-alives. Insert a timer at
+                # the federation ping interval to keep re-checking them; it
+                # re-arms itself each time it fires (see handle_timeout). Only
+                # needed for syncing users — anyone else times out to offline
+                # within SYNC_ONLINE_TIMEOUT.
+                if is_syncing:
+                    wheel_timer.insert(
+                        now=now,
+                        obj=user_id,
+                        then=new_state.last_federation_update_ts
+                        + FEDERATION_PING_INTERVAL,
+                    )
 
             last_federate = new_state.last_federation_update_ts
             if now - last_federate > FEDERATION_PING_INTERVAL:
