@@ -602,6 +602,47 @@ class RoomStateTestCase(RoomBase):
         self.assertEqual(channel.json_body["state_key"], self.user_id)
         self.assertTrue(type(channel.json_body["origin_server_ts"]) is int)
 
+    def test_get_state_type_filter_single(self) -> None:
+        """MSC4497: filtering by a single type returns only that event type."""
+        self.hs.config.experimental.msc4497_state_event_type_filter = True
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state?cc.koja.types=m.room.create" % room_id,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result["body"])
+        self.assertEqual(
+            [event["type"] for event in channel.json_list],
+            ["m.room.create"],
+        )
+
+    def test_get_state_type_filter_ignored_when_disabled(self) -> None:
+        """MSC4497: type filtering is ignored unless the experimental flag is enabled."""
+        self.hs.config.experimental.msc4497_state_event_type_filter = False
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state?cc.koja.types=m.room.create" % room_id,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result["body"])
+        # When disabled, the filter should be ignored and we should get more than just the create event.
+        self.assertGreater(len(channel.json_list), 1)
+
+    def test_get_state_type_filter_multiple(self) -> None:
+        """MSC4497: filtering by multiple types returns only those event types."""
+        self.hs.config.experimental.msc4497_state_event_type_filter = True
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state?cc.koja.types=m.room.create&cc.koja.types=m.room.member"
+            % room_id,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result["body"])
+        self.assertCountEqual(
+            [event["type"] for event in channel.json_list],
+            ["m.room.create", "m.room.member"],
+        )
+
 
 class RoomsMemberListTestCase(RoomBase):
     """Tests /rooms/$room_id/members/list REST events."""
