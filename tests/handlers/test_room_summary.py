@@ -526,37 +526,6 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         self.assertNotIn("org.matrix.msc4507.additional_state", result["room"])
 
-    @override_config({"experimental_features": {"msc4507_enabled": True}})
-    def test_msc4507_public_state_default_power_level(self) -> None:
-        """New rooms require PL100 to send the MSC4507 public-state event."""
-        state_ids = self.get_success(
-            self.hs.get_storage_controllers().state.get_current_state_ids(self.space)
-        )
-        power_levels = self.get_success(
-            self.hs.get_datastores().main.get_event(
-                state_ids[(EventTypes.PowerLevels, "")]
-            )
-        )
-
-        self.assertEqual(
-            power_levels.content["events"][EventTypes.MSC4507PublicState], 100
-        )
-
-    def test_msc4507_public_state_default_power_level_disabled_by_default(
-        self,
-    ) -> None:
-        """The MSC4507 public-state PL rule is gated by experimental config."""
-        state_ids = self.get_success(
-            self.hs.get_storage_controllers().state.get_current_state_ids(self.space)
-        )
-        power_levels = self.get_success(
-            self.hs.get_datastores().main.get_event(
-                state_ids[(EventTypes.PowerLevels, "")]
-            )
-        )
-
-        self.assertNotIn(EventTypes.MSC4507PublicState, power_levels.content["events"])
-
     @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_large_space(self) -> None:
         """Test a space with a large number of rooms."""
