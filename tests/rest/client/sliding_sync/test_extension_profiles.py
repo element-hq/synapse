@@ -530,3 +530,86 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             ],
             expectation,
         )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_tracking_of_sent_fields_per_sliding_sync_connection(self) -> None:
+        """
+        > Homeservers are encouraged to maintain a record of which user profile fields
+        > have been sent down in a given sliding sync connection. That way, as new rooms
+        > enter the room subset, users who were already in rooms within the room subset
+        > will not have their full profiles sent down a second time.
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_removed_fields_get_sent_down_as_removed(self) -> None:
+        """
+        > Likewise, any field IDs that are cleared/removed from a user's profile will appear under users-><user_id>->removed.
+        > Likewise, the removed field should not be present if there were only updates to existing fields (and none were cleared).
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_updated_key_only_present_if_updates(self) -> None:
+        """
+        > The updated field SHOULD only be present if there are changes to existing fields on a user's profile.
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_rooms_subset_changing_includes_full_profile(self) -> None:
+        """
+        > When a room enters this subset in this connection for the first time, all requested
+        > fields from profiles of users in that room MAY be sent down. This gives the client
+        > a base set of information for which future field updates can be applied on top of.
+        > The homeserver MAY omit some fields and profiles if it believes that the client has
+        > already received them, likewise repeat profiles MAY be sent down based on homeserver
+        > implementation.
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_fields_subset_changing_sends_down_field_even_if_not_changed(self) -> None:
+        """
+        > Finally, if the list of fields expands to cover a new field ID, those fields should
+        > be sent down for all users that are within the current room subset. Future incremental
+        > updates will then include changes to this field.
+        """
+
+    """
+    Sliding Sync offers the lazy_members boolean flag on a per-room basis, which when true
+    will only send down membership information for a user if:
+    """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_sends_down_full_profile_if_events_in_timeline(self) -> None:
+        """
+        > the user is one of the senders of a timeline event included in the response
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_sends_down_full_profile_if_membership_events_that_are_returned(
+        self,
+    ) -> None:
+        """
+        > users in required_state member events that are returned
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_sends_down_full_profile_for_heroes(self) -> None:
+        """
+        > heroes(? - not mentioned in the MSC, but seems like Synapse implements it)
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_sends_down_full_profile_for_invite_knock_senders(
+        self,
+    ) -> None:
+        """
+        > invite/knock stripped-state users/senders(? - likewise)
+        """
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_repeat_of_sync_correctly_includes_profile_information_again(self) -> None:
+        """
+        > Homeservers should only consider a profile field update "accepted" by a client
+        > once the client returns with a new /sync request with the next /sync token,
+        > NOT just after sending down the profile update. The client may never receive
+        > response due to network conditions, or a bug in the client implementation.
+        """
