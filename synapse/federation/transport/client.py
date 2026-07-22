@@ -51,12 +51,39 @@ from synapse.http.client import is_unknown_endpoint
 from synapse.http.matrixfederationclient import ByteParser, LegacyJsonSendParser
 from synapse.http.types import QueryParams
 from synapse.types import JsonDict, UserID
+from synapse.types.state import StateEventQuery
 from synapse.util import ExceptionBundle
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.app.homeserver import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+def _create_room_hierarchy_args(
+    suggested_only: bool, additional_state: Iterable[StateEventQuery]
+) -> QueryParams:
+    """
+    Build HTTP query parameters for a `GET /_matrix/federation/v1/hierarchy/{roomId}`
+    request.
+    """
+    args: dict[str, str | list[str]] = {
+        "suggested_only": "true" if suggested_only else "false"
+    }
+
+    encoded_additional_state: list[str] = []
+    for state_query in additional_state:
+        value = {"type": state_query.event_type}
+        if state_query.state_key is not None:
+            value["state_key"] = state_query.state_key
+
+        encoded_additional_state.append(json_encoder.encode(value))
+
+    if encoded_additional_state:
+        args["org.matrix.msc4507.additional_state"] = encoded_additional_state
+
+    return args
 
 
 class TransportLayerClient:
@@ -65,6 +92,7 @@ class TransportLayerClient:
     def __init__(self, hs: "HomeServer"):
         self.client = hs.get_federation_http_client()
         self._is_mine_server_name = hs.is_mine_server_name
+        self._msc4507_enabled = hs.config.experimental.msc4507_enabled
 
     def shutdown(self) -> None:
         self.client.shutdown()
@@ -802,39 +830,57 @@ class TransportLayerClient:
         return await self.client.get_json(destination=destination, path=path)
 
     async def get_room_hierarchy(
-        self, destination: str, room_id: str, suggested_only: bool
+        self,
+        destination: str,
+        room_id: str,
+        suggested_only: bool,
+        additional_state: Iterable[StateEventQuery] = (),
     ) -> JsonDict:
         """
         Args:
             destination: The remote server
             room_id: The room ID to ask about.
             suggested_only: if True, only suggested rooms will be returned
+            additional_state: state events to ask for under MSC4507
         """
         path = _create_v1_path("/hierarchy/%s", room_id)
+        args = _create_room_hierarchy_args(
+            suggested_only,
+            additional_state if self._msc4507_enabled else (),
+        )
 
         return await self.client.get_json(
             destination=destination,
             path=path,
-            args={"suggested_only": "true" if suggested_only else "false"},
+            args=args,
         )
 
     async def get_room_hierarchy_unstable(
-        self, destination: str, room_id: str, suggested_only: bool
+        self,
+        destination: str,
+        room_id: str,
+        suggested_only: bool,
+        additional_state: Iterable[StateEventQuery] = (),
     ) -> JsonDict:
         """
         Args:
             destination: The remote server
             room_id: The room ID to ask about.
             suggested_only: if True, only suggested rooms will be returned
+            additional_state: state events to ask for under MSC4507
         """
         path = _create_path(
             FEDERATION_UNSTABLE_PREFIX, "/org.matrix.msc2946/hierarchy/%s", room_id
         )
+        args = _create_room_hierarchy_args(
+            suggested_only,
+            additional_state if self._msc4507_enabled else (),
+        )
 
         return await self.client.get_json(
             destination=destination,
             path=path,
-            args={"suggested_only": "true" if suggested_only else "false"},
+            args=args,
         )
 
     async def get_account_status(

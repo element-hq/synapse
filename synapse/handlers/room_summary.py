@@ -561,7 +561,10 @@ class RoomSummaryHandler:
         return _RoomEntry(room_id, room_entry, stripped_events)
 
     async def _summarize_remote_room_hierarchy(
-        self, room: "_RoomQueueEntry", suggested_only: bool
+        self,
+        room: "_RoomQueueEntry",
+        suggested_only: bool,
+        additional_state: Iterable[StateEventQuery] = (),
     ) -> tuple[Optional["_RoomEntry"], dict[str, JsonDict], set[str]]:
         """
         Request room entries and a list of event entries for a given room by querying a remote server.
@@ -570,6 +573,7 @@ class RoomSummaryHandler:
             room: The room to summarize.
             suggested_only: True if only suggested children should be returned.
                 Otherwise, all children are returned.
+            additional_state: state events to ask for under MSC4507.
 
         Returns:
             A tuple of:
@@ -579,6 +583,9 @@ class RoomSummaryHandler:
         """
         room_id = room.room_id
         logger.info("Requesting summary for %s via %s", room_id, room.via)
+
+        if not self._msc4507_enabled:
+            additional_state = ()
 
         via = itertools.islice(room.via, MAX_SERVERS_PER_SPACE)
         try:
@@ -591,6 +598,7 @@ class RoomSummaryHandler:
                 via,
                 room_id,
                 suggested_only=suggested_only,
+                additional_state=additional_state,
             )
         except Exception as e:
             logger.warning(
