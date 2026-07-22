@@ -1,1 +1,1 @@
-Stub changelog: Merge with #19539.
+Fix config regression around falsy `experimental_features` no longer being accepted.
