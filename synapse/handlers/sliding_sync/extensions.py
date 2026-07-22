@@ -1179,6 +1179,19 @@ class SlidingSyncExtensionHandler:
             field_names_empty_means_all_fields=False if fields else True,
         )
         profile_user_ids = set()
+        left_room_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.LEFT_ROOM.value
+        }
+        joined_room_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.JOINED_ROOM.value
+        }
+        # Add any newly joined users
+        profile_user_ids.update(joined_room_user_ids)
+
         updated_users = {
             update.user_id
             for update in updates
@@ -1201,54 +1214,57 @@ class SlidingSyncExtensionHandler:
                 continue
             updated_user_fields.setdefault(update.user_id, set()).add(update.field_name)
 
-            profile_data_by_user = await self.store.get_profile_data_for_users(
-                profile_user_ids
-            )
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            profile_user_ids
+        )
 
-            # TODO lazy loading
-            is_lazy = False
+        # TODO lazy loading
+        is_lazy = False
 
-            # Serialise the profile updates into the sync response format.
-            for profile_user_id in profile_user_ids:
-                profile_data = profile_data_by_user.get(profile_user_id)
-                if profile_data is None:
-                    # No profile data for this user, just return a blank dictionary
-                    # in incremental sync, telling the clients to remove all profile
-                    # information for this user.
-                    response[profile_user_id] = None
-                    continue
+        # Serialise the profile updates into the sync response format.
+        for profile_user_id in profile_user_ids:
+            profile_data = profile_data_by_user.get(profile_user_id)
+            if profile_data is None:
+                # No profile data for this user, just return a blank dictionary
+                # in incremental sync, telling the clients to remove all profile
+                # information for this user.
+                response[profile_user_id] = None
+                continue
 
-                per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
-                if is_lazy:
-                    # TODO lazy cache
+            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
+            # Include the fields the client asked for, or all, if not specified
+            if fields:
+                user_fields = set(profile_data.keys()).intersection(fields)
+            else:
+                user_fields = set(profile_data.keys())
+            if is_lazy:
+                # TODO lazy cache
+                for field_name in user_fields:
+                    per_user_updates[field_name] = profile_data.get(field_name)
+            else:
+                # Include only the diff, unless the user recently joined,
+                # then send all the fields the client asked for.
+                # We don't use a cache here as for non-lazy sync we always
+                # send changes and/or fields the client asked for, if relevant
+                # as above joined condition.
+                user_fields = (
+                    user_fields
+                    if profile_user_id in joined_room_user_ids
+                    else set(updated_user_fields.get(profile_user_id, []))
+                )
+                for field_name in user_fields:
+                    per_user_updates[field_name] = profile_data[field_name]
 
-                    # Include the fields the client asked for, or all, if not specified
-                    if fields:
-                        user_fields = set(profile_data.keys()).intersection(fields)
-                    else:
-                        user_fields = set(profile_data.keys())
-                    for field_name in user_fields:
-                        per_user_updates[field_name] = profile_data.get(field_name)
-                else:
-                    # Include only the diff, unless the user recently joined,
-                    # then send all the fields the client asked for.
-                    # We don't use a cache here as for non-lazy sync we always
-                    # send changes and/or fields the client asked for, if relevant
-                    # as above joined condition.
-                    user_fields = (
-                        fields
-                        # TODO joined_room_user_ids
-                        if profile_user_id in []
-                        else set(updated_user_fields.get(profile_user_id, []))
-                    )
-                    user_fields = set(profile_data.keys()).intersection(user_fields)
-                    for field_name in user_fields:
-                        per_user_updates[field_name] = profile_data[field_name]
+            if per_user_updates:
+                response[profile_user_id] = {
+                    "updated": per_user_updates,
+                }
 
-                if per_user_updates:
-                    response[profile_user_id] = {
-                        "updated": per_user_updates,
-                    }
+        # Process left rooms
+        if left_room_user_ids:
+            for other_user_id in left_room_user_ids:
+                # Return a null response to the client
+                response[other_user_id] = None
 
         return SlidingSyncResult.Extensions.ProfilesExtension(
             users=response,
