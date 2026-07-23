@@ -43,7 +43,12 @@ from twisted.web.resource import Resource
 
 from synapse.api import errors
 from synapse.api.constants import ProfileFields
-from synapse.api.errors import SynapseError
+from synapse.api.errors import (
+    FederationDeniedError,
+    HttpResponseException,
+    RequestSendFailed,
+    SynapseError,
+)
 from synapse.api.presence import UserPresenceState
 from synapse.config import ConfigError
 from synapse.config.repository import MediaUploadLimit
@@ -131,6 +136,12 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     ON_THREEPID_BIND_CALLBACK,
     ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK,
 )
+from synapse.module_api.module_errors import (
+    FederationHttpDeniedException,
+    FederationHttpNotRetryingDestinationException,
+    FederationHttpRequestSendFailedException,
+    FederationHttpResponseException,
+)
 from synapse.push.httppusher import HttpPusher
 from synapse.rest.client.login import LoginResponse
 from synapse.storage import DataStore
@@ -162,6 +173,7 @@ from synapse.util.caches.descriptors import CachedFunction, cached as _cached
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.frozenutils import freeze
+from synapse.util.retryutils import NotRetryingDestination
 
 if TYPE_CHECKING:
     # Old versions don't have `LiteralString`
@@ -643,6 +655,106 @@ class ModuleApi:
         Added in Synapse v1.22.0.
         """
         return self._http_client
+
+    async def send_federation_http_request(
+        self,
+        method: str,
+        remote_server_name: str,
+        path: str,
+        query_parameters: Mapping[str, Any] | None = None,
+        body: JsonDict | None = None,
+        timeout: int | None = None,
+    ) -> JsonDict:
+        """Send an authenticated HTTP request to a remote homeserver.
+
+        Synapse signs the request with the local homeserver's signing key and sends it
+        using the configured federation routing, TLS, IP filtering, and retry policy.
+
+        Added in Synapse v1.158.0.
+
+        Args:
+            method: The HTTP method to use. One of `GET`, `PUT`, `POST`, or
+                `DELETE`. Case-insensitive.
+            remote_server_name: The Matrix server name to send the request to.
+                Federation delegation is resolved automatically.
+            path: The absolute HTTP path for the request.
+            query_parameters: Query parameters to include in the request.
+            body: The JSON request body for `PUT` and `POST` requests.
+            timeout: Number of milliseconds to wait for response headers and the
+                response body. The configured federation timeout is used by default.
+
+        Returns:
+            The decoded JSON object returned by the remote homeserver.
+
+        Raises:
+            ValueError: If `method` is not supported.
+            FederationHttpResponseException: If the remote homeserver returns an
+                unsuccessful, non-retryable HTTP response.
+            FederationHttpNotRetryingDestinationException: If Synapse is backing off
+                requests to the remote homeserver.
+            FederationHttpDeniedException: If the remote homeserver is excluded by
+                Synapse's federation policy.
+            FederationHttpRequestSendFailedException: If the request could not be sent
+                or the response could not be decoded.
+        """
+        method = method.upper()
+        federation_http_client = self._hs.get_federation_http_client()
+
+        try:
+            if method == "GET":
+                return await federation_http_client.get_json(
+                    destination=remote_server_name,
+                    path=path,
+                    args=query_parameters,
+                    timeout=timeout,
+                )
+            if method == "PUT":
+                return await federation_http_client.put_json(
+                    destination=remote_server_name,
+                    path=path,
+                    args=query_parameters,
+                    data=body,
+                    timeout=timeout,
+                )
+            if method == "POST":
+                return await federation_http_client.post_json(
+                    destination=remote_server_name,
+                    path=path,
+                    args=query_parameters,
+                    data=body,
+                    timeout=timeout,
+                )
+            if method == "DELETE":
+                return await federation_http_client.delete_json(
+                    destination=remote_server_name,
+                    path=path,
+                    args=query_parameters,
+                    timeout=timeout,
+                )
+
+            raise ValueError(
+                f"method must be one of GET, PUT, POST, or DELETE; received {method!r}"
+            )
+        except HttpResponseException as e:
+            raise FederationHttpResponseException(
+                remote_server_name=remote_server_name,
+                status_code=e.code,
+                msg=e.msg,
+                response_body=e.response,
+            ) from e
+        except NotRetryingDestination as e:
+            raise FederationHttpNotRetryingDestinationException(
+                remote_server_name=remote_server_name
+            ) from e
+        except FederationDeniedError as e:
+            raise FederationHttpDeniedException(
+                remote_server_name=remote_server_name
+            ) from e
+        except RequestSendFailed as e:
+            raise FederationHttpRequestSendFailedException(
+                remote_server_name=remote_server_name,
+                can_retry=e.can_retry,
+            ) from e
 
     @property
     def public_room_list_manager(self) -> "PublicRoomListManager":
