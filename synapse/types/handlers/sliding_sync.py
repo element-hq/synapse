@@ -911,6 +911,94 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
             self._statuses[room_id] = HaveSentRoom.previously(from_token)
 
 
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class ProfileFieldStatusMap(Generic[T]):
+    """For a given profile field, records what we have or have not sent
+    down for that field in a given user profile."""
+
+    # `user_id` -> `field_name` -> `HaveSentRoom`
+    _statuses: Mapping[str, Mapping[str, HaveSentRoom[T]]] = attr.Factory(dict)
+
+    def have_sent_field(self, user_id: str, field_name: str) -> HaveSentRoom[T]:
+        """Return whether we have previously sent the field for this user"""
+        return self._statuses.get(user_id, {}).get(field_name, HaveSentRoom.never())
+
+    def get_mutable(self) -> "MutableProfileFieldStatusMap[T]":
+        """Get a mutable copy of this state."""
+        return MutableProfileFieldStatusMap(
+            statuses=self._statuses,
+        )
+
+    def copy(self) -> "ProfileFieldStatusMap[T]":
+        """Make a copy of the class. Useful for converting from a mutable to
+        immutable version."""
+        return ProfileFieldStatusMap(statuses=dict(self._statuses))
+
+    def __len__(self) -> int:
+        return len(self._statuses)
+
+
+class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
+    """A mutable version of `ProfileFieldStatusMap`"""
+
+    # We use a ChainMap here so that we can easily track what has been updated
+    # and what hasn't. Note that when we persist the per connection state this
+    # will get flattened to a normal dict (via calling `.copy()`)
+    _statuses: ChainMap[str, Mapping[str, HaveSentRoom[T]]]
+
+    def __init__(
+        self,
+        statuses: Mapping[str, Mapping[str, HaveSentRoom[T]]],
+    ) -> None:
+        # ChainMap requires a mutable mapping, but we're not actually going to
+        # mutate it.
+        statuses_mutable = cast(MutableMapping, statuses)
+
+        super().__init__(
+            statuses=ChainMap({}, statuses_mutable),
+        )
+
+    def get_updates(self) -> Mapping[str, Mapping[str, HaveSentRoom[T]]]:
+        """Return only the changes that were made"""
+        return self._statuses.maps[0]
+
+    def record_sent_fields(self, user_id: str, field_names: list[str]) -> None:
+        """Record that we have sent these fields for a user in the response"""
+        if user_id not in self._statuses:
+            self._statuses[user_id] = {}
+
+        user_fields = cast(
+            MutableMapping[str, HaveSentRoom[T]], self._statuses[user_id]
+        )
+
+        for field_name in field_names:
+            current_status = user_fields.get(field_name, HaveSentRoom.never())
+            if current_status.status == HaveSentRoomFlag.LIVE:
+                continue
+
+            user_fields[field_name] = HaveSentRoom.live()
+
+    def record_unsent_fields(
+        self, user_id: str, field_names: list[str], from_token: T
+    ) -> None:
+        """Record that we have not sent these fields for a user in the response, but there
+        have been updates.
+        """
+        if user_id not in self._statuses:
+            return
+
+        user_fields = cast(
+            MutableMapping[str, HaveSentRoom[T]], self._statuses[user_id]
+        )
+
+        for field_name in field_names:
+            current_status = user_fields.get(field_name, HaveSentRoom.never())
+            if current_status.status != HaveSentRoomFlag.LIVE:
+                continue
+
+            user_fields[field_name] = HaveSentRoom.previously(from_token)
+
+
 @attr.s(auto_attribs=True, frozen=True)
 class PerConnectionState:
     """The per-connection state. A snapshot of what we've sent down the
@@ -944,6 +1032,10 @@ class PerConnectionState:
 
     room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
 
+    profile_updates: ProfileFieldStatusMap[MultiWriterStreamToken] = attr.Factory(
+        ProfileFieldStatusMap
+    )
+
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
         room_configs = cast(MutableMapping[str, RoomSyncConfig], self.room_configs)
@@ -954,6 +1046,7 @@ class PerConnectionState:
             receipts=self.receipts.get_mutable(),
             account_data=self.account_data.get_mutable(),
             room_configs=ChainMap({}, room_configs),
+            profile_updates=self.profile_updates.get_mutable(),
         )
 
     def copy(self) -> "PerConnectionState":
@@ -963,10 +1056,17 @@ class PerConnectionState:
             receipts=self.receipts.copy(),
             account_data=self.account_data.copy(),
             room_configs=dict(self.room_configs),
+            profile_updates=self.profile_updates.copy(),
         )
 
     def __len__(self) -> int:
-        return len(self.rooms) + len(self.receipts) + len(self.room_configs)
+        # FIXME: this is missing self.account_data
+        return (
+            len(self.rooms)
+            + len(self.receipts)
+            + len(self.room_configs)
+            + len(self.profile_updates)
+        )
 
 
 @attr.s(auto_attribs=True)
@@ -1044,6 +1144,8 @@ class MutablePerConnectionState(PerConnectionState):
 
     room_configs: ChainMap[str, RoomSyncConfig]
 
+    profile_updates: MutableProfileFieldStatusMap[MultiWriterStreamToken]
+
     # A map from room ID to the lazily-loaded memberships needed for the
     # request in that room.
     room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
@@ -1066,6 +1168,7 @@ class MutablePerConnectionState(PerConnectionState):
                 change.has_updates(clock)
                 for change in self.room_lazy_membership.values()
             )
+            or bool(self.profile_updates.get_updates())
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
