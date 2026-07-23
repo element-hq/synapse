@@ -49,7 +49,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers.sliding_sync import (
-    HaveSentRoomFlag,
+    HaveSentFlag,
     MutablePerConnectionState,
     OperationType,
     PerConnectionState,
@@ -537,12 +537,12 @@ class SlidingSyncExtensionHandler:
                 room_status = previous_connection_state.account_data.have_sent_room(
                     room_id
                 )
-                if room_status.status == HaveSentRoomFlag.LIVE:
+                if room_status.status == HaveSentFlag.LIVE:
                     live_rooms.add(room_id)
-                elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                elif room_status.status == HaveSentFlag.PREVIOUSLY:
                     assert room_status.last_token is not None
                     previously_rooms[room_id] = room_status.last_token
-                elif room_status.status == HaveSentRoomFlag.NEVER:
+                elif room_status.status == HaveSentFlag.NEVER:
                     initial_rooms.add(room_id)
                 else:
                     assert_never(room_status.status)
@@ -747,12 +747,12 @@ class SlidingSyncExtensionHandler:
                         continue
 
                 room_status = previous_connection_state.receipts.have_sent_room(room_id)
-                if room_status.status == HaveSentRoomFlag.LIVE:
+                if room_status.status == HaveSentFlag.LIVE:
                     live_rooms.add(room_id)
-                elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                elif room_status.status == HaveSentFlag.PREVIOUSLY:
                     assert room_status.last_token is not None
                     previously_rooms[room_id] = room_status.last_token
-                elif room_status.status == HaveSentRoomFlag.NEVER:
+                elif room_status.status == HaveSentFlag.NEVER:
                     initial_rooms.add(room_id)
                 else:
                     assert_never(room_status.status)
@@ -867,7 +867,7 @@ class SlidingSyncExtensionHandler:
             rooms_no_receipts = [
                 room_id
                 for room_id, room_status in previous_connection_state.receipts._statuses.items()
-                if room_status.status == HaveSentRoomFlag.LIVE
+                if room_status.status == HaveSentFlag.LIVE
                 and room_id not in relevant_room_ids
             ]
             changed_rooms = await self.store.get_rooms_with_receipts_between(

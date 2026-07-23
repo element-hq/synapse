@@ -767,8 +767,8 @@ class RoomSyncConfig:
         return False
 
 
-class HaveSentRoomFlag(Enum):
-    """Flag for whether we have sent the room down a sliding sync connection.
+class HaveSentFlag(Enum):
+    """Flag for whether we have sent some data down a sliding sync connection.
 
     The valid state changes here are:
         NEVER -> LIVE
@@ -776,15 +776,15 @@ class HaveSentRoomFlag(Enum):
         PREVIOUSLY -> LIVE
     """
 
-    # The room has never been sent down (or we have forgotten we have sent it
+    # The data has never been sent down (or we have forgotten we have sent it
     # down).
     NEVER = "never"
 
-    # We have previously sent the room down, but there are updates that we
+    # We have previously sent the data down, but there are updates that we
     # haven't sent down.
     PREVIOUSLY = "previously"
 
-    # We have sent the room down and the client has received all updates.
+    # We have sent the data down and the client has received all updates.
     LIVE = "live"
 
 
@@ -792,40 +792,40 @@ T = TypeVar("T", str, RoomStreamToken, MultiWriterStreamToken, int)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class HaveSentRoom(Generic[T]):
-    """Whether we have sent the room data down a sliding sync connection.
+class HaveSent(Generic[T]):
+    """Whether we have sent some data down a sliding sync connection.
 
     We are generic over the type of token used, e.g. `RoomStreamToken` or
     `MultiWriterStreamToken`.
 
     Attributes:
-        status: Flag of if we have or haven't sent down the room
+        status: Flag of if we have or haven't sent down the data
         last_token: If the flag is `PREVIOUSLY` then this is non-null and
             contains the last stream token of the last updates we sent down
-            the room, i.e. we still need to send everything since then to the
+            the data, i.e. we still need to send everything since then to the
             client.
     """
 
-    status: HaveSentRoomFlag
+    status: HaveSentFlag
     last_token: T | None
 
     @staticmethod
-    def live() -> "HaveSentRoom[T]":
-        return HaveSentRoom(HaveSentRoomFlag.LIVE, None)
+    def live() -> "HaveSent[T]":
+        return HaveSent(HaveSentFlag.LIVE, None)
 
     @staticmethod
-    def previously(last_token: T) -> "HaveSentRoom[T]":
+    def previously(last_token: T) -> "HaveSent[T]":
         """Constructor for `PREVIOUSLY` flag."""
-        return HaveSentRoom(HaveSentRoomFlag.PREVIOUSLY, last_token)
+        return HaveSent(HaveSentFlag.PREVIOUSLY, last_token)
 
     @staticmethod
-    def never() -> "HaveSentRoom[T]":
+    def never() -> "HaveSent[T]":
         # We use a singleton to avoid repeatedly instantiating new `never`
         # values.
-        return _HAVE_SENT_ROOM_NEVER
+        return _HAVE_SENT_NEVER
 
 
-_HAVE_SENT_ROOM_NEVER: HaveSentRoom[Any] = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
+_HAVE_SENT_NEVER: HaveSent[Any] = HaveSent(HaveSentFlag.NEVER, None)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -833,12 +833,12 @@ class RoomStatusMap(Generic[T]):
     """For a given stream, e.g. events, records what we have or have not sent
     down for that stream in a given room."""
 
-    # `room_id` -> `HaveSentRoom`
-    _statuses: Mapping[str, HaveSentRoom[T]] = attr.Factory(dict)
+    # `room_id` -> `HaveSent`
+    _statuses: Mapping[str, HaveSent[T]] = attr.Factory(dict)
 
-    def have_sent_room(self, room_id: str) -> HaveSentRoom[T]:
+    def have_sent_room(self, room_id: str) -> HaveSent[T]:
         """Return whether we have previously sent the room down"""
-        return self._statuses.get(room_id, HaveSentRoom.never())
+        return self._statuses.get(room_id, HaveSent.never())
 
     def get_mutable(self) -> "MutableRoomStatusMap[T]":
         """Get a mutable copy of this state."""
@@ -862,11 +862,11 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
     # We use a ChainMap here so that we can easily track what has been updated
     # and what hasn't. Note that when we persist the per connection state this
     # will get flattened to a normal dict (via calling `.copy()`)
-    _statuses: ChainMap[str, HaveSentRoom[T]]
+    _statuses: ChainMap[str, HaveSent[T]]
 
     def __init__(
         self,
-        statuses: Mapping[str, HaveSentRoom[T]],
+        statuses: Mapping[str, HaveSent[T]],
     ) -> None:
         # ChainMap requires a mutable mapping, but we're not actually going to
         # mutate it.
@@ -876,18 +876,18 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
             statuses=ChainMap({}, statuses),
         )
 
-    def get_updates(self) -> Mapping[str, HaveSentRoom[T]]:
+    def get_updates(self) -> Mapping[str, HaveSent[T]]:
         """Return only the changes that were made"""
         return self._statuses.maps[0]
 
     def record_sent_rooms(self, room_ids: StrCollection) -> None:
         """Record that we have sent these rooms in the response"""
         for room_id in room_ids:
-            current_status = self._statuses.get(room_id, HaveSentRoom.never())
-            if current_status.status == HaveSentRoomFlag.LIVE:
+            current_status = self._statuses.get(room_id, HaveSent.never())
+            if current_status.status == HaveSentFlag.LIVE:
                 continue
 
-            self._statuses[room_id] = HaveSentRoom.live()
+            self._statuses[room_id] = HaveSent.live()
 
     def record_unsent_rooms(self, room_ids: StrCollection, from_token: T) -> None:
         """Record that we have not sent these rooms in the response, but there
@@ -904,11 +904,11 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
         #     sent anything down this time either so we leave it as NEVER.
 
         for room_id in room_ids:
-            current_status = self._statuses.get(room_id, HaveSentRoom.never())
-            if current_status.status != HaveSentRoomFlag.LIVE:
+            current_status = self._statuses.get(room_id, HaveSent.never())
+            if current_status.status != HaveSentFlag.LIVE:
                 continue
 
-            self._statuses[room_id] = HaveSentRoom.previously(from_token)
+            self._statuses[room_id] = HaveSent.previously(from_token)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -916,12 +916,12 @@ class ProfileFieldStatusMap(Generic[T]):
     """For a given profile field, records what we have or have not sent
     down for that field in a given user profile."""
 
-    # `user_id` -> `field_name` -> `HaveSentRoom`
-    _statuses: Mapping[str, Mapping[str, HaveSentRoom[T]]] = attr.Factory(dict)
+    # `user_id` -> `field_name` -> `HaveSent`
+    _statuses: Mapping[str, Mapping[str, HaveSent[T]]] = attr.Factory(dict)
 
-    def have_sent_field(self, user_id: str, field_name: str) -> HaveSentRoom[T]:
+    def have_sent_field(self, user_id: str, field_name: str) -> HaveSent[T]:
         """Return whether we have previously sent the field for this user"""
-        return self._statuses.get(user_id, {}).get(field_name, HaveSentRoom.never())
+        return self._statuses.get(user_id, {}).get(field_name, HaveSent.never())
 
     def get_mutable(self) -> "MutableProfileFieldStatusMap[T]":
         """Get a mutable copy of this state."""
@@ -944,11 +944,11 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
     # We use a ChainMap here so that we can easily track what has been updated
     # and what hasn't. Note that when we persist the per connection state this
     # will get flattened to a normal dict (via calling `.copy()`)
-    _statuses: ChainMap[str, Mapping[str, HaveSentRoom[T]]]
+    _statuses: ChainMap[str, Mapping[str, HaveSent[T]]]
 
     def __init__(
         self,
-        statuses: Mapping[str, Mapping[str, HaveSentRoom[T]]],
+        statuses: Mapping[str, Mapping[str, HaveSent[T]]],
     ) -> None:
         # ChainMap requires a mutable mapping, but we're not actually going to
         # mutate it.
@@ -958,7 +958,7 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
             statuses=ChainMap({}, statuses_mutable),
         )
 
-    def get_updates(self) -> Mapping[str, Mapping[str, HaveSentRoom[T]]]:
+    def get_updates(self) -> Mapping[str, Mapping[str, HaveSent[T]]]:
         """Return only the changes that were made"""
         return self._statuses.maps[0]
 
@@ -967,16 +967,14 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
         if user_id not in self._statuses:
             self._statuses[user_id] = {}
 
-        user_fields = cast(
-            MutableMapping[str, HaveSentRoom[T]], self._statuses[user_id]
-        )
+        user_fields = cast(MutableMapping[str, HaveSent[T]], self._statuses[user_id])
 
         for field_name in field_names:
-            current_status = user_fields.get(field_name, HaveSentRoom.never())
-            if current_status.status == HaveSentRoomFlag.LIVE:
+            current_status = user_fields.get(field_name, HaveSent.never())
+            if current_status.status == HaveSentFlag.LIVE:
                 continue
 
-            user_fields[field_name] = HaveSentRoom.live()
+            user_fields[field_name] = HaveSent.live()
 
     def record_unsent_fields(
         self, user_id: str, field_names: list[str], from_token: T
@@ -987,16 +985,14 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
         if user_id not in self._statuses:
             return
 
-        user_fields = cast(
-            MutableMapping[str, HaveSentRoom[T]], self._statuses[user_id]
-        )
+        user_fields = cast(MutableMapping[str, HaveSent[T]], self._statuses[user_id])
 
         for field_name in field_names:
-            current_status = user_fields.get(field_name, HaveSentRoom.never())
-            if current_status.status != HaveSentRoomFlag.LIVE:
+            current_status = user_fields.get(field_name, HaveSent.never())
+            if current_status.status != HaveSentFlag.LIVE:
                 continue
 
-            user_fields[field_name] = HaveSentRoom.previously(from_token)
+            user_fields[field_name] = HaveSent.previously(from_token)
 
 
 @attr.s(auto_attribs=True, frozen=True)
