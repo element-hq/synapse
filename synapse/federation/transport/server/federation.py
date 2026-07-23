@@ -28,7 +28,7 @@ from typing import (
     Sequence,
 )
 
-from synapse.api.constants import Direction, EduTypes
+from synapse.api.constants import Direction, EduTypes, ThirdPartyEntityKind
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.api.urls import FEDERATION_UNSTABLE_PREFIX, FEDERATION_V2_PREFIX
@@ -806,6 +806,72 @@ class FederationAccountStatusServlet(BaseFederationServerServlet):
         return 200, {"account_statuses": statuses, "failures": failures}
 
 
+class BaseFederationThirdPartyServlet(BaseFederationServlet):
+    """Base for the federated third-party lookup servlets (MSC4517).
+
+    These mirror the client-server /thirdparty lookup endpoints, letting a
+    remote homeserver query this server's bridges. Only appservices registered
+    on this server are consulted; requests are never re-delegated.
+    """
+
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4517.thirdparty"
+
+    def __init__(
+        self,
+        hs: "HomeServer",
+        authenticator: Authenticator,
+        ratelimiter: FederationRateLimiter,
+        server_name: str,
+    ):
+        super().__init__(hs, authenticator, ratelimiter, server_name)
+        self.appservice_handler = hs.get_application_service_handler()
+
+
+class FederationThirdPartyProtocolsServlet(BaseFederationThirdPartyServlet):
+    PATH = "/protocols"
+
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
+    ) -> tuple[int, JsonDict]:
+        protocols = await self.appservice_handler.get_3pe_protocols()
+        return 200, protocols
+
+
+class FederationThirdPartyUserServlet(BaseFederationThirdPartyServlet):
+    PATH = "/user/(?P<protocol>[^/]+)$"
+
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
+        protocol: str,
+    ) -> tuple[int, JsonDict]:
+        results = await self.appservice_handler.query_3pe(
+            ThirdPartyEntityKind.USER, protocol, query
+        )
+        return 200, {"results": results}
+
+
+class FederationThirdPartyLocationServlet(BaseFederationThirdPartyServlet):
+    PATH = "/location/(?P<protocol>[^/]+)$"
+
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
+        protocol: str,
+    ) -> tuple[int, JsonDict]:
+        results = await self.appservice_handler.query_3pe(
+            ThirdPartyEntityKind.LOCATION, protocol, query
+        )
+        return 200, {"results": results}
+
+
 class FederationMediaDownloadServlet(BaseFederationServerServlet):
     """
     Implementation of new federation media `/download` endpoint outlined in MSC3916. Returns
@@ -935,4 +1001,7 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationThirdPartyProtocolsServlet,
+    FederationThirdPartyUserServlet,
+    FederationThirdPartyLocationServlet,
 )

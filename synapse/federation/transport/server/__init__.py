@@ -33,6 +33,9 @@ from synapse.federation.transport.server.federation import (
     FederationAccountStatusServlet,
     FederationMediaDownloadServlet,
     FederationMediaThumbnailServlet,
+    FederationThirdPartyLocationServlet,
+    FederationThirdPartyProtocolsServlet,
+    FederationThirdPartyUserServlet,
     FederationUnstableClientKeysClaimServlet,
     FederationUnstableGetExtremitiesServlet,
 )
@@ -331,6 +334,17 @@ def register_servlets(
             if (
                 servletclass == FederationUnstableGetExtremitiesServlet
                 and not hs.config.experimental.msc4370_enabled
+            ):
+                continue
+
+            if (
+                servletclass
+                in (
+                    FederationThirdPartyProtocolsServlet,
+                    FederationThirdPartyUserServlet,
+                    FederationThirdPartyLocationServlet,
+                )
+                and not hs.config.experimental.msc4517_enabled
             ):
                 continue
 

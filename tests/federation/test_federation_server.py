@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
@@ -92,6 +92,69 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+
+class FederationThirdPartyLookupTests(unittest.FederatingHomeserverTestCase):
+    """Tests for the federated third-party lookup servlets."""
+
+    PREFIX = "/_matrix/federation/unstable/org.matrix.msc4517.thirdparty"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4517_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.appservice_handler = hs.get_application_service_handler()
+        self.appservice_handler.query_3pe = AsyncMock(  # type: ignore[method-assign]
+            return_value=[
+                {
+                    "userid": "@_xmpp_someone:test",
+                    "protocol": "xmpp",
+                    "fields": {"username": "someone"},
+                }
+            ]
+        )
+        self.appservice_handler.get_3pe_protocols = AsyncMock(  # type: ignore[method-assign]
+            return_value={"xmpp": {"instances": []}}
+        )
+
+    def test_user_lookup(self) -> None:
+        channel = self.make_signed_federation_request(
+            "GET", f"{self.PREFIX}/user/xmpp?username=someone"
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(
+            channel.json_body["results"][0]["userid"], "@_xmpp_someone:test"
+        )
+        call = self.appservice_handler.query_3pe.call_args
+        self.assertEqual(call.args[1], "xmpp")
+        self.assertEqual(call.args[2], {b"username": [b"someone"]})
+
+    def test_location_lookup(self) -> None:
+        channel = self.make_signed_federation_request(
+            "GET", f"{self.PREFIX}/location/xmpp?muc=room"
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertIn("results", channel.json_body)
+
+    def test_protocols(self) -> None:
+        channel = self.make_signed_federation_request("GET", f"{self.PREFIX}/protocols")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body, {"xmpp": {"instances": []}})
+
+
+class FederationThirdPartyLookupDisabledTests(unittest.FederatingHomeserverTestCase):
+    """The servlets are not registered when the flag is off."""
+
+    def test_unrecognised(self) -> None:
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/org.matrix.msc4517.thirdparty/user/xmpp"
+            "?username=someone",
+        )
+        self.assertEqual(channel.code, 404, channel.result)
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:
