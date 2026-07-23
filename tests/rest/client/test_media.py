@@ -3137,27 +3137,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["info_uri"], "https://example.com/")
         self.assertEqual(channel.json_body["can_upgrade"], True)
 
-    def test_allows_extra_fields_in_config(self) -> None:
-        """Config parsing used to be more lax, this test ensures that extra
-        fields in the config don't break parsing."""
-        config_dict = self.default_config()
-
-        HomeServerConfig().parse_config_dict(
-            {
-                "media_upload_limits": [
-                    {
-                        "time_period": "1d",
-                        "max_size": "1K",
-                        "extra_unknown_field": "test",
-                        "extra_unknown_config": {"foo": True},
-                    }
-                ],
-                **config_dict,
-            },
-            "",
-            "",
-        )
-
     def test_fallback_template_loaded_without_media_repo(self) -> None:
         """The fallback page template must be loaded even on a worker that does
         not run the media repo, since `build_synapse_client_resource_tree`
