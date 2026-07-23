@@ -167,6 +167,18 @@ class ContentRepositoryConfig(Config):
         # is not a media repo worker, as it's exposed in `/capabilities`
         self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
 
+        # Load the template used to render the fallback page.
+        #
+        # We set this up on all workers (not just the media repo) as the
+        # fallback page is served by whichever process handles
+        # `/_synapse/client/media_upload_limit_exceeded`, so every process must
+        # be able to render it. This must happen before the early return below,
+        # which is taken by workers that do not load the media repo.
+        self.media_upload_limit_exceeded_template = self.read_templates(
+            ["media_upload_limit_exceeded.html"],
+            (td for td in (self.root.server.custom_template_directory,) if td),
+        )[0]
+
         # Only enable the media repo if either the media repo is enabled or the
         # current worker app is the media repo.
         if (
@@ -366,17 +378,6 @@ class ContentRepositoryConfig(Config):
             self.root.server.public_baseurl
             + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
         )
-
-        # Load the template used to render the fallback page.
-        #
-        # We set this up on all workers (not just the media repo) as the
-        # fallback page is served by whichever process handles
-        # `/_synapse/client/media_upload_limit_exceeded`, so every process must
-        # be able to render it.
-        self.media_upload_limit_exceeded_template = self.read_templates(
-            ["media_upload_limit_exceeded.html"],
-            (td for td in (self.root.server.custom_template_directory,) if td),
-        )[0]
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None
