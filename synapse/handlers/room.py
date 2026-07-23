@@ -1409,6 +1409,25 @@ class RoomCreationHandler:
         is_public: bool,
         room_version: RoomVersion,
     ) -> tuple[EventBase, synapse.events.snapshot.EventContext]:
+        """Create and store the create event for a v12+ room, retrying on room ID collision.
+
+        In v12+ rooms the room ID is derived from the create event, so this
+        builds the create event, stores the room under the resulting ID, and
+        retries with a slightly older `origin_server_ts` if that ID is already taken.
+
+        Args:
+            creator: The user creating the room.
+            creation_content: The content for the create event.
+            is_public: Whether the room is published to the room directory.
+            room_version: The version of the room being created.
+
+        Returns:
+            A tuple of the create event and its event context.
+
+        Raises:
+            StoreError: if a unique room ID could not be generated after several
+                attempts.
+        """
         # In v12+ rooms, the room ID is the reference hash of the create event,
         # so two rooms whose create events have identical content collide on the
         # same room ID. This happens in practice when the same user creates
