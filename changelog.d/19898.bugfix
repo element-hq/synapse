@@ -1,3 +1,3 @@
-Fix third-party (3pid) invites over federation failing intermittently in version 12 rooms, whose room IDs no longer encode a server name.
+Fix third-party (3pid) invites over federation failing intermittently in version 12 rooms, whose room IDs no longer encode a server name. ([#19898](https://github.com/element-hq/synapse/issues/19898))
 
 Fix `/createRoom` intermittently failing with a 500 error in version 12 rooms when the same user creates several rooms at once, due to colliding room IDs.
