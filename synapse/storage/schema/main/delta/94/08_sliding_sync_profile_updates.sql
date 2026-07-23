@@ -19,7 +19,7 @@ CREATE TABLE sliding_sync_connection_profile_updates(
     connection_position BIGINT NOT NULL REFERENCES sliding_sync_connection_positions(connection_position) ON DELETE CASCADE,
     user_id TEXT NOT NULL,
     field_name TEXT NOT NULL,
-    field_status TEXT NOT NULL,  -- "live" or "previously", i.e. the `HaveSentRoomFlag` value
+    field_status TEXT NOT NULL,  -- "live" or "previously", i.e. the `HaveSentFlag` value
     last_token TEXT  -- For "previously" the token for the stream we have sent up to.
 );
 

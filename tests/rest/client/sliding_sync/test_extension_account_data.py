@@ -370,7 +370,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         On incremental sync, we return all account data for a given room but only for
         rooms that we request and are being returned in the Sliding Sync response.
 
-        (HaveSentRoomFlag.LIVE)
+        (HaveSentFlag.LIVE)
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -538,7 +538,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         """Tests that we don't return account data for rooms that are out of
         range, but then do send all account data once they're in range.
 
-        (initial/HaveSentRoomFlag.NEVER)
+        (initial/HaveSentFlag.NEVER)
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -728,7 +728,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         """Tests that we don't return account data for rooms that fall out of
         range, but then do send all account data that has changed they're back in range.
 
-        (HaveSentRoomFlag.PREVIOUSLY)
+        (HaveSentFlag.PREVIOUSLY)
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")

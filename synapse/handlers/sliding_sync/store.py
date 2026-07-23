@@ -55,7 +55,7 @@ class SlidingSyncConnectionStore:
 
     Attributes:
         _connections: Mapping from `(user_id, conn_id)` to mapping of `token`
-            to mapping of room ID to `HaveSentRoom`.
+            to mapping of room ID to `HaveSent`.
     """
 
     clock: Clock

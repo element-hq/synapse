@@ -62,7 +62,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers.sliding_sync import (
-    HaveSentRoomFlag,
+    HaveSentFlag,
     OperationType,
     PerConnectionState,
     RoomSyncConfig,
@@ -893,14 +893,14 @@ class SlidingSyncRoomLists:
                         if (
                             # The room was never sent down before so the client needs to know
                             # about it regardless of any updates.
-                            status.status == HaveSentRoomFlag.NEVER
+                            status.status == HaveSentFlag.NEVER
                             # `PREVIOUSLY` literally means the "room was sent down before *AND*
                             # there are updates we haven't sent down" so we already know this
                             # room has updates.
-                            or status.status == HaveSentRoomFlag.PREVIOUSLY
+                            or status.status == HaveSentFlag.PREVIOUSLY
                         ):
                             rooms_should_send.add(room_id)
-                        elif status.status == HaveSentRoomFlag.LIVE:
+                        elif status.status == HaveSentFlag.LIVE:
                             # We know that we've sent all updates up until `from_token`,
                             # so we just need to check if there have been updates since
                             # then.
@@ -2002,7 +2002,7 @@ class SlidingSyncRoomLists:
             for room_id in sync_room_map.keys()
             if sync_room_map[room_id].event_id is None
             and previous_connection_state.rooms.have_sent_room(room_id).status
-            != HaveSentRoomFlag.NEVER
+            != HaveSentFlag.NEVER
         }
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
@@ -2170,7 +2170,7 @@ class SlidingSyncRoomLists:
             for room_id in sync_room_map.keys()
             if sync_room_map[room_id].event_id is None
             and previous_connection_state.rooms.have_sent_room(room_id).status
-            != HaveSentRoomFlag.NEVER
+            != HaveSentFlag.NEVER
         }
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
