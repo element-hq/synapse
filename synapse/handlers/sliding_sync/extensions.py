@@ -210,6 +210,8 @@ class SlidingSyncExtensionHandler:
         if sync_config.extensions.profiles is not Absent and self._enable_profiles:
             profiles_coro = self.get_profiles_extension_response(
                 sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
                 profiles_request=sync_config.extensions.profiles,
                 all_interested_room_ids=all_interested_room_ids,
                 to_token=to_token,
@@ -460,6 +462,8 @@ class SlidingSyncExtensionHandler:
 
         Args:
             sync_config: Sync configuration
+            previous_connection_state: The previous immutable connection state.
+            new_connection_state: The new connection state to be modified.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
@@ -1083,6 +1087,7 @@ class SlidingSyncExtensionHandler:
         user_id: UserID,
         fields: set[str],
         rooms: set[str],
+        new_connection_state: MutablePerConnectionState,
     ) -> dict[str, JsonDict | None]:
         """
         Build an initial sync response for the profiles extension.
@@ -1091,6 +1096,7 @@ class SlidingSyncExtensionHandler:
             user_id: The syncing user UserID
             fields: A set of fields to include in the response.
             rooms: A set of rooms to limit the user profiles for.
+            new_connection_state: The new connection state to be modified.
 
         Returns:
             A dictionary containing the profile updates in an `updated` dictionary.
@@ -1121,9 +1127,15 @@ class SlidingSyncExtensionHandler:
             else:
                 user_fields = set(profile_data.keys())
             for field_name in user_fields:
+                # We don't check for previous connection state when gathering the
+                # initial sync response.
                 per_user_updates[field_name] = profile_data[field_name]
 
             if per_user_updates:
+                # Mark the fields as sent and add to the response
+                new_connection_state.profile_updates.record_sent_fields(
+                    profile_user_id, list(per_user_updates.keys())
+                )
                 response[profile_user_id] = {
                     "updated": per_user_updates,
                 }
@@ -1133,6 +1145,8 @@ class SlidingSyncExtensionHandler:
     async def get_profiles_extension_response(
         self,
         sync_config: SlidingSyncConfig,
+        previous_connection_state: "PerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
         profiles_request: SlidingSyncConfig.Extensions.ProfilesExtension,
         all_interested_room_ids: set[str],
         to_token: StreamToken,
@@ -1143,6 +1157,8 @@ class SlidingSyncExtensionHandler:
 
         Args:
             sync_config: The Sliding Sync config.
+            previous_connection_state: The previous immutable connection state.
+            new_connection_state: The new connection state to be modified.
             profiles_request: The profiles extension request.
             all_interested_room_ids: Set of rooms the sync request is interested in.
             to_token: The stream token to generate a response until.
@@ -1167,6 +1183,7 @@ class SlidingSyncExtensionHandler:
                     user_id=sync_config.user,
                     fields=fields,
                     rooms=all_interested_room_ids,
+                    new_connection_state=new_connection_state,
                 ),
             )
 
@@ -1253,9 +1270,24 @@ class SlidingSyncExtensionHandler:
                     else set(updated_user_fields.get(profile_user_id, []))
                 )
                 for field_name in user_fields:
-                    per_user_updates[field_name] = profile_data[field_name]
+                    # Ensure we don't send the field unnecessarely to the client, if
+                    # we've sent it down in this connection before, and it hasn't been
+                    # updated.
+                    if (
+                        field_name in updated_user_fields.keys()
+                        or previous_connection_state.profile_updates.have_sent_field(
+                            profile_user_id, field_name
+                        ).status
+                        != HaveSentFlag.LIVE
+                    ):
+                        per_user_updates[field_name] = profile_data[field_name]
 
             if per_user_updates:
+                # Record sending these fields to this connection and add to the response
+                new_connection_state.profile_updates.record_sent_fields(
+                    profile_user_id,
+                    list(per_user_updates.keys()),
+                )
                 response[profile_user_id] = {
                     "updated": per_user_updates,
                 }
