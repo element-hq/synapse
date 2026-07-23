@@ -685,6 +685,47 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return results
 
+    async def store_local_knock_via_server(
+        self, user_id: str, room_id: str, via_server: str, knock_event_id: str
+    ) -> None:
+        """Record the remote server that fulfilled a local user's knock on a
+        remote room, so that a later rescission can be routed through it
+        (MSC4233). Overwrites any previous record for the user/room pair.
+
+        Args:
+            user_id: The ID of the knocking (local) user.
+            room_id: The ID of the room that was knocked on.
+            via_server: The remote server that answered our /send_knock.
+            knock_event_id: The event ID of the knock membership event.
+        """
+        await self.db_pool.simple_upsert(
+            table="local_knock_via_servers",
+            keyvalues={"user_id": user_id, "room_id": room_id},
+            values={"via_server": via_server, "knock_event_id": knock_event_id},
+            desc="store_local_knock_via_server",
+        )
+
+    async def get_local_knock_via_server(
+        self, user_id: str, room_id: str
+    ) -> str | None:
+        """Retrieve the remote server that fulfilled a local user's knock on a
+        remote room, if we have a record of one (MSC4233).
+
+        Args:
+            user_id: The ID of the knocking (local) user.
+            room_id: The ID of the room that was knocked on.
+
+        Returns:
+            The server name, or None if no knock route is recorded.
+        """
+        return await self.db_pool.simple_select_one_onecol(
+            table="local_knock_via_servers",
+            keyvalues={"user_id": user_id, "room_id": room_id},
+            retcol="via_server",
+            allow_none=True,
+            desc="get_local_knock_via_server",
+        )
+
     async def get_users_server_still_shares_room_with(
         self, user_ids: Collection[str]
     ) -> set[str]:
