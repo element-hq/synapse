@@ -74,7 +74,7 @@ CREATE TABLE sliding_sync_connection_streams(
     connection_position BIGINT NOT NULL REFERENCES sliding_sync_connection_positions(connection_position) ON DELETE CASCADE,
     stream TEXT NOT NULL,  -- e.g. "events" or "receipts"
     room_id TEXT NOT NULL,
-    room_status TEXT NOT NULL,  -- "live" or "previously", i.e. the `HaveSentRoomFlag` value
+    room_status TEXT NOT NULL,  -- "live" or "previously", i.e. the `HaveSentFlag` value
     last_token TEXT  -- For "previously" the token for the stream we have sent up to.
 );
 

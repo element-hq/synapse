@@ -31,8 +31,8 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
-    HaveSentRoom,
-    HaveSentRoomFlag,
+    HaveSent,
+    HaveSentFlag,
     MutablePerConnectionState,
     PerConnectionState,
     ProfileFieldStatusMap,
@@ -635,9 +635,9 @@ class SlidingSyncStore(SQLBaseStore):
             )
 
         # Now look up the per-room stream data.
-        rooms: dict[str, HaveSentRoom[str]] = {}
-        receipts: dict[str, HaveSentRoom[str]] = {}
-        account_data: dict[str, HaveSentRoom[str]] = {}
+        rooms: dict[str, HaveSent[str]] = {}
+        receipts: dict[str, HaveSent[str]] = {}
+        account_data: dict[str, HaveSent[str]] = {}
 
         receipt_rows = self.db_pool.simple_select_list_txn(
             txn,
@@ -651,8 +651,8 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
         for stream, room_id, room_status, last_token in receipt_rows:
-            have_sent_room: HaveSentRoom[str] = HaveSentRoom(
-                status=HaveSentRoomFlag(room_status), last_token=last_token
+            have_sent_room: HaveSent[str] = HaveSent(
+                status=HaveSentFlag(room_status), last_token=last_token
             )
             if stream == "rooms":
                 rooms[room_id] = have_sent_room
@@ -666,7 +666,7 @@ class SlidingSyncStore(SQLBaseStore):
                 logger.warning("Unrecognized sliding sync stream in DB %r", stream)
 
         # Now look up the per-profile field stream data.
-        profile_updates: dict[str, dict[str, HaveSentRoom[str]]] = {}
+        profile_updates: dict[str, dict[str, HaveSent[str]]] = {}
 
         profile_update_rows = self.db_pool.simple_select_list_txn(
             txn,
@@ -680,8 +680,8 @@ class SlidingSyncStore(SQLBaseStore):
             ),
         )
         for user_id, field_name, field_status, last_token in profile_update_rows:
-            have_sent_field: HaveSentRoom[str] = HaveSentRoom(
-                status=HaveSentRoomFlag(field_status), last_token=last_token
+            have_sent_field: HaveSent[str] = HaveSent(
+                status=HaveSentFlag(field_status), last_token=last_token
             )
             if user_id not in profile_updates:
                 profile_updates[user_id] = {}
@@ -889,7 +889,7 @@ class PerConnectionStateDB:
     ) -> "PerConnectionStateDB":
         """Convert from a standard `PerConnectionState`"""
         rooms = {
-            room_id: HaveSentRoom(
+            room_id: HaveSent(
                 status=status.status,
                 last_token=(
                     await status.last_token.to_string(store)
@@ -901,7 +901,7 @@ class PerConnectionStateDB:
         }
 
         receipts = {
-            room_id: HaveSentRoom(
+            room_id: HaveSent(
                 status=status.status,
                 last_token=(
                     await status.last_token.to_string(store)
@@ -913,7 +913,7 @@ class PerConnectionStateDB:
         }
 
         account_data = {
-            room_id: HaveSentRoom(
+            room_id: HaveSent(
                 status=status.status,
                 last_token=(
                     str(status.last_token) if status.last_token is not None else None
@@ -922,13 +922,13 @@ class PerConnectionStateDB:
             for room_id, status in per_connection_state.account_data.get_updates().items()
         }
 
-        profile_updates: dict[str, dict[str, HaveSentRoom[str]]] = {}
+        profile_updates: dict[str, dict[str, HaveSent[str]]] = {}
         for (
             user_id,
             field_statuses,
         ) in per_connection_state.profile_updates.get_updates().items():
             profile_updates[user_id] = {
-                field_name: HaveSentRoom(
+                field_name: HaveSent(
                     status=status.status,
                     last_token=(
                         await status.last_token.to_string(store)
@@ -962,7 +962,7 @@ class PerConnectionStateDB:
     async def to_state(self, store: "DataStore") -> "PerConnectionState":
         """Convert into a standard `PerConnectionState`"""
         rooms = {
-            room_id: HaveSentRoom(
+            room_id: HaveSent(
                 status=status.status,
                 last_token=(
                     await RoomStreamToken.parse(store, status.last_token)
@@ -974,7 +974,7 @@ class PerConnectionStateDB:
         }
 
         receipts = {
-            room_id: HaveSentRoom(
+            room_id: HaveSent(
                 status=status.status,
                 last_token=(
                     await MultiWriterStreamToken.parse(store, status.last_token)
@@ -986,7 +986,7 @@ class PerConnectionStateDB:
         }
 
         account_data = {
-            room_id: HaveSentRoom(
+            room_id: HaveSent(
                 status=status.status,
                 last_token=(
                     int(status.last_token) if status.last_token is not None else None
@@ -995,10 +995,10 @@ class PerConnectionStateDB:
             for room_id, status in self.account_data._statuses.items()
         }
 
-        profile_updates: dict[str, dict[str, HaveSentRoom[MultiWriterStreamToken]]] = {}
+        profile_updates: dict[str, dict[str, HaveSent[MultiWriterStreamToken]]] = {}
         for user_id, field_statuses in self.profile_updates._statuses.items():
             profile_updates[user_id] = {
-                field_name: HaveSentRoom(
+                field_name: HaveSent(
                     status=status.status,
                     last_token=(
                         await MultiWriterStreamToken.parse(store, status.last_token)
