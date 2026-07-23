@@ -152,6 +152,7 @@ class FederationServer(FederationBase):
         self._state_storage_controller = hs.get_storage_controllers().state
 
         self.device_handler = hs.get_device_handler()
+        self._room_policy_handler = hs.get_room_policy_handler()
 
         # Ensure the following handlers are loaded since they register callbacks
         # with FederationHandlerRegistry.
@@ -786,6 +787,12 @@ class FederationServer(FederationBase):
                 pdu.event_id,
             )
             raise SynapseError(403, Codes.FORBIDDEN)
+
+        # Verify the policy server has allowed the event, raising a SynapseError if not.
+        # We use `raise_if_not_allowed` instead of asking for a signature because the
+        # event we received might already have a policy server signature.
+        await self._room_policy_handler.raise_if_not_allowed(pdu)
+
         try:
             pdu = await self._check_sigs_and_hash(room_version, pdu)
         except InvalidEventSignatureError as e:
@@ -1096,6 +1103,11 @@ class FederationServer(FederationBase):
                     self.hs.signing_key,
                 )
             )
+
+        # Verify the policy server has allowed the event, raising a SynapseError if not.
+        # We use `raise_if_not_allowed` instead of asking for a signature because the
+        # event we received might already have a policy server signature.
+        await self._room_policy_handler.raise_if_not_allowed(event)
 
         try:
             event = await self._check_sigs_and_hash(room_version, event)

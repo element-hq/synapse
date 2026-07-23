@@ -20,14 +20,15 @@
 #
 import logging
 from http import HTTPStatus
-from unittest.mock import Mock
+from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import FederationError
+from synapse.api.errors import FederationError, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.crypto.event_signing import add_hashes_and_signatures
@@ -712,6 +713,45 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     #   replication, at which point the tests.handlers.room_member test
     #       test_local_users_joining_on_another_worker_contribute_to_rate_limit
     #   is probably sufficient to reassure that the bucket is updated.
+
+    def test_send_join_rejected_by_policy_server(self) -> None:
+        """
+        Tests that a send_join is rejected if the policy server says it's spam.
+        """
+
+        # Instead of mocking the whole policy server, we'll just mock the policy handler.
+        # Other tests should cover whether a policy server is actually called.
+        # Note: this test relies on `raise_if_not_allowed` being called
+        # regardless of whether a policy server is actually enabled in the room. If the
+        # function ever does lose this no-op check, this test will need to be updated.
+        async def always_throw(*args: Any, **kwargs: Any) -> None:
+            raise SynapseError(
+                HTTPStatus.FORBIDDEN, "All events are rejected by this policy server"
+            )
+
+        self.hs.get_room_policy_handler().raise_if_not_allowed = AsyncMock(  # type: ignore[method-assign]
+            side_effect=always_throw
+        )
+
+        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
+        join_result = self._make_join(joining_user)
+
+        join_event_dict = join_result["event"]
+        self.add_hashes_and_signatures_from_other_server(
+            join_event_dict,
+            KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION],
+        )
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v1/send_join/{self._room_id}/$eventid",
+            join_event_dict,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, msg=channel.result["body"])
+        self.assertEqual(
+            channel.json_body["error"],
+            "All events are rejected by this policy server",
+        )
 
 
 class StripUnsignedFromEventsTestCase(unittest.TestCase):

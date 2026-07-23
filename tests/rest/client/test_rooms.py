@@ -42,7 +42,7 @@ from synapse.api.constants import (
     PublicRoomsFilterFields,
     RoomTypes,
 )
-from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase, make_event_from_dict
@@ -792,7 +792,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(35, channel.resource_usage.db_txn_count)
+        self.assertEqual(37, channel.resource_usage.db_txn_count)
 
     def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -805,7 +805,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(37, channel.resource_usage.db_txn_count)
+        self.assertEqual(39, channel.resource_usage.db_txn_count)
 
     def test_post_room_topic(self) -> None:
         # POST with topic key, expect new room id
@@ -1128,6 +1128,7 @@ class RoomMemberStateTestCase(RoomBase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.room_id = self.helper.create_room_as(self.user_id)
+        self.hs = hs
 
     def test_invalid_puts(self) -> None:
         path = "/rooms/%s/state/m.room.member/%s" % (self.room_id, self.user_id)
@@ -1189,6 +1190,35 @@ class RoomMemberStateTestCase(RoomBase):
 
         expected_response = {"membership": Membership.JOIN}
         self.assertEqual(expected_response, channel.json_body)
+
+    def test_rooms_members_policy_server(self) -> None:
+        path = "/rooms/%s/state/m.room.member/%s" % (
+            urlparse.quote(self.room_id),
+            self.user_id,
+        )
+
+        # Instead of mocking the whole policy server, we'll just mock the policy handler.
+        # Other tests should cover whether a policy server is actually called.
+        # Note: this test relies on `ask_policy_server_to_sign_event` being called
+        # regardless of whether a policy server is actually enabled in the room. If the
+        # function ever does lose this no-op check, this test will need to be updated.
+        def always_throw(*args: Any, **kwargs: Any) -> None:
+            raise SynapseError(
+                HTTPStatus.FORBIDDEN, "All events are rejected by this policy server"
+            )
+
+        self.hs.get_room_policy_handler().ask_policy_server_to_sign_event = Mock(  # type: ignore[method-assign]
+            side_effect=always_throw
+        )
+
+        # Even no-op membership changes should be rejected
+        content = '{"membership":"%s", "key_to_cause_new_event":1}' % Membership.JOIN
+        channel = self.make_request("PUT", path, content.encode("ascii"))
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, msg=channel.result["body"])
+        self.assertEqual(
+            channel.json_body["error"],
+            "All events are rejected by this policy server",
+        )
 
     def test_rooms_members_other(self) -> None:
         self.other_id = "@zzsid1:red"
