@@ -2965,6 +2965,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        # Mount the `/_synapse/client` tree, which includes the fallback page
+        # served at `MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH` which we use in the tests.
         resources.update(build_synapse_client_resource_tree(self.hs))
         return resources
 
