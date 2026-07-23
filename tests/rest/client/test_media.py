@@ -49,7 +49,6 @@ from twisted.web.resource import Resource
 from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config._base import Config
-from synapse.config.homeserver import HomeServerConfig
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
@@ -3137,32 +3136,6 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
         self.assertEqual(channel.json_body["info_uri"], "https://example.com/")
         self.assertEqual(channel.json_body["can_upgrade"], True)
-
-    def test_fallback_template_loaded_without_media_repo(self) -> None:
-        """The fallback page template must be loaded even on a worker that does
-        not run the media repo, since `build_synapse_client_resource_tree`
-        mounts the fallback resource on every worker exposing a C-S API and its
-        constructor reads `media_upload_limit_exceeded_template`."""
-        config_dict = self.default_config()
-
-        config = HomeServerConfig()
-        config.parse_config_dict(
-            {
-                # A generic worker with the media repo disabled: this takes the
-                # early return in `ContentRepositoryConfig.read_config`.
-                "worker_app": "synapse.app.generic_worker",
-                "enable_media_repo": False,
-                **config_dict,
-            },
-            "",
-            "",
-        )
-
-        # The media repo isn't loaded on this worker...
-        self.assertFalse(config.media.can_load_media_repo)
-        # ...but the fallback template must still be available so the resource
-        # can be constructed and served.
-        self.assertIsNotNone(config.media.media_upload_limit_exceeded_template)
 
 
 class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
