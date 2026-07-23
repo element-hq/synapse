@@ -106,8 +106,8 @@ class FederationThirdPartyLookupTests(unittest.FederatingHomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
-        self.appservice_handler = hs.get_application_service_handler()
-        self.appservice_handler.query_3pe = AsyncMock(  # type: ignore[method-assign]
+        appservice_handler = hs.get_application_service_handler()
+        self.query_3pe_mock = AsyncMock(
             return_value=[
                 {
                     "userid": "@_xmpp_someone:test",
@@ -116,7 +116,8 @@ class FederationThirdPartyLookupTests(unittest.FederatingHomeserverTestCase):
                 }
             ]
         )
-        self.appservice_handler.get_3pe_protocols = AsyncMock(  # type: ignore[method-assign]
+        appservice_handler.query_3pe = self.query_3pe_mock  # type: ignore[method-assign]
+        appservice_handler.get_3pe_protocols = AsyncMock(  # type: ignore[method-assign]
             return_value={"xmpp": {"instances": []}}
         )
 
@@ -128,7 +129,7 @@ class FederationThirdPartyLookupTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(
             channel.json_body["results"][0]["userid"], "@_xmpp_someone:test"
         )
-        call = self.appservice_handler.query_3pe.call_args
+        call = self.query_3pe_mock.call_args
         self.assertEqual(call.args[1], "xmpp")
         self.assertEqual(call.args[2], {b"username": [b"someone"]})
 
