@@ -108,6 +108,46 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(failure.errcode, Codes.FORBIDDEN, failure)
         self.assertEqual(failure.msg, "You are not invited to this room.")
 
+    def test_exchange_third_party_invite_forwards_to_sender_for_v12_room(
+        self,
+    ) -> None:
+        """When we are not resident in the room, a 3pid invite is forwarded to
+        a remote server for exchange. Pre-v12 room IDs encode the resident
+        server's domain, but v12+ room IDs are a content hash with no domain,
+        so the room ID must not be treated as a destination as doing so raises
+        an invalid-destination error and aborts the exchange.
+
+        Regression test for 3pid invites over federation failing intermittently
+        in v12 rooms.
+        """
+        sender_user_id = "@sender:remote.example.com"
+        # A v12-style room ID: a reference hash with no ":domain" suffix.
+        room_id = "!somereferencehashwithnodomain"
+
+        # Pretend we're not in the room so we take the "forward to a remote
+        # server" branch.
+        self.handler._event_auth_handler.is_host_in_room = AsyncMock(  # type: ignore[method-assign]
+            return_value=False
+        )
+        forward = AsyncMock(return_value=None)
+        self.handler.federation_client.forward_third_party_invite = forward  # type: ignore[method-assign]
+
+        self.get_success(
+            self.handler.exchange_third_party_invite(
+                sender_user_id=sender_user_id,
+                target_user_id="@target:localhost",
+                room_id=room_id,
+                signed={"mxid": "@target:localhost", "token": "sometoken"},
+            )
+        )
+
+        forward.assert_called_once()
+        destinations = forward.call_args.args[0]
+        # Only the sender's server is a valid destination; the domainless room
+        # ID must not be misinterpreted as one.
+        self.assertEqual(destinations, {"remote.example.com"})
+        self.assertNotIn(room_id, destinations)
+
     def test_rejected_message_event_state(self) -> None:
         """
         Check that we store the state group correctly for rejected non-state events.
@@ -357,7 +397,6 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 event.room_version,
             ),
             exc=LimitExceededError,
-            by=0.5,
         )
 
     def _build_and_send_join_event(

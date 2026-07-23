@@ -1345,6 +1345,11 @@ class RoomCreationHandler:
             if is_direct:
                 content["is_direct"] = is_direct
 
+            if self.config.experimental.msc4491_enabled:
+                reason = config.get("uk.timedout.msc4491.invite_reason")
+                if reason and isinstance(reason, str):
+                    content["reason"] = reason
+
             for invitee in invite_list:
                 (
                     member_event_id,
@@ -1404,30 +1409,77 @@ class RoomCreationHandler:
         is_public: bool,
         room_version: RoomVersion,
     ) -> tuple[EventBase, synapse.events.snapshot.EventContext]:
-        (
-            creation_event,
-            new_unpersisted_context,
-        ) = await self.event_creation_handler.create_event(
-            creator,
-            {
+        """Create and store the create event for a v12+ room, retrying on room ID collision.
+
+        In v12+ rooms the room ID is derived from the create event, so this
+        builds the create event, stores the room under the resulting ID, and
+        retries with a slightly older `origin_server_ts` if that ID is already taken.
+
+        Args:
+            creator: The user creating the room.
+            creation_content: The content for the create event.
+            is_public: Whether the room is published to the room directory.
+            room_version: The version of the room being created.
+
+        Returns:
+            A tuple of the create event and its event context.
+
+        Raises:
+            StoreError: if a unique room ID could not be generated after several
+                attempts.
+        """
+        # In v12+ rooms, the room ID is the reference hash of the create event,
+        # so two rooms whose create events have identical content collide on the
+        # same room ID. This happens in practice when the same user creates
+        # several rooms at once (e.g. concurrent /createRoom requests with the
+        # same config), as the only entropy in the create event is
+        # `origin_server_ts`, which has millisecond resolution.
+        #
+        # Retry a few times on collision, perturbing `origin_server_ts`
+        # so the create event hashes to a fresh room ID. This mirrors the
+        # collision handling in `_generate_and_create_room_id` used for
+        # older room versions.
+        attempts = 0
+        while attempts < 5:
+            event_dict: JsonDict = {
                 "content": creation_content,
                 "sender": creator.user.to_string(),
                 "type": EventTypes.Create,
                 "state_key": "",
-            },
-            prev_event_ids=[],
-            depth=1,
-            state_map={},
-            for_batch=False,
-        )
-        await self.store.store_room(
-            room_id=creation_event.room_id,
-            room_creator_user_id=creator.user.to_string(),
-            is_public=is_public,
-            room_version=room_version,
-        )
-        creation_context = await new_unpersisted_context.persist(creation_event)
-        return (creation_event, creation_context)
+            }
+            if attempts > 0:
+                # Bump the timestamp to give the create event (and hence the
+                # room ID it hashes to) different content from the colliding one.
+                event_dict["origin_server_ts"] = (
+                    self.clock.time_msec() + random.randint(1, 10)
+                )
+
+            (
+                creation_event,
+                new_unpersisted_context,
+            ) = await self.event_creation_handler.create_event(
+                creator,
+                event_dict,
+                prev_event_ids=[],
+                depth=1,
+                state_map={},
+                for_batch=False,
+            )
+            try:
+                await self.store.store_room(
+                    room_id=creation_event.room_id,
+                    room_creator_user_id=creator.user.to_string(),
+                    is_public=is_public,
+                    room_version=room_version,
+                )
+            except StoreError:
+                attempts += 1
+                continue
+
+            creation_context = await new_unpersisted_context.persist(creation_event)
+            return (creation_event, creation_context)
+
+        raise StoreError(500, "Couldn't generate a unique room ID.")
 
     async def _send_events_for_new_room(
         self,

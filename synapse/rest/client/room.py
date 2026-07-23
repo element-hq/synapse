@@ -53,9 +53,9 @@ from synapse.api.errors import (
 from synapse.api.filtering import Filter
 from synapse.events.utils import (
     EventClientSerializer,
+    EventFormat,
     FilteredEvent,
     SerializeEventConfig,
-    format_event_for_client_v2,
 )
 from synapse.handlers.pagination import GetMessagesResult
 from synapse.http.server import HttpServer
@@ -84,6 +84,7 @@ from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -215,7 +216,6 @@ class RoomStateEventRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self._event_serializer = hs.get_event_client_serializer()
-        self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
@@ -289,8 +289,8 @@ class RoomStateEventRestServlet(RestServlet):
             event = await self._event_serializer.serialize_event(
                 FilteredEvent.state(data),
                 self.clock.time_msec(),
-                config=SerializeEventConfig(
-                    event_format=format_event_for_client_v2,
+                config=await self._event_serializer.create_config(
+                    event_format=EventFormat.ClientV2,
                     requester=requester,
                 ),
             )
@@ -343,7 +343,7 @@ class RoomStateEventRestServlet(RestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_delay(request, self._max_event_delay_ms)
+        delay = _parse_request_for_delayed_event_delay(request)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -416,7 +416,6 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
-        self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
@@ -442,7 +441,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_delay(request, self._max_event_delay_ms)
+        delay = _parse_request_for_delayed_event_delay(request)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -515,47 +514,20 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-def _parse_request_delay(
-    request: SynapseRequest,
-    max_delay: int | None,
-) -> int | None:
+def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration | None:
     """Parses from the request string the delay parameter for
         delayed event requests, and checks it for correctness.
 
     Args:
         request: the twisted HTTP request.
-        max_delay: the maximum allowed value of the delay parameter,
-            or None if no delay parameter is allowed.
     Returns:
         The value of the requested delay, or None if it was absent.
 
     Raises:
-        SynapseError: if the delay parameter is present and forbidden,
-            or if it exceeds the maximum allowed value.
+        SynapseError: if the delay parameter is present and invalid.
     """
-    delay = parse_integer(request, "org.matrix.msc4140.delay")
-    if delay is None:
-        return None
-    if max_delay is None:
-        raise SynapseError(
-            HTTPStatus.BAD_REQUEST,
-            "Delayed events are not supported on this server",
-            Codes.UNKNOWN,
-            {
-                "org.matrix.msc4140.errcode": "M_MAX_DELAY_UNSUPPORTED",
-            },
-        )
-    if delay > max_delay:
-        raise SynapseError(
-            HTTPStatus.BAD_REQUEST,
-            "The requested delay exceeds the allowed maximum.",
-            Codes.UNKNOWN,
-            {
-                "org.matrix.msc4140.errcode": "M_MAX_DELAY_EXCEEDED",
-                "org.matrix.msc4140.max_delay": max_delay,
-            },
-        )
-    return delay
+    delay_ms = parse_integer(request, "org.matrix.msc4140.delay")
+    return Duration(milliseconds=delay_ms) if delay_ms is not None else None
 
 
 # TODO: Needs unit testing for room ID + alias joins
@@ -925,7 +897,7 @@ class RoomMessageListRestServlet(RestServlet):
         ):
             as_client_event = False
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self.event_serializer.create_config(
             as_client_event=as_client_event, requester=requester
         )
 
@@ -1114,7 +1086,7 @@ class RoomEventServlet(RestServlet):
                 event,
                 self.clock.time_msec(),
                 bundle_aggregations=aggregations,
-                config=SerializeEventConfig(requester=requester),
+                config=await self._event_serializer.create_config(requester=requester),
             )
             return 200, event_dict
 
@@ -1154,7 +1126,9 @@ class RoomEventContextServlet(RestServlet):
             raise SynapseError(404, "Event not found.", errcode=Codes.NOT_FOUND)
 
         time_now = self.clock.time_msec()
-        serializer_options = SerializeEventConfig(requester=requester)
+        serializer_options = await self._event_serializer.create_config(
+            requester=requester
+        )
         results = {
             "events_before": await self._event_serializer.serialize_events(
                 event_context.events_before,

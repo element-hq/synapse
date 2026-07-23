@@ -13,12 +13,13 @@
 #
 
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes, StickyEvent, StickyEventField
-from synapse.api.errors import ShadowBanError, SynapseError
+from synapse.api.errors import Codes, ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.http.site import SynapseRequest
@@ -36,6 +37,7 @@ from synapse.storage.databases.main.delayed_events import (
 )
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import (
+    Absent,
     JsonDict,
     Requester,
     RoomID,
@@ -45,7 +47,6 @@ from synapse.types import (
 from synapse.util.duration import Duration
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
-from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -61,13 +62,13 @@ class DelayedEventsHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._config = hs.config
         self._clock = hs.get_clock()
+        self._auth = hs.get_auth()
         self._event_creation_handler = hs.get_event_creation_handler()
         self._room_member_handler = hs.get_room_member_handler()
 
         self._request_ratelimiter = hs.get_request_ratelimiter()
 
-        # Ratelimiter for management of existing delayed events,
-        # keyed by the sending user ID & device ID.
+        # Ratelimiter for management of existing delayed events
         self._delayed_event_mgmt_ratelimiter = Ratelimiter(
             store=self._store,
             clock=self._clock,
@@ -273,9 +274,7 @@ class DelayedEventsHandler:
                 )
                 continue
 
-            sender_str = event_id_and_sender_dict.get(
-                delta.event_id, Sentinel.UNSET_SENTINEL
-            )
+            sender_str = event_id_and_sender_dict.get(delta.event_id, Absent)
             if sender_str is None:
                 # An event exists, but the `sender` field was "null" and Synapse
                 # incorrectly accepted the event. This is not expected.
@@ -285,7 +284,7 @@ class DelayedEventsHandler:
                     delta.event_id,
                 )
                 continue
-            if sender_str is Sentinel.UNSET_SENTINEL:
+            if sender_str is Absent:
                 # We have an event ID, but the event was not found in the
                 # datastore. This can happen if a room, or its history, is
                 # purged. State deltas related to the room are left behind, but
@@ -332,7 +331,7 @@ class DelayedEventsHandler:
         state_key: str | None,
         origin_server_ts: int | None,
         content: JsonDict,
-        delay: int,
+        delay: Duration,
         sticky_duration_ms: int | None,
     ) -> str:
         """
@@ -346,19 +345,36 @@ class DelayedEventsHandler:
             origin_server_ts: The custom timestamp to send the event with.
                 If None, the timestamp will be the actual time when the event is sent.
             content: The content of the event to be sent.
-            delay: How long (in milliseconds) to wait before automatically sending the event.
+            delay: How long to wait before automatically sending the event.
             sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
                 The event will be attempted to be reliably delivered to clients and remote servers
                 during its sticky period.
         Returns: The ID of the added delayed event.
 
         Raises:
-            SynapseError: if the delayed event fails validation checks.
+            SynapseError: if the delayed event fails validation checks, or
+                if the requested delay is longer than allowed, or
+                if sending delayed events has been disallowed entirely.
         """
         # Use standard request limiter for scheduling new delayed events.
         # TODO: Instead apply ratelimiting based on the scheduled send time.
         # See https://github.com/element-hq/synapse/issues/18021
         await self._request_ratelimiter.ratelimit(requester)
+
+        if not self._config.server.msc4140_enabled:
+            raise SynapseError(
+                HTTPStatus.FORBIDDEN,
+                "Sending delayed events has been disallowed",
+                Codes.FORBIDDEN,
+            )
+        if delay > self._config.server.max_event_delay_duration:
+            requested_delay = delay.as_millis()
+            max_delay = self._config.server.max_event_delay_duration.as_millis()
+            raise SynapseError(
+                HTTPStatus.FORBIDDEN,
+                f"The requested delay ({requested_delay}ms) exceeds the allowed maximum ({max_delay}ms)",
+                Codes.FORBIDDEN,
+            )
 
         self._event_creation_handler.validator.validate_builder(
             self._event_creation_handler.event_builder_factory.for_room_version(
@@ -386,6 +402,7 @@ class DelayedEventsHandler:
             content=content,
             delay=delay,
             sticky_duration_ms=sticky_duration_ms,
+            limit=self._config.server.max_delayed_events_per_user,
         )
 
         if self._repl_client is not None:
@@ -413,9 +430,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._delayed_event_mgmt_ratelimiter.ratelimit(
-            None, request.getClientAddress().host
-        )
+        await self._mgmt_ratelimit(request)
         await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(delay_id)
@@ -430,9 +445,7 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
-        await self._delayed_event_mgmt_ratelimiter.ratelimit(
-            None, request.getClientAddress().host
-        )
+        await self._mgmt_ratelimit(request)
 
         # Note: We don't need to wait on `self._initialized_from_db` here as the
         # events that deals with are already marked as processed.
@@ -456,9 +469,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._delayed_event_mgmt_ratelimiter.ratelimit(
-            None, request.getClientAddress().host
-        )
+        await self._mgmt_ratelimit(request)
         await make_deferred_yieldable(self._initialized_from_db)
 
         event, next_send_ts = await self._store.process_target_delayed_event(delay_id)
@@ -467,6 +478,19 @@ class DelayedEventsHandler:
             self._schedule_next_at_or_none(next_send_ts)
 
         await self._send_event(event)
+
+    async def _mgmt_ratelimit(self, request: SynapseRequest) -> None:
+        """
+        Ratelimit requests with the `_delayed_event_mgmt_ratelimiter` keyed on the
+        user making the request, or the request's IP address if unauthed.
+        """
+        if self._auth.has_access_token(request):
+            requester = await self._auth.get_user_by_req(request)
+            key = None
+        else:
+            requester = None
+            key = request.getClientAddress().host
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester, key)
 
     async def _send_on_timeout(self) -> None:
         self._next_delayed_event_call = None
@@ -527,10 +551,7 @@ class DelayedEventsHandler:
 
     async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""
-        await self._delayed_event_mgmt_ratelimiter.ratelimit(
-            requester,
-            (requester.user.to_string(), requester.device_id),
-        )
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         return await self._store.get_all_delayed_events_for_user(
             requester.user.localpart
         )

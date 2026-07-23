@@ -24,6 +24,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, ReceiptTypes
+from synapse.api.errors import Codes
 from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -44,6 +45,7 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.url = "/sync?since=%s"
         self.next_batch = "s0"
+        self.store = hs.get_datastores().main
 
         # Register the first user
         self.user_id = self.register_user("kermit", "monkey")
@@ -58,6 +60,19 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
 
         # Join the second user
         self.helper.join(room=self.room_id, user=self.user2, tok=self.tok2)
+
+    def _get_fully_read_marker(self) -> str | None:
+        content = self.get_success(
+            self.store.get_account_data_for_room_and_type(
+                self.user2,
+                self.room_id,
+                ReceiptTypes.FULLY_READ,
+            )
+        )
+        if content is None:
+            return None
+
+        return content.get("event_id")
 
     def test_send_receipt(self) -> None:
         # Send a message.
@@ -257,6 +272,126 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON", channel.json_body)
+
+    def test_fully_read_receipt_does_not_move_backwards_by_default(self) -> None:
+        older_event_id = self.helper.send(self.room_id, body="1", tok=self.tok)[
+            "event_id"
+        ]
+        newer_event_id = self.helper.send(self.room_id, body="2", tok=self.tok)[
+            "event_id"
+        ]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{newer_event_id}",
+            {},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(), newer_event_id)
+
+        # Expected to be a no-op.
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{older_event_id}",
+            {},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(), newer_event_id)
+
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_fully_read_receipt_can_move_backwards_with_opt_in(self) -> None:
+        older_event_id = self.helper.send(self.room_id, body="1", tok=self.tok)[
+            "event_id"
+        ]
+        newer_event_id = self.helper.send(self.room_id, body="2", tok=self.tok)[
+            "event_id"
+        ]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{newer_event_id}",
+            {},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{older_event_id}",
+            {"com.beeper.allow_backward": True},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(), older_event_id)
+
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_fully_read_receipt_does_not_move_backwards_with_explicit_opt_out(
+        self,
+    ) -> None:
+        older_event_id = self.helper.send(self.room_id, body="1", tok=self.tok)[
+            "event_id"
+        ]
+        newer_event_id = self.helper.send(self.room_id, body="2", tok=self.tok)[
+            "event_id"
+        ]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{newer_event_id}",
+            {},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Expected to be a no-op.
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{older_event_id}",
+            {"com.beeper.allow_backward": False},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(), newer_event_id)
+
+    @unittest.override_config({"experimental_features": {"msc4446_enabled": True}})
+    def test_allow_backward_is_rejected_for_read_receipts(self) -> None:
+        event_id = self.helper.send(self.room_id, body="1", tok=self.tok)["event_id"]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            {"com.beeper.allow_backward": True},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+    def test_allow_backward_is_ignored_when_feature_disabled(self) -> None:
+        older_event_id = self.helper.send(self.room_id, body="1", tok=self.tok)[
+            "event_id"
+        ]
+        newer_event_id = self.helper.send(self.room_id, body="2", tok=self.tok)[
+            "event_id"
+        ]
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{newer_event_id}",
+            {},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room_id}/receipt/{ReceiptTypes.FULLY_READ}/{older_event_id}",
+            {"com.beeper.allow_backward": True},
+            access_token=self.tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(self._get_fully_read_marker(), newer_event_id)
 
     def _get_read_receipt(self) -> JsonDict | None:
         """Syncs and returns the read receipt."""

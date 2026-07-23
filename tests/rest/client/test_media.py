@@ -30,6 +30,7 @@ from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
+from matrix_common.types.mxc_uri import MXCUri
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
 
@@ -3409,3 +3410,152 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         limit = self.last_media_upload_limit_exceeded["limit"]
         assert isinstance(limit, MediaUploadLimit)
         self.assertIsNone(limit.info_uri)
+
+class AnimatedThumbnailTestCase(unittest.HomeserverTestCase):
+    """End-to-end tests for the `animated` query parameter on the local
+    thumbnail endpoint."""
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+
+        config = self.default_config()
+        config["media_store_path"] = self.media_store_path
+        config["media_storage_providers"] = [
+            {
+                "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+                "store_local": True,
+                "store_synchronous": False,
+                "store_remote": True,
+                "config": {"directory": self.storage_path},
+            }
+        ]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.repo = hs.get_media_repository()
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+        self.content_uri = self._upload(self._make_animated_gif(), "image/gif")
+
+    def _make_animated_gif(self) -> bytes:
+        frames = [
+            Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))
+        ]
+        out = io.BytesIO()
+        frames[0].save(
+            out,
+            format="GIF",
+            save_all=True,
+            append_images=frames[1:],
+            duration=100,
+            loop=0,
+        )
+        return out.getvalue()
+
+    def _upload(self, data: bytes, content_type: str) -> MXCUri:
+        return self.get_success(
+            self.repo.create_or_update_content(
+                content_type,
+                "test",
+                io.BytesIO(data),
+                len(data),
+                UserID.from_string(self.user),
+            )
+        )
+
+    def _thumbnail(self, content_uri: MXCUri, animated: str | None) -> FakeChannel:
+        params = "?width=32&height=32&method=scale"
+        if animated is not None:
+            params += f"&animated={animated}"
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{content_uri.server_name}"
+            f"/{content_uri.media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.pump()
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel
+
+    def test_default_is_static(self) -> None:
+        """Without the `animated` parameter a static thumbnail is returned."""
+        channel = self._thumbnail(self.content_uri, animated=None)
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    def test_animated_false_is_static(self) -> None:
+        channel = self._thumbnail(self.content_uri, animated="false")
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    def test_animated_true_is_animated(self) -> None:
+        """With `animated=true` an animated WebP thumbnail is returned."""
+        channel = self._thumbnail(self.content_uri, animated="true")
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Content-Type"), [b"image/webp"]
+        )
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(result.n_frames, 2)
+
+    def test_animated_thumbnail_is_cached(self) -> None:
+        """Animated thumbnails are generated at upload and served from cache,
+        not regenerated on each request."""
+        # The animated (WebP) thumbnail is stored alongside the static ones at
+        # upload time.
+        thumbnails = self.get_success(
+            self.store.get_local_media_thumbnails(self.content_uri.media_id)
+        )
+        self.assertTrue(
+            any(info.type == "image/webp" for info in thumbnails),
+            thumbnails,
+        )
+
+        # Two consecutive requests return identical cached bytes.
+        first = self._thumbnail(self.content_uri, animated="true")
+        second = self._thumbnail(self.content_uri, animated="true")
+        self.assertEqual(first.result["body"], second.result["body"])
+
+    def test_non_animatable_source_falls_back_to_static(self) -> None:
+        """`animated=true` on a non-animatable source behaves as `animated=false`."""
+        png_uri = self._upload(SMALL_PNG, "image/png")
+        channel = self._thumbnail(png_uri, animated="true")
+        self.assertEqual(channel.headers.getRawHeaders(b"Content-Type"), [b"image/png"])
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    @override_config({"dynamic_thumbnails": True})
+    def test_dynamic_thumbnails_generates_and_caches_animated(self) -> None:
+        """With dynamic thumbnails, animated thumbnails are generated on demand
+        and then cached."""
+        content_uri = self._upload(self._make_animated_gif(), "image/gif")
+
+        channel = self._thumbnail(content_uri, animated="true")
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Content-Type"), [b"image/webp"]
+        )
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertTrue(getattr(result, "is_animated", False))
+
+        # The on-demand generated thumbnail is now cached.
+        thumbnails = self.get_success(
+            self.store.get_local_media_thumbnails(content_uri.media_id)
+        )
+        self.assertTrue(
+            any(info.type == "image/webp" for info in thumbnails),
+            thumbnails,
+        )

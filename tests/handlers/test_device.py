@@ -566,17 +566,20 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
             SynapseError,
         )
 
-        # Send a message to the dehydrated device
-        ensureDeferred(
-            self.message_handler.send_device_message(
-                requester=requester,
-                message_type="test.message",
-                messages={user_id: {stored_dehydrated_device_id: {"body": "foo"}}},
+        # Send some messages to the dehydrated device
+        for i in range(12):
+            ensureDeferred(
+                self.message_handler.send_device_message(
+                    requester=requester,
+                    message_type="test.message",
+                    messages={
+                        user_id: {stored_dehydrated_device_id: {"body": f"foo_{i}"}}
+                    },
+                )
             )
-        )
         self.pump()
 
-        # Fetch the message of the dehydrated device
+        # Fetch the first batch of messages from the dehydrated device
         res = self.get_success(
             self.message_handler.get_events_for_dehydrated_device(
                 requester=requester,
@@ -586,12 +589,14 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        self.assertTrue(len(res["next_batch"]) > 1)
-        self.assertEqual(len(res["events"]), 1)
-        self.assertEqual(res["events"][0]["content"]["body"], "foo")
+        self.assertTrue(res.limited)
+        # This batch contains the first 10 events
+        self.assertEqual(len(res.events), 10)
+        self.assertEqual(res.events[0]["content"]["body"], "foo_0")
+        self.assertEqual(res.events[1]["content"]["body"], "foo_1")
 
-        # Fetch the message of the dehydrated device again, which should return
-        # the same message as it has not been deleted
+        # Fetch the first batch again, which should return the same messages as they
+        # have not been deleted
         res = self.get_success(
             self.message_handler.get_events_for_dehydrated_device(
                 requester=requester,
@@ -600,9 +605,26 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
                 limit=10,
             )
         )
-        self.assertTrue(len(res["next_batch"]) > 1)
-        self.assertEqual(len(res["events"]), 1)
-        self.assertEqual(res["events"][0]["content"]["body"], "foo")
+        self.assertTrue(res.limited)
+        self.assertEqual(len(res.events), 10)
+        self.assertEqual(res.events[0]["content"]["body"], "foo_0")
+        self.assertEqual(res.events[7]["content"]["body"], "foo_7")
+
+        # Fetch the next batch
+        res = self.get_success(
+            self.message_handler.get_events_for_dehydrated_device(
+                requester=requester,
+                device_id=stored_dehydrated_device_id,
+                since_token=res.stream_id,
+                limit=10,
+            )
+        )
+        # This is the last batch
+        self.assertFalse(res.limited)
+        # This batch contains the last 2 events
+        self.assertEqual(len(res.events), 2)
+        self.assertEqual(res.events[0]["content"]["body"], "foo_10")
+        self.assertEqual(res.events[1]["content"]["body"], "foo_11")
 
 
 @patch("synapse.crypto.keyring.Keyring.process_request", AsyncMock(return_value=None))

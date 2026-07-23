@@ -33,6 +33,7 @@ from synapse.http.servlet import (
     RestServlet,
     parse_and_validate_json_object_from_request,
     parse_integer,
+    parse_string,
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
@@ -136,9 +137,7 @@ class DeviceRestServlet(RestServlet):
         handler = hs.get_device_handler()
         self.device_handler = handler
         self.auth_handler = hs.get_auth_handler()
-        self._auth_delegation_enabled = (
-            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
-        )
+        self._auth_delegation_enabled = hs.config.mas.enabled
 
     async def on_GET(
         self, request: SynapseRequest, device_id: str
@@ -179,7 +178,7 @@ class DeviceRestServlet(RestServlet):
 
         if requester.app_service_id:
             # MSC4190 allows appservices to delete devices through this endpoint without UIA
-            # It's also allowed with MSC3861 enabled
+            # It's also allowed when auth is delegated
             pass
 
         else:
@@ -249,17 +248,59 @@ class DehydratedDeviceEventsServlet(RestServlet):
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
 
+    async def on_GET(
+        self, request: SynapseRequest, device_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+
+        since_token = parse_string(request, "from")
+        limit = parse_integer(request, "limit", 100)
+
+        msgs = await self.message_handler.get_events_for_dehydrated_device(
+            requester=requester,
+            device_id=device_id,
+            since_token=since_token,
+            limit=limit,
+        )
+
+        if msgs.limited:
+            msgs_json = {
+                "events": msgs.events,
+                "next_batch": msgs.stream_id,
+            }
+        else:
+            msgs_json = {
+                "events": msgs.events,
+            }
+
+        return 200, msgs_json
+
     class PostBody(RequestBodyModel):
+        """
+        This is deprecated: you should use GET instead.
+
+        The POST version is provided temporarily for backwards compatibility
+        with a previous unstable draft of MSC3814.
+        """
+
         next_batch: StrictStr | None = None
 
     async def on_POST(
         self, request: SynapseRequest, device_id: str
     ) -> tuple[int, JsonDict]:
+        """
+        This is deprecated: you should use GET instead.
+
+        The POST version is provided temporarily for backwards compatibility
+        with a previous unstable draft of MSC3814.
+        """
+
         requester = await self.auth.get_user_by_req(request)
 
         next_batch = parse_and_validate_json_object_from_request(
             request, self.PostBody
         ).next_batch
+
         limit = parse_integer(request, "limit", 100)
 
         msgs = await self.message_handler.get_events_for_dehydrated_device(
@@ -269,7 +310,14 @@ class DehydratedDeviceEventsServlet(RestServlet):
             limit=limit,
         )
 
-        return 200, msgs
+        # For backwards compatibility, we always provide next_batch from the
+        # POST API.
+        msgs_json = {
+            "events": msgs.events,
+            "next_batch": msgs.stream_id,
+        }
+
+        return 200, msgs_json
 
 
 class DehydratedDeviceV2Servlet(RestServlet):
@@ -432,7 +480,7 @@ class DehydratedDeviceV2Servlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+    auth_delegated = hs.config.mas.enabled
     if not auth_delegated:
         DeleteDevicesRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)
