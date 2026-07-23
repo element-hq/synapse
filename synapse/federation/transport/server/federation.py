@@ -48,7 +48,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
-from synapse.types import JsonDict
+from synapse.types import JsonDict, JsonMapping, get_domain_from_id
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
 
@@ -842,6 +842,74 @@ class FederationMediaDownloadServlet(BaseFederationServerServlet):
         )
 
 
+class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
+    """Search this server's user directory on behalf of a remote user (MSC4258).
+
+    POST /_matrix/federation/unstable/org.matrix.msc4258/user_directory/search
+    {
+        "requester": "@user:origin.example.com",
+        "search_term": "foo",
+        "limit": 10
+    }
+
+    The requester's server name must match the origin of the signed request;
+    the search is performed with that user's visibility (the same results they
+    would get searching locally on this server).
+    """
+
+    PATH = "/user_directory/search"
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4258"
+    RATELIMIT = True
+
+    def __init__(
+        self,
+        hs: "HomeServer",
+        authenticator: Authenticator,
+        ratelimiter: FederationRateLimiter,
+        server_name: str,
+    ):
+        super().__init__(hs, authenticator, ratelimiter, server_name)
+        self._user_directory_handler = hs.get_user_directory_handler()
+        self._user_directory_search_enabled = (
+            hs.config.userdirectory.user_directory_search_enabled
+        )
+
+    async def on_POST(
+        self,
+        origin: str,
+        content: JsonDict,
+        query: Mapping[bytes, Sequence[bytes]],
+    ) -> tuple[int, JsonMapping]:
+        if not self._user_directory_search_enabled:
+            return 200, {"limited": False, "results": []}
+
+        requester = content.get("requester")
+        if not isinstance(requester, str) or get_domain_from_id(requester) != origin:
+            raise SynapseError(400, "Missing or invalid requester", Codes.BAD_JSON)
+
+        search_term = content.get("search_term")
+        if not search_term or not isinstance(search_term, str):
+            raise SynapseError(400, "Missing or invalid search_term", Codes.BAD_JSON)
+
+        limit = content.get("limit", 10)
+        if not isinstance(limit, int):
+            raise SynapseError(400, "Invalid limit", Codes.BAD_JSON)
+        limit = max(min(limit, 50), 0)
+
+        # Don't serve directory-trawling queries: require a minimally
+        # specific term, mirroring the MSC's anti-enumeration recommendation.
+        if len(search_term) < 4:
+            return 200, {"limited": False, "results": []}
+
+        # The requester (verified against the origin above) is used as the
+        # searching user, so the results are limited to what that user could
+        # see if they searched locally here.
+        results = await self._user_directory_handler.search_users(
+            requester, search_term, limit
+        )
+        return 200, results
+
+
 class FederationMediaThumbnailServlet(BaseFederationServerServlet):
     """
     Implementation of new federation media `/thumbnail` endpoint outlined in MSC3916. Returns
@@ -935,4 +1003,5 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationUserDirectorySearchServlet,
 )

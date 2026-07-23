@@ -309,3 +309,12 @@ class ExperimentalConfig(Config):
 
         # MSC4491: Invite reasons in room creation
         self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
+
+        # MSC4258: Federated user directory search
+        self.msc4258_enabled: bool = experimental.get("msc4258_enabled", False)
+
+        # How long (in ms) to wait for a remote server to answer a federated
+        # user directory search before giving up on it.
+        self.msc4258_federation_search_timeout: int = experimental.get(
+            "msc4258_federation_search_timeout", 2000
+        )
