@@ -119,7 +119,7 @@ class RoomIDCollisionTestCase(unittest.HomeserverTestCase):
     ]
 
     def test_colliding_v12_room_ids_are_retried(self) -> None:
-        """In v12 room the room ID is the reference hash of the
+        """In v12+ rooms the room ID is the reference hash of the
         create event, so two rooms whose create events have identical content
         collide on the same room ID. This happens when the same user creates
         several rooms at once (e.g. concurrent /createRoom requests with the
