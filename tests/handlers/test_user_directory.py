@@ -1224,8 +1224,8 @@ class TestUserDirFederatedSearch(unittest.HomeserverTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.transport = hs.get_federation_client().transport_layer
-        self.transport.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        transport = hs.get_federation_client().transport_layer
+        self.user_directory_search_mock = AsyncMock(
             return_value={
                 "limited": False,
                 "results": [
@@ -1237,6 +1237,7 @@ class TestUserDirFederatedSearch(unittest.HomeserverTestCase):
                 ],
             }
         )
+        transport.user_directory_search = self.user_directory_search_mock  # type: ignore[method-assign]
 
         # Two local users sharing a room, so local search has something to find.
         self.u1 = self.register_user("user1", "pass")
@@ -1265,8 +1266,8 @@ class TestUserDirFederatedSearch(unittest.HomeserverTestCase):
             [r["user_id"] for r in results["results"]],
             ["@remoteuser:remote.example.com"],
         )
-        self.transport.user_directory_search.assert_called_once()
-        call = self.transport.user_directory_search.call_args
+        self.user_directory_search_mock.assert_called_once()
+        call = self.user_directory_search_mock.call_args
         self.assertEqual(call.args[0], "remote.example.com")
         self.assertEqual(call.args[1], self.u1)
         self.assertEqual(call.args[2], "remoteuser")
@@ -1275,7 +1276,7 @@ class TestUserDirFederatedSearch(unittest.HomeserverTestCase):
         """A below-threshold term never leaves the server, even with server set."""
         results = self.search({"search_term": "use", "server": "remote.example.com"})
         self.assertIn("@user2:test", [r["user_id"] for r in results["results"]])
-        self.transport.user_directory_search.assert_not_called()
+        self.user_directory_search_mock.assert_not_called()
 
     def test_local_scope_stays_local(self) -> None:
         results = self.search(
@@ -1286,20 +1287,20 @@ class TestUserDirFederatedSearch(unittest.HomeserverTestCase):
             }
         )
         self.assertEqual([r["user_id"] for r in results["results"]], ["@user2:test"])
-        self.transport.user_directory_search.assert_not_called()
+        self.user_directory_search_mock.assert_not_called()
 
     def test_no_whitelist_no_broadcast(self) -> None:
         """Without a targeted server or a federation whitelist, a plain search
         is local-only."""
         results = self.search({"search_term": "user2"})
         self.assertEqual([r["user_id"] for r in results["results"]], ["@user2:test"])
-        self.transport.user_directory_search.assert_not_called()
+        self.user_directory_search_mock.assert_not_called()
 
     def test_own_server_name_is_local(self) -> None:
         """Explicitly naming our own server behaves like a local search."""
         results = self.search({"search_term": "user2", "server": "test"})
         self.assertEqual([r["user_id"] for r in results["results"]], ["@user2:test"])
-        self.transport.user_directory_search.assert_not_called()
+        self.user_directory_search_mock.assert_not_called()
 
 
 class TestUserDirFederatedSearchWhitelist(unittest.HomeserverTestCase):
@@ -1320,8 +1321,8 @@ class TestUserDirFederatedSearchWhitelist(unittest.HomeserverTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.transport = hs.get_federation_client().transport_layer
-        self.transport.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        transport = hs.get_federation_client().transport_layer
+        self.user_directory_search_mock = AsyncMock(
             return_value={
                 "limited": False,
                 "results": [
@@ -1339,6 +1340,7 @@ class TestUserDirFederatedSearchWhitelist(unittest.HomeserverTestCase):
                 ],
             }
         )
+        transport.user_directory_search = self.user_directory_search_mock  # type: ignore[method-assign]
 
         self.u1 = self.register_user("user1", "pass")
         self.u1_token = self.login(self.u1, "pass")
@@ -1361,9 +1363,9 @@ class TestUserDirFederatedSearchWhitelist(unittest.HomeserverTestCase):
             [r["user_id"] for r in channel.json_body["results"]],
             ["@user2:test", "@remoteuser:remote.example.com"],
         )
-        self.transport.user_directory_search.assert_called_once()
+        self.user_directory_search_mock.assert_called_once()
         self.assertEqual(
-            self.transport.user_directory_search.call_args.args[0],
+            self.user_directory_search_mock.call_args.args[0],
             "remote.example.com",
         )
 
