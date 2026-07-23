@@ -1414,10 +1414,12 @@ class RoomCreationHandler:
         # same room ID. This happens in practice when the same user creates
         # several rooms at once (e.g. concurrent /createRoom requests with the
         # same config), as the only entropy in the create event is
-        # `origin_server_ts`, which has millisecond resolution. Retry a few times
-        # on collision, perturbing `origin_server_ts` so the create event hashes
-        # to a fresh room ID. This mirrors the collision handling in
-        # `_generate_and_create_room_id` used for older room versions.
+        # `origin_server_ts`, which has millisecond resolution.
+        #
+        # Retry a few times on collision, perturbing `origin_server_ts`
+        # so the create event hashes to a fresh room ID. This mirrors the
+        # collision handling in `_generate_and_create_room_id` used for
+        # older room versions.
         attempts = 0
         while attempts < 5:
             event_dict: JsonDict = {
