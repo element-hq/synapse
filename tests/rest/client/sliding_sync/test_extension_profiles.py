@@ -539,6 +539,51 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > enter the room subset, users who were already in rooms within the room subset
         > will not have their full profiles sent down a second time.
         """
+        new_room = self.helper.create_room_as(self.user, tok=self.tok)
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        profiles_config: dict = {
+            "enabled": True,
+        }
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                self.joined_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+            },
+            "extensions": {
+                "org.matrix.msc4262.profiles": profiles_config,
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+
+        # Starting situation, we get the full profile
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {
+                "updated": {
+                    "avatar_url": None,
+                    "displayname": "other_user",
+                },
+            },
+        )
+
+        # Join other user to the new room and sync now asking for both
+        self.helper.join(new_room, self.other_user, tok=self.other_tok)
+        sync_body["room_subscriptions"][new_room] = {
+            "required_state": [],
+            "timeline_limit": 10,
+        }
+
+        # Make an incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+        # We should not get other user re-sent
+        self.assertIsNone(
+            response_body["extensions"].get("org.matrix.msc4262.profiles"),
+        )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_removed_fields_get_sent_down_as_removed(self) -> None:

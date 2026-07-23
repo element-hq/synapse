@@ -35,6 +35,7 @@ from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
     MutablePerConnectionState,
     PerConnectionState,
+    ProfileFieldStatusMap,
     RoomLazyMembershipChanges,
     RoomStatusMap,
     RoomSyncConfig,
@@ -350,6 +351,15 @@ class SlidingSyncStore(SQLBaseStore):
             """
             txn.execute(sql, (connection_position, previous_connection_position))
 
+            sql = """
+                  INSERT INTO sliding_sync_connection_profile_updates
+                  (connection_position, user_id, field_name, field_status, last_token)
+                  SELECT ?, user_id, field_name, field_status, last_token
+                  FROM sliding_sync_connection_profile_updates
+                  WHERE connection_position = ?
+                  """
+            txn.execute(sql, (connection_position, previous_connection_position))
+
         # We now upsert the changes to the various streams.
         key_values = []
         value_values = []
@@ -389,6 +399,38 @@ class SlidingSyncStore(SQLBaseStore):
             ),
             value_values=value_values,
         )
+
+        # Handle profile updates - nested structure: user_id -> field_name -> status
+        profile_update_key_values = []
+        profile_update_value_values = []
+        for (
+            user_id,
+            field_statuses,
+        ) in per_connection_state.profile_updates._statuses.items():
+            for field_name, have_sent_field in field_statuses.items():
+                profile_update_key_values.append(
+                    (connection_position, user_id, field_name)
+                )
+                profile_update_value_values.append(
+                    (have_sent_field.status.value, have_sent_field.last_token)
+                )
+
+        if profile_update_key_values:
+            self.db_pool.simple_upsert_many_txn(
+                txn,
+                table="sliding_sync_connection_profile_updates",
+                key_names=(
+                    "connection_position",
+                    "user_id",
+                    "field_name",
+                ),
+                key_values=profile_update_key_values,
+                value_names=(
+                    "field_status",
+                    "last_token",
+                ),
+                value_values=profile_update_value_values,
+            )
 
         # ... and upsert changes to the room configs.
         keys = []
@@ -623,11 +665,34 @@ class SlidingSyncStore(SQLBaseStore):
                 # future we want to be able to easily add more stream types.
                 logger.warning("Unrecognized sliding sync stream in DB %r", stream)
 
+        # Now look up the per-profile field stream data.
+        profile_updates: dict[str, dict[str, HaveSentRoom[str]]] = {}
+
+        profile_update_rows = self.db_pool.simple_select_list_txn(
+            txn,
+            table="sliding_sync_connection_profile_updates",
+            keyvalues={"connection_position": connection_position},
+            retcols=(
+                "user_id",
+                "field_name",
+                "field_status",
+                "last_token",
+            ),
+        )
+        for user_id, field_name, field_status, last_token in profile_update_rows:
+            have_sent_field: HaveSentRoom[str] = HaveSentRoom(
+                status=HaveSentRoomFlag(field_status), last_token=last_token
+            )
+            if user_id not in profile_updates:
+                profile_updates[user_id] = {}
+            profile_updates[user_id][field_name] = have_sent_field
+
         return PerConnectionStateDB(
             last_used_ts=last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
+            profile_updates=ProfileFieldStatusMap(profile_updates),
             room_configs=room_configs,
             room_lazy_membership={},
         )
@@ -810,6 +875,7 @@ class PerConnectionStateDB:
     rooms: "RoomStatusMap[str]"
     receipts: "RoomStatusMap[str]"
     account_data: "RoomStatusMap[str]"
+    profile_updates: "ProfileFieldStatusMap[str]"
 
     room_configs: Mapping[str, "RoomSyncConfig"]
 
@@ -856,11 +922,29 @@ class PerConnectionStateDB:
             for room_id, status in per_connection_state.account_data.get_updates().items()
         }
 
+        profile_updates: dict[str, dict[str, HaveSentRoom[str]]] = {}
+        for (
+            user_id,
+            field_statuses,
+        ) in per_connection_state.profile_updates.get_updates().items():
+            profile_updates[user_id] = {
+                field_name: HaveSentRoom(
+                    status=status.status,
+                    last_token=(
+                        await status.last_token.to_string(store)
+                        if status.last_token is not None
+                        else None
+                    ),
+                )
+                for field_name, status in field_statuses.items()
+            }
+
         log_kv(
             {
                 "rooms": rooms,
                 "receipts": receipts,
                 "account_data": account_data,
+                "profile_updates": profile_updates,
                 "room_configs": per_connection_state.room_configs.maps[0],
             }
         )
@@ -870,6 +954,7 @@ class PerConnectionStateDB:
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
+            profile_updates=ProfileFieldStatusMap(profile_updates),
             room_configs=per_connection_state.room_configs.maps[0],
             room_lazy_membership=per_connection_state.room_lazy_membership,
         )
@@ -910,10 +995,25 @@ class PerConnectionStateDB:
             for room_id, status in self.account_data._statuses.items()
         }
 
+        profile_updates: dict[str, dict[str, HaveSentRoom[MultiWriterStreamToken]]] = {}
+        for user_id, field_statuses in self.profile_updates._statuses.items():
+            profile_updates[user_id] = {
+                field_name: HaveSentRoom(
+                    status=status.status,
+                    last_token=(
+                        await MultiWriterStreamToken.parse(store, status.last_token)
+                        if status.last_token is not None
+                        else None
+                    ),
+                )
+                for field_name, status in field_statuses.items()
+            }
+
         return PerConnectionState(
             last_used_ts=self.last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
+            profile_updates=ProfileFieldStatusMap(profile_updates),
             room_configs=self.room_configs,
         )
