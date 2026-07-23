@@ -3411,6 +3411,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         assert isinstance(limit, MediaUploadLimit)
         self.assertIsNone(limit.info_uri)
 
+
 class AnimatedThumbnailTestCase(unittest.HomeserverTestCase):
     """End-to-end tests for the `animated` query parameter on the local
     thumbnail endpoint."""
