@@ -1,0 +1,1 @@
+Fix unbounded growth of the `sliding_sync_connection_positions` table when a client repeatedly retries requests from the same sliding sync position.
