@@ -1409,7 +1409,7 @@ class RoomCreationHandler:
         is_public: bool,
         room_version: RoomVersion,
     ) -> tuple[EventBase, synapse.events.snapshot.EventContext]:
-        # In MSC4291 rooms the room ID is the reference hash of the create event,
+        # In v12+ rooms, the room ID is the reference hash of the create event,
         # so two rooms whose create events have identical content collide on the
         # same room ID. This happens in practice when the same user creates
         # several rooms at once (e.g. concurrent /createRoom requests with the
