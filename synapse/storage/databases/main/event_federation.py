@@ -37,7 +37,7 @@ from prometheus_client import Counter, Gauge
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase, FrozenEventVMSC4242, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -1193,6 +1193,183 @@ class EventFederationWorkerStore(
 
         # Return all events where not all sets can reach them.
         return {eid for eid, n in event_to_missing_sets.items() if n}
+
+    # 22/04/2026: Unused currently, but will be used in future MSC4242 PRs.
+    # Remove comment when used.
+    async def get_state_dag(
+        self, room_id: str, forward_extrems: set[str]
+    ) -> dict[str, FrozenEventVMSC4242]:
+        """Get the current state DAG for the given room.
+
+        This function is called when calculating a /send_join response.
+        This does not check that the room is an state DAG room, so check this
+        before calling this function!
+
+        This functions guarantees that the returned state DAG is connected.
+
+        Args:
+            room_id: The room to get the state dag for
+            forward_extrems: latest event IDs in the room. The state DAG is all events reachable from these events.
+        Returns:
+            A map of event_id => event
+        """
+
+        def _get_state_events_txn(txn: LoggingTransaction, room_id: str) -> list[str]:
+            sql = """
+                SELECT event_id FROM msc4242_state_dag_edges WHERE room_id = ?
+            """
+            txn.execute(sql, (room_id,))
+            event_ids = [ev_id for (ev_id,) in txn]
+            return event_ids
+
+        # Pull out all state events for this room using the events_by_room_and_type index.
+        event_ids = await self.db_pool.runInteraction(
+            "_get_state_events_txn",
+            _get_state_events_txn,
+            room_id,
+        )
+        event_map = await self.get_events(event_ids)
+        # Filter the returned state events to only include ones on the paths back from the forward
+        # extremities.
+        result: dict[str, FrozenEventVMSC4242] = {}
+        next_ids = forward_extrems
+        seen: set[str] = set()
+        while len(next_ids) > 0:
+            # Pull the event and add the prev_state_events.
+            # We must have the event.
+            event_id = next_ids.pop()
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+            ev = event_map[event_id]
+            assert isinstance(ev, FrozenEventVMSC4242)
+            result[event_id] = ev
+            for prev_state_event_id in ev.prev_state_events:
+                next_ids.add(prev_state_event_id)
+
+        assert len(result) > 0  # we always return the forward extremities
+        # Assert that the create event was returned. Pick the first event (any will do) to verify
+        # that this room version supports room IDs as hashes.
+        first_event: FrozenEventVMSC4242 = next(iter(result.values()))
+        if first_event.room_version.msc4291_room_ids_as_hashes:
+            create_event_id = f"${room_id[1:]}"
+            assert create_event_id in result
+
+        return result
+
+    # 22/04/2026: Unused currently, but will be used in future MSC4242 PRs.
+    # Remove comment when used.
+    async def get_missing_events_state_dag(
+        self,
+        *,
+        room_id: str,
+        earliest_event_ids: list[str],
+        latest_event_ids: list[str],
+        limit: int,
+    ) -> list[EventBase]:
+        """Get parts of the state DAG in response to a /get_missing_events query.
+
+        Args:
+            room_id: The state DAG to look at
+            earliest_event_ids: Which events the caller has seen. These events will not be returned.
+            latest_event_ids: Which events to start walking back from via prev_state_events.
+            limit: The max number of events to return.
+        Returns:
+            A list of events, deterministically ordered according to MSC4242.
+        """
+        ids = await self.db_pool.runInteraction(
+            "get_missing_events_state_dag",
+            self._get_missing_events_state_dag_txn,
+            room_id,
+            earliest_event_ids,
+            latest_event_ids,
+            limit,
+        )
+        return await self.get_events_as_list(ids)
+
+    def _get_missing_events_state_dag_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        earliest_event_ids: list[str],
+        latest_event_ids: list[str],
+        limit: int,
+    ) -> list[str]:
+        """Walk the state DAG backward from `latest_event_ids`, stopping at
+        `limit` results or the beginning of the DAG, whichever comes first.
+
+        Earliest events are treated as already-visited: they are not emitted,
+        and their predecessors are not traversed via them.
+
+        Results are deterministic and ordered by BFS, with lexicographic tie-breaking among
+        siblings at the same # hops away.
+
+        Executes as a single recursive CTE in both SQLite and Postgres.
+        """
+        earliest_set = set(earliest_event_ids)
+        seed_ids = sorted(set(latest_event_ids) - earliest_set)
+        if not seed_ids or limit <= 0:
+            return []
+
+        seed_clause, seed_args = make_in_list_sql_clause(
+            self.database_engine, "e.event_id", seed_ids
+        )
+
+        # `make_in_list_sql_clause` doesn't handle empty iterables, so guard
+        # the no-earliest case explicitly with an always-true clause.
+        if earliest_event_ids:
+            earliest_clause, earliest_args = make_in_list_sql_clause(
+                self.database_engine,
+                "e.prev_state_event_id",
+                earliest_event_ids,
+                negative=True,
+            )
+        else:
+            # No-op clause that is TRUE for every row, in both dialects.
+            earliest_clause = "1=1"
+            earliest_args = []
+
+        query = f"""
+            WITH RECURSIVE walk(event_id, hops) AS (
+                SELECT
+                    e.prev_state_event_id,
+                    1
+                FROM msc4242_state_dag_edges e
+                WHERE e.room_id = ?
+                AND {seed_clause}
+                AND e.prev_state_event_id IS NOT NULL
+                AND {earliest_clause}
+
+                UNION
+
+                SELECT
+                    e.prev_state_event_id,
+                    w.hops + 1
+                FROM walk w
+                JOIN msc4242_state_dag_edges e
+                ON e.room_id = ?
+                AND e.event_id = w.event_id
+                WHERE e.prev_state_event_id IS NOT NULL
+                AND {earliest_clause}
+                AND w.hops < ?
+            )
+            SELECT event_id, MIN(hops) AS hops
+            FROM walk
+            GROUP BY event_id
+            ORDER BY hops, event_id
+            LIMIT ?
+        """
+
+        params: list = [room_id]
+        params.extend(seed_args)
+        params.extend(earliest_args)
+        params.append(room_id)
+        params.extend(earliest_args)
+        params.append(limit)
+        params.append(limit)
+
+        txn.execute(query, params)
+        return [row[0] for row in txn]
 
     @trace
     @tag_args
