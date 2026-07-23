@@ -490,7 +490,7 @@ class ProfileWorkerStore(SQLBaseStore):
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
             if field_names_empty_means_all_fields:
-                field_clause = "pu.field_name NOT NULL"
+                field_clause = "pu.field_name IS NOT NULL"
                 field_args: list[str] = []
             else:
                 field_clause, field_args = make_in_list_sql_clause(
