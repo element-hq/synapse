@@ -317,6 +317,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
         fields_updates = self.get_success(
+            # FIXME this function should be deleted, it's not used.
+            # Adapt this test to use the right one.
             self.store.get_profile_updates_for_fields(
                 from_id=1,
                 to_id=2,

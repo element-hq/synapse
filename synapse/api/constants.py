@@ -441,6 +441,7 @@ class ProfileUpdateAction(str, enum.Enum):
     normally includes. This update action currently has no meaning for sync responses
     that are not incremental and non-lazy.
     """
+
     LEFT_ROOM = "left_room"
     """
     This profile update row action represents a user leaving a room.
@@ -450,6 +451,7 @@ class ProfileUpdateAction(str, enum.Enum):
     profiles, so clients can clear their cache containing the users profile data
     they are no longer interested in.
     """
+
     UPDATE = "update"
     """
     This profile update row action represents a user updating a profile field.
@@ -458,6 +460,20 @@ class ProfileUpdateAction(str, enum.Enum):
     diff of profile field updates or all the current profile fields are included
     in the sync response. In the latter case the profile update action row signifies
     a change, but the client may still get fields that have not changed.
+    """
+
+    # FIXME: add a test covering adding these to the streams tables
+    DELETE = "delete"
+    """
+    This profile update row action represents a user deleting a profile field.
+
+    In the sync response deleted fields are indicated separately from updated fields,
+    as `None` is a valid value for a field.
+
+    Note that even though deleting displaynames and avatar_url's is done by setting
+    them to an empty string, for consistency the profile update stream gets a DELETE
+    action written to it, as the profile updates sync MSC's don't special case
+    displayname or avatar_url.
     """
 
 
