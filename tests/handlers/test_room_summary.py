@@ -232,7 +232,9 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             }
         )
         self.get_success(
-            fed_handler.on_invite_request(fed_hostname, event, RoomVersions.V6)
+            fed_handler.on_invite_request(
+                origin=fed_hostname, event=event, room_version=RoomVersions.V6
+            )
         )
 
     def test_simple_space(self) -> None:

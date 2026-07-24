@@ -41,7 +41,7 @@ from typing_extensions import assert_never
 
 from twisted.internet import defer
 
-from synapse.api.constants import Direction, EventTypes
+from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
@@ -384,6 +384,8 @@ class EventsWorkerStore(SQLBaseStore):
         Flag to track when the sliding sync background jobs have
         finished (so we don't have to keep querying it every time)
         """
+
+        self._room_prejoin_state_types = hs.config.api.room_prejoin_state
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
@@ -1127,14 +1129,12 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_stripped_room_state_from_event_context(
         self,
+        event: EventBase,
         context: EventContext,
-        state_keys_to_include: StateFilter,
-        membership_user_id: str | None = None,
     ) -> list[JsonDict]:
         """
         Retrieve the stripped state from a room, given an event context to retrieve state
-        from as well as the state types to include. Optionally, include the membership
-        events from a specific user.
+        from as well as the state types to include.
 
         "Stripped" state means that only the `type`, `state_key`, `content` and `sender` keys
         are included from each state event.
@@ -1142,35 +1142,66 @@ class EventsWorkerStore(SQLBaseStore):
         Args:
             context: The event context to retrieve state of the room from.
             state_keys_to_include: The state events to include, for each event type.
-            membership_user_id: An optional user ID to include the stripped membership state
-                events of. This is useful when generating the stripped state of a room for
-                invites. We want to send membership events of the inviter, so that the
-                invitee can display the inviter's profile information if the room lacks any.
 
         Returns:
             A list of dictionaries, each representing a stripped state event from the room.
         """
-        if membership_user_id:
+        selected_state_ids = await self.get_stripped_room_state_ids_from_event_context(
+            event, context
+        )
+
+        state_to_include = await self.get_events(selected_state_ids)
+
+        return [strip_event(e) for e in state_to_include.values()]
+
+    async def get_stripped_room_state_ids_from_event_context(
+        self,
+        event: EventBase,
+        context: EventContext,
+    ) -> list[str]:
+        """
+        Retrieve the stripped state IDs for an event, given an event context to retrieve state
+        from as well as the state types to include.
+
+        "Stripped" state means that only the `type`, `state_key`, `content` and `sender` keys
+        are included from each state event.
+
+        Args:
+            context: The event context to retrieve state of the room from.
+
+        Returns:
+            A list of event_ids, each representing the stripped state event to include for this event
+        """
+        # Start with the configured default set of stripped state to include
+        state_filter = self._room_prejoin_state_types
+
+        # We want to send membership events of the inviter, so that the invitee can
+        # display the inviter's profile information if the room lacks any.
+        #
+        # FIXME: Doesn't seem to be in the spec but tracked by
+        # [MSC4319](https://github.com/matrix-org/matrix-spec-proposals/pull/4319)
+        is_invite_event = (
+            event.type == EventTypes.Member and event.membership == Membership.INVITE
+        )
+        if is_invite_event:
             types = chain(
-                state_keys_to_include.to_types(),
-                [(EventTypes.Member, membership_user_id)],
+                self._room_prejoin_state_types.to_types(),
+                [(EventTypes.Member, event.sender)],
             )
-            filter = StateFilter.from_types(types)
-        else:
-            filter = state_keys_to_include
-        selected_state_ids = await context.get_current_state_ids(filter)
+            state_filter = StateFilter.from_types(types)
+
+        # Get the relevant state
+        selected_state_ids = await context.get_current_state_ids(state_filter)
 
         # We know this event is not an outlier, so this must be
         # non-None.
         assert selected_state_ids is not None
 
-        # Confusingly, get_current_state_events may return events that are discarded by
-        # the filter, if they're in context._state_delta_due_to_event. Strip these away.
-        selected_state_ids = filter.filter_state(selected_state_ids)
+        # Confusingly, `get_current_state_ids` may return events that are discarded by
+        # the filter, if they're in `context._state_delta_due_to_event`. Strip these away.
+        selected_state_ids = state_filter.filter_state(selected_state_ids)
 
-        state_to_include = await self.get_events(selected_state_ids.values())
-
-        return [strip_event(e) for e in state_to_include.values()]
+        return list(selected_state_ids.values())
 
     def _maybe_start_fetch_thread(self) -> None:
         """Starts an event fetch thread if we are not yet at the maximum number."""

@@ -123,6 +123,25 @@ class RoomVersion:
     to the create event every time we insert an event would be prohibitively expensive.
     This is similar to how doubly-linked lists can potentially not refer to previous items correctly
     without verifying the list's integrity, but doing it on every insert is too expensive."""
+    msc4311_stripped_state: bool
+    """
+    Determines whether a room version *SHOULD* rather than *MAY* reject invites/knocks
+    with invalid stripped state events.
+
+    According to MSC4311:
+    > If any of the [stripped state] events are not a PDU, not for the room ID specified, or fail
+    > signature checks, or the `m.room.create` event is missing, the receiving
+    > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
+    > error (new to the endpoint). For invites to room version 12+ rooms, servers
+    > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+
+    Regardless of room version (we should always do these things):
+     1. The `m.room.create` event *MUST* be included in
+        `invite_room_state`/`knock_room_state` when sending invites/knocks over the
+        federation API's.
+     2. Use full PDU's in the `invite_room_state`/`knock_room_state` in the federation
+        API. The client API still uses stripped state.
+    """
 
 class RoomVersions:
     V1: RoomVersion

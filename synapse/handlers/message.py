@@ -509,8 +509,6 @@ class EventCreationHandler:
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._policy_handler = hs.get_room_policy_handler()
 
-        self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
-
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
         self.request_ratelimiter = hs.get_request_ratelimiter()
@@ -2078,9 +2076,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "invite_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.room_prejoin_state_types,
-                            membership_user_id=event.sender,
                         ),
                     )
 
@@ -2091,7 +2088,7 @@ class EventCreationHandler:
                         # to get them to sign the event.
 
                         returned_invite = await federation_handler.send_invite(
-                            invitee.domain, event
+                            invitee.domain, event, context
                         )
 
                         # TODO: Make sure the signatures actually are correct.
@@ -2103,8 +2100,8 @@ class EventCreationHandler:
                         event.unsigned,
                         "knock_room_state",
                         await self.store.get_stripped_room_state_from_event_context(
+                            event,
                             context,
-                            self.room_prejoin_state_types,
                         ),
                     )
 

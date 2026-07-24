@@ -33,6 +33,7 @@ from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
     SerializeEventConfig,
+    strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
@@ -459,7 +460,11 @@ class SyncRestServlet(RestServlet):
                 invited_state = []
 
             invited_state = list(invited_state)
-            invited_state.append(invite)
+            # Add the invite itself
+            #
+            # FIXME: Doesn't seem to be in the spec but tracked by
+            # [MSC4319](https://github.com/matrix-org/matrix-spec-proposals/pull/4319)
+            invited_state.append(strip_event(room.invite))
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
         return invited
@@ -509,8 +514,10 @@ class SyncRestServlet(RestServlet):
             # the client with:
             #
             # * A knock state event that they can use for easier internal tracking
-            # * The rough timestamp of when the knock occurred contained within the event
-            knocked_state.append(knock)
+            #
+            # FIXME: Doesn't seem to be in the spec but tracked by
+            # [MSC4319](https://github.com/matrix-org/matrix-spec-proposals/pull/4319)
+            knocked_state.append(strip_event(room.knock))
 
             # Build the `knock_state` dictionary, which will contain the state of the
             # room that the client has knocked on

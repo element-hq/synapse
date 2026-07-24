@@ -23,6 +23,7 @@
 
 import itertools
 import logging
+from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -59,6 +60,7 @@ from synapse.api.room_versions import (
     RoomVersions,
 )
 from synapse.events import EventBase, builder, make_event_from_dict
+from synapse.events.snapshot import EventContext
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -70,7 +72,12 @@ from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    StrCollection,
+    UserID,
+    get_domain_from_id,
+)
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -1303,12 +1310,12 @@ class FederationClient(FederationBase):
         self,
         destination: str,
         room_id: str,
-        event_id: str,
         pdu: EventBase,
+        context: EventContext,
     ) -> EventBase:
         room_version = await self.store.get_room_version(room_id)
 
-        content = await self._do_send_invite(destination, pdu, room_version)
+        content = await self._do_send_invite(destination, pdu, context, room_version)
 
         pdu_dict = content["event"]
 
@@ -1329,10 +1336,20 @@ class FederationClient(FederationBase):
         return pdu
 
     async def _do_send_invite(
-        self, destination: str, pdu: EventBase, room_version: RoomVersion
+        self,
+        destination: str,
+        pdu: EventBase,
+        context: EventContext,
+        room_version: RoomVersion,
     ) -> JsonDict:
         """Actually sends the invite, first trying v2 API and falling back to
         v1 API if necessary.
+
+        Args:
+            destination:
+            pdu: Invite event
+            context:
+            room_version:
 
         Returns:
             The event as a dict as returned by the remote server
@@ -1344,6 +1361,19 @@ class FederationClient(FederationBase):
         """
         time_now = self._clock.time_msec()
 
+        # MSC4311: For the federation API, format events in `invite_room_state` as full
+        # PDU's
+        #
+        # Find the full events based on the state at the time of the invite
+        state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
+            pdu,
+            context,
+        )
+        state_events = await self.store.get_events(state_ids)
+        assert set(state_ids) == set(state_events.keys()), (
+            "We should have all events available that were set as stripped state."
+        )
+
         try:
             return await self.transport_layer.send_invite_v2(
                 destination=destination,
@@ -1352,7 +1382,11 @@ class FederationClient(FederationBase):
                 content={
                     "event": pdu.get_pdu_json(time_now),
                     "room_version": room_version.identifier,
-                    "invite_room_state": pdu.unsigned.get("invite_room_state", []),
+                    "invite_room_state": [
+                        # Use full PDU's according to MSC4311
+                        state_event.get_pdu_json(time_now)
+                        for state_event in state_events.values()
+                    ],
                 },
             )
         except HttpResponseException as e:
@@ -1367,18 +1401,74 @@ class FederationClient(FederationBase):
                         "User's homeserver does not support this room version",
                         Codes.UNSUPPORTED_ROOM_VERSION,
                     )
+            # MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
+            # error by the sending server over the Client-Server API. This is done
+            # because there's nothing the client can materially do differently to make
+            # the request succeed.
+            elif (
+                err.code == HTTPStatus.BAD_REQUEST
+                and err.errcode == Codes.MISSING_PARAM
+            ):
+                raise SynapseError(
+                    500,
+                    f"Received {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} response from remote homeserver "
+                    "while trying to send the invite over federation. This indicates a compatibility problem "
+                    "between your homeserver and the homeserver you're trying to send the invite to "
+                    "(either one could be at fault).",
+                    Codes.UNKNOWN,
+                    additional_fields={
+                        "cause": err.msg,
+                        "destination_server": destination,
+                    },
+                )
             else:
                 raise err
 
         # Didn't work, try v1 API.
         # Note the v1 API returns a tuple of `(200, content)`
 
-        _, content = await self.transport_layer.send_invite_v1(
-            destination=destination,
-            room_id=pdu.room_id,
-            event_id=pdu.event_id,
-            content=pdu.get_pdu_json(time_now),
-        )
+        try:
+            # Use full PDU's for `invite_room_state` according to MSC4311
+            #
+            # With the v1 invite API, `invite_room_state` is carried inside the event
+            # instead of a separate field like in v2 so we must munge it in ourselves
+            event_json = pdu.get_pdu_json(time_now)
+            event_json.setdefault("unsigned", {})["invite_room_state"] = [
+                # Use full PDU's according to MSC4311
+                state_event.get_pdu_json(time_now)
+                for state_event in state_events.values()
+            ]
+
+            _, content = await self.transport_layer.send_invite_v1(
+                destination=destination,
+                room_id=pdu.room_id,
+                event_id=pdu.event_id,
+                content=event_json,
+            )
+        except HttpResponseException as e:
+            # MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
+            # error by the sending server over the Client-Server API. This is done
+            # because there's nothing the client can materially do differently to make
+            # the request succeed.
+            err = e.to_synapse_error()
+            if (
+                err.code == HTTPStatus.BAD_REQUEST
+                and err.errcode == Codes.MISSING_PARAM
+            ):
+                raise SynapseError(
+                    500,
+                    f"Received {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} response from remote homeserver "
+                    "while trying to send the invite over federation. This indicates a compatibility problem "
+                    "between your homeserver and the homeserver you're trying to send the invite to "
+                    "(either one could be at fault).",
+                    Codes.UNKNOWN,
+                    additional_fields={
+                        "cause": err.msg,
+                        "destination_server": destination,
+                    },
+                )
+            else:
+                raise err
         return content
 
     async def send_leave(self, destinations: Iterable[str], pdu: EventBase) -> None:

@@ -194,8 +194,6 @@ class FederationServer(FederationBase):
             hs.config.federation.federation_metrics_domains
         )
 
-        self._room_prejoin_state_types = hs.config.api.room_prejoin_state
-
         # Whether we have started handling old events in the staging area.
         self._started_handling_of_staged_events = False
 
@@ -767,8 +765,27 @@ class FederationServer(FederationBase):
         return {"event": pdu.get_templated_pdu_json(), "room_version": room_version}
 
     async def on_invite_request(
-        self, origin: str, content: JsonDict, room_version_id: str
+        self,
+        *,
+        origin: str,
+        expected_room_id: str,
+        expected_event_id: str,
+        event_json: JsonDict,
+        room_version_id: str,
     ) -> dict[str, Any]:
+        """
+        Args:
+            origin:
+            expected_room_id: The room ID specified in the
+                `/_matrix/federation/v1/invite/{roomId}/{eventId}` request that we expect to
+                match in the actual event itself.
+            expected_event_id: The event ID specified in the
+                `/_matrix/federation/v1/invite/{roomId}/{eventId}` request that we expect to
+                match in the actual event itself.
+            event_json:
+            room_version_id:
+        """
+
         room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
         if not room_version:
             raise SynapseError(
@@ -777,9 +794,21 @@ class FederationServer(FederationBase):
                 Codes.UNSUPPORTED_ROOM_VERSION,
             )
 
-        pdu = event_from_pdu_json(content, room_version)
+        pdu = event_from_pdu_json(event_json, room_version)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, pdu.room_id)
+        if pdu.event_id != expected_event_id:
+            raise SynapseError(
+                400,
+                "Invite event ID must match event ID specified in the federation `/invite` request",
+                Codes.INVALID_PARAM,
+            )
+        if pdu.room_id != expected_room_id:
+            raise SynapseError(
+                400,
+                "The room_id specified in the invite event must match room ID specified in the federation `/invite` request",
+                Codes.INVALID_PARAM,
+            )
         if await self._spam_checker_module_callbacks.should_drop_federated_event(pdu):
             logger.info(
                 "Federated event contains spam, dropping %s",
@@ -792,7 +821,11 @@ class FederationServer(FederationBase):
             errmsg = f"event id {pdu.event_id}: {e}"
             logger.warning("%s", errmsg)
             raise SynapseError(403, errmsg, Codes.FORBIDDEN)
-        ret_pdu = await self.handler.on_invite_request(origin, pdu, room_version)
+        ret_pdu = await self.handler.on_invite_request(
+            origin=origin,
+            event=pdu,
+            room_version=room_version,
+        )
         time_now = self._clock.time_msec()
         return {"event": ret_pdu.get_pdu_json(time_now)}
 
@@ -985,19 +1018,31 @@ class FederationServer(FederationBase):
         Returns:
             The stripped room state.
         """
-        _, context = await self._on_send_membership_event(
+        time_now = self._clock.time_msec()
+
+        event, context = await self._on_send_membership_event(
             origin, content, Membership.KNOCK, room_id
         )
 
-        # Retrieve stripped state events from the room and send them back to the remote
-        # server. This will allow the remote server's clients to display information
-        # related to the room while the knock request is pending.
-        stripped_room_state = (
-            await self.store.get_stripped_room_state_from_event_context(
-                context, self._room_prejoin_state_types
-            )
+        # MSC4311: For the federation API, format events in `knock_room_state` as full
+        # PDU's
+        #
+        # Find the full events based on the state at the time of the knock
+        state_ids = await self.store.get_stripped_room_state_ids_from_event_context(
+            event, context
         )
-        return {"knock_room_state": stripped_room_state}
+        state_events = await self.store.get_events(state_ids)
+        assert set(state_ids) == set(state_events.keys()), (
+            "We should have all events available that were set as stripped state."
+        )
+
+        return {
+            "knock_room_state": [
+                # Use full PDU's according to MSC4311
+                state_event.get_pdu_json(time_now)
+                for state_event in state_events.values()
+            ]
+        }
 
     async def _on_send_membership_event(
         self, origin: str, content: JsonDict, membership_type: str, room_id: str
