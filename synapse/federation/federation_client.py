@@ -70,7 +70,14 @@ from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.types import (
+    JsonDict,
+    RemoteUserDirectoryEntry,
+    StrCollection,
+    UserID,
+    get_domain_from_id,
+)
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -134,6 +141,9 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
+        self.user_directory_search_timeout = (
+            hs.config.experimental.bwi_federated_user_dir_federation_search_timeout
+        )
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
@@ -169,6 +179,19 @@ class FederationClient(FederationBase):
             expiry_ms=5 * 60 * 1000,
             reset_expiry_on_get=False,
         )
+
+        # Periodically sync remote homeservers' user directories into our own,
+        # but only on the worker that runs background tasks.
+        if (
+            hs.config.experimental.bwi_federated_user_dir_enabled
+            and hs.config.worker.run_background_tasks
+        ):
+            self._clock.looping_call(
+                self._sync_federated_user_directory,
+                Duration(
+                    milliseconds=hs.config.experimental.bwi_federated_user_dir_sync_interval_ms
+                ),
+            )
 
     def _clear_tried_cache(self) -> None:
         """Clear pdu_destination_tried cache"""
@@ -1915,6 +1938,156 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def user_directory_search(
+        self,
+        destination: str,
+        timeout: int,
+    ) -> JsonDict:
+        """Fetch the full user directory of a remote server.
+
+        Args:
+            destination: The server to query.
+            timeout: Timeout in milliseconds for the request.
+
+        Returns:
+            The results containing a list of users from the remote directory.
+        """
+        try:
+            return await self.transport_layer.user_directory_search(
+                destination, timeout
+            )
+        except (RequestSendFailed, HttpResponseException) as e:
+            # A failing or unreachable destination shouldn't break the sync. The
+            # endpoint is rate-limited, and the transport layer surfaces a 429 as
+            # a RequestSendFailed after exhausting retries, so log without a
+            # stack trace.
+            logger.warning(
+                "Failed to search remote user directory [destination=%s]: %s",
+                destination,
+                e,
+            )
+            return {"results": []}
+        except Exception:
+            # Unexpected error; log with a stack trace for debugging.
+            logger.exception(
+                "Unexpected error searching remote user directory [destination=%s]",
+                destination,
+            )
+            return {"results": []}
+
+    @staticmethod
+    def _parse_remote_user_directory_results(
+        response: JsonDict,
+    ) -> list[RemoteUserDirectoryEntry]:
+        """Parse a remote user directory search response into typed entries.
+
+        Malformed entries are skipped. This keeps the federation wire format
+        contained within the federation layer.
+        """
+        entries: list[RemoteUserDirectoryEntry] = []
+        for user in response.get("results", []):
+            if not isinstance(user, dict):
+                logger.debug(
+                    "Skipping remote user directory entry that is not an object: %r",
+                    user,
+                )
+                continue
+
+            user_id = user.get("user_id")
+            if not isinstance(user_id, str):
+                logger.debug(
+                    "Skipping remote user directory entry with missing or "
+                    "non-string user_id: %r",
+                    user,
+                )
+                continue
+
+            display_name = user.get("display_name")
+            if not isinstance(display_name, str):
+                if display_name is not None:
+                    logger.debug(
+                        "Ignoring non-string display_name for remote user %s: %r",
+                        user_id,
+                        display_name,
+                    )
+                display_name = None
+
+            avatar_url = user.get("avatar_url")
+            if not isinstance(avatar_url, str):
+                if avatar_url is not None:
+                    logger.debug(
+                        "Ignoring non-string avatar_url for remote user %s: %r",
+                        user_id,
+                        avatar_url,
+                    )
+                avatar_url = None
+
+            entries.append(
+                RemoteUserDirectoryEntry(
+                    user_id=user_id,
+                    display_name=display_name,
+                    avatar_url=avatar_url,
+                )
+            )
+
+        return entries
+
+    @wrap_as_background_process("federated_user_directory_sync")
+    async def _sync_federated_user_directory(self) -> None:
+        """Periodically fetch users from known homeservers' user directories
+        and hand them to the local user directory for storage.
+
+        This is the federation-side background job: it decides which servers to
+        contact and how to query them. Persisting the results is delegated to
+        the user directory handler, which knows nothing about federation.
+        """
+        destinations = await self.store.get_known_destinations()
+        if not destinations:
+            logger.debug("ending federated user directory sync: no known destinations")
+            return
+
+        # This job is only scheduled when the experimental feature is enabled.
+        handler = self.hs.get_user_directory_handler()
+
+        total_reconciled = 0
+
+        for destination in destinations:
+            if self._is_mine_server_name(destination):
+                continue
+
+            response = await self.user_directory_search(
+                destination,
+                self.user_directory_search_timeout,
+            )
+
+            # De-duplicate by user id within a single destination's results.
+            entries_by_user: dict[str, RemoteUserDirectoryEntry] = {}
+            for entry in self._parse_remote_user_directory_results(response):
+                entries_by_user[entry.user_id] = entry
+
+            # In our logic we treat an empty result as a failed fetch and skip
+            # reconciliation for this destination. `user_directory_search`
+            # cannot signal failure via `None` (some callers rely on the dict
+            # shape) and returns `{"results": []}` on error, which is
+            # indistinguishable from a genuinely empty directory. Skipping the
+            # prune here avoids removing still-valid users just because the
+            # remote was temporarily unreachable, at the cost of not pruning a
+            # remote whose directory legitimately became empty.
+            if not entries_by_user:
+                continue
+
+            # Reconcile per homeserver: upsert the current set and prune users
+            # that this destination no longer returns.
+            await handler.reconcile_remote_users(
+                destination, list(entries_by_user.values())
+            )
+            total_reconciled += len(entries_by_user)
+
+        logger.debug(
+            "Federated user directory sync reconciled %d remote users",
+            total_reconciled,
+        )
 
     async def federation_download_media(
         self,

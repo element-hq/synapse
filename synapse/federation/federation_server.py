@@ -87,7 +87,13 @@ from synapse.replication.http.federation import (
 from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
-from synapse.types import JsonDict, StateMap, UserID, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    StateMap,
+    UserID,
+    get_domain_from_id,
+)
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import Linearizer, concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
@@ -1476,6 +1482,52 @@ class FederationServer(FederationBase):
             server_name
         ):
             raise AuthError(code=403, msg="Server is banned from room")
+
+    async def on_user_directory_search_request(
+        self, origin: str
+    ) -> tuple[int, JsonMapping]:
+        """Handle a user directory request from a remote server.
+
+        Returns every searchable local user, since the federation endpoint
+        always syncs the full local directory rather than matching a term.
+
+        Args:
+            origin: The server that sent the request.
+
+        Returns:
+            A tuple of (response code, response json)
+        """
+        return 200, await self._search_all_users()
+
+    async def _search_all_users(self) -> JsonDict:
+        """Return all of this server's own users from the user directory.
+
+        Reads the directory straight from the database and filters to locally
+        owned users, since the federation endpoint must only expose this
+        homeserver's own users (the table may also hold cached remote users).
+
+        Returns:
+            A dict of the form ``{"results": [...]}``.
+        """
+        results = await self.store.get_users_in_user_dir()
+
+        # Federation endpoint: only return users local to this homeserver.
+        # is_mine_id is infallible and returns False for malformed user IDs.
+        filtered_results: list[JsonDict] = []
+        for user in results["results"]:
+            if not self.hs.is_mine_id(user["user_id"]):
+                continue
+
+            # Omit optional fields entirely when unset rather than sending
+            # null over the wire.
+            entry: JsonDict = {"user_id": user["user_id"]}
+            if user["display_name"] is not None:
+                entry["display_name"] = user["display_name"]
+            if user["avatar_url"] is not None:
+                entry["avatar_url"] = user["avatar_url"]
+            filtered_results.append(entry)
+
+        return {"results": filtered_results}
 
 
 class FederationHandlerRegistry:

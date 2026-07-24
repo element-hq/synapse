@@ -657,6 +657,46 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             [_UserDirProfile(user_id, display_name, avatar_url)],
         )
 
+    async def upsert_federated_remote_users(
+        self,
+        users: Sequence[tuple[str, str | None, str | None]],
+    ) -> None:
+        """Upsert remote users discovered via federated user directory sync.
+
+        Updates profile and search index entries and marks the users as visible
+        in user directory searches via `users_in_federated_search`.
+        """
+        if not users:
+            return
+
+        profiles = [
+            _UserDirProfile(user_id, display_name, avatar_url)
+            for user_id, display_name, avatar_url in users
+        ]
+
+        await self.db_pool.runInteraction(
+            "upsert_federated_remote_users",
+            self._upsert_federated_remote_users_txn,
+            profiles,
+        )
+
+    def _upsert_federated_remote_users_txn(
+        self,
+        txn: LoggingTransaction,
+        profiles: Sequence[_UserDirProfile],
+    ) -> None:
+        self._update_profiles_in_user_dir_txn(txn, profiles)
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="users_in_federated_search",
+            key_names=("user_id",),
+            key_values=[(profile.user_id,) for profile in profiles],
+            value_names=("homeserver",),
+            value_values=[
+                (get_domain_from_id(profile.user_id),) for profile in profiles
+            ],
+        )
+
     def _update_profiles_in_user_dir_txn(
         self,
         txn: LoggingTransaction,
@@ -804,6 +844,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             txn.execute(f"{truncate} user_directory_search")
             txn.execute(f"{truncate} users_in_public_rooms")
             txn.execute(f"{truncate} users_who_share_private_rooms")
+            txn.execute(f"{truncate} users_in_federated_search")
 
         await self.db_pool.runInteraction(
             "delete_all_from_user_dir", _delete_all_from_user_dir_txn
@@ -862,30 +903,89 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         )
         self._server_name = hs.config.server.server_name
 
+    def _remove_from_user_dir_txn(self, txn: LoggingTransaction, user_id: str) -> None:
+        self.db_pool.simple_delete_txn(
+            txn, table="user_directory", keyvalues={"user_id": user_id}
+        )
+        self.db_pool.simple_delete_txn(
+            txn, table="user_directory_search", keyvalues={"user_id": user_id}
+        )
+        self.db_pool.simple_delete_txn(
+            txn, table="users_in_public_rooms", keyvalues={"user_id": user_id}
+        )
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="users_in_federated_search",
+            keyvalues={"user_id": user_id},
+        )
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="users_who_share_private_rooms",
+            keyvalues={"user_id": user_id},
+        )
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="users_who_share_private_rooms",
+            keyvalues={"other_user_id": user_id},
+        )
+
     async def remove_from_user_dir(self, user_id: str) -> None:
-        def _remove_from_user_dir_txn(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_delete_txn(
-                txn, table="user_directory", keyvalues={"user_id": user_id}
-            )
-            self.db_pool.simple_delete_txn(
-                txn, table="user_directory_search", keyvalues={"user_id": user_id}
-            )
-            self.db_pool.simple_delete_txn(
-                txn, table="users_in_public_rooms", keyvalues={"user_id": user_id}
-            )
-            self.db_pool.simple_delete_txn(
+        await self.db_pool.runInteraction(
+            "remove_from_user_dir", self._remove_from_user_dir_txn, user_id
+        )
+
+    async def reconcile_federated_remote_users(
+        self,
+        homeserver: str,
+        users: Sequence[tuple[str, str | None, str | None]],
+    ) -> None:
+        """Reconcile the set of remote users made visible via federated search
+        for a single remote homeserver.
+
+        Users present in ``users`` are upserted. Users that were previously
+        visible for ``homeserver`` but are no longer part of ``users`` are
+        pruned: their federated-search visibility is removed, and if they are
+        not otherwise visible (i.e. not sharing any room with a local user)
+        they are removed from the user directory entirely.
+
+        This must only be called with the full, successfully fetched result set
+        for ``homeserver`` -- passing a partial set (e.g. after a failed sync)
+        would incorrectly prune still-valid users.
+        """
+
+        profiles = [
+            _UserDirProfile(user_id, display_name, avatar_url)
+            for user_id, display_name, avatar_url in users
+        ]
+        new_user_ids = {profile.user_id for profile in profiles}
+
+        def _reconcile_txn(txn: LoggingTransaction) -> None:
+            existing_user_ids = self.db_pool.simple_select_onecol_txn(
                 txn,
-                table="users_who_share_private_rooms",
-                keyvalues={"user_id": user_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="users_who_share_private_rooms",
-                keyvalues={"other_user_id": user_id},
+                table="users_in_federated_search",
+                keyvalues={"homeserver": homeserver},
+                retcol="user_id",
             )
 
+            if profiles:
+                self._upsert_federated_remote_users_txn(txn, profiles)
+
+            stale_user_ids = set(existing_user_ids) - new_user_ids
+            for stale_user_id in stale_user_ids:
+                # Drop the federated-search visibility first.
+                self.db_pool.simple_delete_txn(
+                    txn,
+                    table="users_in_federated_search",
+                    keyvalues={"user_id": stale_user_id},
+                )
+
+                # Only remove the user from the directory entirely if they are
+                # not still visible through a shared room.
+                if not self._get_user_dir_rooms_user_is_in_txn(txn, stale_user_id):
+                    self._remove_from_user_dir_txn(txn, stale_user_id)
+
         await self.db_pool.runInteraction(
-            "remove_from_user_dir", _remove_from_user_dir_txn
+            "reconcile_federated_remote_users", _reconcile_txn
         )
 
     async def get_users_in_dir_due_to_room(self, room_id: str) -> set[str]:
@@ -942,6 +1042,27 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             "remove_user_who_share_room", _remove_user_who_share_room_txn
         )
 
+    def _get_user_dir_rooms_user_is_in_txn(
+        self, txn: LoggingTransaction, user_id: str
+    ) -> list[str]:
+        rows = self.db_pool.simple_select_onecol_txn(
+            txn,
+            table="users_who_share_private_rooms",
+            keyvalues={"user_id": user_id},
+            retcol="room_id",
+        )
+
+        pub_rows = self.db_pool.simple_select_onecol_txn(
+            txn,
+            table="users_in_public_rooms",
+            keyvalues={"user_id": user_id},
+            retcol="room_id",
+        )
+
+        users = set(pub_rows)
+        users.update(rows)
+        return list(users)
+
     async def get_user_dir_rooms_user_is_in(self, user_id: str) -> list[str]:
         """
         Returns the rooms that a user is in.
@@ -952,23 +1073,22 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         Returns:
             List of room IDs
         """
-        rows = await self.db_pool.simple_select_onecol(
-            table="users_who_share_private_rooms",
-            keyvalues={"user_id": user_id},
-            retcol="room_id",
-            desc="get_rooms_user_is_in",
+        return await self.db_pool.runInteraction(
+            "get_rooms_user_is_in",
+            self._get_user_dir_rooms_user_is_in_txn,
+            user_id,
         )
 
-        pub_rows = await self.db_pool.simple_select_onecol(
-            table="users_in_public_rooms",
+    async def is_user_in_federated_search(self, user_id: str) -> bool:
+        """Whether a user is visible through federated user directory sync."""
+        homeserver = await self.db_pool.simple_select_one_onecol(
+            table="users_in_federated_search",
             keyvalues={"user_id": user_id},
-            retcol="room_id",
-            desc="get_rooms_user_is_in",
+            retcol="homeserver",
+            allow_none=True,
+            desc="is_user_in_federated_search",
         )
-
-        users = set(pub_rows)
-        users.update(rows)
-        return list(users)
+        return homeserver is not None
 
     async def get_user_directory_stream_pos(self) -> int | None:
         """
@@ -1020,8 +1140,15 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                         SELECT 1 FROM users_who_share_private_rooms
                         WHERE user_id = ? AND other_user_id = t.user_id
                     )
-                )
             """
+            if self.hs.config.experimental.bwi_federated_user_dir_enabled:
+                where_clause += """
+                    OR EXISTS (
+                        SELECT 1 FROM users_in_federated_search
+                        WHERE user_id = t.user_id
+                    )
+                """
+            where_clause += ")"
 
         if not show_locked_users:
             where_clause += " AND (u.locked IS NULL OR u.locked = FALSE)"
@@ -1156,6 +1283,49 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 for r in results[0:limit]
             ],
         }
+
+    async def get_users_in_user_dir(self) -> SearchResult:
+        """Get every user stored in the user directory.
+
+        Unlike `search_user_dir`, this does not match a search term: it
+        returns all profiles in the `user_directory` table. It is used by the
+        federation responder to hand a server's full local directory to a
+        remote homeserver.
+
+        Returns:
+            A `SearchResult` of the form:
+
+                {
+                    "limited": False,  # always False; no term/limit is applied
+                    "results": [
+                        {
+                            "user_id": <user_id>,
+                            "display_name": <display_name>,
+                            "avatar_url": <avatar_url>,
+                        }
+                    ]
+                }
+        """
+        rows = cast(
+            list[tuple[str, str | None, str | None]],
+            await self.db_pool.simple_select_list(
+                table="user_directory",
+                keyvalues=None,
+                retcols=("user_id", "display_name", "avatar_url"),
+                desc="get_users_in_user_dir",
+            ),
+        )
+
+        results: list[UserProfile] = [
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+                "avatar_url": avatar_url,
+            }
+            for user_id, display_name, avatar_url in rows
+        ]
+
+        return {"limited": False, "results": results}
 
 
 def _filter_text_for_index(text: str) -> str:

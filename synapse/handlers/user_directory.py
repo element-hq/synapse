@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -39,7 +39,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import UserID
+from synapse.types import RemoteUserDirectoryEntry, UserID
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -512,7 +512,10 @@ class UserDirectoryHandler(StateDeltasHandler):
         if not self.is_mine_id(user_id):
             rooms_user_is_in = await self.store.get_user_dir_rooms_user_is_in(user_id)
 
-            if len(rooms_user_is_in) == 0:
+            if (
+                not rooms_user_is_in
+                and not await self.store.is_user_in_federated_search(user_id)
+            ):
                 logger.debug("Removing user %r from directory", user_id)
                 await self.store.remove_from_user_dir(user_id)
 
@@ -784,3 +787,69 @@ class UserDirectoryHandler(StateDeltasHandler):
                         profile.get(ProfileFields.AVATAR_URL)
                     ),
                 )
+
+    async def upsert_remote_users(
+        self, users: Sequence[RemoteUserDirectoryEntry]
+    ) -> None:
+        """Persist remote users fetched from another homeserver's user directory.
+
+        Remote users are stored in the same tables as locally discovered users
+        so that client searches only need to query the local database. Entries
+        for our own users are ignored.
+        """
+        if not self.update_user_directory:
+            # Only the worker that owns the user directory should write to it.
+            return
+
+        profiles = [
+            (entry.user_id, entry.display_name, entry.avatar_url)
+            for entry in users
+            if not self.is_mine_id(entry.user_id)
+        ]
+
+        if not profiles:
+            return
+
+        await self.store.upsert_federated_remote_users(profiles)
+
+    async def reconcile_remote_users(
+        self, homeserver: str, users: Sequence[RemoteUserDirectoryEntry]
+    ) -> None:
+        """Reconcile the remote users made visible via federated search for a
+        single remote homeserver.
+
+        Unlike :meth:`upsert_remote_users`, this also prunes users that were
+        previously visible for ``homeserver`` but are absent from ``users``.
+        It must therefore only be called with the full result set of a
+        successful sync for that homeserver.
+        """
+        if not self.update_user_directory:
+            # Only the worker that owns the user directory should write to it.
+            return
+
+        profiles: list[tuple[str, str | None, str | None]] = []
+        for entry in users:
+            try:
+                user = UserID.from_string(entry.user_id)
+            except SynapseError:
+                logger.warning(
+                    "Ignoring malformed user ID returned by federated user "
+                    "directory [homeserver=%s, user_id=%r]",
+                    homeserver,
+                    entry.user_id,
+                )
+                continue
+
+            # Check if the user is from the same homeserver (we don`t want to sync 3rd party users.)
+            if user.domain != homeserver:
+                logger.warning(
+                    "Ignoring user from another homeserver returned by federated "
+                    "user directory [homeserver=%s, user_id=%s]",
+                    homeserver,
+                    entry.user_id,
+                )
+                continue
+
+            profiles.append((entry.user_id, entry.display_name, entry.avatar_url))
+
+        await self.store.reconcile_federated_remote_users(homeserver, profiles)
