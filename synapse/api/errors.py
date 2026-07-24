@@ -823,19 +823,23 @@ class HttpResponseException(CodeMessageException):
         super().__init__(code, msg)
         self.response = response
 
-    def to_synapse_error(self) -> SynapseError:
-        """Make a SynapseError based on an HTTPResponseException
+    def unsafe_to_verbatim_synapse_error(self) -> SynapseError:
+        """Make a SynapseError directly based on a TRUSTED HTTPResponseException.
 
         This is useful when a proxied request has failed, and we need to
         decide how to map the failure onto a matrix error to send back to the
         client.
 
-        An attempt is made to parse the body of the http response as a matrix
+        An attempt is made to parse the body of the HTTP response as a Matrix
         error. If that succeeds, the errcode and error message from the body
-        are used as the errcode and error message in the new synapse error.
+        are copied verbatim into the new Synapse error.
 
         Otherwise, the errcode is set to M_UNKNOWN, and the error message is
         set to the reason code from the HTTP response.
+
+        Safety:
+            This must ONLY be used on errors from TRUSTED sources,
+            such as other Synapse workers.
 
         Returns:
             The error converted to a SynapseError.
@@ -851,9 +855,67 @@ class HttpResponseException(CodeMessageException):
             j = {}
 
         errcode = j.pop("errcode", Codes.UNKNOWN)
+        if not isinstance(errcode, str):
+            errcode = Codes.UNKNOWN
         errmsg = j.pop("error", self.msg)
+        if not isinstance(errmsg, str):
+            errmsg = self.msg
 
         return ProxiedRequestError(self.code, errmsg, errcode, j)
+
+    def to_synapse_error(self) -> SynapseError:
+        """Make a SynapseError directly based on a TRUSTED HTTPResponseException.
+
+        This is useful when a proxied request has failed, and we need to
+        decide how to map the failure onto a matrix error to send back to the
+        client.
+
+        An attempt is made to parse the body of the HTTP response as a Matrix
+        error. If that succeeds, the errcode and error message from the body
+        are copied verbatim into the new Synapse error, unless it's of
+        a forbidden type.
+
+        Otherwise, the errcode is set to M_UNKNOWN, and the error message is
+        set to the reason code from the HTTP response.
+
+        Safety:
+            This is the correct method to use when forwarding errors
+            from upstream requests (e.g. federation, policy servers).
+
+            FIXME: restrict forwarded errors further
+
+        Returns:
+            The error converted to a SynapseError.
+        """
+        # try to parse the body as json, to get better errcode/msg, but
+        # default to M_UNKNOWN with the HTTP status as the error text
+        try:
+            j = json_decoder.decode(self.response.decode("utf-8"))
+        except ValueError:
+            j = {}
+
+        if not isinstance(j, dict):
+            j = {}
+
+        status = self.code
+        errcode = j.pop("errcode", Codes.UNKNOWN)
+        if not isinstance(errcode, str):
+            errcode = Codes.UNKNOWN
+        errmsg = j.pop("error", self.msg)
+        if not isinstance(errmsg, str):
+            errmsg = self.msg
+
+        if errcode == Codes.UNKNOWN_TOKEN:
+            # We must not relay this error code back down to clients,
+            # because clients interpret this code to mean that they
+            # have been logged out.
+            # See: https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq
+            errcode = Codes.UNKNOWN
+
+        if status == HTTPStatus.UNAUTHORIZED:
+            status = HTTPStatus.BAD_REQUEST
+
+        return ProxiedRequestError(status, errmsg, errcode, j)
 
 
 class HomeServerNotSetupException(Exception):
