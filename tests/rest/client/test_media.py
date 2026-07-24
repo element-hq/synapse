@@ -3373,7 +3373,8 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
-        # Assert that the upload limit from the module callback was used (identified by max_bytes=123)
+        # Assert that the upload limit from the module callback was used (identified by
+        # max_bytes=123) (as opposed to the global default).
         assert self.last_media_upload_limit_exceeded is not None
         limit = self.last_media_upload_limit_exceeded["limit"]
         assert isinstance(limit, MediaUploadLimit)
