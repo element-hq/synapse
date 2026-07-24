@@ -1103,6 +1103,8 @@ class SlidingSyncExtensionHandler:
         into the timeline will be included, unless they would be included otherwise.
         For other rooms, all members of the room will be included as candidates.
 
+        Note, this does not collect user ID's from the profile updates stream.
+
         Args:
             user_id: The full user ID syncing.
             rooms: A set of rooms that was already calculated as relevant for this
@@ -1295,31 +1297,46 @@ class SlidingSyncExtensionHandler:
             field_names=fields,
             field_names_empty_means_all_fields=True,
         )
-        left_room_user_ids = {
-            update.user_id
-            for update in updates
-            if update.action == ProfileUpdateAction.LEFT_ROOM.value
-        }
+
+        # Add any newly joined users to our list of users
         joined_room_user_ids = {
             update.user_id
             for update in updates
             if update.action == ProfileUpdateAction.JOINED_ROOM.value
         }
-        # Add any newly joined users
         profile_user_ids.update(joined_room_user_ids)
 
-        updated_users = {
+        # Add any users from field updates
+        updated_user_ids = {
             update.user_id
             for update in updates
             if update.action == ProfileUpdateAction.UPDATE.value
         }
-        # Add users with updates
-        profile_user_ids.update(updated_users)
+        profile_user_ids.update(updated_user_ids)
+
+        # Collect users who left rooms
+        left_room_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.LEFT_ROOM.value
+        }
+
+        # Collect users who deleted fields
+        delete_field_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.DELETE.value
+        }
+
+        # Process left rooms
+        for other_user_id in left_room_user_ids:
+            # Return a null response to the client
+            response[other_user_id] = None
 
         updated_user_fields: dict[str, set[str]] = {}
         # Set fields from updates
         for update in updates:
-            if not update.affected_fields:
+            if not update.affected_fields or update.user_id in left_room_user_ids:
                 continue
             for field_name in update.affected_fields:
                 # Skip the update if the client didn't ask for this field, or we're not
@@ -1331,11 +1348,14 @@ class SlidingSyncExtensionHandler:
                 updated_user_fields.setdefault(update.user_id, set()).add(field_name)
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
-            profile_user_ids
+            # Get profiles for both updates and deletes in one go
+            profile_user_ids.union(delete_field_user_ids),
         )
 
         # Serialise the profile updates into the sync response format.
         for profile_user_id in profile_user_ids:
+            if profile_user_id in left_room_user_ids:
+                continue
             profile_data = profile_data_by_user.get(profile_user_id)
             if profile_data is None:
                 # No profile data for this user, just return a blank dictionary
@@ -1386,11 +1406,35 @@ class SlidingSyncExtensionHandler:
                     "updated": per_user_updates,
                 }
 
-        # Process left rooms
-        if left_room_user_ids:
-            for other_user_id in left_room_user_ids:
-                # Return a null response to the client
-                response[other_user_id] = None
+        # Process deleted fields
+        for update in updates:
+            if (
+                update.action != ProfileUpdateAction.DELETE.value
+                or not update.affected_fields
+                or update.user_id in left_room_user_ids
+            ):
+                continue
+            profile_data = profile_data_by_user.get(update.user_id)
+            if not profile_data:
+                # No profile data for this user, just return a blank dictionary
+                # telling the clients to remove all profile information for this user.
+                response[update.user_id] = None
+                continue
+            for field_name in update.affected_fields:
+                if field_name in profile_data.keys():
+                    # This field has re-appeared to the profile, skip
+                    continue
+                if response.get(update.user_id) is None:
+                    response[update.user_id] = {"removed": []}
+
+                # Typing fix as mypy thinks this may be None
+                entry = cast(JsonDict, response[update.user_id])
+                removed = cast(list[str], entry.setdefault("removed", []))
+
+                # Ensure we only add the field once
+                if field_name in removed:
+                    continue
+                removed.append(field_name)
 
         return SlidingSyncResult.Extensions.ProfilesExtension(
             users=response,
