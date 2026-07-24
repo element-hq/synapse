@@ -373,19 +373,10 @@ def _tag(gh_token: str | None) -> None:
         )
         click.get_current_context().abort()
 
-    # Get the appropriate changelogs and tag.
-    changes = get_changes_for_version(current_version)
+    # We simply point to the changelog instead of duplicating the content into the git tag/release
+    tag_message = f"Changelog: https://github.com/element-hq/synapse/blob/{repo.active_branch.name}/CHANGES.md"
 
-    click.echo_via_pager(changes)
-    if click.confirm("Edit text?", default=False):
-        edited_changes = click.edit(changes, require_save=False)
-        # This assert is for mypy's benefit. click's docs are a little unclear, but
-        # when `require_save=False`, not saving the temp file in the editor returns
-        # the original string.
-        assert edited_changes is not None
-        changes = edited_changes
-
-    repo.create_tag(tag_name, message=changes, sign=True)
+    repo.create_tag(tag_name, message=tag_message, sign=True)
 
     if not click.confirm("Push tag to GitHub?", default=True):
         print("")
@@ -420,7 +411,7 @@ def _tag(gh_token: str | None) -> None:
     release = gh_repo.create_git_release(
         tag=tag_name,
         name=tag_name,
-        message=changes,
+        message=tag_message,
         draft=True,
         prerelease=current_version.is_prerelease,
     )
@@ -745,6 +736,7 @@ def announce(_gh_token: str | None) -> None:
 def _announce() -> None:
     """Generate markdown to announce the release."""
 
+    synapse_repo = get_repo_and_check_clean_checkout()
     current_version = get_package_version()
     tag_name = f"v{current_version}"
     is_rc = "rc" in tag_name
@@ -764,7 +756,7 @@ Hi everyone. Synapse {current_version} has just been released.
         )
 
     release_text += f"""
-[notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
+[notes](https://github.com/element-hq/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md) | \
 [docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
