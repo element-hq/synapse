@@ -1817,7 +1817,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             )
 
     async def store_e2e_cross_signing_signatures(
-        self, user_id: str, signatures: "Iterable[SignatureListItem]"
+        self, user_id: str, signatures: "list[SignatureListItem]"
     ) -> None:
         """Stores cross-signing signatures.
 
@@ -1828,7 +1828,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
         def _store_e2e_cross_signing_signatures(
             txn: LoggingTransaction,
-            signatures: "Iterable[SignatureListItem]",
+            signatures: "list[SignatureListItem]",
         ) -> None:
             self.db_pool.simple_upsert_many_txn(
                 txn,
