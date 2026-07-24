@@ -1342,6 +1342,7 @@ dependencies = [
  "icu_segmenter",
  "itertools",
  "lazy_static",
+ "libc",
  "log",
  "mime",
  "once_cell",
