@@ -35,6 +35,7 @@ from synapse.types.handlers.sliding_sync import (
     HaveSentFlag,
     MutablePerConnectionState,
     PerConnectionState,
+    ProfileFieldsRequestChanges,
     ProfileFieldStatusMap,
     RoomLazyMembershipChanges,
     RoomStatusMap,
@@ -190,6 +191,34 @@ class SlidingSyncStore(SQLBaseStore):
                 per_connection_state, store
             ),
         )
+
+    def _persist_profile_fields_request_txn(
+        self,
+        txn: LoggingTransaction,
+        connection_key: int,
+        profile_fields_request: ProfileFieldsRequestChanges,
+    ) -> None:
+        """Persist the requested profile field names for this connection."""
+
+        # Delete existing entries for this connection
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="sliding_sync_connection_profile_fields_request",
+            keyvalues={"connection_key": connection_key},
+        )
+
+        # Insert the current field names
+        if profile_fields_request.requested_field_names:
+            rows = [
+                (connection_key, field_name)
+                for field_name in profile_fields_request.requested_field_names
+            ]
+            self.db_pool.simple_insert_many_txn(
+                txn,
+                table="sliding_sync_connection_profile_fields_request",
+                keys=("connection_key", "field_name"),
+                values=rows,
+            )
 
     def persist_per_connection_state_txn(
         self,
@@ -461,6 +490,12 @@ class SlidingSyncStore(SQLBaseStore):
             per_connection_state.room_lazy_membership,
         )
 
+        self._persist_profile_fields_request_txn(
+            txn,
+            connection_key,
+            per_connection_state.profile_fields_request,
+        )
+
         return connection_position
 
     @cached(iterable=True, max_entries=100000)
@@ -484,6 +519,45 @@ class SlidingSyncStore(SQLBaseStore):
         store = cast("DataStore", self)
 
         return await per_connection_state_db.to_state(store)
+
+    async def get_sliding_sync_connection_profile_fields_request(
+        self, connection_position: int
+    ) -> set[str]:
+        """Get the requested profile field names for a given connection position.
+
+        Args:
+            connection_position: The sliding sync connection position.
+
+        Returns:
+            A set of field names that were requested for this connection.
+        """
+
+        def get_profile_fields_request_txn(
+            txn: LoggingTransaction,
+        ) -> set[str]:
+            rows = self.db_pool.simple_select_list_txn(
+                txn,
+                table="sliding_sync_connection_profile_fields_request",
+                keyvalues={
+                    "connection_key": (
+                        # First get the connection_key from the position
+                        self.db_pool.simple_select_one_onecol_txn(
+                            txn,
+                            table="sliding_sync_connection_positions",
+                            keyvalues={"connection_position": connection_position},
+                            retcol="connection_key",
+                        )
+                    )
+                },
+                retcols=("field_name",),
+            )
+            return {row[0] for row in rows}
+
+        return await self.db_pool.runInteraction(
+            "get_sliding_sync_connection_profile_fields_request",
+            get_profile_fields_request_txn,
+            db_autocommit=True,
+        )
 
     def _get_and_clear_connection_positions_txn(
         self,
@@ -687,12 +761,26 @@ class SlidingSyncStore(SQLBaseStore):
                 profile_updates[user_id] = {}
             profile_updates[user_id][field_name] = have_sent_field
 
+        # Fetch the profile fields request for this connection
+        profile_fields_request_rows = self.db_pool.simple_select_list_txn(
+            txn,
+            table="sliding_sync_connection_profile_fields_request",
+            keyvalues={"connection_key": connection_key},
+            retcols=("field_name",),
+        )
+        profile_fields_request = ProfileFieldsRequestChanges(
+            requested_field_names=frozenset(
+                {row[0] for row in profile_fields_request_rows}
+            )
+        )
+
         return PerConnectionStateDB(
             last_used_ts=last_used_ts,
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             profile_updates=ProfileFieldStatusMap(profile_updates),
+            profile_fields_request=profile_fields_request,
             room_configs=room_configs,
             room_lazy_membership={},
         )
@@ -876,6 +964,7 @@ class PerConnectionStateDB:
     receipts: "RoomStatusMap[str]"
     account_data: "RoomStatusMap[str]"
     profile_updates: "ProfileFieldStatusMap[str]"
+    profile_fields_request: "ProfileFieldsRequestChanges"
 
     room_configs: Mapping[str, "RoomSyncConfig"]
 
@@ -945,6 +1034,7 @@ class PerConnectionStateDB:
                 "receipts": receipts,
                 "account_data": account_data,
                 "profile_updates": profile_updates,
+                "profile_fields_request": per_connection_state.profile_fields_request.requested_field_names,
                 "room_configs": per_connection_state.room_configs.maps[0],
             }
         )
@@ -955,6 +1045,7 @@ class PerConnectionStateDB:
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             profile_updates=ProfileFieldStatusMap(profile_updates),
+            profile_fields_request=per_connection_state.profile_fields_request,
             room_configs=per_connection_state.room_configs.maps[0],
             room_lazy_membership=per_connection_state.room_lazy_membership,
         )
@@ -1015,5 +1106,6 @@ class PerConnectionStateDB:
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             profile_updates=ProfileFieldStatusMap(profile_updates),
+            profile_fields_request=self.profile_fields_request,
             room_configs=self.room_configs,
         )

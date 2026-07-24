@@ -24,3 +24,12 @@ CREATE TABLE sliding_sync_connection_profile_updates(
 );
 
 CREATE UNIQUE INDEX sliding_sync_connection_profile_updates_idx ON sliding_sync_connection_profile_updates(connection_position, user_id, field_name);
+
+-- Stores the requested profile field names for each sliding sync connection.
+-- This allows us to detect when a client changes which fields it's requesting.
+CREATE TABLE sliding_sync_connection_profile_fields_request(
+    connection_key BIGINT NOT NULL REFERENCES sliding_sync_connections(connection_key) ON DELETE CASCADE,
+    field_name TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX sliding_sync_connection_profile_fields_request_idx ON sliding_sync_connection_profile_fields_request(connection_key, field_name);

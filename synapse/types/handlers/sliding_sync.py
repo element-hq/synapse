@@ -996,6 +996,52 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
 
 
 @attr.s(auto_attribs=True, frozen=True)
+class ProfileFieldsRequestChanges:
+    """Tracks profile field name requests across sliding sync connections.
+
+    This is used to detect if the requested profile fields have changed between
+    connection positions, similar to how `RoomLazyMembershipChanges` tracks
+    lazy membership changes.
+    """
+
+    requested_field_names: frozenset[str] = attr.Factory(frozenset)
+    """The set of profile field names that were requested in the previous
+    connection position. Used to detect if the current request has different
+    field names.
+    """
+
+    def has_field_names_changed(self, current_fields: set[str]) -> bool:
+        """Check if the requested field names have changed compared to the
+        previous connection state.
+
+        Args:
+            current_fields: The set of field names requested in the current sync.
+
+        Returns:
+            True if the field names have changed, False otherwise.
+        """
+        return self.requested_field_names != frozenset(current_fields)
+
+    def with_updated_field_names(
+        self, current_fields: set[str]
+    ) -> "ProfileFieldsRequestChanges":
+        """Return a new instance with updated field names.
+
+        Since this class is frozen, we return a new instance rather than
+        mutating in place.
+
+        Args:
+            current_fields: The set of field names from the current sync request.
+
+        Returns:
+            A new ProfileFieldsRequestChanges instance with updated field names.
+        """
+        return ProfileFieldsRequestChanges(
+            requested_field_names=frozenset(current_fields)
+        )
+
+
+@attr.s(auto_attribs=True, frozen=True)
 class PerConnectionState:
     """The per-connection state. A snapshot of what we've sent down the
     connection before.
@@ -1032,6 +1078,10 @@ class PerConnectionState:
         ProfileFieldStatusMap
     )
 
+    profile_fields_request: ProfileFieldsRequestChanges = attr.Factory(
+        ProfileFieldsRequestChanges
+    )
+
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
         room_configs = cast(MutableMapping[str, RoomSyncConfig], self.room_configs)
@@ -1043,6 +1093,7 @@ class PerConnectionState:
             account_data=self.account_data.get_mutable(),
             room_configs=ChainMap({}, room_configs),
             profile_updates=self.profile_updates.get_mutable(),
+            profile_fields_request=self.profile_fields_request,
         )
 
     def copy(self) -> "PerConnectionState":
@@ -1053,10 +1104,12 @@ class PerConnectionState:
             account_data=self.account_data.copy(),
             room_configs=dict(self.room_configs),
             profile_updates=self.profile_updates.copy(),
+            profile_fields_request=self.profile_fields_request,
         )
 
     def __len__(self) -> int:
         # FIXME: this is missing self.account_data
+        # TODO
         return (
             len(self.rooms)
             + len(self.receipts)
@@ -1142,6 +1195,8 @@ class MutablePerConnectionState(PerConnectionState):
 
     profile_updates: MutableProfileFieldStatusMap[MultiWriterStreamToken]
 
+    profile_fields_request: ProfileFieldsRequestChanges
+
     # A map from room ID to the lazily-loaded memberships needed for the
     # request in that room.
     room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
@@ -1165,8 +1220,19 @@ class MutablePerConnectionState(PerConnectionState):
                 for change in self.room_lazy_membership.values()
             )
             or bool(self.profile_updates.get_updates())
+            # TODO
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
         """Get updates to the room sync config"""
         return self.room_configs.maps[0]
+
+    def update_profile_fields_request(self, current_fields: set[str]) -> None:
+        """Update the profile fields request tracking.
+
+        Args:
+            current_fields: The set of field names from the current sync request.
+        """
+        self.profile_fields_request = (
+            self.profile_fields_request.with_updated_field_names(current_fields)
+        )

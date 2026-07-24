@@ -1270,7 +1270,7 @@ class SlidingSyncExtensionHandler:
                     else set(updated_user_fields.get(profile_user_id, []))
                 )
                 for field_name in user_fields:
-                    # Ensure we don't send the field unnecessarely to the client, if
+                    # Ensure we don't send the field unnecessarily to the client, if
                     # we've sent it down in this connection before, and it hasn't been
                     # updated.
                     if (

@@ -586,6 +586,60 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         )
 
     @override_config({"include_profile_updates_in_sync": True})
+    def test_fields_subset_changing_sends_down_field_even_if_not_changed(self) -> None:
+        """
+        > Finally, if the list of fields expands to cover a new field ID, those fields should
+        > be sent down for all users that are within the current room subset. Future incremental
+        > updates will then include changes to this field.
+        """
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        profiles_config: dict = {"enabled": True, "fields": ["displayname"]}
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                self.joined_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+            },
+            "extensions": {
+                "org.matrix.msc4262.profiles": profiles_config,
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+
+        # Starting situation, we get the field we wanted
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {
+                "updated": {
+                    "displayname": "other_user",
+                },
+            },
+        )
+
+        # Start asking for more fields
+        sync_body["extensions"]["org.matrix.msc4262.profiles"]["fields"].append(
+            "avatar_url"
+        )
+
+        # Make an incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+        # We get the new field even though it didn't change
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {
+                "updated": {
+                    "avatar_url": None,
+                },
+            },
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
     def test_removed_fields_get_sent_down_as_removed(self) -> None:
         """
         > Likewise, any field IDs that are cleared/removed from a user's profile will appear under users-><user_id>->removed.
@@ -607,14 +661,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > The homeserver MAY omit some fields and profiles if it believes that the client has
         > already received them, likewise repeat profiles MAY be sent down based on homeserver
         > implementation.
-        """
-
-    @override_config({"include_profile_updates_in_sync": True})
-    def test_fields_subset_changing_sends_down_field_even_if_not_changed(self) -> None:
-        """
-        > Finally, if the list of fields expands to cover a new field ID, those fields should
-        > be sent down for all users that are within the current room subset. Future incremental
-        > updates will then include changes to this field.
         """
 
     """
