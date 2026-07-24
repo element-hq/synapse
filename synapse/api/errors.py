@@ -524,6 +524,7 @@ class UserLimitExceededError(SynapseError):
         self,
         code: int,
         msg: str,
+        *,
         info_uri: str,
         can_upgrade: bool = False,
     ):

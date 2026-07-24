@@ -413,8 +413,8 @@ class MediaRepository:
                 raise UserLimitExceededError(
                     403,
                     "Media upload limit exceeded",
-                    info_uri,
-                    limit.can_upgrade,
+                    info_uri=info_uri,
+                    can_upgrade=limit.can_upgrade,
                 )
 
         if is_new_media:
