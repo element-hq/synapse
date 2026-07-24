@@ -32,6 +32,8 @@ pub struct Session {
     /// treated as an idempotent no-op.
     previous_hash: Option<[u8; 32]>,
     data: String,
+    /// Monotonic counter incremented on each successful write.
+    sequence: u64,
     last_modified: SystemTime,
     expires: SystemTime,
 }
@@ -88,12 +90,14 @@ impl<'source> IntoPyObject<'source> for PutResponse {
 impl Session {
     /// Create a new session with the given data and time-to-live.
     pub fn new(id: Ulid, data: String, now: SystemTime, ttl: Duration) -> Self {
-        let hash = Self::compute_hash(&data, now);
+        let sequence = 0;
+        let hash = Self::compute_hash(id, sequence, &data);
         Self {
             id,
             hash,
             previous_hash: None,
             data,
+            sequence,
             expires: now + ttl,
             last_modified: now,
         }
@@ -107,7 +111,8 @@ impl Session {
     /// Update the session with new data and last modified time.
     pub fn update(&mut self, data: String, now: SystemTime) {
         self.previous_hash = Some(self.hash);
-        self.hash = Self::compute_hash(&data, now);
+        self.sequence += 1;
+        self.hash = Self::compute_hash(self.id, self.sequence, &data);
         self.data = data;
         self.last_modified = now;
     }
@@ -126,15 +131,13 @@ impl Session {
         URL_SAFE_NO_PAD.encode(previous_hash) == sequence_token
     }
 
-    /// Compute the hash of the data and timestamp.
-    fn compute_hash(data: &str, now: SystemTime) -> [u8; 32] {
+    /// Compute the hash of the rendezvous ID, write counter and data, as
+    /// recommended by MSC4388 for `sequence_token` values.
+    fn compute_hash(id: Ulid, sequence: u64, data: &str) -> [u8; 32] {
         let mut hasher = Sha256::new();
+        hasher.update(id.to_bytes());
+        hasher.update(sequence.to_be_bytes());
         hasher.update(data);
-        let now_millis = now
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        hasher.update(now_millis.to_be_bytes());
         hasher.finalize().into()
     }
 
