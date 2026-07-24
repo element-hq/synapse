@@ -107,6 +107,7 @@ def _load_rules(
         msc4028_push_encrypted_events=experimental_config.msc4028_push_encrypted_events,
         msc4210_enabled=experimental_config.msc4210_enabled,
         msc4306_enabled=experimental_config.msc4306_enabled,
+        msc4506_enabled=experimental_config.msc4506_enabled,
     )
 
     return filtered_rules
