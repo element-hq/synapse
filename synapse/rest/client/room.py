@@ -1505,7 +1505,7 @@ class RoomAliasListServlet(RestServlet):
     PATTERNS = [
         re.compile(
             r"^/_matrix/client/unstable/org\.matrix\.msc2432"
-            r"/rooms/(?P<room_id>[^/]*)/aliases"
+            r"/rooms/(?P<room_id>[^/]*)/aliases$"
         ),
     ] + list(client_patterns("/rooms/(?P<room_id>[^/]*)/aliases$", unstable=False))
     CATEGORY = "Client API requests"
