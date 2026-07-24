@@ -236,6 +236,71 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                 },
             )
 
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_updated_field_then_deleted_does_not_error(self) -> None:
+        """
+        Test that profile extension response does not crash if the user first
+        updates a field, then deletes it, and then the sync happens seeing both
+        the update and delete in the stream.
+        """
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                    "fields": ["field"],
+                },
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        # Starting situation
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {
+                "updated": {
+                    "field": "value",
+                }
+            },
+        )
+
+        # Update field
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="new value",
+            )
+        )
+        # Delete field
+        self.get_success(
+            self.profile_handler.delete_profile_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+            )
+        )
+
+        # Make an incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+
+        # FIXME: once field deletions come down in sync this should
+        # be checking for that
+        self.assertIsNone(
+            response_body["extensions"].get("org.matrix.msc4262.profiles")
+        )
+
     @parameterized.expand(
         [
             True,

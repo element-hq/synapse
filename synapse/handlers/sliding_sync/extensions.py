@@ -1267,7 +1267,9 @@ class SlidingSyncExtensionHandler:
                 user_fields = (
                     user_fields
                     if profile_user_id in joined_room_user_ids
-                    else set(updated_user_fields.get(profile_user_id, []))
+                    else set(updated_user_fields.get(profile_user_id, [])).intersection(
+                        profile_data.keys()
+                    )
                 )
                 for field_name in user_fields:
                     # Ensure we don't send the field unnecessarely to the client, if
