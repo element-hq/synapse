@@ -71,7 +71,7 @@ from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
-from synapse.util.async_helpers import concurrently_execute
+from synapse.util.async_helpers import concurrently_execute, yieldable_gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
@@ -134,6 +134,9 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
+        self._user_directory_search_timeout = (
+            hs.config.experimental.msc4258_federation_search_timeout
+        )
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
@@ -1915,6 +1918,75 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def user_directory_search(
+        self,
+        destination: str,
+        requester: str,
+        search_term: str,
+        limit: int,
+    ) -> JsonDict:
+        """Search the user directory of a single remote server (MSC4258).
+
+        Returns an empty result set if the remote query fails, so that one
+        slow or broken destination never breaks a merged search.
+        """
+        try:
+            return await self.transport_layer.user_directory_search(
+                destination,
+                requester,
+                search_term,
+                limit,
+                self._user_directory_search_timeout,
+            )
+        except Exception:
+            logger.warning(
+                "Error searching user directory of %s", destination, exc_info=True
+            )
+            return {"limited": False, "results": []}
+
+    async def search_user_directory_across_federation(
+        self,
+        destinations: StrCollection,
+        requester: str,
+        search_term: str,
+        limit: int,
+    ) -> JsonDict:
+        """Search the user directories of several remote servers in parallel
+        (MSC4258) and concatenate the results.
+
+        Args:
+            destinations: The servers to query; our own name is skipped.
+            requester: The user ID performing the search.
+            search_term: The term to search for.
+            limit: Maximum number of results to return overall.
+        """
+        remote_destinations = [
+            destination
+            for destination in destinations
+            if not self._is_mine_server_name(destination)
+        ]
+        if not remote_destinations:
+            return {"limited": False, "results": []}
+
+        server_results = await yieldable_gather_results(
+            lambda destination: self.user_directory_search(
+                destination, requester, search_term, limit
+            ),
+            remote_destinations,
+        )
+
+        limited = False
+        results: list[JsonDict] = []
+        for result in server_results:
+            limited = limited or bool(result.get("limited", False))
+            results.extend(result.get("results", []))
+
+        if len(results) > limit:
+            results = results[:limit]
+            limited = True
+
+        return {"limited": limited, "results": results}
 
     async def federation_download_media(
         self,

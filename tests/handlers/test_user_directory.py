@@ -1207,6 +1207,169 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
                 i += 2
 
 
+class TestUserDirFederatedSearch(unittest.HomeserverTestCase):
+    """Tests for MSC4258 federated user directory search, client side."""
+
+    servlets = [
+        user_directory.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4258_enabled": True}
+        config["update_user_directory_from_worker"] = None
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        transport = hs.get_federation_client().transport_layer
+        self.user_directory_search_mock = AsyncMock(
+            return_value={
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@remoteuser:remote.example.com",
+                        "display_name": "Remote User",
+                        "avatar_url": None,
+                    }
+                ],
+            }
+        )
+        transport.user_directory_search = self.user_directory_search_mock  # type: ignore[method-assign]
+
+        # Two local users sharing a room, so local search has something to find.
+        self.u1 = self.register_user("user1", "pass")
+        self.u1_token = self.login(self.u1, "pass")
+        u2 = self.register_user("user2", "pass")
+        u2_token = self.login(u2, "pass")
+        room_id = self.helper.create_room_as(self.u1, tok=self.u1_token)
+        self.helper.join(room_id, user=u2, tok=u2_token)
+
+    def search(self, body: JsonDict) -> JsonDict:
+        channel = self.make_request(
+            "POST",
+            "user_directory/search",
+            body,
+            access_token=self.u1_token,
+        )
+        self.assertEqual(200, channel.code, channel.result)
+        return channel.json_body
+
+    def test_targeted_server_search(self) -> None:
+        """Searching an explicit remote server returns that server's results."""
+        results = self.search(
+            {"search_term": "remoteuser", "server": "remote.example.com"}
+        )
+        self.assertEqual(
+            [r["user_id"] for r in results["results"]],
+            ["@remoteuser:remote.example.com"],
+        )
+        self.user_directory_search_mock.assert_called_once()
+        call = self.user_directory_search_mock.call_args
+        self.assertEqual(call.args[0], "remote.example.com")
+        self.assertEqual(call.args[1], self.u1)
+        self.assertEqual(call.args[2], "remoteuser")
+
+    def test_short_term_stays_local(self) -> None:
+        """A below-threshold term never leaves the server, even with server set."""
+        results = self.search({"search_term": "use", "server": "remote.example.com"})
+        self.assertIn("@user2:test", [r["user_id"] for r in results["results"]])
+        self.user_directory_search_mock.assert_not_called()
+
+    def test_local_scope_stays_local(self) -> None:
+        results = self.search(
+            {
+                "search_term": "user2",
+                "server": "remote.example.com",
+                "search_scope": "local",
+            }
+        )
+        self.assertEqual([r["user_id"] for r in results["results"]], ["@user2:test"])
+        self.user_directory_search_mock.assert_not_called()
+
+    def test_no_whitelist_no_broadcast(self) -> None:
+        """Without a targeted server or a federation whitelist, a plain search
+        is local-only."""
+        results = self.search({"search_term": "user2"})
+        self.assertEqual([r["user_id"] for r in results["results"]], ["@user2:test"])
+        self.user_directory_search_mock.assert_not_called()
+
+    def test_own_server_name_is_local(self) -> None:
+        """Explicitly naming our own server behaves like a local search."""
+        results = self.search({"search_term": "user2", "server": "test"})
+        self.assertEqual([r["user_id"] for r in results["results"]], ["@user2:test"])
+        self.user_directory_search_mock.assert_not_called()
+
+
+class TestUserDirFederatedSearchWhitelist(unittest.HomeserverTestCase):
+    """MSC4258 broadcast search against the federation whitelist."""
+
+    servlets = [
+        user_directory.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4258_enabled": True}
+        config["update_user_directory_from_worker"] = None
+        config["federation_domain_whitelist"] = ["remote.example.com", "test"]
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        transport = hs.get_federation_client().transport_layer
+        self.user_directory_search_mock = AsyncMock(
+            return_value={
+                "limited": False,
+                "results": [
+                    {
+                        "user_id": "@remoteuser:remote.example.com",
+                        "display_name": "user2 elsewhere",
+                        "avatar_url": None,
+                    },
+                    # A duplicate of a local result, to exercise dedup.
+                    {
+                        "user_id": "@user2:test",
+                        "display_name": "user2",
+                        "avatar_url": None,
+                    },
+                ],
+            }
+        )
+        transport.user_directory_search = self.user_directory_search_mock  # type: ignore[method-assign]
+
+        self.u1 = self.register_user("user1", "pass")
+        self.u1_token = self.login(self.u1, "pass")
+        u2 = self.register_user("user2", "pass")
+        u2_token = self.login(u2, "pass")
+        room_id = self.helper.create_room_as(self.u1, tok=self.u1_token)
+        self.helper.join(room_id, user=u2, tok=u2_token)
+
+    def test_broadcast_merges_and_dedupes(self) -> None:
+        channel = self.make_request(
+            "POST",
+            "user_directory/search",
+            {"search_term": "user2"},
+            access_token=self.u1_token,
+        )
+        self.assertEqual(200, channel.code, channel.result)
+        # Local result first, then the remote one, with the remote duplicate
+        # of the local user dropped. Our own name is skipped as a destination.
+        self.assertEqual(
+            [r["user_id"] for r in channel.json_body["results"]],
+            ["@user2:test", "@remoteuser:remote.example.com"],
+        )
+        self.user_directory_search_mock.assert_called_once()
+        self.assertEqual(
+            self.user_directory_search_mock.call_args.args[0],
+            "remote.example.com",
+        )
+
+
 class TestUserDirSearchDisabled(unittest.HomeserverTestCase):
     servlets = [
         user_directory.register_servlets,

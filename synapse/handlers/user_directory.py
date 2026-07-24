@@ -39,7 +39,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import UserID
+from synapse.types import JsonMapping, StrCollection, UserID
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -115,6 +115,10 @@ class UserDirectoryHandler(StateDeltasHandler):
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._hs = hs
+        self._federation_client = hs.get_federation_client()
+        self._federation_domain_whitelist = (
+            hs.config.federation.federation_domain_whitelist
+        )
 
         # The current position in the current_state_delta stream
         self.pos: int | None = None
@@ -181,6 +185,39 @@ class UserDirectoryHandler(StateDeltasHandler):
         results["results"] = non_spammy_users
 
         return results
+
+    async def search_remote_users(
+        self,
+        user_id: str,
+        search_term: str,
+        limit: int,
+        server: str | None,
+    ) -> JsonMapping:
+        """Search the user directories of remote servers (MSC4258).
+
+        Args:
+            user_id: The user performing the search (sent to the remote
+                servers as the requester, so they can apply visibility).
+            search_term: The term to search for.
+            limit: Maximum number of results to return.
+            server: An explicit remote server whose directory to search. If
+                None, all servers on the federation whitelist (if one is
+                configured) are queried; with no whitelist there is nowhere
+                sensible to broadcast to, so no results are returned.
+        """
+        if server is not None:
+            destinations: StrCollection = [server]
+        elif self._federation_domain_whitelist is not None:
+            destinations = list(self._federation_domain_whitelist)
+        else:
+            destinations = []
+
+        if not destinations:
+            return {"limited": False, "results": []}
+
+        return await self._federation_client.search_user_directory_across_federation(
+            destinations, user_id, search_term, limit
+        )
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""

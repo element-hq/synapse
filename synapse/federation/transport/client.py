@@ -853,6 +853,37 @@ class TransportLayerClient:
             destination=destination, path=path, data={"user_ids": user_ids}
         )
 
+    async def user_directory_search(
+        self,
+        destination: str,
+        requester: str,
+        search_term: str,
+        limit: int,
+        timeout: int,
+    ) -> JsonDict:
+        """Search the user directory of a remote server (MSC4258).
+
+        Args:
+            destination: The remote server.
+            requester: The user ID performing the search.
+            search_term: The term to search for.
+            limit: Maximum number of results to return.
+            timeout: How long to wait for the remote response, in ms.
+        """
+        path = _create_path(
+            FEDERATION_UNSTABLE_PREFIX, "/org.matrix.msc4258/user_directory/search"
+        )
+
+        return await self.client.post_json(
+            destination=destination,
+            path=path,
+            data={"requester": requester, "search_term": search_term, "limit": limit},
+            # Searches are interactive: fail fast rather than waiting out a
+            # backoff period.
+            ignore_backoff=True,
+            timeout=timeout,
+        )
+
     async def download_media_r0(
         self,
         destination: str,
