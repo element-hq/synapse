@@ -105,9 +105,28 @@ class CapabilitiesRestServlet(RestServlet):
 
         # For transition from unstable to stable identifiers.
         if self.config.experimental.msc4133_enabled:
-            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = response[
-                "capabilities"
-            ]["m.profile_fields"]
+            allowed_profile_fields = list(
+                self.config.experimental.msc4133_key_allowlist or []
+            )
+            disallowed_msc4133_profile_fields = list(
+                self.config.experimental.msc4133_key_denylist or []
+            )
+
+            if self.config.registration.enable_set_displayname:
+                allowed_profile_fields.append("displayname")
+            else:
+                disallowed_msc4133_profile_fields.append("displayname")
+
+            if self.config.registration.enable_set_avatar_url:
+                allowed_profile_fields.append("avatar_url")
+            else:
+                disallowed_msc4133_profile_fields.append("avatar_url")
+
+            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = {
+                "enabled": True,
+                "allowed": allowed_profile_fields,
+                "disallowed": disallowed_msc4133_profile_fields,
+            }
 
         response["capabilities"]["org.matrix.msc4140.delayed_events"] = {
             "max_delay_ms": self.config.server.max_event_delay_duration.as_millis(),
