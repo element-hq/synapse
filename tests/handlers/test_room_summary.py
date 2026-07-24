@@ -36,11 +36,17 @@ from synapse.api.constants import (
 from synapse.api.errors import AuthError, NotFoundError, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.federation.transport.client import TransportLayerClient
-from synapse.handlers.room_summary import _child_events_comparison_key, _RoomEntry
+from synapse.handlers.room_summary import (
+    _child_events_comparison_key,
+    _get_permitted_public_state,
+    _parse_public_state,
+    _RoomEntry,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
+from synapse.types.state import StateEventQuery, StateFilter
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -118,6 +124,62 @@ class TestSpaceSummarySort(unittest.TestCase):
 
         ev1 = _create_event("!abc:test", "a" * 51)
         self.assertEqual([ev2, ev1], _order(ev1, ev2))
+
+
+class PublicStateTestCase(unittest.TestCase):
+    def test_parse_public_state(self) -> None:
+        """Public state rules are validated and normalized independently."""
+        public_state = _parse_public_state(
+            {
+                "wildcard": {},
+                "limited": {"state_keys": ["one", "two", "one"]},
+                "empty": {"state_keys": []},
+                "invalid_rule": [],
+                "invalid_state_keys": {"state_keys": ["one", 2]},
+            }
+        )
+
+        self.assertEqual(
+            public_state,
+            StateFilter.from_types(
+                [("wildcard", None), ("limited", "one"), ("limited", "two")]
+            ),
+        )
+
+    def test_get_permitted_public_state(self) -> None:
+        """Requested state is intersected with normalized public state rules."""
+        public_state = StateFilter.from_types(
+            [
+                ("wildcard", None),
+                ("limited", "one"),
+                ("limited", "two"),
+                ("overlap", "one"),
+                ("overlap", "two"),
+            ]
+        )
+
+        permitted_state = _get_permitted_public_state(
+            [
+                StateEventQuery("wildcard", "requested"),
+                StateEventQuery("limited"),
+                StateEventQuery("overlap", "two"),
+                StateEventQuery("overlap", "three"),
+                StateEventQuery("private"),
+            ],
+            public_state,
+        )
+
+        self.assertEqual(
+            permitted_state,
+            StateFilter.from_types(
+                [
+                    ("wildcard", "requested"),
+                    ("limited", "one"),
+                    ("limited", "two"),
+                    ("overlap", "two"),
+                ]
+            ),
+        )
 
 
 class SpaceSummaryTestCase(unittest.HomeserverTestCase):
@@ -245,6 +307,224 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             self.handler.get_room_hierarchy(create_requester(self.user), self.space)
         )
         self._assert_hierarchy(result, expected)
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_federation_hierarchy_additional_state(self) -> None:
+        """Federation hierarchy can include requested public state for each room."""
+        event_type = "m.security_labels"
+        self.helper.send_state(
+            self.space,
+            event_type=event_type,
+            body={"labels": ["space-label"]},
+            tok=self.token,
+        )
+        self.helper.send_state(
+            self.room,
+            event_type=event_type,
+            body={"labels": ["room-label"]},
+            tok=self.token,
+        )
+        for room_id in (self.space, self.room):
+            self.helper.send_state(
+                room_id,
+                event_type=EventTypes.MSC4507PublicState,
+                body={"public_state": {event_type: {"state_keys": [""]}}},
+                tok=self.token,
+            )
+
+        result = self.get_success(
+            self.handler.get_federation_hierarchy(
+                "remote.example.com",
+                self.space,
+                suggested_only=False,
+                additional_state=(StateEventQuery(event_type, ""),),
+            )
+        )
+
+        self.assertEqual(
+            result["room"]["org.matrix.msc4507.additional_state"],
+            [
+                {
+                    "type": event_type,
+                    "state_key": "",
+                    "content": {"labels": ["space-label"]},
+                    "sender": self.user,
+                }
+            ],
+        )
+        self.assertEqual(
+            result["children"][0]["org.matrix.msc4507.additional_state"],
+            [
+                {
+                    "type": event_type,
+                    "state_key": "",
+                    "content": {"labels": ["room-label"]},
+                    "sender": self.user,
+                }
+            ],
+        )
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_federation_hierarchy_additional_state_requires_public_state(
+        self,
+    ) -> None:
+        """Requested state is omitted if the room has not declared it public."""
+        event_type = "m.security_labels"
+        self.helper.send_state(
+            self.space,
+            event_type=event_type,
+            body={"labels": ["secret"]},
+            tok=self.token,
+        )
+
+        result = self.get_success(
+            self.handler.get_federation_hierarchy(
+                "remote.example.com",
+                self.space,
+                suggested_only=False,
+                additional_state=(StateEventQuery(event_type, ""),),
+            )
+        )
+
+        self.assertEqual(result["room"]["org.matrix.msc4507.additional_state"], [])
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_federation_hierarchy_additional_state_supports_state_key_wildcard(
+        self,
+    ) -> None:
+        """Omitting state_key requests all public state keys for that type."""
+        event_type = "com.example.some_state"
+        self.helper.send_state(
+            self.space,
+            event_type=event_type,
+            state_key="allowed",
+            body={"value": "allowed"},
+            tok=self.token,
+        )
+        self.helper.send_state(
+            self.space,
+            event_type=event_type,
+            state_key="private",
+            body={"value": "private"},
+            tok=self.token,
+        )
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.MSC4507PublicState,
+            body={"public_state": {event_type: {}}},
+            tok=self.token,
+        )
+
+        result = self.get_success(
+            self.handler.get_federation_hierarchy(
+                "remote.example.com",
+                self.space,
+                suggested_only=False,
+                additional_state=(StateEventQuery(event_type),),
+            )
+        )
+
+        self.assertEqual(
+            result["room"]["org.matrix.msc4507.additional_state"],
+            [
+                {
+                    "type": event_type,
+                    "state_key": "allowed",
+                    "content": {"value": "allowed"},
+                    "sender": self.user,
+                },
+                {
+                    "type": event_type,
+                    "state_key": "private",
+                    "content": {"value": "private"},
+                    "sender": self.user,
+                },
+            ],
+        )
+
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.MSC4507PublicState,
+            body={"public_state": {event_type: {"state_keys": ["allowed"]}}},
+            tok=self.token,
+        )
+
+        result = self.get_success(
+            self.handler.get_federation_hierarchy(
+                "remote.example.com",
+                self.space,
+                suggested_only=False,
+                additional_state=(StateEventQuery(event_type),),
+            )
+        )
+
+        self.assertEqual(
+            result["room"]["org.matrix.msc4507.additional_state"],
+            [
+                {
+                    "type": event_type,
+                    "state_key": "allowed",
+                    "content": {"value": "allowed"},
+                    "sender": self.user,
+                }
+            ],
+        )
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_federation_hierarchy_additional_state_omitted_without_query(
+        self,
+    ) -> None:
+        """The federation hierarchy response is unchanged without the MSC query."""
+        event_type = "m.security_labels"
+        self.helper.send_state(
+            self.space,
+            event_type=event_type,
+            body={"labels": ["public"]},
+            tok=self.token,
+        )
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.MSC4507PublicState,
+            body={"public_state": {event_type: {"state_keys": [""]}}},
+            tok=self.token,
+        )
+
+        result = self.get_success(
+            self.handler.get_federation_hierarchy(
+                "remote.example.com", self.space, suggested_only=False
+            )
+        )
+
+        self.assertNotIn("org.matrix.msc4507.additional_state", result["room"])
+
+    def test_federation_hierarchy_additional_state_disabled_by_default(
+        self,
+    ) -> None:
+        """The MSC4507 hierarchy response field is gated by experimental config."""
+        event_type = "m.security_labels"
+        self.helper.send_state(
+            self.space,
+            event_type=event_type,
+            body={"labels": ["public"]},
+            tok=self.token,
+        )
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.MSC4507PublicState,
+            body={"public_state": {event_type: {"state_keys": [""]}}},
+            tok=self.token,
+        )
+
+        result = self.get_success(
+            self.handler.get_federation_hierarchy(
+                "remote.example.com",
+                self.space,
+                suggested_only=False,
+                additional_state=(StateEventQuery(event_type, ""),),
+            )
+        )
+
+        self.assertNotIn("org.matrix.msc4507.additional_state", result["room"])
 
     @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_large_space(self) -> None:
@@ -1024,6 +1304,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             destination: str,
             room_id: str,
             suggested_only: bool,
+            additional_state: Iterable[StateEventQuery] = (),
         ) -> JsonDict:
             nonlocal federation_requests
             federation_requests += 1

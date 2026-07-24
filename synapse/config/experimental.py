@@ -309,3 +309,6 @@ class ExperimentalConfig(Config):
 
         # MSC4491: Invite reasons in room creation
         self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
+
+        # MSC4507: Return additional room state from the federation hierarchy endpoint.
+        self.msc4507_enabled: bool = experimental.get("msc4507_enabled", False)
