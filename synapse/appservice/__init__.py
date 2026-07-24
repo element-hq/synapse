@@ -89,6 +89,11 @@ class ApplicationService:
     # values.
     NS_LIST = [NS_USERS, NS_ALIASES, NS_ROOMS]
 
+    # Prefixes are applied after the version segment(s) (either /vX/ or /unstable/foo/):
+    # - /_matrix/client/(unstable/[^/]+|v[^/]+)/{prefix}/.*
+    # - /_matrix/federation/(unstable/[^/]+|v[^/]+)/{prefix}/.*
+    ALLOWED_PROXY_PREFIXES = {"rtc/livekit"}
+
     def __init__(
         self,
         token: str,
@@ -104,11 +109,16 @@ class ApplicationService:
         supports_unstable_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
         msc4190_device_management: bool = False,
+        proxy_prefix: str | None = None,
+        proxy_url: str | None = None,
     ):
         self.token = token
         self.url = (
             url.rstrip("/") if isinstance(url, str) else None
         )  # url must not end with a slash
+        self.proxy_url = (
+            proxy_url.rstrip("/") if isinstance(proxy_url, str) else None
+        )  # proxy_url must not end with a slash
         self.hs_token = hs_token
         # The full Matrix ID for this application service's sender.
         self.sender = sender
@@ -130,9 +140,20 @@ class ApplicationService:
         self.supports_ephemeral = supports_ephemeral
         self.msc3202_transaction_extensions = msc3202_transaction_extensions
         self.msc4190_device_management = msc4190_device_management
+        self.proxy_prefix = proxy_prefix
 
         if "|" in self.id:
             raise Exception("application service ID cannot contain '|' character")
+
+        if (self.proxy_prefix is None) != (self.proxy_url is None):
+            raise KeyError("proxy_url and proxy_prefix must always be set together")
+        if proxy_prefix is not None:
+            if not proxy_prefix or not self.proxy_url:
+                raise ValueError(
+                    "proxy_prefix and proxy_url must be a non-empty strings"
+                )
+            if not self._is_proxy_prefix_allowed(proxy_prefix):
+                raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
 
         # .protocols is a publicly visible field
         if protocols:
@@ -191,6 +212,12 @@ class ApplicationService:
         if namespace:
             return namespace.exclusive
         return False
+
+    def _is_proxy_prefix_allowed(self, prefix: str) -> bool:
+        return any(
+            prefix == allowed or prefix.startswith(allowed + "/")
+            for allowed in ApplicationService.ALLOWED_PROXY_PREFIXES
+        )
 
     @cached(num_args=1, cache_context=True)
     async def _matches_user_in_member_list(
