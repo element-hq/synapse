@@ -101,6 +101,15 @@ class EndToEndKeyBackgroundStore(SQLBaseStore):
             columns=("user_id", "device_id", "algorithm", "ts_added_ms"),
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="e2e_cross_signing_signatures_add_key_id_to_index",
+            index_name="e2e_cross_signing_signatures3_idx",
+            table="e2e_cross_signing_signatures",
+            columns=("user_id", "target_user_id", "target_device_id", "key_id"),
+            unique=True,
+            replaces_index="e2e_cross_signing_signatures2_idx",
+        )
+
 
 class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorkerStore):
     def __init__(
@@ -1808,7 +1817,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             )
 
     async def store_e2e_cross_signing_signatures(
-        self, user_id: str, signatures: "Iterable[SignatureListItem]"
+        self, user_id: str, signatures: "list[SignatureListItem]"
     ) -> None:
         """Stores cross-signing signatures.
 
@@ -1819,28 +1828,23 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
         def _store_e2e_cross_signing_signatures(
             txn: LoggingTransaction,
-            signatures: "Iterable[SignatureListItem]",
+            signatures: "list[SignatureListItem]",
         ) -> None:
-            self.db_pool.simple_insert_many_txn(
+            self.db_pool.simple_upsert_many_txn(
                 txn,
                 "e2e_cross_signing_signatures",
-                keys=(
-                    "user_id",
-                    "key_id",
-                    "target_user_id",
-                    "target_device_id",
-                    "signature",
-                ),
-                values=[
+                key_names=("user_id", "key_id", "target_user_id", "target_device_id"),
+                key_values=[
                     (
                         user_id,
                         item.signing_key_id,
                         item.target_user_id,
                         item.target_device_id,
-                        item.signature,
                     )
                     for item in signatures
                 ],
+                value_names=("signature",),
+                value_values=[(item.signature,) for item in signatures],
             )
 
             to_invalidate = [
