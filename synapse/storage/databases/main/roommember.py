@@ -595,6 +595,21 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             desc="get_local_users_in_room",
         )
 
+    @cached(max_entries=10000)
+    async def is_locally_joined(self, room_id: str) -> bool:
+        """
+        Checks if any local user is currently joined to the given room.
+        """
+        sql = """
+            SELECT 1 FROM local_current_membership
+            WHERE room_id = ? AND membership = ?
+            LIMIT 1
+        """
+        rows = await self.db_pool.execute(
+            "is_locally_joined", sql, room_id, Membership.JOIN
+        )
+        return bool(rows)
+
     async def get_local_users_related_to_room(
         self, room_id: str
     ) -> list[tuple[str, str]]:

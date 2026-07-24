@@ -79,6 +79,14 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual([self.room], [m.room_id for m in rooms_for_user])
 
+    def test_is_locally_joined(self) -> None:
+        self.room = self.helper.create_room_as(self.u_alice, tok=self.t_alice)
+
+        self.assertTrue(self.get_success(self.store.is_locally_joined(self.room)))
+        self.assertFalse(
+            self.get_success(self.store.is_locally_joined("!doesnotexist:test"))
+        )
+
     def test_count_known_servers(self) -> None:
         """
         _count_known_servers will calculate how many servers are in a room.
