@@ -644,10 +644,33 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         }
 
         # Make an incremental Sliding Sync request
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=self.tok
+        )
         # We should not get other user re-sent
         self.assertIsNone(
             response_body["extensions"].get("org.matrix.msc4262.profiles"),
+        )
+
+        # Set a new field value and ensure our tracking doesn't swallow updates
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="displayname",
+                new_value="new displayname",
+            )
+        )
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {
+                "updated": {
+                    "displayname": "new displayname",
+                },
+            },
         )
 
     @override_config({"include_profile_updates_in_sync": True})
