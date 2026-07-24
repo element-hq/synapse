@@ -54,10 +54,11 @@
 
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
+use futures::future::try_join_all;
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
-    types::{PyInt, PyTuple},
+    types::{PyInt, PyList, PyTuple},
 };
 use tokio_postgres::Client;
 
@@ -394,6 +395,91 @@ impl Cursor {
         Ok(())
     }
 
+    /// Execute `query` once for each parameter set in `params_seq`.
+    ///
+    /// This is DBAPI2's `executemany`, used by Synapse for batched writes. The
+    /// statement is `prepare`d once and then run for each parameter set; it
+    /// produces no fetchable rows. Like a single `execute`, the whole batch runs
+    /// inside the connection's (lazily opened) transaction, so a failure
+    /// part-way through aborts it and leaves the caller to roll back.
+    ///
+    /// The per-parameter-set executions are *pipelined*: their futures are
+    /// driven concurrently, so `tokio_postgres` streams the whole batch onto the
+    /// connection without waiting for a round-trip between each — one round-trip
+    /// for the batch rather than one per statement. Results are matched to
+    /// requests in order, and on the first error the rest are abandoned (the
+    /// transaction is aborted anyway).
+    ///
+    /// After it returns `rowcount` reports the total number of rows affected
+    /// across all executions (as psycopg2 does), `description` is `None`, and
+    /// any `fetch_*` is an error. An empty `params_seq` runs nothing at all —
+    /// no statement is sent and no transaction is opened — and leaves
+    /// `rowcount` at the PEP-249 "unknown" sentinel (`-1`).
+    #[pyo3(signature = (query, params_seq))]
+    fn executemany(
+        &self,
+        py: Python<'_>,
+        query: &str,
+        params_seq: Vec<Vec<PgValue>>,
+    ) -> PyResult<()> {
+        // Drop any previous result set before starting the new statement.
+        self.lock_state()?.new_query();
+
+        // An empty batch is a no-op (matching psycopg2): don't send anything or
+        // open a transaction, and leave `rowcount` reporting "unknown".
+        if params_seq.is_empty() {
+            self.lock_state()?.on_command_complete(None);
+            return Ok(());
+        }
+
+        let total = self.connection.with_client(py, |client| {
+            // Prepare once, then build a future per parameter set. Driving them
+            // concurrently is what makes `tokio_postgres` pipeline them onto the
+            // connection; blocking on the joined future runs the whole batch.
+            let statement = client.prepare(query).block_on_result(py)?;
+
+            let counts = try_join_all(
+                params_seq
+                    .into_iter()
+                    .map(|params| client.execute_raw(&statement, params)),
+            )
+            .block_on_result(py)?;
+
+            Ok(counts.into_iter().sum::<u64>())
+        })?;
+
+        // Retain the summed affected-row count for `rowcount`, as psycopg2 does.
+        self.lock_state()?.on_command_complete(Some(total));
+
+        Ok(())
+    }
+
+    /// Execute a multi-statement SQL script (statements separated by `;`).
+    ///
+    /// Unlike [`Cursor::execute`], which `prepare`s a single statement, this
+    /// runs the whole script on the simple-query protocol (`batch_execute`), so
+    /// it may contain many `;`-separated statements — as Synapse's schema files
+    /// do. It takes no parameters and produces no fetchable rows.
+    ///
+    /// This is a thin primitive: the script runs inside the connection's current
+    /// transaction, opening one lazily like `execute` and leaving it open for
+    /// the caller to commit. The higher-level engine `executescript` — which
+    /// also substitutes the auto-increment placeholder — is layered on top.
+    /// Note it does *not* commit any prior transaction first: unlike the
+    /// psycopg2 engine (which still prefixes `COMMIT; BEGIN TRANSACTION;`,
+    /// committing script-by-script), the Rust engine deliberately keeps a whole
+    /// sequence of schema/delta scripts in one transaction so it is applied
+    /// either completely or not at all — see
+    /// `BaseDatabaseEngine.executescript`'s docstring for the contract.
+    fn executescript(&self, py: Python<'_>, script: &str) -> PyResult<()> {
+        // A script yields no fetchable rows, so drop any previous result set.
+        self.lock_state()?.new_query();
+
+        self.connection.with_client(py, |client| {
+            client.batch_execute(script).block_on_result(py)
+        })
+    }
+
     /// Return the next row of the current result set, or `None` if exhausted.
     fn fetch_one<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
         self.lock_state()?.fetch_one(py)
@@ -425,6 +511,45 @@ impl Cursor {
     /// where it isn't (yet) known it follows PEP-249 and returns `-1`.
     fn rowcount<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyInt>> {
         self.lock_state()?.rowcount(py)
+    }
+
+    /// Return the PEP-249 `description` for the current result set, or `None`.
+    ///
+    /// This is a list with one entry per column, each a 7-tuple
+    /// `(name, type_code, display_size, internal_size, precision, scale,
+    /// null_ok)` as PEP-249 specifies. Only the column name is populated; the
+    /// remaining six fields are always `None` — that is all Synapse needs, as
+    /// it only ever reads `column[0]`.
+    ///
+    /// It is `None` when there is no row-returning result set to describe:
+    /// before any query, after an error reset the cursor, or for a statement
+    /// that returns no rows (e.g. a bare `INSERT`), matching psycopg2.
+    fn description<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyList>>> {
+        let state = self.lock_state()?;
+        let Some(columns) = state.description() else {
+            return Ok(None);
+        };
+
+        let rows = columns
+            .iter()
+            .map(|name| {
+                // PEP-249's 7-tuple; only `name` carries a meaningful value.
+                PyTuple::new(
+                    py,
+                    [
+                        name.into_pyobject(py)?.into_any(),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                        py.None().into_bound(py),
+                    ],
+                )
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+
+        Ok(Some(PyList::new(py, rows)?))
     }
 
     /// Close the cursor, discarding any in-flight result set.
