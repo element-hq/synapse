@@ -766,6 +766,7 @@ class ProfileWorkerStore(SQLBaseStore):
             return None
 
         # Record updates in the profile updates stream
+        #FIXME: this should be DELETE if displayname/avatarurl are being emptied
         stream_id = self.record_profile_updates_txn(
             txn=txn,
             user_id=user_id,
