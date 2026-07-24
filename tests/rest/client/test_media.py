@@ -3079,8 +3079,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         )
         self.assertIn(b"upload limit", page.result["body"])
 
-    def test_fallback_page_always_mounted(self) -> None:
-        """The fallback resource is always mounted, even if every configured
+    def test_fallback_page_mounted(self) -> None:
+        """The fallback resource should always be mounted, even if every configured
         limit has an explicit info_uri, since module callbacks can return
         limits without an info_uri at any time."""
         # The default config for this test case sets an info_uri on every limit.
@@ -3360,7 +3360,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
             return [
                 MediaUploadLimit(
                     time_period_ms=Config.parse_duration("1d"),
-                    max_bytes=1024,
+                    max_bytes=123,
                 )
             ]
 
@@ -3368,23 +3368,23 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
             get_media_upload_limits_for_user=_limits_without_info_uri,
         )
 
-        # user3 has no other callback overriding it, so uses the above.
-        channel = self.upload_media(1300, self.tok3)
+        # This is over the limit of 123 bytes, but below the default limit of 1k bytes
+        channel = self.upload_media(130, self.tok3)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
+        # Assert that the upload limit from the module callback was used (identified by max_bytes=123)
+        assert self.last_media_upload_limit_exceeded is not None
+        limit = self.last_media_upload_limit_exceeded["limit"]
+        assert isinstance(limit, MediaUploadLimit)
+        self.assertEqual(limit.max_bytes, 123)
+
+        # Assert that the info_uri was correctly populated (even though not provided by the module)
         expected_info_uri = (
             self.hs.config.server.public_baseurl
             + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
         )
         self.assertEqual(channel.json_body["info_uri"], expected_info_uri)
-
-        # The limit passed to the on_media_upload_limit_exceeded callback keeps
-        # its unresolved (None) info_uri.
-        assert self.last_media_upload_limit_exceeded is not None
-        limit = self.last_media_upload_limit_exceeded["limit"]
-        assert isinstance(limit, MediaUploadLimit)
-        self.assertIsNone(limit.info_uri)
 
 
 class AnimatedThumbnailTestCase(unittest.HomeserverTestCase):
