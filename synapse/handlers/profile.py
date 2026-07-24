@@ -767,6 +767,9 @@ class ProfileHandler:
     ) -> None:
         """Delete a field from a user's profile.
 
+        This should only be called for custom profile fields,
+        not displayname or avatar_url.
+
         Preconditions:
         - This must NOT be called as part of deactivating the user, because we will
           notify modules about the change whilst claiming it is not related
@@ -780,6 +783,8 @@ class ProfileHandler:
             field_name: The name of the profile field to remove.
             by_admin: Whether this change was made by an administrator.
         """
+        assert field_name not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
+
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
 

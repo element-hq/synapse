@@ -387,6 +387,7 @@ class ProfileWorkerStore(SQLBaseStore):
             "get_updated_profile_updates", _get_updated_profile_updates_txn
         )
 
+    # FIXME this function should be deleted, it's not used.
     async def get_profile_updates_for_fields(
         self,
         *,
@@ -496,6 +497,12 @@ class ProfileWorkerStore(SQLBaseStore):
                 field_clause, field_args = make_in_list_sql_clause(
                     txn.database_engine, "pu.field_name", field_names
                 )
+            action_clause, action_args = make_in_list_sql_clause(
+                txn.database_engine,
+                "pu.action",
+                (ProfileUpdateAction.UPDATE.value, ProfileUpdateAction.DELETE.value),
+                negative=True,
+            )
             user_clause = ""
             user_args: list[str] = []
             if include_users is not None:
@@ -518,7 +525,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 WHERE ? < pu.stream_id AND pu.stream_id <= ?
                     AND puf.user_id = ?
                     {user_clause}
-                    AND ({field_clause} OR pu.action != ?)
+                    AND ({field_clause} OR {action_clause})
                 ORDER BY pu.stream_id ASC
                 """,
                 (
@@ -527,7 +534,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     user_id,
                     *user_args,
                     *field_args,
-                    ProfileUpdateAction.UPDATE.value,
+                    *action_args,
                 ),
             )
             rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
@@ -820,9 +827,10 @@ class ProfileWorkerStore(SQLBaseStore):
         Args:
             txn: Transaction to use
             user_id: User ID that made the profile update
-            action: The profile update action, either `update`, `left_room` or
-                `joined_room`
-            field_names: A list of fields that were set, if ProfileUpdateAction.UPDATE
+            action: The profile update action, either `update`, `delete`, `left_room`
+                or `joined_room`.
+            field_names: A list of fields that were set, if
+                ProfileUpdateAction.UPDATE/DELETE
             user_rooms: Optionally, a set of rooms that the update concerns. If not
                 given, a database lookup will be done to fetch all the users rooms.
             target_users: Optionally, set of users to create profile update stream rows
@@ -835,7 +843,7 @@ class ProfileWorkerStore(SQLBaseStore):
         if not self._msc4429_enabled:
             return None
 
-        if action == ProfileUpdateAction.UPDATE:
+        if action in (ProfileUpdateAction.UPDATE, ProfileUpdateAction.DELETE):
             assert field_names
         else:
             assert not field_names
@@ -875,8 +883,8 @@ class ProfileWorkerStore(SQLBaseStore):
                 # No point writing an update for ourselves, if a membership change and no
                 # other users interested
                 return None
-        elif action == ProfileUpdateAction.UPDATE:
-            # Always include ourselves when updating field values
+        elif action in (ProfileUpdateAction.UPDATE, ProfileUpdateAction.DELETE):
+            # Always include ourselves when updating/deleting field values
             users.add(user_id.to_string())
 
         # Record the profile update
@@ -1004,7 +1012,7 @@ class ProfileWorkerStore(SQLBaseStore):
             stream_id = self.record_profile_updates_txn(
                 txn=txn,
                 user_id=user_id,
-                action=ProfileUpdateAction.UPDATE,
+                action=ProfileUpdateAction.DELETE,
                 field_names=[field_name],
             )
             return stream_id

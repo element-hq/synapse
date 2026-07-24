@@ -294,11 +294,15 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
 
         # Make an incremental Sliding Sync request
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
-
-        # FIXME: once field deletions come down in sync this should
-        # be checking for that
-        self.assertIsNone(
-            response_body["extensions"].get("org.matrix.msc4262.profiles")
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {
+                "removed": [
+                    "field",
+                ],
+            },
         )
 
     @parameterized.expand(
@@ -679,6 +683,47 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > Likewise, any field IDs that are cleared/removed from a user's profile will appear under users-><user_id>->removed.
         > Likewise, the removed field should not be present if there were only updates to existing fields (and none were cleared).
         """
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                },
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+
+        # Delete the field
+        self.get_success(
+            self.profile_handler.delete_profile_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+            )
+        )
+
+        # Make an incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+        # We should see the removed field
+        self.assertEqual(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+            {
+                "removed": [
+                    "field",
+                ],
+            },
+        )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_updated_key_only_present_if_updates(self) -> None:
