@@ -1,0 +1,2 @@
+Add optional support for [MSC4429: Profile Updates for Legacy Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4429).
+Currently defaults to not enabled, and is limited to local users only for the sync results.

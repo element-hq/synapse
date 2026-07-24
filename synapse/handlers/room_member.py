@@ -1536,7 +1536,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             prev_member_event_id = prev_state_ids.get(
                 (EventTypes.Member, event.state_key), None
             )
-
             if prev_member_event_id:
                 prev_member_event = await self.store.get_event(prev_member_event_id)
                 if prev_member_event.membership == Membership.JOIN:

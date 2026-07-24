@@ -34,6 +34,10 @@ from synapse.api.errors import (
     StoreError,
     SynapseError,
 )
+from synapse.replication.http.profile import (
+    ReplicationProfileDeleteField,
+    ReplicationProfileSetField,
+)
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import (
@@ -42,6 +46,7 @@ from synapse.types import (
     JsonValue,
     Requester,
     ScheduledTask,
+    StreamKeyType,
     TaskStatus,
     UserID,
     create_requester,
@@ -75,6 +80,7 @@ class ProfileHandler:
         self.clock = hs.get_clock()  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self.hs = hs
+        self._notifier = hs.get_notifier()
 
         self.federation = hs.get_federation_client()
         hs.get_federation_registry().register_query_handler(
@@ -98,6 +104,17 @@ class ProfileHandler:
             self._update_join_states_task, UPDATE_JOIN_STATES_ACTION_NAME
         )
         self._worker_locks = hs.get_worker_locks_handler()
+
+        # Profile updates stream
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._is_events_writer = (
+            hs.get_instance_name() in hs.config.worker.writers.events
+        )
+        self._delete_profile_field_client = ReplicationProfileDeleteField.make_client(
+            self.hs
+        )
+        self._set_profile_field_client = ReplicationProfileSetField.make_client(self.hs)
+        self._profile_updates_writer_instance = self.hs.config.worker.writers.events[0]
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
         """
@@ -191,13 +208,13 @@ class ProfileHandler:
 
     async def set_displayname(
         self,
+        *,
         target_user: UserID,
         requester: Requester,
         new_displayname: str,
-        *,
         by_admin: bool = False,
         propagate: bool = True,
-    ) -> None:
+    ) -> int | None:
         """Set the displayname of a user
 
         Preconditions:
@@ -207,12 +224,17 @@ class ProfileHandler:
           updates into rooms, which could cause rooms to be accidentally joined
           after the deactivated user has left them.
 
+          FIXME: This precondition seems to lack a test.
+
         Args:
             target_user: the user whose displayname is to be changed.
             requester: The user attempting to make this change.
             new_displayname: The displayname to give this user.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
+
+        Returns:
+            Stream ID of the profile updates stream row that was just inserted.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -252,7 +274,11 @@ class ProfileHandler:
                 authenticated_entity=requester.authenticated_entity,
             )
 
-        await self.store.set_profile_displayname(target_user, displayname_to_set)
+        stream_id = await self.store.set_profile_field(
+            target_user,
+            ProfileFields.DISPLAYNAME,
+            displayname_to_set,
+        )
 
         profile = await self.store.get_profileinfo(target_user)
 
@@ -266,6 +292,8 @@ class ProfileHandler:
 
         if propagate:
             await self._update_join_states(requester, target_user)
+
+        return stream_id
 
     async def get_avatar_url(self, target_user: UserID) -> str | None:
         """
@@ -302,13 +330,13 @@ class ProfileHandler:
 
     async def set_avatar_url(
         self,
+        *,
         target_user: UserID,
         requester: Requester,
         new_avatar_url: str,
-        *,
         by_admin: bool = False,
         propagate: bool = True,
-    ) -> None:
+    ) -> int | None:
         """Set a new avatar URL for a user.
 
         Preconditions:
@@ -318,12 +346,17 @@ class ProfileHandler:
           updates into rooms, which could cause rooms to be accidentally joined
           after the deactivated user has left them.
 
+          FIXME: This precondition seems to lack a test.
+
         Args:
             target_user: the user whose avatar URL is to be changed.
             requester: The user attempting to make this change.
             new_avatar_url: The avatar URL to give this user.
             by_admin: Whether this change was made by an administrator.
             propagate: Whether this change also applies to the user's membership events.
+
+        Returns:
+            Stream ID of the profile updates stream row that was just inserted.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -361,7 +394,11 @@ class ProfileHandler:
                 target_user, authenticated_entity=requester.authenticated_entity
             )
 
-        await self.store.set_profile_avatar_url(target_user, avatar_url_to_set)
+        stream_id = await self.store.set_profile_field(
+            target_user,
+            ProfileFields.AVATAR_URL,
+            avatar_url_to_set,
+        )
 
         profile = await self.store.get_profileinfo(target_user)
 
@@ -375,6 +412,8 @@ class ProfileHandler:
 
         if propagate:
             await self._update_join_states(requester, target_user)
+
+        return stream_id
 
     async def delete_profile_upon_deactivation(
         self,
@@ -394,6 +433,9 @@ class ProfileHandler:
         **leave** the room on the user's behalf, so there's no point sending new join events into
         rooms to propagate the profile deletion.
         See the `users_pending_deactivation` table and the associated user parter loop.
+
+        Profile update streams are NOT updated in any way; this happens when the
+        event persister processes the room leave events triggered elsewhere as above.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -406,7 +448,10 @@ class ProfileHandler:
             # have it.
             raise AuthError(400, "Cannot remove another user's profile")
 
-        await self.store.delete_profile(target_user)
+        # Record the profile delete
+        await self.store.delete_profile(
+            user_id=target_user,
+        )
 
         await self._third_party_rules.on_profile_update(
             target_user.to_string(),
@@ -414,6 +459,50 @@ class ProfileHandler:
             by_admin,
             deactivation=True,
         )
+
+    async def dispatch_set_profile_field(
+        self,
+        *,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        new_value: JsonValue | dict[str, JsonValue],
+        by_admin: bool = False,
+        propagate: bool = True,
+    ) -> None:
+        """
+        Dispatch setting a profile field value. This either happens in the same
+        instance, if configured for profile updates, or via replication in the
+        right instance.
+
+        Args:
+            target_user: the user whose profile field is to be changed.
+            requester: The user attempting to make this change.
+            field_name: The field name to update.
+            new_value: New value for the profile field.
+            by_admin: Whether this change was made by an administrator.
+            propagate: Whether this change also applies to the user's membership events.
+        """
+        if self._is_events_writer:
+            await self.set_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
+        else:
+            # Offload to the right worker via http replication
+            await self._set_profile_field_client(
+                instance_name=self._profile_updates_writer_instance,
+                user_id=target_user.to_string(),
+                requester=requester,
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
 
     @cached()
     async def check_avatar_size_and_mime_type(self, mxc: str) -> bool:
@@ -492,7 +581,7 @@ class ProfileHandler:
 
     async def get_profile_field(
         self, target_user: UserID, field_name: str
-    ) -> JsonValue:
+    ) -> JsonValue | dict[str, JsonValue]:
         """
         Fetch a user's profile from the database for local users and over federation
         for remote users.
@@ -530,21 +619,76 @@ class ProfileHandler:
 
             return result.get(field_name)
 
-    async def set_profile_field(
+    async def set_field(
         self,
+        *,
         target_user: UserID,
         requester: Requester,
         field_name: str,
-        new_value: JsonValue,
-        *,
+        new_value: JsonValue | dict[str, JsonValue],
         by_admin: bool = False,
+        propagate: bool = True,
     ) -> None:
+        """Wrapper function for setting any profile field for a user."""
+        if field_name == ProfileFields.DISPLAYNAME:
+            if not isinstance(new_value, str):
+                raise SynapseError(
+                    400, "'displayname' must be a string", errcode=Codes.INVALID_PARAM
+                )
+            stream_id = await self.set_displayname(
+                target_user=target_user,
+                requester=requester,
+                new_displayname=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
+        elif field_name == ProfileFields.AVATAR_URL:
+            if not isinstance(new_value, str):
+                raise SynapseError(
+                    400, "'avatar_url' must be a string", errcode=Codes.INVALID_PARAM
+                )
+            stream_id = await self.set_avatar_url(
+                target_user=target_user,
+                requester=requester,
+                new_avatar_url=new_value,
+                by_admin=by_admin,
+                propagate=propagate,
+            )
+        else:
+            stream_id = await self.set_profile_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=field_name,
+                new_value=new_value,
+                by_admin=by_admin,
+            )
+
+        if stream_id is not None:
+            room_ids = await self.store.get_rooms_for_user(target_user.to_string())
+            if room_ids:
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    rooms=room_ids,
+                )
+
+    async def set_profile_field(
+        self,
+        *,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        new_value: JsonValue | dict[str, JsonValue],
+        by_admin: bool = False,
+    ) -> int | None:
         """Set a new profile field for a user.
 
         Preconditions:
         - This must NOT be called as part of deactivating the user, because we will
           notify modules about the change whilst claiming it is not related
           to user deactivation.
+
+          FIXME: This precondition seems to lack a test.
 
         Args:
             target_user: the user whose profile is to be changed.
@@ -559,13 +703,59 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(403, "Cannot set another user's profile")
 
-        await self.store.set_profile_field(target_user, field_name, new_value)
+        stream_id = await self.store.set_profile_field(
+            target_user,
+            field_name,
+            new_value,
+        )
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
         await self._third_party_rules.on_profile_update(
             target_user.to_string(), profile, by_admin, deactivation=False
         )
+
+        return stream_id
+
+    async def dispatch_delete_profile_field(
+        self,
+        *,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        by_admin: bool = False,
+    ) -> None:
+        """
+        Dispatch deleting a profile field value. This either happens in the same
+        instance, if configured for profile updates, or via replication in the
+        right instance.
+
+        To delete a displayname / avatar_uri, use the `dispatch_set_profile_field`
+        method, using an empty string as the value.
+
+        Args:
+            target_user: the user whose profile field is to be changed.
+            requester: The user attempting to make this change.
+            field_name: The field name to update.
+            by_admin: Whether this change was made by an administrator.
+        """
+        assert field_name not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
+        if self._is_events_writer:
+            await self.delete_profile_field(
+                target_user=target_user,
+                requester=requester,
+                field_name=field_name,
+                by_admin=by_admin,
+            )
+        else:
+            # Offload to the right worker via http replication
+            await self._delete_profile_field_client(
+                instance_name=self._profile_updates_writer_instance,
+                user_id=target_user.to_string(),
+                requester=requester,
+                field_name=field_name,
+                by_admin=by_admin,
+            )
 
     async def delete_profile_field(
         self,
@@ -582,6 +772,8 @@ class ProfileHandler:
           notify modules about the change whilst claiming it is not related
           to user deactivation.
 
+          FIXME: This precondition seems to lack a test.
+
         Args:
             target_user: the user whose profile is to be changed.
             requester: The user attempting to make this change.
@@ -594,13 +786,25 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's profile")
 
-        await self.store.delete_profile_field(target_user, field_name)
+        stream_id = await self.store.delete_profile_field(
+            target_user,
+            field_name,
+        )
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)
         await self._third_party_rules.on_profile_update(
             target_user.to_string(), profile, by_admin, deactivation=False
         )
+
+        if stream_id:
+            room_ids = await self.store.get_rooms_for_user(target_user.to_string())
+            if room_ids:
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    rooms=room_ids,
+                )
 
     async def on_profile_query(self, args: JsonDict) -> JsonDict:
         """Handles federation profile query requests."""

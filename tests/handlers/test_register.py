@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, Mock
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
-from synapse.api.constants import UserTypes
+from synapse.api.constants import ProfileFields, UserTypes
 from synapse.api.errors import (
     CodeMessageException,
     Codes,
@@ -824,8 +824,12 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
 
         if displayname is not None:
             # logger.info("setting user display name: %s -> %s", user_id, displayname)
-            await self.hs.get_profile_handler().set_displayname(
-                user, requester, displayname, by_admin=True
+            await self.hs.get_profile_handler().set_field(
+                target_user=user,
+                requester=requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=displayname,
+                by_admin=True,
             )
 
         return user_id, token

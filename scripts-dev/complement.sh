@@ -286,6 +286,7 @@ main() {
     ./tests/msc4155
     ./tests/msc4306
     ./tests/msc4222
+    ./tests/msc4429
   )
 
   # Export the list of test packages as a space-separated environment variable, so other

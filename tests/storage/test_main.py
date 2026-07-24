@@ -18,8 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
-
+from synapse.api.constants import ProfileFields
 from synapse.types import UserID
 
 from tests import unittest
@@ -38,7 +37,11 @@ class DataStoreTestCase(unittest.HomeserverTestCase):
         self.get_success(self.store.register_user(self.user.to_string(), "pass"))
         self.get_success(self.store.create_profile(self.user))
         self.get_success(
-            self.store.set_profile_displayname(self.user, self.displayname)
+            self.store.set_profile_field(
+                user_id=self.user,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=self.displayname,
+            )
         )
 
         users, total = self.get_success(
