@@ -22,6 +22,7 @@ from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,23 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
+
+    def test_msc4517_not_advertised_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertIs(
+            channel.json_body["unstable_features"]["org.matrix.msc4517.thirdparty"],
+            False,
+        )
+
+    @override_config({"experimental_features": {"msc4517_enabled": True}})
+    def test_msc4517_advertised_when_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertIs(
+            channel.json_body["unstable_features"]["org.matrix.msc4517.thirdparty"],
+            True,
+        )
 
     def test_authenticated_with_per_user_feature(self) -> None:
         user1_id = self.register_user("user1", "pass")
