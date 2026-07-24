@@ -6,6 +6,9 @@ name: Attempt to automatically fix linting errors
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   # We use nightly so that `fmt` correctly groups together imports, and
   # clippy correctly fixes up the benchmarks.
@@ -17,13 +20,17 @@ jobs:
   fixup:
     name: Fix up
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed to push the lint fixes back to the branch
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        # zizmor: ignore[artipacked]
+        # The git-auto-commit-action step below reuses the GITHUB_TOKEN
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy, rustfmt

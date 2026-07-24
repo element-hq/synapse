@@ -17,6 +17,9 @@ on:
           - develop
           - master
 
+permissions:
+  contents: read
+
 # Only run this action once per pull request/branch; restart if a new commit arrives.
 # C.f. https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency
 # and https://docs.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#github-context
@@ -30,22 +33,25 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write # needed to push the image to ghcr.io
     steps:
       - name: Checkout specific branch (debug build)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         if: github.event_name == 'workflow_dispatch'
         with:
+          persist-credentials: false
           ref: ${{ inputs.branch }}
       - name: Checkout clean copy of develop (scheduled build)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         if: github.event_name == 'schedule'
         with:
+          persist-credentials: false
           ref: develop
       - name: Checkout clean copy of master (on-push)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         if: github.event_name == 'push'
         with:
+          persist-credentials: false
           ref: master
       # We use `poetry` in `complement.sh`
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
@@ -70,8 +76,10 @@ jobs:
       - name: Run scripts-dev/complement.sh to generate complement-synapse:latest image.
         run: scripts-dev/complement.sh --build-only
       - name: Tag and push generated image
+        env:
+          TAGS: ${{ join(fromJson(steps.meta.outputs.json).tags, ' ') }}
         run: |
-          for TAG in ${{ join(fromJson(steps.meta.outputs.json).tags, ' ') }}; do 
+          for TAG in $TAGS; do
             echo "tag and push $TAG"
             # `localhost/complement-synapse` should match the image created by `scripts-dev/complement.sh`
             docker tag localhost/complement-synapse $TAG
