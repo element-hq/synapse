@@ -1,0 +1,1 @@
+Refactor how the Rust side of Synapse is tied to the reactor: per-homeserver Rust state (the tokio runtime and reactor handle) now lives in a `RustRuntime` object owned by the `HomeServer`, instead of being stashed in an attribute on the reactor.

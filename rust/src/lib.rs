@@ -19,11 +19,12 @@ pub mod json;
 pub mod matrix_const;
 pub mod msc4388_rendezvous;
 pub mod push;
+pub mod reactor;
 pub mod rendezvous;
 pub mod room_versions;
+pub mod runtime;
 pub mod segmenter;
 pub mod storage;
-pub mod tokio_runtime;
 pub mod types;
 
 lazy_static! {
@@ -76,6 +77,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     handlers::register_module(py, m)?;
     http_client::register_module(py, m)?;
     rendezvous::register_module(py, m)?;
+    runtime::register_module(py, m)?;
     msc4388_rendezvous::register_module(py, m)?;
     segmenter::register_module(py, m)?;
     room_versions::register_module(py, m)?;

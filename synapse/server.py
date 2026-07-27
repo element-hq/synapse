@@ -174,6 +174,7 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust import RustRuntime
 from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
@@ -963,6 +964,18 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_rust_handlers(self) -> RustHandlers:
         return RustHandlers(self)
+
+    @cache_in_self
+    def get_rust_runtime(self) -> RustRuntime:
+        """The per-homeserver state for the Rust side of Synapse: the tokio
+        thread pool, plus anything else Rust code keeps for the lifetime of
+        the homeserver.
+
+        The tokio runtime is started lazily on first use, and shut down by a
+        reactor shutdown trigger.
+        """
+        # TODO: make the number of worker threads configurable
+        return RustRuntime(reactor=self.get_reactor(), worker_threads=4)
 
     @cache_in_self
     def get_event_sources(self) -> EventSources:

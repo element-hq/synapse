@@ -48,18 +48,13 @@ class LoginTokenRequestServletTestCase(unittest.HomeserverTestCase):
         self.hs.config.registration.auto_join_rooms = []
         self.hs.config.captcha.enable_registration_captcha = False
 
-        # XXX: We must create the Rust HTTP client before we call `reactor.run()` below.
-        # Twisted's `MemoryReactor` doesn't invoke `callWhenRunning` callbacks if it's
-        # already running and we rely on that to start the Tokio thread pool in Rust. In
-        # the future, this may not matter, see https://github.com/twisted/twisted/pull/12514
         self._http_client = self.hs.get_proxied_http_client()
+        # The tokio thread pool is started lazily on first use, so no
+        # reactor startup hooks need to run here.
         _ = HttpClient(
-            reactor=self.hs.get_reactor(),
+            runtime=self.hs.get_rust_runtime(),
             user_agent=self._http_client.user_agent.decode("utf8"),
         )
-
-        # This triggers the server startup hooks, which starts the Tokio thread pool
-        reactor.run()
 
         return self.hs
 
