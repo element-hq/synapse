@@ -19,8 +19,9 @@
 #
 #
 import logging
+import urllib.parse
 from http import HTTPStatus
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
@@ -39,7 +40,9 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
 from synapse.types import JsonDict
+from synapse.types.state import StateEventQuery
 from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 from tests import unittest
 from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
@@ -73,6 +76,119 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             "/_matrix/federation/v1/get_missing_events/%s" % (room_1,),
             query_content,
         )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON")
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_hierarchy_additional_state_query_parameter(self) -> None:
+        """The federation hierarchy servlet parses repeated MSC4507 JSON params."""
+        u1 = self.register_user("u1", "pass")
+        u1_token = self.login("u1", "pass")
+
+        room_id = self.helper.create_room_as(u1, tok=u1_token)
+        event_type = "m.some_event"
+        self.helper.send_state(
+            room_id,
+            event_type=event_type,
+            body={"foo": ["bar"]},
+            tok=u1_token,
+        )
+        self.helper.send_state(
+            room_id,
+            event_type=EventTypes.MSC4507PublicState,
+            body={"public_state": {event_type: {"state_keys": [""]}}},
+            tok=u1_token,
+        )
+
+        query = urllib.parse.urlencode(
+            [
+                (
+                    "org.matrix.msc4507.additional_state",
+                    json_encoder.encode({"type": event_type, "state_key": ""}),
+                )
+            ]
+        )
+
+        channel = self.make_signed_federation_request(
+            "GET", f"/_matrix/federation/v1/hierarchy/{room_id}?{query}"
+        )
+
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            channel.json_body["room"]["org.matrix.msc4507.additional_state"],
+            [
+                {
+                    "type": event_type,
+                    "state_key": "",
+                    "content": {"foo": ["bar"]},
+                    "sender": u1,
+                }
+            ],
+        )
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_hierarchy_additional_state_percent_encoded_state_key(self) -> None:
+        """MSC4507 query values are percent-decoded exactly once."""
+        room_id = "!unknown:test"
+        event_type = "m.some_event_type"
+        state_key = "%22"
+        room_summary_handler = self.hs.get_room_summary_handler()
+        room_summary_handler.get_federation_hierarchy = AsyncMock(return_value={})  # type: ignore[method-assign]
+
+        query = urllib.parse.urlencode(
+            [
+                (
+                    "org.matrix.msc4507.additional_state",
+                    json_encoder.encode({"type": event_type, "state_key": state_key}),
+                )
+            ]
+        )
+        self.assertIn("%2522", query)
+
+        channel = self.make_signed_federation_request(
+            "GET", f"/_matrix/federation/v1/hierarchy/{room_id}?{query}"
+        )
+
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        room_summary_handler.get_federation_hierarchy.assert_awaited_once_with(
+            self.OTHER_SERVER_NAME,
+            room_id,
+            False,
+            (StateEventQuery(event_type, state_key),),
+        )
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_hierarchy_additional_state_rejects_non_string_state_key(self) -> None:
+        """MSC4507 query objects must omit state_key or use a string."""
+        query = urllib.parse.urlencode(
+            [
+                (
+                    "org.matrix.msc4507.additional_state",
+                    json_encoder.encode(
+                        {"type": "m.some_event_type", "state_key": None}
+                    ),
+                )
+            ]
+        )
+
+        channel = self.make_signed_federation_request(
+            "GET", f"/_matrix/federation/v1/hierarchy/!unknown:test?{query}"
+        )
+
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+
+    @override_config({"experimental_features": {"msc4507_enabled": True}})
+    def test_hierarchy_additional_state_rejects_invalid_json(self) -> None:
+        """MSC4507 query objects must be valid JSON."""
+        query = urllib.parse.urlencode(
+            [("org.matrix.msc4507.additional_state", "not json")]
+        )
+
+        channel = self.make_signed_federation_request(
+            "GET", f"/_matrix/federation/v1/hierarchy/!unknown:test?{query}"
+        )
+
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON")
 

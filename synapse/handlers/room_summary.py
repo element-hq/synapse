@@ -45,7 +45,7 @@ from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.events import EventBase
 from synapse.types import JsonDict, Requester, StrCollection
-from synapse.types.state import StateFilter
+from synapse.types.state import StateEventQuery, StateFilter
 from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
@@ -103,6 +103,7 @@ class RoomSummaryHandler:
         self._event_serializer = hs.get_event_client_serializer()
         self._server_name = hs.hostname
         self._federation_client = hs.get_federation_client()
+        self._msc4507_enabled = hs.config.experimental.msc4507_enabled
         self._ratelimiter = Ratelimiter(
             store=self._store,
             clock=hs.get_clock(),
@@ -418,6 +419,7 @@ class RoomSummaryHandler:
         origin: str,
         requested_room_id: str,
         suggested_only: bool,
+        additional_state: Sequence[StateEventQuery] | None = None,
     ) -> JsonDict:
         """
         Implementation of the room hierarchy Federation API.
@@ -431,12 +433,18 @@ class RoomSummaryHandler:
             requested_room_id: The room ID to start the hierarchy at (the "root" room).
             suggested_only: whether we should only return children with the "suggested"
                 flag set.
+            additional_state: State events to include in the response if the room's
+                public state declaration allows them. None if the query parameter
+                was not present.
 
         Returns:
             The JSON hierarchy dictionary.
         """
+        if not self._msc4507_enabled:
+            additional_state = None
+
         root_room_entry = await self._summarize_local_room(
-            None, origin, requested_room_id, suggested_only
+            None, origin, requested_room_id, suggested_only, additional_state
         )
         if root_room_entry is None:
             # Room is inaccessible to the requesting server.
@@ -457,7 +465,12 @@ class RoomSummaryHandler:
                 continue
 
             room_entry = await self._summarize_local_room(
-                None, origin, room_id, suggested_only, include_children=False
+                None,
+                origin,
+                room_id,
+                suggested_only,
+                additional_state,
+                include_children=False,
             )
             # If the room is accessible, include it in the results.
             #
@@ -483,6 +496,7 @@ class RoomSummaryHandler:
         origin: str | None,
         room_id: str,
         suggested_only: bool,
+        additional_state: Sequence[StateEventQuery] | None = None,
         include_children: bool = True,
         admin_skip_room_visibility_check: bool = False,
     ) -> Optional["_RoomEntry"]:
@@ -499,6 +513,9 @@ class RoomSummaryHandler:
             room_id: The room ID to summarize.
             suggested_only: True if only suggested children should be returned.
                 Otherwise, all children are returned.
+            additional_state: State events to include in the response if the room's
+                public state declaration allows them. Should be `None` if the
+                query parameter was not present.
             include_children:
                 Whether to include the events of any children.
             admin_skip_room_visibility_check: Whether to skip checking if the room
@@ -514,6 +531,11 @@ class RoomSummaryHandler:
             return None
 
         room_entry = await self._build_room_entry(room_id)
+
+        if additional_state is not None:
+            room_entry[
+                "org.matrix.msc4507.additional_state"
+            ] = await self._get_public_room_state(room_id, additional_state)
 
         # If the room is not a space return just the room information.
         if room_entry.get("room_type") != RoomTypes.SPACE or not include_children:
@@ -539,7 +561,10 @@ class RoomSummaryHandler:
         return _RoomEntry(room_id, room_entry, stripped_events)
 
     async def _summarize_remote_room_hierarchy(
-        self, room: "_RoomQueueEntry", suggested_only: bool
+        self,
+        room: "_RoomQueueEntry",
+        suggested_only: bool,
+        additional_state: Iterable[StateEventQuery] = (),
     ) -> tuple[Optional["_RoomEntry"], dict[str, JsonDict], set[str]]:
         """
         Request room entries and a list of event entries for a given room by querying a remote server.
@@ -548,6 +573,7 @@ class RoomSummaryHandler:
             room: The room to summarize.
             suggested_only: True if only suggested children should be returned.
                 Otherwise, all children are returned.
+            additional_state: state events to ask for under MSC4507.
 
         Returns:
             A tuple of:
@@ -557,6 +583,9 @@ class RoomSummaryHandler:
         """
         room_id = room.room_id
         logger.info("Requesting summary for %s via %s", room_id, room.via)
+
+        if not self._msc4507_enabled:
+            additional_state = ()
 
         via = itertools.islice(room.via, MAX_SERVERS_PER_SPACE)
         try:
@@ -569,6 +598,7 @@ class RoomSummaryHandler:
                 via,
                 room_id,
                 suggested_only=suggested_only,
+                additional_state=additional_state,
             )
         except Exception as e:
             logger.warning(
@@ -833,6 +863,79 @@ class RoomSummaryHandler:
 
         return room_entry
 
+    async def _get_public_room_state(
+        self, room_id: str, requested_state: Sequence[StateEventQuery]
+    ) -> list[JsonDict]:
+        """Get requested room state that is declared public.
+
+        The room must contain an `org.matrix.msc4507.public_state` state event.
+        Invalid event shapes are ignored.
+
+        Args:
+            room_id: The room to fetch state from.
+            requested_state: A set of state event descriptions that someone is
+                asking for.
+
+        Returns:
+            A list of stripped state events that match the query, if any.
+        """
+
+        # See which state events the room has marked as "public".
+        public_state_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id,
+            state_filter=StateFilter.from_types([(EventTypes.MSC4507PublicState, "")]),
+        )
+        public_state_event_id = public_state_ids.get(
+            (EventTypes.MSC4507PublicState, "")
+        )
+        if public_state_event_id is None:
+            return []
+
+        public_state_event = await self._store.get_event(public_state_event_id)
+        raw_public_state = public_state_event.content.get("public_state")
+        if not isinstance(raw_public_state, dict):
+            logger.debug(
+                "'%s' state event in room '%s' had an invalid type for "
+                "its 'public_state' field: %s",
+                EventTypes.MSC4507PublicState,
+                room_id,
+                type(raw_public_state),
+            )
+            return []
+
+        public_state = _parse_public_state(raw_public_state)
+
+        # Fetch public room state, given the list of what's public, and a query
+        # for it.
+        permitted_state = _get_permitted_public_state(requested_state, public_state)
+        if not permitted_state:
+            # None of the requested state was allowed.
+            return []
+
+        # Pull the allowed state events from the room.
+        state_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id, state_filter=permitted_state
+        )
+        if not state_ids:
+            return []
+        events = await self._store.get_events_as_list(state_ids.values())
+
+        # Return the stripped state versions of each state event.
+        # TODO: Whether we should return stripped state is currently an open question on the MSC:
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/4507/changes#r3589665252
+        stripped_state: list[JsonDict] = []
+        for event in sorted(events, key=lambda e: (e.type, e.state_key)):
+            stripped_state.append(
+                {
+                    "type": event.type,
+                    "state_key": event.state_key,
+                    "content": event.content,
+                    "sender": event.sender,
+                }
+            )
+
+        return stripped_state
+
     async def _get_child_events(self, room_id: str) -> Iterable[EventBase]:
         """
         Get the child events for a given room.
@@ -999,6 +1102,111 @@ class _RoomEntry:
 
         result["children_state"] = self.children_state_events
         return result
+
+
+def _parse_public_state(public_state: dict) -> StateFilter:
+    """Parse an MSC4507 public state declaration into a state filter.
+
+    Invalid rules for individual event types are ignored.
+
+    Args:
+        The content of a `org.matrix.msc4507.public_state` state event.
+
+    Returns:
+        A `StateFilter` built from the parsed public state event.
+    """
+    public_types: list[tuple[str, str | None]] = []
+    for event_type, public_rule in public_state.items():
+        if not isinstance(event_type, str):
+            logger.debug(
+                "Ignoring an entry in the MSC4507 public state declaration: "
+                "event type must be a string, got %s",
+                type(event_type).__name__,
+            )
+            continue
+
+        if not isinstance(public_rule, dict):
+            logger.debug(
+                "Ignoring MSC4507 public state rule for event type '%s': "
+                "rule must be an object, got %s",
+                event_type,
+                type(public_rule).__name__,
+            )
+            continue
+
+        if "state_keys" not in public_rule:
+            public_types.append((event_type, None))
+            continue
+
+        state_keys = public_rule["state_keys"]
+        if not isinstance(state_keys, list):
+            logger.debug(
+                "Ignoring MSC4507 public state rule for event type '%s': "
+                "'state_keys' must be a list, got %s",
+                event_type,
+                type(state_keys).__name__,
+            )
+            continue
+
+        if not all(isinstance(state_key, str) for state_key in state_keys):
+            logger.debug(
+                "Ignoring MSC4507 public state rule for event type '%s': "
+                "'state_keys' must contain only strings",
+                event_type,
+            )
+            continue
+
+        # If multiple state_keys exist, create a filter for each one.
+        public_types.extend((event_type, state_key) for state_key in state_keys)
+
+    return StateFilter.from_types(public_types)
+
+
+def _get_permitted_public_state(
+    requested_state: Sequence[StateEventQuery], public_state: StateFilter
+) -> StateFilter:
+    """
+    Given a request for certain state events from a room, and a definition of
+    what state events are public, return which state event types and state_keys
+    we're actually allowed to return (AKA the intersection between the query
+    and the room's public state definition).
+
+    Args:
+        requested_state: A request for certain state event types and state_keys
+            from a room.
+        public_state: The parsed state event types and state_keys that a room has
+            explicitly marked as public.
+
+    Returns:
+        A frozen `StateFilter` representing the intersection of the requested
+        state and the room's public state declaration. May be used to pull state
+        events from the room.
+    """
+    requested_filter = StateFilter.from_types(
+        (requested.event_type, requested.state_key) for requested in requested_state
+    )
+    permitted_state: dict[str, frozenset[str] | None] = {}
+
+    # For each requested state event, check whether it may be requested based on
+    # `public_state`.
+    for event_type, requested_state_keys in requested_filter.types.items():
+        if event_type not in public_state.types:
+            continue
+
+        public_state_keys = public_state.types[event_type]
+        if public_state_keys is None:
+            # Any state key may be requested. Allow all requested.
+            permitted_state[event_type] = requested_state_keys
+        elif requested_state_keys is None:
+            # Some state keys are marked as public, but ANY were requested.
+            # Return only those that are marked as public.
+            permitted_state[event_type] = public_state_keys
+        elif permitted_keys := requested_state_keys & public_state_keys:
+            # If there is an intersection between the requested state keys and
+            # those marked as public, return those.
+            permitted_state[event_type] = permitted_keys
+
+    return StateFilter.freeze(permitted_state, include_others=False)
 
 
 def _has_valid_via(e: EventBase) -> bool:

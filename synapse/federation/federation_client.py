@@ -71,6 +71,7 @@ from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types.state import StateEventQuery
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -134,6 +135,7 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
+        self._msc4507_enabled = hs.config.experimental.msc4507_enabled
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
@@ -155,10 +157,10 @@ class FederationClient(FederationBase):
         # Some stale data over federation is OK, but must be refreshed
         # periodically since the local server is in the room.
         #
-        # It is a map of (room ID, suggested-only) -> the response of
+        # It is a map of (room ID, suggested-only, additional-state) -> the response of
         # get_room_hierarchy.
         self._get_room_hierarchy_cache: ExpiringCache[
-            tuple[str, bool],
+            tuple[str, bool, tuple[StateEventQuery, ...]],
             tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]],
         ] = ExpiringCache(
             cache_name="get_room_hierarchy_cache",
@@ -1653,6 +1655,7 @@ class FederationClient(FederationBase):
         destinations: Iterable[str],
         room_id: str,
         suggested_only: bool,
+        additional_state: Iterable[StateEventQuery] = (),
     ) -> tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]]:
         """
         Call other servers to get a hierarchy of the given room.
@@ -1665,6 +1668,9 @@ class FederationClient(FederationBase):
             room_id: ID of the space to be queried
             suggested_only:  If true, ask the remote server to only return children
                 with the "suggested" flag set
+            additional_state: Additional state events to ask for (under
+                MSC4507). May not be returned if they are not specifically marked as
+                public in the room state.
 
         Returns:
             A tuple of:
@@ -1678,7 +1684,15 @@ class FederationClient(FederationBase):
                remote servers
         """
 
-        cached_result = self._get_room_hierarchy_cache.get((room_id, suggested_only))
+        additional_state = (
+            _canonicalize_additional_state(additional_state)
+            if self._msc4507_enabled
+            else ()
+        )
+
+        cached_result = self._get_room_hierarchy_cache.get(
+            (room_id, suggested_only, additional_state)
+        )
         if cached_result:
             return cached_result
 
@@ -1690,6 +1704,7 @@ class FederationClient(FederationBase):
                     destination=destination,
                     room_id=room_id,
                     suggested_only=suggested_only,
+                    additional_state=additional_state,
                 )
             except HttpResponseException as e:
                 # If an error is received that is due to an unrecognised endpoint,
@@ -1706,6 +1721,7 @@ class FederationClient(FederationBase):
                     destination=destination,
                     room_id=room_id,
                     suggested_only=suggested_only,
+                    additional_state=additional_state,
                 )
 
             room = res.get("room")
@@ -1713,6 +1729,13 @@ class FederationClient(FederationBase):
                 raise InvalidResponseError("'room' must be a dict")
             if room.get("room_id") != room_id:
                 raise InvalidResponseError("wrong room returned in hierarchy response")
+            filtered_additional_parent_state = (
+                _validate_and_filter_hierarchy_additional_state(room, additional_state)
+            )
+            if filtered_additional_parent_state:
+                room["org.matrix.msc4507.additional_state"] = (
+                    filtered_additional_parent_state
+                )
 
             # Validate children_state of the room.
             children_state = room.pop("children_state", [])
@@ -1732,6 +1755,16 @@ class FederationClient(FederationBase):
                 raise InvalidResponseError("'children' must be a list")
             if any(not isinstance(r, dict) for r in children):
                 raise InvalidResponseError("Invalid room in 'children' list")
+            for child in children:
+                filtered_additional_child_state = (
+                    _validate_and_filter_hierarchy_additional_state(
+                        child, additional_state
+                    )
+                )
+                if filtered_additional_child_state:
+                    child["org.matrix.msc4507.additional_state"] = (
+                        filtered_additional_child_state
+                    )
 
             # Validate the inaccessible children.
             inaccessible_children = res.get("inaccessible_children", [])
@@ -1752,7 +1785,9 @@ class FederationClient(FederationBase):
         )
 
         # Cache the result to avoid fetching data over federation every time.
-        self._get_room_hierarchy_cache[(room_id, suggested_only)] = result
+        self._get_room_hierarchy_cache[(room_id, suggested_only, additional_state)] = (
+            result
+        )
         return result
 
     async def timestamp_to_event(
@@ -2070,3 +2105,187 @@ def _validate_hierarchy_event(d: JsonDict) -> None:
         raise ValueError("Invalid event: 'via' must be a list")
     if any(not isinstance(v, str) for v in via):
         raise ValueError("Invalid event: 'via' must be a list of strings")
+
+
+def _canonicalize_additional_state(
+    additional_state: Iterable[StateEventQuery],
+) -> tuple[StateEventQuery, ...]:
+    """
+    Convert any iterable of `StateEventQuery` to a (hashable) tuple, which can
+    be used as a cache key. Additionally, optimise the query by combining
+    semantically identical requests with:
+
+    * duplicate entries
+    * collapsed wildcards
+      (i.e. (type="x", state_key=None) (all state keys)
+      dominates (type="x", state_key="a") )
+
+    Keys are also ordered to ensure otherwise identical `StateEventQuery`s are
+    cached.
+    """
+    type_to_state_keys: dict[str, set[str] | None] = {}
+
+    for state_query in additional_state:
+        existing_state_keys = type_to_state_keys.get(state_query.event_type)
+
+        if state_query.state_key is None:
+            type_to_state_keys[state_query.event_type] = None
+        elif (
+            existing_state_keys is None and state_query.event_type in type_to_state_keys
+        ):
+            continue
+        elif existing_state_keys is None:
+            type_to_state_keys[state_query.event_type] = {state_query.state_key}
+        else:
+            existing_state_keys.add(state_query.state_key)
+
+    result: list[StateEventQuery] = []
+    for event_type in sorted(type_to_state_keys):
+        state_keys = type_to_state_keys[event_type]
+        if state_keys is None:
+            result.append(StateEventQuery(event_type))
+        else:
+            result.extend(
+                StateEventQuery(event_type, state_key)
+                for state_key in sorted(state_keys)
+            )
+
+    return tuple(result)
+
+
+def _validate_and_filter_hierarchy_additional_state(
+    room: JsonDict, requested_state: Sequence[StateEventQuery]
+) -> list[JsonDict]:
+    """
+    Given the `room` field in a response to a `/hierarchy` request over
+    federation, and the `requested_state` that the homeserver desired:
+
+    - filter the response to only what we asked for
+    - ignore invalid events that were returned, rather than passing it to callers.
+
+    Results are loaded into the `org.matrix.msc4507.additional_state` field of
+    the passed `room` dict.
+
+    Args:
+        room: The contents of the `room` or one of the `children` fields in a
+            `GET /_matrix/federation/v1/hierarchy/{roomId}` response.
+        requested_state: The state events that the caller desires.
+    """
+    if len(requested_state) == 0:
+        # No state was requested. Don't return any to the client.
+        return []
+
+    additional_state = room.get("org.matrix.msc4507.additional_state")
+    if not additional_state:
+        # The field was not present or `None`.
+        return []
+
+    if not isinstance(additional_state, list):
+        logger.debug(
+            "Invalid 'org.matrix.msc4507.additional_state' field in hierarchy response for room "
+            "'%s': expected a list, got %s",
+            room.get("room_id"),
+            type(additional_state).__name__,
+        )
+        raise InvalidResponseError(
+            "'org.matrix.msc4507.additional_state' must be a list"
+        )
+
+    filtered_state: list[JsonDict] = []
+    for index, state_event in enumerate(additional_state):
+        if not isinstance(state_event, dict):
+            logger.debug(
+                "Invalid 'org.matrix.msc4507.additional_state' entry %d in hierarchy response for "
+                "room '%s': expected an object, got %s",
+                index,
+                room.get("room_id"),
+                type(state_event).__name__,
+            )
+            raise InvalidResponseError("Invalid event in 'additional_state' list")
+
+        # Check that the returned state event has valid form.
+        try:
+            _validate_hierarchy_additional_state_event(state_event)
+        except ValueError as e:
+            raise InvalidResponseError(str(e))
+
+        # Check that this is actually what we asked for.
+        if _matches_additional_state_query(state_event, requested_state):
+            filtered_state.append(state_event)
+
+    return filtered_state
+
+
+def _matches_additional_state_query(
+    state_event: JsonDict, requested_state: Sequence[StateEventQuery]
+) -> bool:
+    """
+    Validate that a given state event matches the given requested state query.
+
+    This ensures that we don't return more state than what we asked for, even if
+    the remote homeserver happens to.
+
+    Args:
+        state_event: The returned state event from the remote server.
+        requested_state: The set of locally-requested state events.
+
+    Returns:
+        True if the state_event matches the requested state, False otherwise.
+    """
+    event_type = state_event["type"]
+    state_key = state_event["state_key"]
+
+    return any(
+        requested.event_type == event_type
+        and (requested.state_key is None or requested.state_key == state_key)
+        for requested in requested_state
+    )
+
+
+def _validate_hierarchy_additional_state_event(state_event: JsonDict) -> None:
+    """
+    Validate an event within the `org.matrix.msc4507.additional_state` field
+    in a /hierarchy response.
+
+    Args:
+        state_event: The stripped state event to validate.
+
+    Raises:
+        ValueError: If the event is invalid in some way.
+    """
+
+    event_type = state_event.get("type")
+    if not isinstance(event_type, str):
+        logger.debug(
+            "Invalid event in hierarchy 'org.matrix.msc4507.additional_state': 'type' must be a "
+            "string, got %s",
+            type(event_type).__name__,
+        )
+        raise ValueError("Invalid event: 'event_type' must be a str")
+
+    state_key = state_event.get("state_key")
+    if not isinstance(state_key, str):
+        logger.debug(
+            "Invalid event in hierarchy 'org.matrix.msc4507.additional_state': 'state_key' must be "
+            "a string, got %s",
+            type(state_key).__name__,
+        )
+        raise ValueError("Invalid event: 'state_key' must be a str")
+
+    content = state_event.get("content")
+    if not isinstance(content, dict):
+        logger.debug(
+            "Invalid event in hierarchy 'org.matrix.msc4507.additional_state': 'content' must be "
+            "an object, got %s",
+            type(content).__name__,
+        )
+        raise ValueError("Invalid event: 'content' must be a dict")
+
+    sender = state_event.get("sender")
+    if not isinstance(sender, str):
+        logger.debug(
+            "Invalid event in hierarchy 'org.matrix.msc4507.additional_state': 'sender' must be a "
+            "string, got %s",
+            type(sender).__name__,
+        )
+        raise ValueError("Invalid event: 'sender' must be a str")
