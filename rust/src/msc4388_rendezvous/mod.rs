@@ -21,25 +21,24 @@ use http::StatusCode;
 use pyo3::{
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
+    Bound, Py, PyAny, PyResult, Python,
 };
 use serde::Deserialize;
 use ulid::Ulid;
 
 use self::session::Session;
 use crate::{
+    clock,
     duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
     http::http_request_from_twisted,
     msc4388_rendezvous::session::{GetResponse, PostResponse, PutResponse},
-    UnwrapInfallible,
 };
 
 mod session;
 
 #[pyclass]
 struct MSC4388RendezvousHandler {
-    clock: Py<PyAny>,
     sessions: BTreeMap<Ulid, Session>,
     soft_limit: usize,
     hard_limit: usize,
@@ -99,18 +98,11 @@ impl MSC4388RendezvousHandler {
         eviction_interval: u64,
         ttl: u64,
     ) -> PyResult<Py<Self>> {
-        let clock = homeserver
-            .call_method0("get_clock")?
-            .into_pyobject(py)
-            .unwrap_infallible()
-            .unbind();
-
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.
         let self_ = Py::new(
             py,
             Self {
-                clock,
                 sessions: BTreeMap::new(),
                 soft_limit,
                 hard_limit,
@@ -131,23 +123,14 @@ impl MSC4388RendezvousHandler {
         Ok(self_)
     }
 
-    fn _evict(&mut self, py: Python<'_>) -> PyResult<()> {
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
-        self.evict(now);
+    fn _evict(&mut self) -> PyResult<()> {
+        self.evict(clock::now_system_time());
 
         Ok(())
     }
 
-    fn handle_post(
-        &mut self,
-        py: Python<'_>,
-        twisted_request: &Bound<'_, PyAny>,
-    ) -> PyResult<(u8, PostResponse)> {
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+    fn handle_post(&mut self, twisted_request: &Bound<'_, PyAny>) -> PyResult<(u8, PostResponse)> {
+        let now = clock::now_system_time();
 
         // We trigger an immediate eviction if we're at the hard limit
         if self.sessions.len() >= self.hard_limit {
@@ -182,7 +165,6 @@ impl MSC4388RendezvousHandler {
 
     fn handle_get(
         &mut self,
-        py: Python<'_>,
         id: &str,
         twisted_request: &Bound<'_, PyAny>,
     ) -> PyResult<(u8, GetResponse)> {
@@ -280,9 +262,7 @@ impl MSC4388RendezvousHandler {
             ));
         }
 
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = clock::now_system_time();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self
@@ -296,7 +276,6 @@ impl MSC4388RendezvousHandler {
 
     fn handle_put(
         &mut self,
-        py: Python<'_>,
         id: &str,
         twisted_request: &Bound<'_, PyAny>,
     ) -> PyResult<(u8, PutResponse)> {
@@ -319,9 +298,7 @@ impl MSC4388RendezvousHandler {
 
         self.check_data_length(&data)?;
 
-        let clock = self.clock.bind(py);
-        let now: u64 = clock.call_method0("time_msec")?.extract()?;
-        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let now = clock::now_system_time();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self

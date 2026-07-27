@@ -99,6 +99,7 @@ from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
+from synapse.synapse_rust.clock import set_virtual_time_msec
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -619,6 +620,26 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # happen after `super().__init__()` so that the base class doesn't
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
+
+        # Point the Rust clock at our virtual time straight away, so that Rust
+        # code constructed before anything happens to call `seconds()` doesn't
+        # briefly see the wall clock.
+        self.seconds()
+
+    def seconds(self) -> float:
+        # Rust has its own clock (`synapse.synapse_rust.clock`) because much of
+        # it runs without the GIL and can't call back into Python for the time.
+        # That clock has no way of knowing about this virtual one, so push the
+        # current time over to it whenever we're asked what the time is.
+        #
+        # We hook `seconds()` rather than `advance()` because `Clock.advance`
+        # bumps its notion of now and *then* fires the calls that have come due,
+        # re-testing `self.seconds()` as it goes. Hooking here therefore updates
+        # Rust before any of those callbacks run, whereas pushing after
+        # `super().advance()` returned would be too late for them.
+        now = super().seconds()
+        set_virtual_time_msec(int(now * 1000))
+        return now
 
     def run(self) -> None:
         """

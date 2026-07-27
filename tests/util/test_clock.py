@@ -15,9 +15,10 @@
 
 import weakref
 
+from synapse.synapse_rust import clock as rust_clock
 from synapse.util.duration import Duration
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, TestCase
 
 
 class ClockTestCase(HomeserverTestCase):
@@ -75,3 +76,50 @@ class ClockTestCase(HomeserverTestCase):
         was_called = False
         self.reactor.advance(2)
         self.assertFalse(was_called)
+
+
+class RustClockTestCase(HomeserverTestCase):
+    """Tests for `synapse.synapse_rust.clock`, the Rust side's view of the time.
+
+    Rust can't reach the (virtual) reactor clock the tests run against, so the
+    test reactor pushes the time over to it; see
+    `tests.server.ThreadedMemoryReactorClock.seconds`.
+    """
+
+    def test_matches_the_synapse_clock(self) -> None:
+        self.assertEqual(rust_clock.time_msec(), self.hs.get_clock().time_msec())
+
+    def test_follows_the_reactor(self) -> None:
+        before = rust_clock.time_msec()
+
+        self.reactor.advance(37)
+
+        self.assertEqual(rust_clock.time_msec(), before + 37 * 1000)
+        self.assertEqual(rust_clock.time_msec(), self.hs.get_clock().time_msec())
+
+    def test_is_up_to_date_inside_a_looping_call(self) -> None:
+        """Rust must see the new time from callbacks fired *during* an advance.
+
+        This is why we hook `seconds()` rather than `advance()`: expiring things
+        by age from a looping call is the main reason the Rust clock exists.
+        """
+        seen: list[int] = []
+        self.hs.get_clock().looping_call(
+            lambda: seen.append(rust_clock.time_msec()), Duration(seconds=1)
+        )
+
+        expected = self.hs.get_clock().time_msec() + 1000
+        self.reactor.advance(1)
+
+        self.assertEqual(seen, [expected])
+
+
+class RealRustClockTestCase(TestCase):
+    """The virtual time must not leak out of the tests that pin it."""
+
+    def test_clock_is_real_without_a_virtual_reactor(self) -> None:
+        # This test never builds a test reactor, so the Rust clock should be
+        # reporting real time — as it will be for anything running in a real
+        # homeserver. If a previous test leaked its pinned time we'd see that
+        # instead, because the whole suite shares one process.
+        self.assertGreater(rust_clock.time_msec(), 1_600_000_000_000)

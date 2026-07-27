@@ -6,6 +6,7 @@ use pyo3_log::ResetHandle;
 
 pub mod acl;
 pub mod canonical_json;
+pub mod clock;
 pub mod config;
 pub mod deferred;
 pub mod duration;
@@ -70,6 +71,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(reset_logging_config, m)?)?;
 
     acl::register_module(py, m)?;
+    clock::register_module(py, m)?;
     deferred::register_module(py, m)?;
     push::register_module(py, m)?;
     events::register_module(py, m)?;

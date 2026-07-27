@@ -76,6 +76,7 @@ from synapse.logging.context import (
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
+from synapse.synapse_rust.clock import set_virtual_time_msec
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.httpresourcetree import create_resource_tree
@@ -219,6 +220,12 @@ class TestCase(unittest.TestCase):
             # Trial messes with the warnings configuration, thus this has to be
             # done in the context of an individual TestCase.
             self.addCleanup(setup_awaitable_errors())
+
+            # Tests that use a virtual reactor clock pin the Rust clock to it
+            # (see `ThreadedMemoryReactorClock.seconds`). Put it back on the
+            # real clock afterwards, so a frozen time can't leak into a test
+            # that doesn't use one.
+            self.addCleanup(set_virtual_time_msec, None)
 
             return orig()
 
