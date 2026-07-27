@@ -832,6 +832,10 @@ class SsoHandler:
                         logger.info("skipping saving the user avatar")
                         return True
 
+            # Check the upload limits before storing anything, so that a
+            # rejected avatar doesn't leave an orphaned file behind.
+            await self._media_repo.check_media_upload_limits(user_id, content_length)
+
             # store it in media repository
             avatar_mxc_url = await self._media_repo.create_or_update_content(
                 media_type=headers[b"Content-Type"][0].decode("utf-8"),
