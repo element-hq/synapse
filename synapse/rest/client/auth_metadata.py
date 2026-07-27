@@ -13,7 +13,6 @@
 # limitations under the License.
 import logging
 import typing
-from typing import cast
 
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import Codes, SynapseError
@@ -51,7 +50,7 @@ class AuthIssuerServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This endpoint is unauthenticated and the response only depends on
         # the metadata we get from Matrix Authentication Service. Internally,
-        # MasDelegatedAuth/MSC3861DelegatedAuth.issuer() are already caching the
+        # MasDelegatedAuth.issuer() is already caching the
         # response in memory anyway. Ideally we would follow any Cache-Control directive
         # given by MAS, but this is fine for now.
         #
@@ -70,14 +69,6 @@ class AuthIssuerServlet(RestServlet):
 
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
-            return 200, {"issuer": await self._auth.issuer()}
-
-        elif self._config.experimental.msc3861.enabled:
-            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
-            # We import lazily here because of the authlib requirement
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-            assert isinstance(self._auth, MSC3861DelegatedAuth)
             return 200, {"issuer": await self._auth.issuer()}
 
         else:
@@ -115,7 +106,7 @@ class AuthMetadataServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This endpoint is unauthenticated and the response only depends on
         # the metadata we get from Matrix Authentication Service. Internally,
-        # MasDelegatedAuth/MSC3861DelegatedAuth.issuer() are already caching the
+        # MasDelegatedAuth.issuer() is already caching the
         # response in memory anyway. Ideally we would follow any Cache-Control directive
         # given by MAS, but this is fine for now.
         #
@@ -136,14 +127,6 @@ class AuthMetadataServlet(RestServlet):
             assert isinstance(self._auth, MasDelegatedAuth)
             return 200, await self._auth.auth_metadata()
 
-        elif self._config.experimental.msc3861.enabled:
-            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
-            # We import lazily here because of the authlib requirement
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-            auth = cast(MSC3861DelegatedAuth, self._auth)
-            return 200, await auth.auth_metadata()
-
         else:
             # Wouldn't expect this to be reached: the servlet shouldn't have been
             # registered. Still, fail gracefully if we are registered for some reason.
@@ -155,6 +138,6 @@ class AuthMetadataServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled:
         AuthIssuerServlet(hs).register(http_server)
         AuthMetadataServlet(hs).register(http_server)

@@ -117,6 +117,18 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.157.0
+
+## MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration
+
+Support for the deprecated MSC3861 Auth Delegation (`experimental_features.msc3861`)
+has been dropped in this version, in favour of the stable Matrix Authentication Service
+integration.
+
+See [the previous upgrade notes](#stable-integration-with-matrix-authentication-service)
+and the [`matrix_authentication_service` section in the Configuration Manual](usage/configuration/config_documentation.md#matrix_authentication_service)
+for more information.
+
 # Upgrading to v1.152.0
 
 ## Workers which quarantine media must be stream writers
@@ -327,7 +339,8 @@ using these metrics.
 Support for [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service) is now stable, with a simplified configuration.
 This stable integration requires MAS 0.20.0 or later.
 
-The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.137.0.
+The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.157.0.
+(*Note*: this previously read v1.137.0 but the removal date was missed.)
 
 Synapse deployments already using MAS should now use the new configuration options:
 

@@ -35,8 +35,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, make_event_from_dict
-from synapse.federation.federation_base import event_from_pdu_json
+from synapse.events import EventBase
 from synapse.federation.federation_client import SendJoinResult
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -45,6 +44,7 @@ from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,46 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(failure.errcode, Codes.FORBIDDEN, failure)
         self.assertEqual(failure.msg, "You are not invited to this room.")
 
+    def test_exchange_third_party_invite_forwards_to_sender_for_v12_room(
+        self,
+    ) -> None:
+        """When we are not resident in the room, a 3pid invite is forwarded to
+        a remote server for exchange. Pre-v12 room IDs encode the resident
+        server's domain, but v12+ room IDs are a content hash with no domain,
+        so the room ID must not be treated as a destination as doing so raises
+        an invalid-destination error and aborts the exchange.
+
+        Regression test for 3pid invites over federation failing intermittently
+        in v12 rooms.
+        """
+        sender_user_id = "@sender:remote.example.com"
+        # A v12-style room ID: a reference hash with no ":domain" suffix.
+        room_id = "!somereferencehashwithnodomain"
+
+        # Pretend we're not in the room so we take the "forward to a remote
+        # server" branch.
+        self.handler._event_auth_handler.is_host_in_room = AsyncMock(  # type: ignore[method-assign]
+            return_value=False
+        )
+        forward = AsyncMock(return_value=None)
+        self.handler.federation_client.forward_third_party_invite = forward  # type: ignore[method-assign]
+
+        self.get_success(
+            self.handler.exchange_third_party_invite(
+                sender_user_id=sender_user_id,
+                target_user_id="@target:localhost",
+                room_id=room_id,
+                signed={"mxid": "@target:localhost", "token": "sometoken"},
+            )
+        )
+
+        forward.assert_called_once()
+        destinations = forward.call_args.args[0]
+        # Only the sender's server is a valid destination; the domainless room
+        # ID must not be misinterpreted as one.
+        self.assertEqual(destinations, {"remote.example.com"})
+        self.assertNotIn(room_id, destinations)
+
     def test_rejected_message_event_state(self) -> None:
         """
         Check that we store the state group correctly for rejected non-state events.
@@ -132,7 +172,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         )
 
         # build and send an event which will be rejected
-        ev = event_from_pdu_json(
+        ev = make_test_pdu_event(
             {
                 "type": EventTypes.Message,
                 "content": {},
@@ -183,7 +223,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         )
 
         # build and send an event which will be rejected
-        ev = event_from_pdu_json(
+        ev = make_test_pdu_event(
             {
                 "type": "org.matrix.test",
                 "state_key": "test_key",
@@ -227,7 +267,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         room_version = self.get_success(self.store.get_room_version(room_id))
 
         # Build an event to backfill
-        event = event_from_pdu_json(
+        event = make_test_pdu_event(
             {
                 "type": EventTypes.Message,
                 "content": {"body": "hello world", "msgtype": "m.text"},
@@ -324,7 +364,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         def create_invite() -> EventBase:
             room_id = self.helper.create_room_as(room_creator=user_id, tok=tok)
             room_version = self.get_success(self.store.get_room_version(room_id))
-            return event_from_pdu_json(
+            return make_test_pdu_event(
                 {
                     "type": EventTypes.Member,
                     "content": {"membership": "invite"},
@@ -357,7 +397,6 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 event.room_version,
             ),
             exc=LimitExceededError,
-            by=0.5,
         )
 
     def _build_and_send_join_event(
@@ -386,7 +425,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
 class EventFromPduTestCase(TestCase):
     def test_valid_json(self) -> None:
         """Valid JSON should be turned into an event."""
-        ev = event_from_pdu_json(
+        ev = make_test_pdu_event(
             {
                 "type": EventTypes.Message,
                 "content": {"bool": True, "null": None, "int": 1, "str": "foobar"},
@@ -413,7 +452,7 @@ class EventFromPduTestCase(TestCase):
             float("nan"),
         ]:
             with self.assertRaises(SynapseError):
-                event_from_pdu_json(
+                make_test_pdu_event(
                     {
                         "type": EventTypes.Message,
                         "content": {"foo": value},
@@ -430,7 +469,7 @@ class EventFromPduTestCase(TestCase):
     def test_invalid_nested(self) -> None:
         """List and dictionaries are recursively searched."""
         with self.assertRaises(SynapseError):
-            event_from_pdu_json(
+            make_test_pdu_event(
                 {
                     "type": EventTypes.Message,
                     "content": {"foo": [{"bar": 2**56}]},
@@ -457,7 +496,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
 
         room_id = "!room:example.com"
 
-        EVENT_CREATE = make_event_from_dict(
+        EVENT_CREATE = make_test_event(
             {
                 "room_id": room_id,
                 "type": "m.room.create",
@@ -470,7 +509,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
             },
             room_version=RoomVersions.V10,
         )
-        EVENT_CREATOR_MEMBERSHIP = make_event_from_dict(
+        EVENT_CREATOR_MEMBERSHIP = make_test_event(
             {
                 "room_id": room_id,
                 "type": "m.room.member",
@@ -484,7 +523,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
             },
             room_version=RoomVersions.V10,
         )
-        EVENT_INVITATION_MEMBERSHIP = make_event_from_dict(
+        EVENT_INVITATION_MEMBERSHIP = make_test_event(
             {
                 "room_id": room_id,
                 "type": "m.room.member",
@@ -501,7 +540,7 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
             },
             room_version=RoomVersions.V10,
         )
-        membership_event = make_event_from_dict(
+        membership_event = make_test_event(
             {
                 "room_id": room_id,
                 "type": "m.room.member",

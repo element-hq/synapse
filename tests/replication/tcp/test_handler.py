@@ -147,6 +147,12 @@ class ChannelsTestCase(BaseMultiWorkerStreamTestCase):
         # ... but worker1 finishing (and so sending an update) should.
         self.get_success(ctx_worker1.__aexit__(None, None, None))
 
+        # Wait for the stream position to be replicated to the master process
+        #
+        # Replication travels over `FakeTransport` and we're specifically flushing the
+        # write
+        self.reactor.advance(0)
+
         self.assertTrue(d.called)
 
     def test_wait_for_stream_position_rdata(self) -> None:
@@ -205,6 +211,12 @@ class ChannelsTestCase(BaseMultiWorkerStreamTestCase):
 
         # Finish the context manager, triggering the data to be sent to master.
         self.get_success(ctx_worker1.__aexit__(None, None, None))
+
+        # Wait for the stream position to be replicated to the master process
+        #
+        # Replication travels over `FakeTransport` and we're specifically flushing the
+        # write
+        self.reactor.advance(0)
 
         # Master should get told about `next_token2`, so the deferred should
         # resolve.

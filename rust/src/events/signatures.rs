@@ -30,10 +30,23 @@ use serde::{Deserialize, Serialize};
 
 /// A class representing the signatures on an event.
 #[pyclass(frozen, skip_from_py_object)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct Signatures {
     inner: Arc<RwLock<HashMap<String, HashMap<String, String>>>>,
+}
+
+impl Signatures {
+    /// Create a deep copy of this `Signatures` to allow modification without
+    /// affecting other references to the same signatures. This is needed when
+    /// we clone an event.
+    pub fn deep_copy(&self) -> Self {
+        let signatures = self.inner.read().expect("lock poisoned").clone(); // Deep copy the inner map
+
+        Self {
+            inner: Arc::new(RwLock::new(signatures)),
+        }
+    }
 }
 
 #[pymethods]

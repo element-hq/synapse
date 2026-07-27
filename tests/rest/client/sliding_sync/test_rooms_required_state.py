@@ -25,8 +25,10 @@ from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState, SlidingSyncTableChanges
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
+from tests.server import TimedOutException
 from tests.test_utils.event_injection import mark_event_as_partial_state
 
 logger = logging.getLogger(__name__)
@@ -1924,7 +1926,12 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
     def test_rooms_required_state_expand_retract_expand(self) -> None:
         """Test that when expanding, retracting and then expanding the required
-        state, we get the changes that happened."""
+        state, we get the changes that happened.
+
+        Also see `test_changing_required_state_returns_immediately`, which tests
+        that the sync stream is woken up immediately when changing the required
+        state, and not just on the next change to the room.
+        """
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -2244,4 +2251,76 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.assertEqual(
             response_body["rooms"][room_id]["required_state"][0]["event_id"],
             first_event_id,
+        )
+
+    def test_changing_required_state_returns_immediately(self) -> None:
+        """Test that if we change the `required_state`, then we return immediately
+        with the new `required_state`."""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Make an initial sync request with no required state
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We should see no required state
+        self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
+
+        # Get the state_map before we change the state as this is the final state we
+        # expect to see when we update the required state.
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # There is no new data, and so making another sync request will block.
+        channel = self.make_sync_request(
+            sync_body,
+            since=from_token,
+            tok=user1_tok,
+            timeout=Duration(seconds=10),
+            await_result=False,
+        )
+
+        # Request will block for 10 seconds as there no updates.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=9500)
+
+        # Wait for the request to actually finish. (We do this to ensure log
+        # contexts don't leak between tests).
+        channel.await_result(timeout_ms=1000)
+
+        # Now update the Sliding Sync requests to include a `required_state`
+        # event, and make another sync request.
+        sync_body["lists"]["foo-list"]["required_state"] = [
+            [EventTypes.Create, ""],
+        ]
+
+        channel = self.make_sync_request(
+            sync_body,
+            since=from_token,
+            tok=user1_tok,
+            timeout=Duration(seconds=10),
+            await_result=False,
+        )
+
+        # We should see the new `required_state` immediately without waiting
+        channel.await_result(timeout_ms=0)
+        response_body = channel.json_body
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+            },
+            exact=True,
         )

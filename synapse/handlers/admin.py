@@ -32,7 +32,8 @@ import attr
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
-from synapse.events import EventBase, FrozenEventVMSC4242
+from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.utils import FilteredEvent
 from synapse.types import (
     JsonMapping,
@@ -362,7 +363,9 @@ class AdminHandler:
         requester: JsonMapping,
         use_admin: bool,
         reason: str | None,
-        limit: int | None,
+        before_ts: int | None = None,
+        after_ts: int | None = None,
+        limit: int | None = None,
     ) -> str:
         """
         Start a task redacting the events of the given user in the given rooms
@@ -373,6 +376,8 @@ class AdminHandler:
             requester: the user requesting the events
             use_admin: whether to use the admin account to issue the redactions
             reason: reason for requesting the redaction, ie spam, etc
+            before_ts: only redact events that happened before this time
+            after_ts: only redact events that happened after this time
             limit: limit on the number of events in each room to redact
 
         Returns:
@@ -401,6 +406,8 @@ class AdminHandler:
                 "user_id": user_id,
                 "use_admin": use_admin,
                 "reason": reason,
+                "before_ts": before_ts,
+                "after_ts": after_ts,
                 "limit": limit,
             },
         )
@@ -416,8 +423,8 @@ class AdminHandler:
         self, task: ScheduledTask
     ) -> tuple[TaskStatus, Mapping[str, Any] | None, str | None]:
         """
-        Task to redact all of a users events in the given rooms, tracking which, if any, events
-        whose redaction failed
+        Task to redact all of a users events in the given rooms in the given time period,
+        tracking which, if any, events whose redaction failed
         """
 
         assert task.params is not None
@@ -426,7 +433,7 @@ class AdminHandler:
 
         r = task.params.get("requester")
         assert r is not None
-        admin = Requester.deserialize(self._store, r)
+        admin = Requester.deserialize(r)
 
         user_id = task.params.get("user_id")
         assert user_id is not None
@@ -445,6 +452,8 @@ class AdminHandler:
             authenticated_entity=admin.user.to_string(),
         )
 
+        before_ts = task.params.get("before_ts")
+        after_ts = task.params.get("after_ts")
         reason = task.params.get("reason")
         limit = task.params.get("limit")
         assert limit is not None
@@ -459,6 +468,8 @@ class AdminHandler:
                 room,
                 limit,
                 ["m.room.member", "m.room.message", "m.room.encrypted"],
+                before_ts,
+                after_ts,
             )
             if not event_ids:
                 # nothing to redact in this room
@@ -495,8 +506,7 @@ class AdminHandler:
 
                 try:
                     prev_state_events = None
-                    if room_version.msc4242_state_dags:
-                        assert isinstance(event, FrozenEventVMSC4242)
+                    if supports_msc4242_state_dag(event):
                         prev_state_events = event.prev_state_events
                         assert prev_state_events is not None, (
                             "Parent event of redaction has no `prev_state_events` which should be impossible as `prev_state_events` is a required field in MSC4242 rooms"

@@ -17,6 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+
 from unittest.mock import AsyncMock
 
 from twisted.web.resource import Resource
@@ -24,7 +25,6 @@ from twisted.web.resource import Resource
 from synapse.rest.well_known import well_known_resource
 
 from tests import unittest
-from tests.utils import HAS_AUTHLIB
 
 
 class WellKnownTests(unittest.HomeserverTestCase):
@@ -106,23 +106,18 @@ class WellKnownTests(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
 
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @unittest.override_config(
         {
             "public_baseurl": "https://homeserver",  # this is only required so that client well known is served
-            "experimental_features": {
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "client_id": "id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "secret",
-                },
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "https://issuer",
+                "secret": "secret",
             },
             "disable_registration": True,
         }
     )
-    def test_client_well_known_msc3861_oauth_delegation(self) -> None:
+    def test_client_well_known_oauth_delegation(self) -> None:
         # Patch the HTTP client to return the issuer metadata
         req_mock = AsyncMock(
             return_value={

@@ -907,7 +907,7 @@ class RegisterRestServlet(RestServlet):
 class RegisterAppServiceOnlyRestServlet(RestServlet):
     """An alternative registration API endpoint that only allows ASes to register
 
-    This replaces the regular /register endpoint if MSC3861. There are two notable
+    This replaces the regular /register endpoint if auth is delegated to MAS. There are two notable
     differences with the regular /register endpoint:
      - It only allows the `m.login.application_service` login type
      - It does not create a device or access token for the just-registered user
@@ -1068,7 +1068,7 @@ def _calculate_registration_flows(
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled:
         RegisterAppServiceOnlyRestServlet(hs).register(http_server)
         return
 

@@ -31,8 +31,7 @@ from synapse.api.errors import FederationError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import EventBase, make_event_from_dict
-from synapse.federation.federation_base import event_from_pdu_json
+from synapse.events import EventBase
 from synapse.http.types import QueryParams
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
@@ -43,6 +42,7 @@ from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
 from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:
-    return make_event_from_dict(
+    return make_test_event(
         {
             "room_id": "!a:b",
             "event_id": "$a:b",
@@ -147,7 +147,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
 
         # Join a remote user to the room that will attempt to send bad events
         self.remote_bad_user_id = f"@baduser:{self.OTHER_SERVER_NAME}"
-        self.remote_bad_user_join_event = make_event_from_dict(
+        self.remote_bad_user_join_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "room_id": self.room_id,
@@ -212,7 +212,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
         )
 
         # Now lie about an event's prev_events
-        lying_event = make_event_from_dict(
+        lying_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "room_id": self.room_id,
@@ -732,7 +732,7 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "auth_events": [],
             "unsigned": {"malicious garbage": "hackz", "more warez": "more hackz"},
         }
-        filtered_event = event_from_pdu_json(event1, RoomVersions.V1)
+        filtered_event = make_test_pdu_event(event1, RoomVersions.V1)
         # Make sure unauthorized fields are stripped from unsigned
         self.assertNotIn("more warez", filtered_event.unsigned)
 
@@ -754,7 +754,7 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             },
         }
 
-        filtered_event2 = event_from_pdu_json(event2, RoomVersions.V1, received_time=20)
+        filtered_event2 = make_test_pdu_event(event2, RoomVersions.V1, received_time=20)
         self.assertIn("age_ts", filtered_event2.unsigned)
         self.assertEqual(6, filtered_event2.unsigned["age_ts"])
         self.assertNotIn("more warez", filtered_event2.unsigned)
@@ -779,7 +779,7 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
                 "invite_room_state": [],
             },
         }
-        filtered_event3 = event_from_pdu_json(event3, RoomVersions.V1, received_time=20)
+        filtered_event3 = make_test_pdu_event(event3, RoomVersions.V1, received_time=20)
         self.assertIn("age_ts", filtered_event3.unsigned)
         # Invite_room_state field is only permitted in event type m.room.member
         self.assertNotIn("invite_room_state", filtered_event3.unsigned)

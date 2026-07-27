@@ -43,6 +43,7 @@ class CreateResource(RestServlet):
         super().__init__()
 
         self.media_repo = media_repo
+        self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self.auth = hs.get_auth()
         self.max_pending_media_uploads = hs.config.media.max_pending_media_uploads
@@ -60,7 +61,12 @@ class CreateResource(RestServlet):
         # If the create media requests for the user are over the limit, drop them.
         await self._create_media_rate_limiter.ratelimit(requester)
 
-        if not requester.app_service or requester.app_service.is_rate_limited():
+        app_service = (
+            self.store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
+        if not app_service or app_service.is_rate_limited():
             (
                 reached_pending_limit,
                 first_expiration_ts,

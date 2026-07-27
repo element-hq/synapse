@@ -203,7 +203,11 @@ class LoginRestServlet(RestServlet):
         try:
             if login_submission["type"] == LoginRestServlet.APPSERVICE_TYPE:
                 requester = await self.auth.get_user_by_req(request)
-                appservice = requester.app_service
+                appservice = (
+                    self._main_store.get_app_service_by_id(requester.app_service_id)
+                    if requester.app_service_id
+                    else None
+                )
 
                 if appservice is None:
                     raise InvalidClientTokenError(
@@ -729,7 +733,7 @@ class CasTicketServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled:
         return
 
     LoginRestServlet(hs).register(http_server)

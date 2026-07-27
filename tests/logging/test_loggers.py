@@ -21,6 +21,19 @@ from tests.unittest import TestCase
 
 
 class ExplicitlyConfiguredLoggerTestCase(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+
+        # These tests mutate the root logger's level (see the various
+        # `root_logger.setLevel(...)` calls below). Make sure we restore the
+        # original level afterwards, otherwise we leak a raised log level into
+        # the other tests running in the same worker process. A raised level can
+        # cause oversized debug log lines which break `trial -jN` (worker log
+        # events are shipped to the manager over trials's AMP, which caps each
+        # value at 64KiB, c.f. https://github.com/twisted/twisted/issues/12482).
+        root_logger = logging.getLogger()
+        self.addCleanup(root_logger.setLevel, root_logger.level)
+
     def _create_explicitly_configured_logger(self) -> logging.Logger:
         original_logger_class = logging.getLoggerClass()
         logging.setLoggerClass(ExplicitlyConfiguredLogger)

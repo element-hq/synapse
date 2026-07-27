@@ -27,8 +27,10 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Annotated,
     Any,
     ClassVar,
+    Final,
     Literal,
     Mapping,
     Match,
@@ -41,8 +43,12 @@ from typing import (
     overload,
 )
 
+import annotated_types
 import attr
+import pydantic_core.core_schema
 from immutabledict import immutabledict
+from pydantic import GetCoreSchemaHandler, StrictInt
+from pydantic_core import CoreSchema
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
 from typing_extensions import Self
@@ -61,6 +67,7 @@ from twisted.internet.interfaces import (
 )
 
 from synapse.api.errors import Codes, SynapseError
+from synapse.synapse_rust.types import Requester
 from synapse.util.cancellation import cancellable
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -70,7 +77,6 @@ if TYPE_CHECKING:
     from synapse.appservice.api import ApplicationService
     from synapse.events import EventBase
     from synapse.storage.databases.main import DataStore, PurgeEventsStore
-    from synapse.storage.databases.main.appservice import ApplicationServiceWorkerStore
     from synapse.storage.util.id_generators import MultiWriterIdGenerator
 
 
@@ -109,6 +115,110 @@ StrCollection = tuple[str, ...] | list[str] | AbstractSet[str]
 StrSequence = tuple[str, ...] | list[str]
 
 
+class AbsentType(Enum):
+    """
+    Type of a sentinel to use as an alternative to `None`
+    for when we really mean 'absent' and not JSON null.
+
+    Generally suitable for distinguishing a default state from user-suppliable values.
+    Has no meaning on its own.
+
+    It is falsy (like None is), so shorthand forms like `x or 0` can be used.
+    """
+
+    # Making this an Enum member makes this compatible with type narrowing,
+    # meaning `x is not Absent` will narrow `x: int | AbsentType` to `x: int` etc.
+    _Absent = object()
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: object, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """
+        This function is checked for and used by Pydantic when
+        attempting to deserialise/validate a field of this type.
+
+        As the `Absent` type has no valid value when deserialising
+        from JSON (as that's the point; `Absent` is a marker representing
+        a lack of any JSON value), we always reject any value.
+        Instead of deserialising from this type, we rely on the struct class
+        we are in having field defaults that provide an `Absent`, which does not
+        go through the JSON validation.
+
+        When validating Python, we accept the absent marker itself.
+        """
+
+        def _reject_from_json(v: object) -> "AbsentType":
+            """
+            Reject the JSON value, no matter what it is, since absent values
+            are meant to be ... absent, thus have nothing they can be deserialised
+            from.
+            """
+            raise ValueError("AbsentType cannot be deserialized from JSON")
+
+        # `json_or_python_schema` wrapper needed for Pydantic < 2.10
+        # but can be replaced with just the `is_instance_schema` after that version.
+        return pydantic_core.core_schema.json_or_python_schema(
+            json_schema=pydantic_core.core_schema.no_info_plain_validator_function(
+                _reject_from_json
+            ),
+            python_schema=pydantic_core.core_schema.is_instance_schema(cls),
+        )
+
+    def __copy__(self) -> "AbsentType":
+        """
+        Copy implementation used by `copy.copy()`.
+        Always use the same instance.
+
+        Without this and the deep version `__deepcopy__`,
+        `copy.copy(Absent)` on Python 3.10 (olddeps)
+        had a problem where it tried to construct a new Absent
+        as part of a deepcopy operation and resulted in:
+            ValueError: <object object at 0x7f64b3b6d930> is not a valid AbsentType
+        """
+        return self
+
+    def __deepcopy__(self, memo: object) -> "AbsentType":
+        """
+        Copy implementation used by `copy.deepcopy()`.
+        Always use the same instance.
+        """
+        return self
+
+    def __bool__(self) -> Literal[False]:
+        return False
+
+    def __str__(self) -> str:
+        return "Absent"
+
+    def __repr__(self) -> str:
+        return "Absent"
+
+
+Absent: Final = AbsentType._Absent
+"""
+Sentinel to use as an alternative to `None`
+for when we really mean 'absent' and not JSON null.
+
+Generally suitable for distinguishing a default state from user-suppliable values.
+Has no meaning on its own.
+
+It is falsy (like None is), so shorthand forms like `x or 0` can be used.
+
+(Previously known as `Sentinel.UNSET_SENTINEL`.)
+"""
+
+
+NonNegativeStrictInt = Annotated[StrictInt, annotated_types.Ge(0)]
+"""A strict integer that must be greater than or equal to zero.
+
+Should be preferred in place of Pydantic's own (lax) NonNegativeInt,
+which will coerce strings to integers in a way that does not agree with
+the Matrix specification (and would risk backing us into a backward compatibility
+hole where we had to support input forms we didn't intend).
+"""
+
+
 # Note that this seems to require inheriting *directly* from Interface in order
 # for mypy-zope to realize it is an interface.
 class ISynapseThreadlessReactor(
@@ -136,82 +246,6 @@ class ISynapseReactor(
     Interface,
 ):
     """The interfaces necessary for Synapse to function."""
-
-
-@attr.s(frozen=True, slots=True, auto_attribs=True)
-class Requester:
-    """
-    Represents the user making a request
-
-    Attributes:
-        user:  id of the user making the request
-        access_token_id:  *ID* of the access token used for this request, or
-            None for appservices, guests, and tokens generated by the admin API
-        is_guest:  True if the user making this request is a guest user
-        shadow_banned:  True if the user making this request has been shadow-banned.
-        device_id:  device_id which was set at authentication time, or
-            None for appservices, guests, and tokens generated by the admin API
-        app_service:  the AS requesting on behalf of the user
-        authenticated_entity: The entity that authenticated when making the request.
-            This is different to the user_id when an admin user or the server is
-            "puppeting" the user.
-    """
-
-    user: "UserID"
-    access_token_id: int | None
-    is_guest: bool
-    scope: set[str]
-    shadow_banned: bool
-    device_id: str | None
-    app_service: Optional["ApplicationService"]
-    authenticated_entity: str
-
-    def serialize(self) -> dict[str, Any]:
-        """Converts self to a type that can be serialized as JSON, and then
-        deserialized by `deserialize`
-
-        Returns:
-            dict
-        """
-        return {
-            "user_id": self.user.to_string(),
-            "access_token_id": self.access_token_id,
-            "is_guest": self.is_guest,
-            "scope": list(self.scope),
-            "shadow_banned": self.shadow_banned,
-            "device_id": self.device_id,
-            "app_server_id": self.app_service.id if self.app_service else None,
-            "authenticated_entity": self.authenticated_entity,
-        }
-
-    @staticmethod
-    def deserialize(
-        store: "ApplicationServiceWorkerStore", input: dict[str, Any]
-    ) -> "Requester":
-        """Converts a dict that was produced by `serialize` back into a
-        Requester.
-
-        Args:
-            store: Used to convert AS ID to AS object
-            input: A dict produced by `serialize`
-
-        Returns:
-            Requester
-        """
-        appservice = None
-        if input["app_server_id"]:
-            appservice = store.get_app_service_by_id(input["app_server_id"])
-
-        return Requester(
-            user=UserID.from_string(input["user_id"]),
-            access_token_id=input["access_token_id"],
-            is_guest=input["is_guest"],
-            scope=set(input.get("scope", [])),
-            shadow_banned=input["shadow_banned"],
-            device_id=input["device_id"],
-            app_service=appservice,
-            authenticated_entity=input["authenticated_entity"],
-        )
 
 
 def create_requester(
@@ -258,7 +292,7 @@ def create_requester(
         scope,
         shadow_banned,
         device_id,
-        app_service,
+        app_service.id if app_service else None,
         authenticated_entity,
     )
 
@@ -685,6 +719,9 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
 
     def bound_stream_token(self, max_stream: int) -> "Self":
         """Bound the stream positions to a maximum value"""
+        # Shortcut if we're already under the bound
+        if self.get_max_stream_pos() <= max_stream:
+            return self
 
         min_pos = min(self.stream, max_stream)
         return type(self)(
@@ -1057,6 +1094,7 @@ class StreamKeyType(Enum):
     UN_PARTIAL_STATED_ROOMS = "un_partial_stated_rooms_key"
     THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
     STICKY_EVENTS = "sticky_events_key"
+    QUARANTINED_MEDIA = "quarantined_media_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1064,7 +1102,7 @@ class StreamToken:
     """A collection of keys joined together by underscores in the following
     order and which represent the position in their respective streams.
 
-    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242`
+    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242_4141_4343`
         1. `room_key`: `s2633508` which is a `RoomStreamToken`
            - `RoomStreamToken`'s can also look like `t426-2633508` or `m56~2.58~3.59`
            - See the docstring for `RoomStreamToken` for more details.
@@ -1079,12 +1117,13 @@ class StreamToken:
         10. `un_partial_stated_rooms_key`: `379`
         11. `thread_subscriptions_key`: 4242
         12. `sticky_events_key`: 4141
+        13. `quarantined_media_key`: 4343
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
     ```json
     {
-        "next_batch": "s12_4_0_1_1_1_1_4_1_1",
+        "next_batch": "s12_4_0_1_1_1_1_4_1_1_1_1_1",
         "presence": {
             "events": []
         },
@@ -1096,7 +1135,7 @@ class StreamToken:
                 "!QrZlfIDQLNLdZHqTnt:hs1": {
                     "timeline": {
                         "events": [],
-                        "prev_batch": "s10_4_0_1_1_1_1_4_1_1",
+                        "prev_batch": "s10_4_0_1_1_1_1_4_1_1_1_1_1",
                         "limited": false
                     },
                     "state": {
@@ -1139,6 +1178,9 @@ class StreamToken:
     un_partial_stated_rooms_key: int
     thread_subscriptions_key: int
     sticky_events_key: int
+    quarantined_media_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1168,6 +1210,7 @@ class StreamToken:
                 un_partial_stated_rooms_key,
                 thread_subscriptions_key,
                 sticky_events_key,
+                quarantined_media_key,
             ) = keys
 
             return cls(
@@ -1185,6 +1228,9 @@ class StreamToken:
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
                 thread_subscriptions_key=int(thread_subscriptions_key),
                 sticky_events_key=int(sticky_events_key),
+                quarantined_media_key=await MultiWriterStreamToken.parse(
+                    store, quarantined_media_key
+                ),
             )
         except CancelledError:
             raise
@@ -1209,6 +1255,7 @@ class StreamToken:
                 str(self.un_partial_stated_rooms_key),
                 str(self.thread_subscriptions_key),
                 str(self.sticky_events_key),
+                await self.quarantined_media_key.to_string(store),
             ]
         )
 
@@ -1238,6 +1285,12 @@ class StreamToken:
                 self.device_list_key.copy_and_advance(new_value),
             )
             return new_token
+        elif key == StreamKeyType.QUARANTINED_MEDIA:
+            new_token = self.copy_and_replace(
+                StreamKeyType.QUARANTINED_MEDIA,
+                self.quarantined_media_key.copy_and_advance(new_value),
+            )
+            return new_token
 
         new_token = self.copy_and_replace(key, new_value)
         new_id = new_token.get_field(key)
@@ -1260,6 +1313,7 @@ class StreamToken:
         key: Literal[
             StreamKeyType.RECEIPT,
             StreamKeyType.DEVICE_LIST,
+            StreamKeyType.QUARANTINED_MEDIA,
         ],
     ) -> MultiWriterStreamToken: ...
 
@@ -1331,7 +1385,8 @@ class StreamToken:
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
             f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
-            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key})"
+            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}"
+            f"quarantined_media: {self.quarantined_media_key})"
         )
 
 
@@ -1348,6 +1403,7 @@ StreamToken.START = StreamToken(
     un_partial_stated_rooms_key=0,
     thread_subscriptions_key=0,
     sticky_events_key=0,
+    quarantined_media_key=MultiWriterStreamToken(stream=0),
 )
 
 

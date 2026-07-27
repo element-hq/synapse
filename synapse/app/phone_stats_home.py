@@ -48,10 +48,21 @@ PHONE_HOME_INTERVAL = Duration(hours=3)
 Phone home stats are sent every 3 hours
 """
 
+COUNT_USERS_INTERVAL = Duration(minutes=5)
+"""
+We recalculate synapse_non_deactivated_user_count every 5 minutes, which allows
+for a reasonable level of accuracy without consuming too much database time.
+"""
+
 # Contains the list of processes we will be monitoring
 # currently either 0 or 1
 _stats_process: list[tuple[int, "resource.struct_rusage"]] = []
 
+# FIXME: These gauges should probably be moved somewhere else as they are NOT included
+# in the phone home stats payload. It appears that they were historically organized here
+# during a refactor to ensure that we only calculate them on the workers designated to
+# `hs.config.run_background_tasks` and because they are metrics.
+#
 # Gauges to expose monthly active user control metrics
 current_mau_gauge = Gauge(
     "synapse_admin_mau_current",
@@ -72,6 +83,11 @@ registered_reserved_users_mau_gauge = Gauge(
     "synapse_admin_mau_registered_reserved_users",
     "Registered users with reserved threepids",
     labelnames=[SERVER_NAME_LABEL],
+)
+user_count_gauge = Gauge(
+    "synapse_non_deactivated_user_count",
+    "Total non-deactivated user count within the Synapse database, split by appservice",
+    labelnames=["app_service", SERVER_NAME_LABEL],
 )
 
 
@@ -263,8 +279,34 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
-        clock.looping_call(generate_monthly_active_users, Duration(minutes=5))
+        clock.looping_call(generate_monthly_active_users, COUNT_USERS_INTERVAL)
     # End of monthly active user settings
+
+    def generate_non_deactivated_user_count() -> "defer.Deferred[None]":
+        async def _generate_total_users() -> None:
+            store = hs.get_datastores().main
+
+            result = await store.get_user_count_by_service()
+
+            # Should an appservice disappear from the results (because all of the users
+            # were deleted/deactivated), we want to ensure we don't leave behind any
+            # stale data.
+            user_count_gauge.clear()
+
+            for app_service, count in result:
+                user_count_gauge.labels(
+                    app_service=app_service,
+                    **{SERVER_NAME_LABEL: server_name},
+                ).set(float(count))
+
+        return hs.run_as_background_process(
+            "generate_total_users",
+            _generate_total_users,
+        )
+
+    if hs.config.metrics.enable_metrics:
+        generate_non_deactivated_user_count()
+        clock.looping_call(generate_non_deactivated_user_count, Duration(minutes=5))
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")

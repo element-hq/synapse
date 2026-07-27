@@ -284,6 +284,24 @@ This setting has the following sub-options:
 
 * `include_offline_users_on_sync` (boolean): When clients perform an initial or `full_state` sync, presence results for offline users are not included by default. Setting `include_offline_users_on_sync` to `true` will always include offline users in the results. Defaults to `false`.
 
+* `last_active_granularity` (duration): How long after a user was last active that they are still shown as "currently active" to other users. Larger values reduce the rate of presence updates sent to other users and servers.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"1m"`.
+
+* `sync_online_timeout` (duration): How long after a client's last sync request their presence is switched to offline. Clients are expected to keep a sync request open at (almost) all times while online, so this only needs to cover the gap between two consecutive sync requests. Note that if `rc_presence` is set to ratelimit how often syncs can affect presence, this must be greater than the ratelimit's interval or users will incorrectly be marked as offline in between syncs.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"30s"`.
+
+* `idle_timeout` (duration): How long after a user was last active that their presence is switched to "unavailable" (idle) while they remain connected. Must be greater than `last_active_granularity`.
+
+  *Added in Synapse 1.156.0.*
+
+  Defaults to `"5m"`.
+
 Example configuration:
 ```yaml
 presence:
@@ -345,8 +363,9 @@ Known room versions are listed [here](https://spec.matrix.org/latest/rooms/#comp
 For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
+_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
 
-Defaults to `"10"`.
+Defaults to `"11"`.
 
 Example configuration:
 ```yaml
@@ -1971,7 +1990,7 @@ rc_presence:
 
 *(object)* Ratelimiting settings for delayed event management.
 
-This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account, or its source IP when requests are unauthenticated.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -2209,13 +2228,26 @@ These settings can be overridden using the `get_media_upload_limits_for_user` mo
 
 Defaults to `[]`.
 
+Options for each entry include:
+
+* `time_period` (duration): The time period over which the limit applies. Required.
+
+* `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
+
+* `info_uri` (string): URI returned to the client for where the user can find information about the upload limit and how users can reduce their upload usage or request an upload limit increase. Optional. If not set, Synapse serves a built-in page (customisable via the `media_upload_limit_exceeded.html` template) and uses its URL instead.
+
+* `can_upgrade` (boolean): Value returned to the client for whether the limit can be increased. Defaults to `false`.
+
 Example configuration:
 ```yaml
 media_upload_limits:
 - time_period: 1h
   max_size: 100M
+  info_uri: https://example.com/quota#hour
 - time_period: 1w
   max_size: 500M
+  info_uri: https://example.com/quota
+  can_upgrade: true
 ```
 ---
 ### `max_image_pixels`
@@ -2869,6 +2901,8 @@ enable_3pid_changes: false
 *(array)* Users who register on this homeserver will automatically be joined to the rooms listed under this option.
 
 By default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to `public`. You can find more options relating to auto-joining rooms below.
+
+Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart` to a user who's part of the invite-only rooms.
 
 As Spaces are just rooms under the hood, Space aliases may also be used.
 
@@ -3788,7 +3822,10 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:
+    * displayname
+    * picture - only if Synapse media repository is running in the main
+       process (i.e. not workerized) and media is stored locally Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -4284,6 +4321,16 @@ forget_rooms_on_leave: true
 Example configuration:
 ```yaml
 exclude_rooms_from_sync:
+- '!foo:example.com'
+```
+---
+### `exclude_rooms_from_presence`
+
+*(array)* A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to `[]`.
+
+Example configuration:
+```yaml
+exclude_rooms_from_presence:
 - '!foo:example.com'
 ```
 ---

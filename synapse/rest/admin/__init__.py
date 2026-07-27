@@ -281,17 +281,11 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
 
     # Admin servlets below may not work on workers.
     if hs.config.worker.worker_app is not None:
-        # Some admin servlets can be mounted on workers when MSC3861 is enabled.
-        # Note that this is only for MSC3861 mode, as modern MAS using the
-        # matrix_authentication_service integration uses the dedicated MAS API.
-        if hs.config.experimental.msc3861.enabled:
-            register_servlets_for_msc3861_delegation(hs, http_server)
-        else:
-            UserRestServletV2Get(hs).register(http_server)
+        UserRestServletV2Get(hs).register(http_server)
 
         return
 
-    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+    auth_delegated = hs.config.mas.enabled
 
     register_servlets_for_client_rest_resource(hs, http_server)
     BlockRoomRestServlet(hs).register(http_server)
@@ -362,7 +356,7 @@ def register_servlets_for_client_rest_resource(
     hs: "HomeServer", http_server: HttpServer
 ) -> None:
     """Register only the servlets which need to be exposed on /_matrix/client/xxx"""
-    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+    auth_delegated = hs.config.mas.enabled
 
     WhoisRestServlet(hs).register(http_server)
     PurgeHistoryStatusRestServlet(hs).register(http_server)
@@ -386,16 +380,3 @@ def register_servlets_for_client_rest_resource(
 
     # don't add more things here: new servlets should only be exposed on
     # /_synapse/admin so should not go here. Instead register them in register_servlets.
-
-
-def register_servlets_for_msc3861_delegation(
-    hs: "HomeServer", http_server: HttpServer
-) -> None:
-    """Register servlets needed by MAS when MSC3861 is enabled"""
-    assert hs.config.experimental.msc3861.enabled
-
-    UserRestServletV2(hs).register(http_server)
-    UsernameAvailableRestServlet(hs).register(http_server)
-    UserReplaceMasterCrossSigningKeyRestServlet(hs).register(http_server)
-    DeviceRestServlet(hs).register(http_server)
-    DevicesRestServlet(hs).register(http_server)

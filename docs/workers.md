@@ -239,6 +239,7 @@ information.
     ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
     ^/_matrix/client/v1/rooms/.*/threads$
     ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
+    ^/_matrix/client/v1/room_summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
     ^/_matrix/client/(r0|v3|unstable)/account/deactivate$
@@ -336,14 +337,6 @@ Ensure that all SSO logins go to a single process.
 For multiple workers not handling the SSO endpoints properly, see
 [#7530](https://github.com/matrix-org/synapse/issues/7530) and
 [#9427](https://github.com/matrix-org/synapse/issues/9427).
-
-Additionally, when MSC3861 is enabled (`experimental_features.msc3861.enabled`
-set to `true`), the following endpoints can be handled by the worker:
-
-    ^/_synapse/admin/v2/users/[^/]+$
-    ^/_synapse/admin/v1/username_available$
-    ^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
-    ^/_synapse/admin/v1/users/[^/]+/devices$
 
 Note that a [HTTP listener](usage/configuration/config_documentation.md#listeners)
 with `client` and `federation` `resources` must be configured in the

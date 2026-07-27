@@ -141,9 +141,7 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
                 )
                 event.internal_metadata.outlier = event_payload["outlier"]
 
-                requester = Requester.deserialize(
-                    self.store, event_payload["requester"]
-                )
+                requester = Requester.deserialize(event_payload["requester"])
                 context = EventContext.deserialize(
                     self._storage_controllers, event_payload["context"]
                 )

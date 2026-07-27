@@ -8,10 +8,7 @@ import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import FrozenEventV3
-from synapse.federation.federation_base import (
-    event_from_pdu_json,
-)
+from synapse.events import make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
@@ -19,6 +16,7 @@ from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -73,7 +71,6 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 action=Membership.JOIN,
             ),
             LimitExceededError,
-            by=0.5,
         )
 
     @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
@@ -126,7 +123,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             create_event_source,
             self.hs.config.server.default_room_version,
         )
-        create_event = FrozenEventV3(
+        create_event = make_event_from_dict(
             create_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -150,7 +147,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = FrozenEventV3(
+        join_event = make_event_from_dict(
             join_event_source,
             self.hs.config.server.default_room_version,
             {},
@@ -215,7 +212,6 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 ),
                 LimitExceededError,
-                by=0.5,
             )
 
     # TODO: test that remote joins to a room are rate limited.
@@ -283,7 +279,6 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
-            by=0.5,
         )
 
         # Try to join as Chris on the original worker. Should get denied because Alice
@@ -296,7 +291,6 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
-            by=0.5,
         )
 
 
@@ -549,7 +543,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -595,7 +589,7 @@ class TestMSC4155InviteFiltering(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -710,7 +704,7 @@ class TestMSC4380InviteBlocking(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},

@@ -9,7 +9,9 @@ on:
 env:
   # We use nightly so that `fmt` correctly groups together imports, and
   # clippy correctly fixes up the benchmarks.
-  RUST_VERSION: nightly-2025-06-24
+  #
+  # Note: This should match the nightly rust version in `tests.yml`.
+  RUST_VERSION: nightly-2025-03-27
 
 jobs:
   fixup:
@@ -18,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
@@ -31,7 +33,7 @@ jobs:
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           install-project: "false"
-          poetry-version: "2.2.1"
+          poetry-version: "2.4.1"
 
       - name: Run ruff check
         continue-on-error: true
@@ -47,6 +49,6 @@ jobs:
       - run: cargo fmt
         continue-on-error: true
 
-      - uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7.1.0
+      - uses: stefanzweifel/git-auto-commit-action@4a55954c782fc1ea30b9056cd3e7a2b40ca8887d # v7.2.0
         with:
           commit_message: "Attempt to fix linting"

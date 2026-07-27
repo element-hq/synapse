@@ -255,9 +255,8 @@ class ApplicationServicesHandler:
                 will cause this function to return early.
 
                 Ephemeral events will only be pushed to appservices that have opted into
-                receiving them by setting `push_ephemeral` to true in their registration
-                file. Note that while MSC2409 is experimental, this option is called
-                `de.sorunome.msc2409.push_ephemeral`.
+                receiving them by setting `receive_ephemeral` to true in their
+                registration file(previously this was `push_ephemeral`).
 
                 Appservices will only receive ephemeral events that fall within their
                 registered user and room namespaces.
@@ -270,7 +269,6 @@ class ApplicationServicesHandler:
 
         # Notify appservices of updates in ephemeral event streams.
         # Only the following streams are currently supported.
-        # FIXME: We should use constants for these values.
         if stream_key not in (
             StreamKeyType.TYPING,
             StreamKeyType.RECEIPT,
@@ -315,7 +313,10 @@ class ApplicationServicesHandler:
                     StreamKeyType.PRESENCE,
                     StreamKeyType.TO_DEVICE,
                 )
-                and service.supports_ephemeral
+                # Honour both the stable `receive_ephemeral` registration flag and the
+                # legacy `de.sorunome.msc2409.push_ephemeral` one, matching the
+                # transaction body built in `ApplicationServiceApi.push_bulk`.
+                and (service.supports_ephemeral or service.supports_unstable_ephemeral)
             )
             or (
                 stream_key == StreamKeyType.DEVICE_LIST
