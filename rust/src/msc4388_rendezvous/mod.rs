@@ -21,7 +21,7 @@ use http::StatusCode;
 use pyo3::{
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
+    Bound, Py, PyAny, PyResult, Python,
 };
 use serde::Deserialize;
 use ulid::Ulid;
@@ -30,9 +30,9 @@ use self::session::Session;
 use crate::{
     duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
+    homeserver::HomeServer,
     http::http_request_from_twisted,
     msc4388_rendezvous::session::{GetResponse, PostResponse, PutResponse},
-    UnwrapInfallible,
 };
 
 mod session;
@@ -92,25 +92,21 @@ impl MSC4388RendezvousHandler {
     #[pyo3(signature = (homeserver, /, soft_limit=100, hard_limit=200,max_content_length=4*1024, eviction_interval=60*1000, ttl=2*60*1000))]
     fn new(
         py: Python<'_>,
-        homeserver: &Bound<'_, PyAny>,
+        homeserver: HomeServer,
         soft_limit: usize,
         hard_limit: usize,
         max_content_length: u64,
         eviction_interval: u64,
         ttl: u64,
     ) -> PyResult<Py<Self>> {
-        let clock = homeserver
-            .call_method0("get_clock")?
-            .into_pyobject(py)
-            .unwrap_infallible()
-            .unbind();
+        let clock = homeserver.clock(py)?;
 
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.
         let self_ = Py::new(
             py,
             Self {
-                clock,
+                clock: clock.clone_ref(py),
                 sessions: BTreeMap::new(),
                 soft_limit,
                 hard_limit,
@@ -122,11 +118,9 @@ impl MSC4388RendezvousHandler {
         let eviction_duration = SynapseDuration::from_milliseconds(eviction_interval);
 
         let evict = self_.getattr(py, "_evict")?;
-        homeserver.call_method0("get_clock")?.call_method(
-            "looping_call",
-            (evict, &eviction_duration),
-            None,
-        )?;
+        clock
+            .bind(py)
+            .call_method("looping_call", (evict, &eviction_duration), None)?;
 
         Ok(self_)
     }

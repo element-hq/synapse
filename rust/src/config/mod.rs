@@ -48,6 +48,7 @@ pub struct AuthConfig {
 #[derive(FromPyObject, Clone)]
 pub struct ServerConfig {
     pub msc4140_enabled: bool,
+    pub public_baseurl: String,
 }
 
 #[derive(FromPyObject, Clone)]

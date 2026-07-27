@@ -29,7 +29,7 @@ use pyo3::{
     exceptions::PyValueError,
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, IntoPyObject, Py, PyAny, PyResult, Python,
+    Bound, Py, PyAny, PyResult, Python,
 };
 use ulid::Ulid;
 
@@ -37,8 +37,8 @@ use self::session::Session;
 use crate::{
     duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
+    homeserver::HomeServer,
     http::{http_request_from_twisted, http_response_to_twisted, HeaderMapPyExt},
-    UnwrapInfallible,
 };
 
 mod session;
@@ -113,25 +113,17 @@ impl RendezvousHandler {
     #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=4*1024, eviction_interval=60*1000, ttl=60*1000))]
     fn new(
         py: Python<'_>,
-        homeserver: &Bound<'_, PyAny>,
+        homeserver: HomeServer,
         capacity: usize,
         max_content_length: u64,
         eviction_interval: u64,
         ttl: u64,
     ) -> PyResult<Py<Self>> {
-        let base: String = homeserver
-            .getattr("config")?
-            .getattr("server")?
-            .getattr("public_baseurl")?
-            .extract()?;
+        let base = homeserver.config(py)?.server.public_baseurl;
         let base = Uri::try_from(format!("{base}_synapse/client/rendezvous"))
             .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
-        let clock = homeserver
-            .call_method0("get_clock")?
-            .into_pyobject(py)
-            .unwrap_infallible()
-            .unbind();
+        let clock = homeserver.clock(py)?;
 
         let eviction_duration = SynapseDuration::from_milliseconds(eviction_interval);
 
@@ -141,7 +133,7 @@ impl RendezvousHandler {
             py,
             Self {
                 base,
-                clock,
+                clock: clock.clone_ref(py),
                 sessions: BTreeMap::new(),
                 capacity,
                 max_content_length,
@@ -150,11 +142,9 @@ impl RendezvousHandler {
         )?;
 
         let evict = self_.getattr(py, "_evict")?;
-        homeserver.call_method0("get_clock")?.call_method(
-            "looping_call",
-            (evict, &eviction_duration),
-            None,
-        )?;
+        clock
+            .bind(py)
+            .call_method("looping_call", (evict, &eviction_duration), None)?;
 
         Ok(self_)
     }

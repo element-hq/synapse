@@ -12,6 +12,7 @@ pub mod duration;
 pub mod errors;
 pub mod events;
 pub mod handlers;
+pub mod homeserver;
 pub mod http;
 pub mod http_client;
 pub mod identifier;

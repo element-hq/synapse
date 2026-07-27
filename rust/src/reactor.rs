@@ -15,36 +15,20 @@
 
 //! A typed wrapper around the Twisted reactor.
 
-use pyo3::{call::PyCallArgs, exceptions::PyTypeError, intern, prelude::*};
-
-/// The reactor methods Rust code relies on.
-///
-/// Extracting a [`Reactor`] from a Python object fails if any of these are
-/// missing, so mistakes surface as a `TypeError` at the FFI boundary rather
-/// than as an `AttributeError` on a tokio worker thread later.
-const REQUIRED_METHODS: &[&str] = &["callFromThread", "addSystemEventTrigger"];
+use pyo3::{call::PyCallArgs, intern, prelude::*};
 
 /// The Twisted reactor, as seen from Rust.
 ///
-/// This is not a static guarantee that the object behaves like a reactor (it
-/// is a foreign Python object), but the duck type is checked once at
-/// extraction, and this module is the single place that names the Twisted
-/// API surface that Rust code depends on.
+/// A typed facade over a foreign Python object: it does no validation of the
+/// object it wraps (the Python side is type-checked by mypy), but it is the
+/// single place that names the Twisted API surface that Rust code depends
+/// on.
 pub struct Reactor(Py<PyAny>);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Reactor {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        for name in REQUIRED_METHODS {
-            if !obj.hasattr(*name)? {
-                return Err(PyTypeError::new_err(format!(
-                    "expected a Twisted reactor, but {} has no `{name}` method",
-                    obj.get_type()
-                )));
-            }
-        }
-
         Ok(Reactor(obj.to_owned().unbind()))
     }
 }
