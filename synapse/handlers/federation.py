@@ -1539,7 +1539,14 @@ class FederationHandler:
                     if i == max_retries - 1:
                         raise e
         else:
-            destinations = {x.split(":", 1)[-1] for x in (sender_user_id, room_id)}
+            # The sender always tells us a server to try. Pre-v12 room IDs also
+            # encode the resident server's domain, but v12+ room IDs are a hash
+            # with no domain component, so we must not treat them as a server
+            # name -- doing so raises an invalid-destination error which can
+            # abort the whole exchange before the valid destination is tried.
+            destinations = {get_domain_from_id(sender_user_id)}
+            if ":" in room_id:
+                destinations.add(get_domain_from_id(room_id))
 
             try:
                 await self.federation_client.forward_third_party_invite(

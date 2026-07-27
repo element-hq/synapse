@@ -30,10 +30,9 @@ from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
+    EventFormat,
     FilteredEvent,
     SerializeEventConfig,
-    format_event_for_client_v2_without_room_id,
-    format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
@@ -304,18 +303,18 @@ class SyncRestServlet(RestServlet):
     ) -> JsonDict:
         logger.debug("Formatting events in sync response")
         if filter.event_format == "client":
-            event_formatter = format_event_for_client_v2_without_room_id
+            event_formatter = EventFormat.ClientV2WithoutRoomId
         elif filter.event_format == "federation":
-            event_formatter = format_event_raw
+            event_formatter = EventFormat.Raw
         else:
             raise Exception("Unknown event format %s" % (filter.event_format,))
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self._event_serializer.create_config(
             event_format=event_formatter,
             requester=requester,
-            only_event_fields=filter.event_fields,
+            event_field_allowlist=filter.event_fields,
         )
-        stripped_serialize_options = SerializeEventConfig(
+        stripped_serialize_options = await self._event_serializer.create_config(
             event_format=event_formatter,
             requester=requester,
             include_stripped_room_state=True,
@@ -931,8 +930,8 @@ class SlidingSyncRestServlet(RestServlet):
     ) -> JsonDict:
         time_now = self.clock.time_msec()
 
-        serialize_options = SerializeEventConfig(
-            event_format=format_event_for_client_v2_without_room_id,
+        serialize_options = await self.event_serializer.create_config(
+            event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
 
@@ -1158,8 +1157,8 @@ class SlidingSyncRestServlet(RestServlet):
         time_now = self.clock.time_msec()
         # Same as SSS timelines.
         #
-        serialize_options = SerializeEventConfig(
-            event_format=format_event_for_client_v2_without_room_id,
+        serialize_options = await self.event_serializer.create_config(
+            event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
 

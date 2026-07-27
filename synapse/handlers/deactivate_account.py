@@ -349,6 +349,9 @@ class DeactivateAccountHandler:
         # Ensure the user is not marked as erased.
         await self.store.mark_user_not_erased(user_id)
 
+        # The profile row is deleted on erasure, so recreate it if missing.
+        await self.store.create_profile(user)
+
         # Mark the user as active.
         await self.store.set_user_deactivated_status(user_id, False)
 

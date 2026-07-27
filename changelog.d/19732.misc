@@ -1,1 +1,0 @@
-Refactor `get_user_which_could_invite` logic to reuse `get_users_which_can_issue_invite`. Contributed by Noah Markert.

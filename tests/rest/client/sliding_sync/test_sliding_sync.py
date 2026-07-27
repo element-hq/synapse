@@ -564,9 +564,16 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
         # Block for 10 seconds to make `notifier.wait_for_stream_token(from_token)`
         # timeout
+        #
+        # First, block for *almost* 10 seconds to make sure we are
+        # `notifier.wait_for_stream_token(from_token)`
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=9900)
-        channel.await_result(timeout_ms=200)
+        # Then wait for the rest of the 10 second timeout, 9900 + 500 > 10000
+        #
+        # `notifier.wait_for_stream_token(from_token)` only checks every 500ms so we
+        # need to match that in order to make sure we hit the wake-up for sure.
+        channel.await_result(timeout_ms=500)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # We expect the next `pos` in the result to be the same as what we requested

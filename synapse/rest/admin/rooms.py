@@ -1028,7 +1028,7 @@ class RoomMessagesRestServlet(RestServlet):
         ):
             as_client_event = False
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self._event_serializer.create_config(
             as_client_event=as_client_event, requester=requester
         )
 

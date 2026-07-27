@@ -152,6 +152,8 @@ class Codes(str, Enum):
     # Part of MSC4326
     UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
 
+    USER_LIMIT_EXCEEDED = "M_USER_LIMIT_EXCEEDED"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.
@@ -510,6 +512,34 @@ class ResourceLimitError(SynapseError):
             self.errcode,
             admin_contact=self.admin_contact,
             limit_type=self.limit_type,
+        )
+
+
+class UserLimitExceededError(SynapseError):
+    """
+    Implementation of M_USER_LIMIT_EXCEEDED error
+    """
+
+    def __init__(
+        self,
+        code: int,
+        msg: str,
+        *,
+        info_uri: str,
+        can_upgrade: bool = False,
+    ):
+        additional_fields: dict[str, str | bool] = {
+            "info_uri": info_uri,
+        }
+
+        if can_upgrade:
+            additional_fields["can_upgrade"] = can_upgrade
+
+        super().__init__(
+            code,
+            msg,
+            Codes.USER_LIMIT_EXCEEDED,
+            additional_fields=additional_fields,
         )
 
 

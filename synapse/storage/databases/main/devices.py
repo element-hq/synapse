@@ -2019,7 +2019,10 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn,
             table="device_lists_remote_extremeties",
             keyvalues={"user_id": user_id},
-            values={"stream_id": stream_id},
+            # `stream_id` is a TEXT column, so store it as a string (this method
+            # takes an int) rather than relying on the driver to coerce it.
+            # (Ideally we'd fix the schema, but that is non-trivial)
+            values={"stream_id": str(stream_id)},
         )
 
     async def add_device_change_to_streams(
@@ -2558,9 +2561,14 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # We default to 0 here as that is less than all possible stream IDs.
         min_stream_id = 0
 
-        def prune_device_lists_changes_in_room_txn(txn: LoggingTransaction) -> int:
-            nonlocal min_stream_id
-
+        def prune_device_lists_changes_in_room_txn(
+            txn: LoggingTransaction, min_stream_id: int
+        ) -> tuple[int, int]:
+            """
+            Returns tuple of:
+                - number of rows deleted
+                - new `min_stream_id` for the next iteration
+            """
             delete_sql = """
                 DELETE FROM device_lists_changes_in_room
                 WHERE stream_id IN (
@@ -2593,13 +2601,14 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     updatevalues={"stream_id": min_stream_id},
                 )
 
-            return num_deleted
+            return num_deleted, min_stream_id
 
         progress_num_rows_deleted = 0
         while True:
-            batch_deleted = await self.db_pool.runInteraction(
+            batch_deleted, min_stream_id = await self.db_pool.runInteraction(
                 "prune_device_lists_changes_in_room",
                 prune_device_lists_changes_in_room_txn,
+                min_stream_id,
             )
 
             finished = batch_deleted < PRUNE_DEVICE_LISTS_BATCH_SIZE

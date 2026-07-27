@@ -25,7 +25,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.api.errors import SynapseError
-from synapse.events.utils import SerializeEventConfig
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_string
 from synapse.http.site import SynapseRequest
@@ -104,7 +103,7 @@ class EventRestServlet(RestServlet):
             result = await self._event_serializer.serialize_event(
                 event,
                 self.clock.time_msec(),
-                config=SerializeEventConfig(requester=requester),
+                config=await self._event_serializer.create_config(requester=requester),
             )
             return 200, result
         else:
