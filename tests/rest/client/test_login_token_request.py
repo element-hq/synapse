@@ -24,7 +24,6 @@ from twisted.internet.testing import MemoryReactor
 from synapse.rest import admin
 from synapse.rest.client import login, login_token_request, versions
 from synapse.server import HomeServer
-from synapse.synapse_rust.http_client import HttpClient
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -47,14 +46,6 @@ class LoginTokenRequestServletTestCase(unittest.HomeserverTestCase):
         self.hs.config.registration.registrations_require_3pid = []
         self.hs.config.registration.auto_join_rooms = []
         self.hs.config.captcha.enable_registration_captcha = False
-
-        self._http_client = self.hs.get_proxied_http_client()
-        # The tokio thread pool is started lazily on first use, so no
-        # reactor startup hooks need to run here.
-        _ = HttpClient(
-            runtime=self.hs.get_rust_runtime(),
-            user_agent=self._http_client.user_agent.decode("utf8"),
-        )
 
         return self.hs
 

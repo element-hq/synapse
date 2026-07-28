@@ -24,7 +24,6 @@ from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import delayed_events, login, room, sync, versions
 from synapse.server import HomeServer
-from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
@@ -40,19 +39,6 @@ _EVENT_TYPE = "com.example.test"
 
 class DelayedEventsUnstableSupportTestCase(HomeserverTestCase):
     servlets = [versions.register_servlets]
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        hs = self.setup_test_homeserver()
-
-        self._http_client = hs.get_proxied_http_client()
-        # The tokio thread pool is started lazily on first use, so no
-        # reactor startup hooks need to run here.
-        _ = HttpClient(
-            runtime=hs.get_rust_runtime(),
-            user_agent=self._http_client.user_agent.decode("utf8"),
-        )
-
-        return hs
 
     def tearDown(self) -> None:
         # MemoryReactor doesn't trigger the shutdown phases, and we want the
