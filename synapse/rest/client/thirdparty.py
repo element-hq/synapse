@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from synapse.api.constants import ThirdPartyEntityKind
 from synapse.http.server import HttpServer
-from synapse.http.servlet import RestServlet
+from synapse.http.servlet import RestServlet, parse_string
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
 
@@ -36,91 +36,125 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ThirdPartyProtocolsServlet(RestServlet):
-    PATTERNS = client_patterns("/thirdparty/protocols")
-
+class ThirdPartyBaseServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
 
+        self.hs = hs
         self.auth = hs.get_auth()
         self.appservice_handler = hs.get_application_service_handler()
+        self.federation_client = hs.get_federation_client()
+        self.federated_lookup_enabled = hs.config.experimental.msc4517_enabled
+
+    def get_remote_server(self, request: SynapseRequest) -> str | None:
+        """Return the remote server this request targets (via ?server=), or
+        None when the request is for the local server's bridges.
+        """
+        if not self.federated_lookup_enabled:
+            return None
+        server = parse_string(request, "server")
+        if server is None or self.hs.is_mine_server_name(server):
+            return None
+        return server
+
+
+class ThirdPartyProtocolsServlet(ThirdPartyBaseServlet):
+    PATTERNS = client_patterns("/thirdparty/protocols")
 
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
-        protocols = await self.appservice_handler.get_3pe_protocols()
+        server = self.get_remote_server(request)
+        if server is not None:
+            protocols = await self.federation_client.get_thirdparty_protocols(server)
+        else:
+            protocols = await self.appservice_handler.get_3pe_protocols()
         return 200, protocols
 
 
-class ThirdPartyProtocolServlet(RestServlet):
+class ThirdPartyProtocolServlet(ThirdPartyBaseServlet):
     PATTERNS = client_patterns("/thirdparty/protocol/(?P<protocol>[^/]+)$")
-
-    def __init__(self, hs: "HomeServer"):
-        super().__init__()
-
-        self.auth = hs.get_auth()
-        self.appservice_handler = hs.get_application_service_handler()
 
     async def on_GET(
         self, request: SynapseRequest, protocol: str
     ) -> tuple[int, JsonDict]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
-        protocols = await self.appservice_handler.get_3pe_protocols(
-            only_protocol=protocol
-        )
+        server = self.get_remote_server(request)
+        if server is not None:
+            protocols = await self.federation_client.get_thirdparty_protocols(server)
+        else:
+            protocols = await self.appservice_handler.get_3pe_protocols(
+                only_protocol=protocol
+            )
         if protocol in protocols:
             return 200, protocols[protocol]
         else:
             return 404, {"error": "Unknown protocol"}
 
 
-class ThirdPartyUserServlet(RestServlet):
+class ThirdPartyUserServlet(ThirdPartyBaseServlet):
     PATTERNS = client_patterns("/thirdparty/user(/(?P<protocol>[^/]+))?$")
 
-    def __init__(self, hs: "HomeServer"):
-        super().__init__()
-
-        self.auth = hs.get_auth()
-        self.appservice_handler = hs.get_application_service_handler()
-
     async def on_GET(
         self, request: SynapseRequest, protocol: str
     ) -> tuple[int, list[JsonDict]]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
+        server = self.get_remote_server(request)
+
         fields: dict[bytes, list[bytes]] = request.args  # type: ignore[assignment]
         fields.pop(b"access_token", None)
+        fields.pop(b"server", None)
 
-        results = await self.appservice_handler.query_3pe(
-            ThirdPartyEntityKind.USER, protocol, fields
-        )
+        if server is not None:
+            results = await self.federation_client.get_thirdparty_entities(
+                server,
+                "user",
+                protocol,
+                _decode_fields(fields),
+            )
+        else:
+            results = await self.appservice_handler.query_3pe(
+                ThirdPartyEntityKind.USER, protocol, fields
+            )
 
         return 200, results
 
 
-class ThirdPartyLocationServlet(RestServlet):
+class ThirdPartyLocationServlet(ThirdPartyBaseServlet):
     PATTERNS = client_patterns("/thirdparty/location(/(?P<protocol>[^/]+))?$")
 
-    def __init__(self, hs: "HomeServer"):
-        super().__init__()
-
-        self.auth = hs.get_auth()
-        self.appservice_handler = hs.get_application_service_handler()
-
     async def on_GET(
         self, request: SynapseRequest, protocol: str
     ) -> tuple[int, list[JsonDict]]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
+        server = self.get_remote_server(request)
+
         fields: dict[bytes, list[bytes]] = request.args  # type: ignore[assignment]
         fields.pop(b"access_token", None)
+        fields.pop(b"server", None)
 
-        results = await self.appservice_handler.query_3pe(
-            ThirdPartyEntityKind.LOCATION, protocol, fields
-        )
+        if server is not None:
+            results = await self.federation_client.get_thirdparty_entities(
+                server,
+                "location",
+                protocol,
+                _decode_fields(fields),
+            )
+        else:
+            results = await self.appservice_handler.query_3pe(
+                ThirdPartyEntityKind.LOCATION, protocol, fields
+            )
 
         return 200, results
+
+
+def _decode_fields(fields: dict[bytes, list[bytes]]) -> dict[str, list[str]]:
+    return {
+        k.decode("utf-8"): [v.decode("utf-8") for v in vs] for k, vs in fields.items()
+    }
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

@@ -134,6 +134,7 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
+        self._thirdparty_lookup_timeout = hs.config.experimental.msc4517_lookup_timeout
 
         self.server_name = hs.hostname
         self.signing_key = hs.signing_key
@@ -1915,6 +1916,59 @@ class FederationClient(FederationBase):
         filtered_failures = list(filter(filter_user_id, failures))
 
         return filtered_statuses, filtered_failures
+
+    async def get_thirdparty_protocols(self, destination: str) -> JsonDict:
+        """Fetch the third-party protocol metadata of a remote server.
+
+        Returns an empty dict if the remote query fails.
+        """
+        try:
+            return await self.transport_layer.get_thirdparty_protocols(
+                destination, self._thirdparty_lookup_timeout
+            )
+        except Exception:
+            logger.warning(
+                "Error fetching thirdparty protocols from %s",
+                destination,
+                exc_info=True,
+            )
+            return {}
+
+    async def get_thirdparty_entities(
+        self,
+        destination: str,
+        kind: str,
+        protocol: str,
+        fields: Mapping[str, Iterable[str]],
+    ) -> list[JsonDict]:
+        """Look up third-party users or locations on a remote server.
+
+        Args:
+            destination: The remote server.
+            kind: "user" or "location".
+            protocol: The third-party protocol to query.
+            fields: Protocol-specific query fields.
+
+        Returns an empty list if the remote query fails.
+        """
+        try:
+            response = await self.transport_layer.get_thirdparty_entities(
+                destination, kind, protocol, fields, self._thirdparty_lookup_timeout
+            )
+        except Exception:
+            logger.warning(
+                "Error looking up thirdparty %s/%s on %s",
+                kind,
+                protocol,
+                destination,
+                exc_info=True,
+            )
+            return []
+
+        results = response.get("results", [])
+        if not isinstance(results, list):
+            return []
+        return results
 
     async def federation_download_media(
         self,

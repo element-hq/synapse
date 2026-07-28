@@ -309,3 +309,15 @@ class ExperimentalConfig(Config):
 
         # MSC4491: Invite reasons in room creation
         self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
+
+        # MSC4517: Federated third-party network lookups: allow the
+        # /thirdparty client endpoints to be pointed at a remote server
+        # (?server=), proxying the query to that server's appservices over
+        # federation.
+        self.msc4517_enabled: bool = experimental.get("msc4517_enabled", False)
+
+        # How long (in ms) to wait for a remote server to answer a federated
+        # third-party lookup before giving up on it.
+        self.msc4517_lookup_timeout: int = experimental.get(
+            "msc4517_lookup_timeout", 5000
+        )

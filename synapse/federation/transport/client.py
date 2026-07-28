@@ -853,6 +853,61 @@ class TransportLayerClient:
             destination=destination, path=path, data={"user_ids": user_ids}
         )
 
+    async def get_thirdparty_protocols(
+        self, destination: str, timeout: int
+    ) -> JsonDict:
+        """Fetch the third-party protocol metadata of a remote server.
+
+        Args:
+            destination: The remote server.
+            timeout: How long to wait for the remote response, in ms.
+        """
+        path = _create_path(
+            FEDERATION_UNSTABLE_PREFIX, "/org.matrix.msc4517.thirdparty/protocols"
+        )
+
+        return await self.client.get_json(
+            destination=destination,
+            path=path,
+            ignore_backoff=True,
+            timeout=timeout,
+        )
+
+    async def get_thirdparty_entities(
+        self,
+        destination: str,
+        kind: str,
+        protocol: str,
+        fields: Mapping[str, Iterable[str]],
+        timeout: int,
+    ) -> JsonDict:
+        """Look up third-party users or locations on a remote server.
+
+        Returns:
+            A dict with a "results" key holding the list of matches.
+
+        Args:
+            destination: The remote server.
+            kind: "user" or "location".
+            protocol: The third-party protocol to query.
+            fields: Protocol-specific query fields.
+            timeout: How long to wait for the remote response, in ms.
+        """
+        path = _create_path(
+            FEDERATION_UNSTABLE_PREFIX,
+            "/org.matrix.msc4517.thirdparty/%s/%s",
+            kind,
+            protocol,
+        )
+
+        return await self.client.get_json(
+            destination=destination,
+            path=path,
+            args={k: list(v) for k, v in fields.items()},
+            ignore_backoff=True,
+            timeout=timeout,
+        )
+
     async def download_media_r0(
         self,
         destination: str,
