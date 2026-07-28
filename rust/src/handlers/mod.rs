@@ -41,7 +41,7 @@ impl RustHandlers {
 
         // The per-homeserver Rust state, which gives us the tokio runtime
         // and the Twisted reactor.
-        let runtime = homeserver.rust_runtime(py)?;
+        let runtime = homeserver.get_rust_runtime(py)?;
 
         let db_pool = PythonDatabasePoolWrapper::new(
             &homeserver.main_database_pool(py)?,
@@ -62,7 +62,7 @@ impl RustHandlers {
             versions::VersionsHandler {
                 global_unstable_feature_map: Arc::clone(&global_unstable_feature_map),
                 store: Arc::clone(&store),
-                runtime: Arc::clone(&runtime),
+                runtime: runtime.clone(),
             },
         )?;
 

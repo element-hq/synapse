@@ -99,7 +99,7 @@ impl MSC4388RendezvousHandler {
         eviction_interval: u64,
         ttl: u64,
     ) -> PyResult<Py<Self>> {
-        let clock = homeserver.clock(py)?;
+        let clock = homeserver.get_clock(py)?;
 
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.

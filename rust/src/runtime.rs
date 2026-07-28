@@ -22,6 +22,7 @@
 //! [`Arc<RustRuntimeInner>`] at construction time and don't need the GIL (or
 //! the Python-facing object) to reach it afterwards.
 
+use std::ops::Deref;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -119,18 +120,24 @@ impl Drop for RustRuntimeInner {
     }
 }
 
-/// The Python-facing handle to the per-homeserver Rust state.
+/// A cheaply-clonable handle to the per-homeserver Rust state, and the
+/// Python-facing class for it.
 ///
-/// Constructed by `HomeServer.get_rust_runtime()`, and passed to the Rust
-/// classes that need it (which take a clone of the inner [`Arc`] and drop
-/// this handle).
-#[pyclass(frozen, name = "RustRuntime", module = "synapse.synapse_rust")]
+/// One instance is constructed per homeserver by
+/// `HomeServer.get_rust_runtime()`. Rust classes that need it take it as a
+/// constructor argument — pyo3 extracts a `#[pyclass]` that is `Clone` by
+/// cloning, which here is just an `Arc` refcount bump — and hold their own
+/// clone. Derefs to [`RustRuntimeInner`].
+#[pyclass(frozen, from_py_object, module = "synapse.synapse_rust")]
+#[derive(Clone)]
 pub struct RustRuntime {
     inner: Arc<RustRuntimeInner>,
 }
 
-impl RustRuntime {
-    pub fn inner(&self) -> &Arc<RustRuntimeInner> {
+impl Deref for RustRuntime {
+    type Target = RustRuntimeInner;
+
+    fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }

@@ -26,7 +26,7 @@ use pyo3::{
 use tokio::sync::oneshot;
 
 use crate::reactor::Reactor;
-use crate::runtime::RustRuntimeInner;
+use crate::runtime::RustRuntime;
 
 create_exception!(
     synapse.synapse_rust.http_client,
@@ -75,7 +75,7 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// Does not handle deferred cancellation or contextvars.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
-    runtime: &Arc<RustRuntimeInner>,
+    runtime: &RustRuntime,
     fut: F,
 ) -> PyResult<Bound<'py, PyAny>>
 where
@@ -91,7 +91,7 @@ where
 
     // Keep the runtime state (and, through it, the reactor) alive while the
     // task is in flight.
-    let runtime = Arc::clone(runtime);
+    let runtime = runtime.clone();
     handle.spawn(async move {
         let res = task.await;
 

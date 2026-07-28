@@ -13,7 +13,6 @@
  */
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::Context;
 use http_body_util::BodyExt;
@@ -22,7 +21,7 @@ use reqwest::RequestBuilder;
 
 use crate::deferred::create_deferred;
 use crate::errors::HttpResponseException;
-use crate::runtime::{RustRuntime, RustRuntimeInner};
+use crate::runtime::RustRuntime;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -43,7 +42,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[pyclass]
 struct HttpClient {
     client: reqwest::Client,
-    runtime: Arc<RustRuntimeInner>,
+    runtime: RustRuntime,
 }
 
 #[pymethods]
@@ -51,7 +50,7 @@ impl HttpClient {
     #[new]
     #[pyo3(signature = (runtime, user_agent, http2_only = false))]
     pub fn py_new(
-        runtime: &Bound<'_, RustRuntime>,
+        runtime: RustRuntime,
         user_agent: &str,
         http2_only: bool,
     ) -> PyResult<HttpClient> {
@@ -65,10 +64,7 @@ impl HttpClient {
 
         let client = builder.build().context("building reqwest client")?;
 
-        Ok(HttpClient {
-            client,
-            runtime: Arc::clone(runtime.get().inner()),
-        })
+        Ok(HttpClient { client, runtime })
     }
 
     pub fn get<'a>(

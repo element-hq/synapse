@@ -123,7 +123,7 @@ impl RendezvousHandler {
         let base = Uri::try_from(format!("{base}_synapse/client/rendezvous"))
             .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
-        let clock = homeserver.clock(py)?;
+        let clock = homeserver.get_clock(py)?;
 
         let eviction_duration = SynapseDuration::from_milliseconds(eviction_interval);
 

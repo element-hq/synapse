@@ -15,12 +15,10 @@
 
 //! A typed wrapper around the Python `HomeServer`.
 
-use std::sync::Arc;
-
 use pyo3::{intern, prelude::*};
 
 use crate::config::SynapseHomeServerConfig;
-use crate::runtime::{RustRuntime, RustRuntimeInner};
+use crate::runtime::RustRuntime;
 
 /// The Python `HomeServer`, as seen from Rust.
 ///
@@ -41,14 +39,12 @@ impl<'a, 'py> FromPyObject<'a, 'py> for HomeServer {
 impl HomeServer {
     /// The per-homeserver Rust state (`hs.get_rust_runtime()`), which gives
     /// access to the tokio runtime and the reactor.
-    pub fn rust_runtime(&self, py: Python<'_>) -> PyResult<Arc<RustRuntimeInner>> {
-        let runtime: Bound<'_, RustRuntime> = self
+    pub fn get_rust_runtime(&self, py: Python<'_>) -> PyResult<RustRuntime> {
+        Ok(self
             .0
             .bind(py)
             .call_method0(intern!(py, "get_rust_runtime"))?
-            .extract()?;
-
-        Ok(Arc::clone(runtime.get().inner()))
+            .extract()?)
     }
 
     /// The Rust-side view of `hs.config`.
@@ -58,7 +54,7 @@ impl HomeServer {
 
     /// The Synapse `Clock` (`hs.get_clock()`).
     // TODO: give the clock a typed wrapper of its own.
-    pub fn clock(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    pub fn get_clock(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(self
             .0
             .bind(py)

@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use crate::config::{types::RoomCreationPreset, SynapseHomeServerConfig};
 use crate::deferred::create_deferred;
-use crate::runtime::RustRuntimeInner;
+use crate::runtime::RustRuntime;
 use crate::storage::store::{PerUserExperimentalFeature, Store};
 
 /// `GET /_matrix/client/versions` response
@@ -48,7 +48,7 @@ pub struct VersionsHandler {
     pub store: Arc<Store>,
     /// The per-homeserver Rust state, used to bridge our `async` response
     /// back into a Twisted deferred that Python can `await`.
-    pub runtime: Arc<RustRuntimeInner>,
+    pub runtime: RustRuntime,
 }
 
 #[pymethods]
