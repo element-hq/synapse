@@ -317,7 +317,29 @@ relay "matrix_federation" {
 
 Synapse exposes a health check endpoint for use by reverse proxies.
 Each configured HTTP listener has a `/health` endpoint which always returns
-200 OK (and doesn't get logged).
+200 OK (and doesn't get logged). This is a *liveness* check only: it reflects
+whether the process is running, not whether it is able to serve traffic. Use it
+for a liveness probe (e.g. Kubernetes' `livenessProbe`), where failure should
+cause the process to be restarted.
+
+## Readiness check endpoint
+
+Each configured HTTP listener also has a `/ready` endpoint (also not logged),
+which reports whether the process is currently able to serve traffic. It
+checks that the database can be reached, that (for worker processes) the
+connection to the main process is up, and that the process has finished its
+startup sequence, returning `200 OK` with a JSON body if all checks pass, or
+`503 Service Unavailable` with a JSON body indicating which check(s) failed
+otherwise, for example:
+
+```json
+{"db": true, "replication": true, "startup_complete": false}
+```
+
+Use this for a *readiness* probe (e.g. Kubernetes' `readinessProbe`), where
+failure should remove the instance from load-balancer rotation without
+restarting it. Do not use `/ready` as a liveness probe: a transient database or
+replication outage would then cause every instance to be restarted at once.
 
 ## Synapse administration endpoints
 
