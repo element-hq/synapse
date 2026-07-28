@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aba0db49.js";
+            window.path_to_searchindex_js = "searchindex-3fe72d14.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4dc10a98.js"></script>
@@ -2012,7 +2012,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.157.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.157.1</td><td>v1.100.0</td></tr>
 </tbody>
 </table>
 </div>
@@ -7424,7 +7424,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p>Defaults to <code>null</code>.</p>
 </li>
 <li>
-<p><code>update_profile_information</code> (boolean): Use this setting to keep a user’s profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:</p>
+<p><code>update_profile_information</code> (boolean): Use this setting to keep a user’s profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Fields that will be synced:</p>
 <ul>
 <li>displayname</li>
 <li>picture - only if Synapse media repository is running in the main
@@ -7563,6 +7563,30 @@ process (i.e. not workerized) and media is stored locally Defaults to <code>fals
   group_unread_count_by_room: false
   jitter_delay: 10s
 </code></pre>
+<hr>
+<h3 id="push_rules"><a class="header" href="#push_rules"><code>push_rules</code></a></h3>
+<p><em>(object)</em> Options for push rules</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>limits</code> (object): Limits on the size of push rules that users can have</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>rule_count</code> (integer): This is the total number of push rules that each user can have. Power users may expect to have one push rule per room. Defaults to <code>10000</code>.</p>
+</li>
+<li>
+<p><code>rule_id_length</code> (integer): This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are <a href="https://spec.matrix.org/v1.19/appendices/#room-ids">limited to 255 bytes per specification</a>)
+It’s recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit. Defaults to <code>300</code>.</p>
+</li>
+<li>
+<p><code>rule_size</code> (integer): This is the maximum size of a push rule’s body, in bytes.
+The exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.
+It’s recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it. Defaults to <code>1024</code>.</p>
+</li>
+</ul>
+</li>
+</ul>
 <hr>
 <h2 id="rooms"><a class="header" href="#rooms">Rooms</a></h2>
 <p>Config options relating to rooms.</p>
