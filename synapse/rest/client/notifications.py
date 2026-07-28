@@ -20,12 +20,12 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import ReceiptTypes
 from synapse.events.utils import (
-    SerializeEventConfig,
-    format_event_for_client_v2_without_room_id,
+    EventFormat,
+    FilteredEvent,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
@@ -53,7 +53,7 @@ class NotificationsServlet(RestServlet):
         self.clock = hs.get_clock()
         self._event_serializer = hs.get_event_client_serializer()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 
@@ -97,8 +97,8 @@ class NotificationsServlet(RestServlet):
 
         next_token = None
 
-        serialize_options = SerializeEventConfig(
-            event_format=format_event_for_client_v2_without_room_id,
+        serialize_options = await self._event_serializer.create_config(
+            event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
         now = self.clock.time_msec()
@@ -111,7 +111,7 @@ class NotificationsServlet(RestServlet):
                 "ts": pa.received_ts,
                 "event": (
                     await self._event_serializer.serialize_event(
-                        notif_events[pa.event_id],
+                        FilteredEvent(event=notif_events[pa.event_id], membership=None),
                         now,
                         config=serialize_options,
                     )

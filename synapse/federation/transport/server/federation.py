@@ -1,8 +1,9 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#  Copyright 2021 The Matrix.org Foundation C.I.C.
+# Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -22,15 +23,9 @@ import logging
 from collections import Counter
 from typing import (
     TYPE_CHECKING,
-    Dict,
-    List,
     Literal,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
-    Type,
-    Union,
 )
 
 from synapse.api.constants import Direction, EduTypes
@@ -42,6 +37,7 @@ from synapse.federation.transport.server._base import (
     BaseFederationServlet,
 )
 from synapse.http.servlet import (
+    parse_boolean,
     parse_boolean_from_args,
     parse_integer,
     parse_integer_from_args,
@@ -51,7 +47,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
-from synapse.media.thumbnailer import ThumbnailProvider
+from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
 from synapse.types import JsonDict
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -93,9 +89,9 @@ class FederationSendServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         transaction_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """Called on PUT /send/<transaction_id>/
 
         Args:
@@ -158,9 +154,9 @@ class FederationEventServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         event_id: str,
-    ) -> Tuple[int, Union[JsonDict, str]]:
+    ) -> tuple[int, JsonDict | str]:
         return await self.handler.on_pdu_request(origin, event_id)
 
 
@@ -173,9 +169,9 @@ class FederationStateV1Servlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         return await self.handler.on_room_state_request(
             origin,
             room_id,
@@ -191,9 +187,9 @@ class FederationStateIdsServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         return await self.handler.on_state_ids_request(
             origin,
             room_id,
@@ -209,9 +205,9 @@ class FederationBackfillServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         versions = [x.decode("ascii") for x in query[b"v"]]
         limit = parse_integer_from_args(query, "limit", None)
 
@@ -248,9 +244,9 @@ class FederationTimestampLookupServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         timestamp = parse_integer_from_args(query, "ts", required=True)
         direction_str = parse_string_from_args(
             query, "dir", allowed_values=["f", "b"], required=True
@@ -271,12 +267,28 @@ class FederationQueryServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         query_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         args = {k.decode("utf8"): v[0].decode("utf-8") for k, v in query.items()}
         args["origin"] = origin
         return await self.handler.on_query_request(query_type, args)
+
+
+class FederationUnstableGetExtremitiesServlet(BaseFederationServerServlet):
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc4370"
+    PATH = "/extremities/(?P<room_id>[^/]*)"
+    CATEGORY = "Federation requests"
+
+    async def on_GET(
+        self,
+        origin: str,
+        content: Literal[None],
+        query: dict[bytes, list[bytes]],
+        room_id: str,
+    ) -> tuple[int, JsonDict]:
+        result = await self.handler.on_get_extremities_request(origin, room_id)
+        return 200, result
 
 
 class FederationMakeJoinServlet(BaseFederationServerServlet):
@@ -287,10 +299,10 @@ class FederationMakeJoinServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         user_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         """
         Args:
             origin: The authenticated server_name of the calling server
@@ -323,10 +335,10 @@ class FederationMakeLeaveServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         user_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         result = await self.handler.on_make_leave_request(origin, room_id, user_id)
         return 200, result
 
@@ -339,10 +351,10 @@ class FederationV1SendLeaveServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, Tuple[int, JsonDict]]:
+    ) -> tuple[int, tuple[int, JsonDict]]:
         result = await self.handler.on_send_leave_request(origin, content, room_id)
         return 200, (200, result)
 
@@ -357,10 +369,10 @@ class FederationV2SendLeaveServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         result = await self.handler.on_send_leave_request(origin, content, room_id)
         return 200, result
 
@@ -373,10 +385,10 @@ class FederationMakeKnockServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         user_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # Retrieve the room versions the remote homeserver claims to support
         supported_versions = parse_strings_from_args(
             query, "ver", required=True, encoding="utf-8"
@@ -396,10 +408,10 @@ class FederationV1SendKnockServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         result = await self.handler.on_send_knock_request(origin, content, room_id)
         return 200, result
 
@@ -412,10 +424,10 @@ class FederationEventAuthServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         return await self.handler.on_event_auth(origin, room_id, event_id)
 
 
@@ -427,10 +439,10 @@ class FederationV1SendJoinServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, Tuple[int, JsonDict]]:
+    ) -> tuple[int, tuple[int, JsonDict]]:
         # TODO(paul): assert that event_id parsed from path actually
         #   match those given in content
         result = await self.handler.on_send_join_request(origin, content, room_id)
@@ -447,10 +459,10 @@ class FederationV2SendJoinServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # TODO(paul): assert that event_id parsed from path actually
         #   match those given in content
 
@@ -470,10 +482,10 @@ class FederationV1InviteServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, Tuple[int, JsonDict]]:
+    ) -> tuple[int, tuple[int, JsonDict]]:
         # We don't get a room version, so we have to assume its EITHER v1 or
         # v2. This is "fine" as the only difference between V1 and V2 is the
         # state resolution algorithm, and we don't use that for processing
@@ -497,10 +509,10 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # TODO(paul): assert that room_id/event_id parsed from path actually
         #   match those given in content
 
@@ -535,9 +547,9 @@ class FederationThirdPartyInviteExchangeServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.handler.on_exchange_third_party_invite_request(content)
         return 200, {}
 
@@ -547,8 +559,8 @@ class FederationClientKeysQueryServlet(BaseFederationServerServlet):
     CATEGORY = "Federation requests"
 
     async def on_POST(
-        self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         return await self.handler.on_query_client_keys(origin, content)
 
 
@@ -560,9 +572,9 @@ class FederationUserDevicesQueryServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         user_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         return await self.handler.on_query_user_devices(origin, user_id)
 
 
@@ -571,10 +583,10 @@ class FederationClientKeysClaimServlet(BaseFederationServerServlet):
     CATEGORY = "Federation requests"
 
     async def on_POST(
-        self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         # Generate a count for each algorithm, which is hard-coded to 1.
-        key_query: List[Tuple[str, str, str, int]] = []
+        key_query: list[tuple[str, str, str, int]] = []
         for user_id, device_keys in content.get("one_time_keys", {}).items():
             for device_id, algorithm in device_keys.items():
                 key_query.append((user_id, device_id, algorithm, 1))
@@ -597,10 +609,10 @@ class FederationUnstableClientKeysClaimServlet(BaseFederationServerServlet):
     CATEGORY = "Federation requests"
 
     async def on_POST(
-        self, origin: str, content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         # Generate a count for each algorithm.
-        key_query: List[Tuple[str, str, str, int]] = []
+        key_query: list[tuple[str, str, str, int]] = []
         for user_id, device_keys in content.get("one_time_keys", {}).items():
             for device_id, algorithms in device_keys.items():
                 counts = Counter(algorithms)
@@ -621,9 +633,9 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
         self,
         origin: str,
         content: JsonDict,
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         limit = int(content.get("limit", 10))
         earliest_events = content.get("earliest_events", [])
         latest_events = content.get("latest_events", [])
@@ -646,8 +658,8 @@ class On3pidBindServlet(BaseFederationServerServlet):
     REQUIRE_AUTH = False
 
     async def on_POST(
-        self, origin: Optional[str], content: JsonDict, query: Dict[bytes, List[bytes]]
-    ) -> Tuple[int, JsonDict]:
+        self, origin: str | None, content: JsonDict, query: dict[bytes, list[bytes]]
+    ) -> tuple[int, JsonDict]:
         if "invites" in content:
             last_exception = None
             for invite in content["invites"]:
@@ -680,10 +692,10 @@ class FederationVersionServlet(BaseFederationServlet):
 
     async def on_GET(
         self,
-        origin: Optional[str],
+        origin: str | None,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
-    ) -> Tuple[int, JsonDict]:
+        query: dict[bytes, list[bytes]],
+    ) -> tuple[int, JsonDict]:
         return (
             200,
             {
@@ -715,7 +727,7 @@ class FederationRoomHierarchyServlet(BaseFederationServlet):
         content: Literal[None],
         query: Mapping[bytes, Sequence[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         suggested_only = parse_boolean_from_args(query, "suggested_only", default=False)
         return 200, await self.handler.get_federation_hierarchy(
             origin, room_id, suggested_only
@@ -746,9 +758,9 @@ class RoomComplexityServlet(BaseFederationServlet):
         self,
         origin: str,
         content: Literal[None],
-        query: Dict[bytes, List[bytes]],
+        query: dict[bytes, list[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         is_public = await self._store.is_room_world_readable_or_publicly_joinable(
             room_id
         )
@@ -780,7 +792,7 @@ class FederationAccountStatusServlet(BaseFederationServerServlet):
         content: JsonDict,
         query: Mapping[bytes, Sequence[bytes]],
         room_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if "user_ids" not in content:
             raise SynapseError(
                 400, "Required parameter 'user_ids' is missing", Codes.MISSING_PARAM
@@ -816,7 +828,7 @@ class FederationMediaDownloadServlet(BaseFederationServerServlet):
 
     async def on_GET(
         self,
-        origin: Optional[str],
+        origin: str | None,
         content: Literal[None],
         request: SynapseRequest,
         media_id: str,
@@ -856,7 +868,7 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
     async def on_GET(
         self,
-        origin: Optional[str],
+        origin: str | None,
         content: Literal[None],
         request: SynapseRequest,
         media_id: str,
@@ -864,8 +876,9 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")
+        animated = parse_boolean(request, "animated", default=False)
         # TODO Parse the Accept header to get an prioritised list of thumbnail types.
-        m_type = "image/png"
+        m_type = ANIMATED_THUMBNAIL_TYPE if animated else "image/png"
         max_timeout_ms = parse_integer(
             request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
         )
@@ -873,7 +886,15 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
         if self.dynamic_thumbnails:
             await self.thumbnail_provider.select_or_generate_local_thumbnail(
-                request, media_id, width, height, method, m_type, max_timeout_ms, True
+                request,
+                media_id,
+                width,
+                height,
+                method,
+                m_type,
+                max_timeout_ms,
+                True,
+                animated=animated,
             )
         else:
             await self.thumbnail_provider.respond_local_thumbnail(
@@ -882,7 +903,7 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         self.media_repo.mark_recently_accessed(None, media_id)
 
 
-FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
+FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationSendServlet,
     FederationEventServlet,
     FederationStateV1Servlet,
@@ -890,6 +911,7 @@ FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationBackfillServlet,
     FederationTimestampLookupServlet,
     FederationQueryServlet,
+    FederationUnstableGetExtremitiesServlet,
     FederationMakeJoinServlet,
     FederationMakeLeaveServlet,
     FederationEventServlet,

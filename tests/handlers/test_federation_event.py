@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
 from unittest import mock
 
 from twisted.internet.testing import MemoryReactor
@@ -29,7 +28,6 @@ from synapse.event_auth import (
     check_state_dependent_auth_rules,
     check_state_independent_auth_rules,
 )
-from synapse.events import make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.federation.transport.client import StateRequestResponse
 from synapse.logging.context import LoggingContext
@@ -43,6 +41,7 @@ from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import event_injection
+from tests.test_utils.event_builders import make_test_event
 
 
 class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
@@ -128,7 +127,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         # mock up a load of state events which we are missing
         state_events = [
-            make_event_from_dict(
+            make_test_event(
                 self.add_hashes_and_signatures_from_other_server(
                     {
                         "type": "test_state_type",
@@ -155,7 +154,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         # mock up a prev event.
         # Depending on the test, we either persist this upfront (as an outlier),
         # or let the server request it.
-        prev_event = make_event_from_dict(
+        prev_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "test_regular_type",
@@ -183,7 +182,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         else:
 
             async def get_event(
-                destination: str, event_id: str, timeout: Optional[int] = None
+                destination: str, event_id: str, timeout: int | None = None
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, prev_event.event_id)
@@ -192,7 +191,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             self.mock_federation_transport_client.get_event.side_effect = get_event
 
         # mock up a regular event to pass into _process_pulled_event
-        pulled_event = make_event_from_dict(
+        pulled_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "test_regular_type",
@@ -302,7 +301,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             )
         )
 
-        pulled_event = make_event_from_dict(
+        pulled_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "test_regular_type",
@@ -422,7 +421,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             member_event.event_id,
         ]
 
-        pulled_event = make_event_from_dict(
+        pulled_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "test_regular_type",
@@ -525,7 +524,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         # We purposely don't run `add_hashes_and_signatures_from_other_server`
         # over this because we want the signature check to fail.
-        pulled_event_without_signatures = make_event_from_dict(
+        pulled_event_without_signatures = make_test_event(
             {
                 "type": "test_regular_type",
                 "room_id": room_id,
@@ -541,7 +540,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         # Create a regular event that should pass except for the
         # `pulled_event_without_signatures` in the `prev_event`.
-        pulled_event = make_event_from_dict(
+        pulled_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "test_regular_type",
@@ -585,7 +584,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         room_state_endpoint_requested_count = 0
 
         async def get_event(
-            destination: str, event_id: str, timeout: Optional[int] = None
+            destination: str, event_id: str, timeout: int | None = None
         ) -> None:
             nonlocal event_endpoint_requested_count
             event_endpoint_requested_count += 1
@@ -721,7 +720,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         ]
 
         # Create a regular event that should process
-        pulled_event = make_event_from_dict(
+        pulled_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "test_regular_type",
@@ -879,7 +878,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         # accepted, but the local homeserver will reject.
         next_depth = 100
         next_timestamp = other_member_event.origin_server_ts + 100
-        rejected_power_levels_event = make_event_from_dict(
+        rejected_power_levels_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "m.room.power_levels",
@@ -928,7 +927,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         # Then we create a kick event for a local user that cites the rejected power
         # levels event in its auth events. The kick event will be rejected solely
         # because of the rejected auth event and would otherwise be accepted.
-        rejected_kick_event = make_event_from_dict(
+        rejected_kick_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "m.room.member",
@@ -1043,7 +1042,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         # Create a missing event, so that the local homeserver has to do a `/state` or
         # `/state_ids` request to pull state from the remote homeserver.
-        missing_event = make_event_from_dict(
+        missing_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "m.room.message",
@@ -1068,7 +1067,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         # The pulled event has two prev events, one of which is missing. We will make a
         # `/state` or `/state_ids` request to the remote homeserver to ask it for the
         # state before the missing prev event.
-        pulled_event = make_event_from_dict(
+        pulled_event = make_test_event(
             self.add_hashes_and_signatures_from_other_server(
                 {
                     "type": "m.room.message",
@@ -1115,14 +1114,16 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         ):
 
             async def get_event(
-                destination: str, event_id: str, timeout: Optional[int] = None
+                destination: str, event_id: str, timeout: int | None = None
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, missing_event.event_id)
                 return {"pdus": [missing_event.get_pdu_json()]}
 
             async def get_room_state_ids(
-                destination: str, room_id: str, event_id: str
+                destination: str,
+                room_id: str,
+                event_id: str,
             ) -> JsonDict:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, missing_event.event_id)
@@ -1132,7 +1133,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 }
 
             async def get_room_state(
-                room_version: RoomVersion, destination: str, room_id: str, event_id: str
+                room_version: RoomVersion,
+                destination: str,
+                room_id: str,
+                event_id: str,
             ) -> StateRequestResponse:
                 self.assertEqual(destination, self.OTHER_SERVER_NAME)
                 self.assertEqual(event_id, missing_event.event_id)

@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.constants import Direction
 from synapse.api.errors import Codes, NotFoundError, SynapseError
@@ -65,7 +65,7 @@ class EventReportsRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         start = parse_integer(request, "from", default=0)
@@ -123,7 +123,7 @@ class EventReportDetailRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, report_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         message = (
@@ -149,7 +149,7 @@ class EventReportDetailRestServlet(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, report_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
         message = (

@@ -25,16 +25,10 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Iterable,
-    List,
     Literal,
     Mapping,
-    Optional,
-    Set,
-    Tuple,
     TypeVar,
-    Union,
     overload,
 )
 
@@ -47,6 +41,7 @@ from twisted.internet.defer import Deferred
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
@@ -67,8 +62,9 @@ from synapse.types import (
 from synapse.util.async_helpers import (
     timeout_deferred,
 )
+from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -148,7 +144,7 @@ class _NotifierUserStream:
         self.last_notified_ms = time_now_ms
 
         # Set of listeners that we need to wake up when there has been a change.
-        self.listeners: Set[Deferred[StreamToken]] = set()
+        self.listeners: set[Deferred[StreamToken]] = set()
 
     def update_and_fetch_deferreds(
         self,
@@ -215,7 +211,7 @@ class _NotifierUserStream:
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventStreamResult:
-    events: List[Union[JsonDict, EventBase]]
+    events: list[JsonDict | FilteredEvent]
     start_token: StreamToken
     end_token: StreamToken
 
@@ -230,8 +226,8 @@ class _PendingRoomEventEntry:
 
     room_id: str
     type: str
-    state_key: Optional[str]
-    membership: Optional[str]
+    state_key: str | None
+    membership: str | None
 
 
 class Notifier:
@@ -241,28 +237,28 @@ class Notifier:
     Primarily used from the /events stream.
     """
 
-    UNUSED_STREAM_EXPIRY_MS = 10 * 60 * 1000
+    UNUSED_STREAM_EXPIRY = Duration(minutes=10)
 
     def __init__(self, hs: "HomeServer"):
-        self.user_to_user_stream: Dict[str, _NotifierUserStream] = {}
-        self.room_to_user_streams: Dict[str, Set[_NotifierUserStream]] = {}
+        self.user_to_user_stream: dict[str, _NotifierUserStream] = {}
+        self.room_to_user_streams: dict[str, set[_NotifierUserStream]] = {}
 
         self.hs = hs
         self.server_name = hs.hostname
         self._storage_controllers = hs.get_storage_controllers()
         self.event_sources = hs.get_event_sources()
         self.store = hs.get_datastores().main
-        self.pending_new_room_events: List[_PendingRoomEventEntry] = []
+        self.pending_new_room_events: list[_PendingRoomEventEntry] = []
 
         self._replication_notifier = hs.get_replication_notifier()
-        self._new_join_in_room_callbacks: List[Callable[[str, str], None]] = []
+        self._new_join_in_room_callbacks: list[Callable[[str, str], None]] = []
 
         self._federation_client = hs.get_federation_http_client()
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
         # List of callbacks to be notified when a lock is released
-        self._lock_released_callback: List[Callable[[str, str, str], None]] = []
+        self._lock_released_callback: list[Callable[[str, str, str], None]] = []
 
         self.reactor = hs.get_reactor()
         self.clock = hs.get_clock()
@@ -275,18 +271,16 @@ class Notifier:
 
         self.state_handler = hs.get_state_handler()
 
-        self.clock.looping_call(
-            self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY_MS
-        )
+        self.clock.looping_call(self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY)
 
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
         # most when scraping it.
         #
-        # Ideally, we'd use `Mapping[Tuple[str], int]` here but mypy doesn't like it.
+        # Ideally, we'd use `Mapping[tuple[str], int]` here but mypy doesn't like it.
         # This is close enough and better than a type ignore.
-        def count_listeners() -> Mapping[Tuple[str, ...], int]:
-            all_user_streams: Set[_NotifierUserStream] = set()
+        def count_listeners() -> Mapping[tuple[str, ...], int]:
+            all_user_streams: set[_NotifierUserStream] = set()
 
             for streams in list(self.room_to_user_streams.values()):
                 all_user_streams |= streams
@@ -338,9 +332,9 @@ class Notifier:
 
     async def on_new_room_events(
         self,
-        events_and_pos: List[Tuple[EventBase, PersistedEventPosition]],
+        events_and_pos: list[tuple[EventBase, PersistedEventPosition]],
         max_room_stream_token: RoomStreamToken,
-        extra_users: Optional[Collection[UserID]] = None,
+        extra_users: Collection[UserID] | None = None,
     ) -> None:
         """Creates a _PendingRoomEventEntry for each of the listed events and calls
         notify_new_room_events with the results."""
@@ -373,7 +367,7 @@ class Notifier:
         time_now_ms = self.clock.time_msec()
         current_token = self.event_sources.get_current_token()
 
-        listeners: List["Deferred[StreamToken]"] = []
+        listeners: list["Deferred[StreamToken]"] = []
         for user_stream in user_streams:
             try:
                 listeners.extend(
@@ -397,7 +391,7 @@ class Notifier:
 
     async def notify_new_room_events(
         self,
-        event_entries: List[Tuple[_PendingRoomEventEntry, str]],
+        event_entries: list[tuple[_PendingRoomEventEntry, str]],
         max_room_stream_token: RoomStreamToken,
     ) -> None:
         """Used by handlers to inform the notifier something has happened
@@ -425,11 +419,11 @@ class Notifier:
     def create_pending_room_event_entry(
         self,
         event_pos: PersistedEventPosition,
-        extra_users: Optional[Collection[UserID]],
+        extra_users: Collection[UserID] | None,
         room_id: str,
         event_type: str,
-        state_key: Optional[str],
-        membership: Optional[str],
+        state_key: str | None,
+        membership: str | None,
     ) -> _PendingRoomEventEntry:
         """Creates and returns a _PendingRoomEventEntry"""
         return _PendingRoomEventEntry(
@@ -453,8 +447,8 @@ class Notifier:
         pending = self.pending_new_room_events
         self.pending_new_room_events = []
 
-        users: Set[UserID] = set()
-        rooms: Set[str] = set()
+        users: set[UserID] = set()
+        rooms: set[str] = set()
 
         for entry in pending:
             if entry.event_pos.persisted_after(max_room_stream_token):
@@ -508,8 +502,8 @@ class Notifier:
         self,
         stream_key: Literal[StreamKeyType.ROOM],
         new_token: RoomStreamToken,
-        users: Optional[Collection[Union[str, UserID]]] = None,
-        rooms: Optional[StrCollection] = None,
+        users: Collection[str | UserID] | None = None,
+        rooms: StrCollection | None = None,
     ) -> None: ...
 
     @overload
@@ -517,8 +511,8 @@ class Notifier:
         self,
         stream_key: Literal[StreamKeyType.RECEIPT],
         new_token: MultiWriterStreamToken,
-        users: Optional[Collection[Union[str, UserID]]] = None,
-        rooms: Optional[StrCollection] = None,
+        users: Collection[str | UserID] | None = None,
+        rooms: StrCollection | None = None,
     ) -> None: ...
 
     @overload
@@ -533,18 +527,19 @@ class Notifier:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
+            StreamKeyType.STICKY_EVENTS,
         ],
         new_token: int,
-        users: Optional[Collection[Union[str, UserID]]] = None,
-        rooms: Optional[StrCollection] = None,
+        users: Collection[str | UserID] | None = None,
+        rooms: StrCollection | None = None,
     ) -> None: ...
 
     def on_new_event(
         self,
         stream_key: StreamKeyType,
-        new_token: Union[int, RoomStreamToken, MultiWriterStreamToken],
-        users: Optional[Collection[Union[str, UserID]]] = None,
-        rooms: Optional[StrCollection] = None,
+        new_token: int | RoomStreamToken | MultiWriterStreamToken,
+        users: Collection[str | UserID] | None = None,
+        rooms: StrCollection | None = None,
     ) -> None:
         """Used to inform listeners that something has happened event wise.
 
@@ -560,7 +555,7 @@ class Notifier:
         users = users or []
         rooms = rooms or []
 
-        user_streams: Set[_NotifierUserStream] = set()
+        user_streams: set[_NotifierUserStream] = set()
 
         log_kv(
             {
@@ -593,7 +588,7 @@ class Notifier:
 
             time_now_ms = self.clock.time_msec()
             current_token = self.event_sources.get_current_token()
-            listeners: List["Deferred[StreamToken]"] = []
+            listeners: list["Deferred[StreamToken]"] = []
             for user_stream in user_streams:
                 try:
                     listeners.extend(
@@ -640,7 +635,7 @@ class Notifier:
         user_id: str,
         timeout: int,
         callback: Callable[[StreamToken, StreamToken], Awaitable[T]],
-        room_ids: Optional[StrCollection] = None,
+        room_ids: StrCollection | None = None,
         from_token: StreamToken = StreamToken.START,
     ) -> T:
         """Wait until the callback returns a non empty response or the
@@ -741,7 +736,7 @@ class Notifier:
         pagination_config: PaginationConfig,
         timeout: int,
         is_guest: bool = False,
-        explicit_room_id: Optional[str] = None,
+        explicit_room_id: str | None = None,
     ) -> EventStreamResult:
         """For the given user and rooms, return any new events for them. If
         there are no new events wait for up to `timeout` milliseconds for any
@@ -771,7 +766,7 @@ class Notifier:
             # The events fetched from each source are a JsonDict, EventBase, or
             # UserPresenceState, but see below for UserPresenceState being
             # converted to JsonDict.
-            events: List[Union[JsonDict, EventBase]] = []
+            events: list[JsonDict | FilteredEvent] = []
             end_token = from_token
 
             for keyname, source in self.event_sources.sources.get_sources():
@@ -790,7 +785,7 @@ class Notifier:
                 )
 
                 if keyname == StreamKeyType.ROOM:
-                    new_events = await filter_events_for_client(
+                    new_events = await filter_and_transform_events_for_client(
                         self._storage_controllers,
                         user.to_string(),
                         new_events,
@@ -837,15 +832,49 @@ class Notifier:
         return result
 
     async def wait_for_stream_token(self, stream_token: StreamToken) -> bool:
-        """Wait for this worker to catch up with the given stream token."""
+        """
+        Wait for this worker to catch up with the given stream token.
+
+        This is important to ensure that the worker has a proper view of the world
+        before trying to serve a request. For example, one worker can return a response
+        with some `next_batch` token, but then the next request goes to another worker
+        which is behind; if the worker assembles a response up to the token, it could be
+        missing data in the gap between where it's behind and the requested token.
+
+        ### Inavlid future tokens
+
+        We assume the token has already been validated/sanitized before being passed to
+        this function to ensure it's not some invalid future token. We consider a token
+        invalid, if the token has positions ahead of our persisted positions in the
+        database. This is important as we we don't want to wait for the stream to
+        advance in those cases (as it may never do so) (it's a waste of time for the
+        user and server).
+
+        Previously, we would sanitize and `bound_future_token(...)` within this function
+        but that leads to bad patterns upstream where people can continue to use the
+        unbounded token.
+
+        While it was possible for older Synapse versions to erroneously give out invalid
+        future tokens, this is no longer the case and its considered a Synapse
+        programming error if this ever happens. Validation/sanitization is still
+        necessary as a user can intentionally mess with numbers in the tokens being
+        provided.
+
+        Args:
+            stream_token: The token to wait for. We assume the token has already been
+            validated/sanitized to ensure it's not some invalid future token (has a
+            stream position ahead of what is in the DB). (see details above)
+
+        Returns:
+            True when this worker has caught up
+            False when we timed out waiting
+        """
         current_token = self.event_sources.get_current_token()
+        # Return early if we are already caught up
         if stream_token.is_before_or_eq(current_token):
             return True
 
-        # Work around a bug where older Synapse versions gave out tokens "from
-        # the future", i.e. that are ahead of the tokens persisted in the DB.
-        stream_token = await self.event_sources.bound_future_token(stream_token)
-
+        # Start waiting until we've caught up to the `stream_token`
         start = self.clock.time_msec()
         logged = False
         while True:
@@ -855,6 +884,7 @@ class Notifier:
 
             now = self.clock.time_msec()
 
+            # Timed out
             if now - start > 10_000:
                 return False
 
@@ -867,11 +897,11 @@ class Notifier:
                 logged = True
 
             # TODO: be better
-            await self.clock.sleep(0.5)
+            await self.clock.sleep(Duration(milliseconds=500))
 
     async def _get_room_ids(
-        self, user: UserID, explicit_room_id: Optional[str]
-    ) -> Tuple[StrCollection, bool]:
+        self, user: UserID, explicit_room_id: str | None
+    ) -> tuple[StrCollection, bool]:
         joined_room_ids = await self.store.get_rooms_for_user(user.to_string())
         if explicit_room_id:
             if explicit_room_id in joined_room_ids:
@@ -895,7 +925,7 @@ class Notifier:
     def remove_expired_streams(self) -> None:
         time_now_ms = self.clock.time_msec()
         expired_streams = []
-        expire_before_ts = time_now_ms - self.UNUSED_STREAM_EXPIRY_MS
+        expire_before_ts = time_now_ms - self.UNUSED_STREAM_EXPIRY.as_millis()
         for stream in self.user_to_user_stream.values():
             if stream.count_listeners():
                 continue
@@ -960,7 +990,7 @@ class ReplicationNotifier:
     This is separate from the notifier to avoid circular dependencies.
     """
 
-    _replication_callbacks: List[Callable[[], None]] = attr.Factory(list)
+    _replication_callbacks: list[Callable[[], None]] = attr.Factory(list)
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
         """Add a callback that will be called when some new data is available.

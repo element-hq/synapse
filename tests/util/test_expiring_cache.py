@@ -19,7 +19,6 @@
 #
 #
 
-from typing import List
 
 from synapse.util.caches.expiringcache import ExpiringCache
 
@@ -65,7 +64,7 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
 
     def test_iterable_eviction(self) -> None:
         reactor, clock = get_clock()
-        cache: ExpiringCache[str, List[int]] = ExpiringCache(
+        cache: ExpiringCache[str, list[int]] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
             hs=self.hs,

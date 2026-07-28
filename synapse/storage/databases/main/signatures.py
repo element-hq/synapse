@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Collection, Dict, List, Mapping, Tuple
+from typing import Collection, Mapping
 
 from unpaddedbase64 import encode_base64
 
@@ -59,7 +59,7 @@ class SignatureWorkerStore(EventsWorkerStore):
             allow_rejected=True,
         )
 
-        hashes: Dict[str, Dict[str, bytes]] = {}
+        hashes: dict[str, dict[str, bytes]] = {}
         for event_id in event_ids:
             event = events.get(event_id)
             if event is None:
@@ -72,7 +72,7 @@ class SignatureWorkerStore(EventsWorkerStore):
 
     async def add_event_hashes(
         self, event_ids: Collection[str]
-    ) -> List[Tuple[str, Dict[str, str]]]:
+    ) -> list[tuple[str, dict[str, str]]]:
         """
 
         Args:

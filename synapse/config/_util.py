@@ -18,12 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, Type, TypeVar
+from typing import Annotated, Any, TypeVar
 
 import jsonschema
+from pydantic import BaseModel, BeforeValidator, StrictInt, TypeAdapter, ValidationError
+from pydantic_core.core_schema import int_schema
 
-from synapse._pydantic_compat import BaseModel, ValidationError, parse_obj_as
-from synapse.config._base import ConfigError
+from synapse.config._base import Config, ConfigError
 from synapse.types import JsonDict, StrSequence
 
 
@@ -79,8 +80,8 @@ Model = TypeVar("Model", bound=BaseModel)
 
 def parse_and_validate_mapping(
     config: Any,
-    model_type: Type[Model],
-) -> Dict[str, Model]:
+    model_type: type[Model],
+) -> dict[str, Model]:
     """Parse `config` as a mapping from strings to a given `Model` type.
     Args:
         config: The configuration data to check
@@ -93,7 +94,15 @@ def parse_and_validate_mapping(
     try:
         # type-ignore: mypy doesn't like constructing `Dict[str, model_type]` because
         # `model_type` is a runtime variable. Pydantic is fine with this.
-        instances = parse_obj_as(Dict[str, model_type], config)  # type: ignore[valid-type]
+        instances = TypeAdapter(dict[str, model_type]).validate_python(config)  # type: ignore[valid-type]
     except ValidationError as e:
         raise ConfigError(str(e)) from e
     return instances
+
+
+ConfigByteSize = Annotated[
+    StrictInt, BeforeValidator(Config.parse_size), int_schema(ge=0)
+]
+"""
+A size in bytes. Pydantic-compatible wrapper for `Config.parse_size`
+"""

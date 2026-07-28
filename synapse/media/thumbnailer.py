@@ -20,11 +20,12 @@
 #
 #
 import logging
+from collections.abc import Callable
 from io import BytesIO
 from types import TracebackType
-from typing import TYPE_CHECKING, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any
 
-from PIL import Image
+from PIL import Image, ImageSequence
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
 from synapse.config.repository import THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP
@@ -49,6 +50,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Content type used when generating animated thumbnails. The spec recommends servers
+# prefer WebP when supporting animation. See
+# https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1mediathumbnailservernamemediaid
+ANIMATED_THUMBNAIL_TYPE = "image/webp"
+
 EXIF_ORIENTATION_TAG = 0x0112
 EXIF_TRANSPOSE_MAPPINGS = {
     2: Image.FLIP_LEFT_RIGHT,
@@ -66,7 +72,7 @@ class ThumbnailError(Exception):
 
 
 class Thumbnailer:
-    FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG"}
+    FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
 
     # Which image formats we allow Pillow to open.
     # This should intentionally be kept restrictive, because the decoder of any
@@ -97,16 +103,7 @@ class Thumbnailer:
         self.transpose_method = None
         try:
             # We don't use ImageOps.exif_transpose since it crashes with big EXIF
-            #
-            # Ignore safety: Pillow seems to acknowledge that this method is
-            # "private, experimental, but generally widely used". Pillow 6
-            # includes a public getexif() method (no underscore) that we might
-            # consider using instead when we can bump that dependency.
-            #
-            # At the time of writing, Debian buster (currently oldstable)
-            # provides version 5.4.1. It's expected to EOL in mid-2022, see
-            # https://wiki.debian.org/DebianReleases#Production_Releases
-            image_exif = self.image._getexif()  # type: ignore
+            image_exif = self.image.getexif()
             if image_exif is not None:
                 image_orientation = image_exif.get(EXIF_ORIENTATION_TAG)
                 assert type(image_orientation) is int  # noqa: E721
@@ -116,7 +113,7 @@ class Thumbnailer:
             logger.info("Error parsing image EXIF information: %s", e)
 
     @trace
-    def transpose(self) -> Tuple[int, int]:
+    def transpose(self) -> tuple[int, int]:
         """Transpose the image using its EXIF Orientation tag
 
         Returns:
@@ -134,7 +131,7 @@ class Thumbnailer:
             self.image.info["exif"] = None
         return self.image.size
 
-    def aspect(self, max_width: int, max_height: int) -> Tuple[int, int]:
+    def aspect(self, max_width: int, max_height: int) -> tuple[int, int]:
         """Calculate the largest size that preserves aspect ratio which
         fits within the given rectangle::
 
@@ -152,33 +149,72 @@ class Thumbnailer:
         else:
             return max((max_height * self.width) // self.height, 1), max_height
 
-    def _resize(self, width: int, height: int) -> Image.Image:
+    def _resize_image(self, image: Image.Image, width: int, height: int) -> Image.Image:
         # 1-bit or 8-bit color palette images need converting to RGB
         # otherwise they will be scaled using nearest neighbour which
         # looks awful.
         #
         # If the image has transparency, use RGBA instead.
-        if self.image.mode in ["1", "L", "P"]:
-            if self.image.info.get("transparency", None) is not None:
-                with self.image:
-                    self.image = self.image.convert("RGBA")
+        if image.mode in ["1", "L", "P"]:
+            if image.info.get("transparency", None) is not None:
+                converted = image.convert("RGBA")
             else:
-                with self.image:
-                    self.image = self.image.convert("RGB")
-        return self.image.resize((width, height), Image.LANCZOS)
+                converted = image.convert("RGB")
+        else:
+            converted = image
+        return converted.resize((width, height), Image.LANCZOS)
+
+    @property
+    def is_animated(self) -> bool:
+        return getattr(self.image, "is_animated", False)
+
+    def _encode_animated_from(
+        self, transform: Callable[[Image.Image], Image.Image]
+    ) -> BytesIO:
+        """Apply `transform` to every frame of the source image and encode the
+        result as an animated thumbnail."""
+        frames = []
+        durations = []
+        loop = self.image.info.get("loop", 0)
+        for frame in ImageSequence.Iterator(self.image):
+            # Copy the frame to avoid referencing the original image memory.
+            f = frame.copy()
+            if f.mode != "RGBA":
+                f = f.convert("RGBA")
+            frames.append(transform(f))
+            # A duration of 0 is valid (interpretation is implementation-defined,
+            # see RFC 9649 section 2.7.1.1), so only fall back when unset. The
+            # 100ms default matches libwebp's animation tools.
+            duration = frame.info.get("duration")
+            if duration is None:
+                duration = self.image.info.get("duration", 100)
+            durations.append(duration)
+        return self._encode_animated(frames, durations, loop)
 
     @trace
-    def scale(self, width: int, height: int, output_type: str) -> BytesIO:
+    def scale(
+        self, width: int, height: int, output_type: str, animated: bool = False
+    ) -> BytesIO:
         """Rescales the image to the given dimensions.
+
+        If `animated` is set and the source image is animated, the animation is
+        preserved. Otherwise a static thumbnail of the first frame is produced.
 
         Returns:
             The bytes of the encoded image ready to be written to disk
         """
-        with self._resize(width, height) as scaled:
+        if animated and self.is_animated:
+            return self._encode_animated_from(
+                lambda f: self._resize_image(f, width, height)
+            )
+
+        with self._resize_image(self.image, width, height) as scaled:
             return self._encode_image(scaled, output_type)
 
     @trace
-    def crop(self, width: int, height: int, output_type: str) -> BytesIO:
+    def crop(
+        self, width: int, height: int, output_type: str, animated: bool = False
+    ) -> BytesIO:
         """Rescales and crops the image to the given dimensions preserving
         aspect::
             (w_in / h_in) = (w_scaled / h_scaled)
@@ -205,7 +241,14 @@ class Thumbnailer:
             crop_right = width + crop_left
             crop = (crop_left, 0, crop_right, height)
 
-        with self._resize(scaled_width, scaled_height) as scaled_image:
+        if animated and self.is_animated:
+            return self._encode_animated_from(
+                lambda f: self._resize_image(f, scaled_width, scaled_height).crop(crop)
+            )
+
+        with self._resize_image(
+            self.image, scaled_width, scaled_height
+        ) as scaled_image:
             with scaled_image.crop(crop) as cropped:
                 return self._encode_image(cropped, output_type)
 
@@ -215,6 +258,35 @@ class Thumbnailer:
         if fmt == "JPEG" or fmt == "PNG" and output_image.mode == "CMYK":
             output_image = output_image.convert("RGB")
         output_image.save(output_bytes_io, fmt, quality=80)
+        output_bytes_io.seek(0)
+        return output_bytes_io
+
+    def _encode_animated(
+        self,
+        frames: list[Image.Image],
+        durations: list[int],
+        loop: int,
+    ) -> BytesIO:
+        """
+        Encode a list of RGBA frames into an animated WebP, preserving per-frame
+        durations and the loop count.
+        """
+        output_bytes_io = BytesIO()
+        if not frames:
+            raise ThumbnailError("No frames to encode for animated thumbnail")
+
+        save_kwargs: dict[str, Any] = {
+            "format": "WEBP",
+            "save_all": True,
+            "append_images": frames[1:],
+            "loop": loop,
+            "duration": durations,
+            "minimize_size": True,
+            "quality": 80,
+        }
+
+        frames[0].save(output_bytes_io, **save_kwargs)
+        output_bytes_io.seek(0)
         return output_bytes_io
 
     def close(self) -> None:
@@ -246,9 +318,9 @@ class Thumbnailer:
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         self.close()
 
@@ -327,6 +399,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         for_federation: bool,
         allow_authenticated: bool = True,
+        animated: bool = False,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
@@ -388,6 +461,7 @@ class ThumbnailProvider:
             desired_method,
             desired_type,
             url_cache=bool(media_info.url_cache),
+            animated=animated,
         )
 
         if thumbnail_result:
@@ -422,6 +496,7 @@ class ThumbnailProvider:
         ip_address: str,
         use_federation: bool,
         allow_authenticated: bool = True,
+        animated: bool = False,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
             server_name,
@@ -483,6 +558,7 @@ class ThumbnailProvider:
             desired_height,
             desired_method,
             desired_type,
+            animated=animated,
         )
 
         if file_path:
@@ -553,13 +629,13 @@ class ThumbnailProvider:
         desired_height: int,
         desired_method: str,
         desired_type: str,
-        thumbnail_infos: List[ThumbnailInfo],
+        thumbnail_infos: list[ThumbnailInfo],
         media_id: str,
         file_id: str,
         url_cache: bool,
         for_federation: bool,
-        media_info: Optional[LocalMedia] = None,
-        server_name: Optional[str] = None,
+        media_info: LocalMedia | None = None,
+        server_name: str | None = None,
     ) -> None:
         """
         Respond to a request with an appropriate thumbnail from the previously generated thumbnails.
@@ -642,13 +718,9 @@ class ThumbnailProvider:
             # width/height/method so we can just call the "generate exact"
             # methods.
 
-            # First let's check that we do actually have the original image
-            # still. This will throw a 404 if we don't.
-            # TODO: We should refetch the thumbnails for remote media.
-            await self.media_storage.ensure_media_is_in_local_cache(
-                FileInfo(server_name, file_id, url_cache=url_cache)
-            )
-
+            # A stored animated thumbnail is always of the animated type, so
+            # regenerate it as animated.
+            regen_animated = file_info.thumbnail.type == ANIMATED_THUMBNAIL_TYPE
             if server_name:
                 await self.media_repo.generate_remote_exact_thumbnail(
                     server_name,
@@ -658,6 +730,7 @@ class ThumbnailProvider:
                     t_height=file_info.thumbnail.height,
                     t_method=file_info.thumbnail.method,
                     t_type=file_info.thumbnail.type,
+                    animated=regen_animated,
                 )
             else:
                 await self.media_repo.generate_local_exact_thumbnail(
@@ -667,6 +740,7 @@ class ThumbnailProvider:
                     t_method=file_info.thumbnail.method,
                     t_type=file_info.thumbnail.type,
                     url_cache=url_cache,
+                    animated=regen_animated,
                 )
 
             responder = await self.media_storage.fetch_media(file_info)
@@ -719,11 +793,11 @@ class ThumbnailProvider:
         desired_height: int,
         desired_method: str,
         desired_type: str,
-        thumbnail_infos: List[ThumbnailInfo],
+        thumbnail_infos: list[ThumbnailInfo],
         file_id: str,
         url_cache: bool,
-        server_name: Optional[str],
-    ) -> Optional[FileInfo]:
+        server_name: str | None,
+    ) -> FileInfo | None:
         """
         Choose an appropriate thumbnail from the previously generated thumbnails.
 
@@ -750,12 +824,12 @@ class ThumbnailProvider:
 
         if desired_method == "crop":
             # Thumbnails that match equal or larger sizes of desired width/height.
-            crop_info_list: List[
-                Tuple[int, int, int, bool, Optional[int], ThumbnailInfo]
+            crop_info_list: list[
+                tuple[int, int, int, bool, int | None, ThumbnailInfo]
             ] = []
             # Other thumbnails.
-            crop_info_list2: List[
-                Tuple[int, int, int, bool, Optional[int], ThumbnailInfo]
+            crop_info_list2: list[
+                tuple[int, int, int, bool, int | None, ThumbnailInfo]
             ] = []
             for info in thumbnail_infos:
                 # Skip thumbnails generated with different methods.
@@ -801,9 +875,9 @@ class ThumbnailProvider:
                 thumbnail_info = min(crop_info_list2, key=lambda t: t[:-1])[-1]
         elif desired_method == "scale":
             # Thumbnails that match equal or larger sizes of desired width/height.
-            info_list: List[Tuple[int, bool, int, ThumbnailInfo]] = []
+            info_list: list[tuple[int, bool, int, ThumbnailInfo]] = []
             # Other thumbnails.
-            info_list2: List[Tuple[int, bool, int, ThumbnailInfo]] = []
+            info_list2: list[tuple[int, bool, int, ThumbnailInfo]] = []
 
             for info in thumbnail_infos:
                 # Skip thumbnails generated with different methods.

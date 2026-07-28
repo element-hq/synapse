@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Awaitable, Optional, cast
+from typing import Awaitable, cast
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactorClock
@@ -37,6 +37,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests.server import get_clock
 
@@ -184,7 +185,7 @@ class LogContextScopeManagerTestCase(TestCase):
             scopes.append(scope)
 
             self.assertEqual(self._tracer.active_span, scope.span)
-            await clock.sleep(4)
+            await clock.sleep(Duration(seconds=4))
             self.assertEqual(self._tracer.active_span, scope.span)
             scope.close()
 
@@ -194,7 +195,7 @@ class LogContextScopeManagerTestCase(TestCase):
                 scopes.append(root_scope)
 
                 d1 = run_in_background(task, 1)
-                await clock.sleep(2)
+                await clock.sleep(Duration(seconds=2))
                 d2 = run_in_background(task, 2)
 
                 # because we did run_in_background, the active span should still be the
@@ -329,7 +330,7 @@ class LogContextScopeManagerTestCase(TestCase):
         reactor, clock = get_clock()
 
         callback_finished = False
-        active_span_in_callback: Optional[jaeger_client.Span] = None
+        active_span_in_callback: jaeger_client.Span | None = None
 
         async def bg_task() -> None:
             nonlocal callback_finished, active_span_in_callback
@@ -351,7 +352,7 @@ class LogContextScopeManagerTestCase(TestCase):
 
         # Now wait for the background process to finish
         while not callback_finished:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
         self.assertTrue(
             callback_finished,
@@ -391,7 +392,7 @@ class LogContextScopeManagerTestCase(TestCase):
         reactor, clock = get_clock()
 
         callback_finished = False
-        active_span_in_callback: Optional[jaeger_client.Span] = None
+        active_span_in_callback: jaeger_client.Span | None = None
 
         async def bg_task() -> None:
             nonlocal callback_finished, active_span_in_callback
@@ -418,7 +419,7 @@ class LogContextScopeManagerTestCase(TestCase):
 
         # Now wait for the background process to finish
         while not callback_finished:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
         self.assertTrue(
             callback_finished,
@@ -461,7 +462,7 @@ class LogContextScopeManagerTestCase(TestCase):
             span.span_id: span.operation_name for span in self._reporter.get_spans()
         }
 
-        def get_span_friendly_name(span_id: Optional[int]) -> str:
+        def get_span_friendly_name(span_id: int | None) -> str:
             if span_id is None:
                 return "None"
 

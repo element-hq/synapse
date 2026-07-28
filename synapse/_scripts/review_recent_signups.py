@@ -23,7 +23,6 @@ import argparse
 import sys
 import time
 from datetime import datetime
-from typing import List
 
 import attr
 
@@ -50,15 +49,15 @@ class ReviewConfig(RootConfig):
 class UserInfo:
     user_id: str
     creation_ts: int
-    emails: List[str] = attr.Factory(list)
-    private_rooms: List[str] = attr.Factory(list)
-    public_rooms: List[str] = attr.Factory(list)
-    ips: List[str] = attr.Factory(list)
+    emails: list[str] = attr.Factory(list)
+    private_rooms: list[str] = attr.Factory(list)
+    public_rooms: list[str] = attr.Factory(list)
+    ips: list[str] = attr.Factory(list)
 
 
 def get_recent_users(
     txn: LoggingTransaction, since_ms: int, exclude_app_service: bool
-) -> List[UserInfo]:
+) -> list[UserInfo]:
     """Fetches recently registered users and some info on them."""
 
     sql = """

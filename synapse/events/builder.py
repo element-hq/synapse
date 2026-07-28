@@ -19,12 +19,12 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any
 
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes
+from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -83,18 +83,22 @@ class EventBuilder:
     room_version: RoomVersion
 
     # MSC4291 makes the room ID == the create event ID. This means the create event has no room_id.
-    room_id: Optional[str]
+    room_id: str | None
     type: str
     sender: str
 
     content: JsonDict = attr.Factory(dict)
     unsigned: JsonDict = attr.Factory(dict)
+    sticky: StickyEventField | None = None
+    """
+    Fields for MSC4354: Sticky Events
+    """
 
     # These only exist on a subset of events, so they raise AttributeError if
     # someone tries to get them when they don't exist.
-    _state_key: Optional[str] = None
-    _redacts: Optional[str] = None
-    _origin_server_ts: Optional[int] = None
+    _state_key: str | None = None
+    _redacts: str | None = None
+    _origin_server_ts: int | None = None
 
     internal_metadata: EventInternalMetadata = attr.Factory(
         lambda: EventInternalMetadata({})
@@ -125,9 +129,10 @@ class EventBuilder:
 
     async def build(
         self,
-        prev_event_ids: List[str],
-        auth_event_ids: Optional[List[str]],
-        depth: Optional[int] = None,
+        prev_event_ids: list[str],
+        auth_event_ids: list[str] | None,
+        depth: int | None = None,
+        prev_state_events: StrCollection | None = None,
     ) -> EventBase:
         """Transform into a fully signed and hashed event
 
@@ -139,10 +144,51 @@ class EventBuilder:
             depth: Override the depth used to order the event in the DAG.
                 Should normally be set to None, which will cause the depth to be calculated
                 based on the prev_events.
-
+            prev_state_events: The event IDs to use as prev_state_events.
+                Only applicable on MSC4242 state DAG rooms. If this is supplied, auth_event_ids
+                must not be specified unless this event is part of a batch such that the builder
+                will be unable to compute the auth_event_ids due to the events not being persisted
+                yet.
         Returns:
             The signed and hashed event.
         """
+        # If the caller specifies this, make sure the room version supports it.
+        if prev_state_events:
+            assert self.room_version.msc4242_state_dags
+        if self.room_version.msc4242_state_dags:
+            assert prev_state_events is not None
+            if self.room_id:
+                state_ids = await self._state.compute_state_after_events(
+                    self.room_id,
+                    prev_state_events,
+                    state_filter=StateFilter.from_types(
+                        auth_types_for_event(self.room_version, self)
+                    ),
+                    await_full_state=False,
+                )
+                # When we create rooms we only insert the create+member events, and batch the rest.
+                # Therefore, we may not have state_ids from compute_state_after_events as the
+                # prev_state_events are unknown. If this happens, the caller provides the auth events
+                # to use instead.
+                calculated_auth_event_ids: list[
+                    str
+                ] = []  # assume it's the create event which has []
+                if len(state_ids) == 0 and len(prev_state_events) > 0:
+                    # it's a batched event, so we should have been provided the auth_events
+                    assert auth_event_ids and len(auth_event_ids) > 0
+                    calculated_auth_event_ids = auth_event_ids
+                else:
+                    calculated_auth_event_ids = (
+                        self._event_auth_handler.compute_auth_events(self, state_ids)
+                    )
+            else:
+                # event is a state DAG event and is the create event (room_id is not provided),
+                # therefore there are no auth_events.
+                calculated_auth_event_ids = []
+                assert self.type == EventTypes.Create and self.state_key == ""
+            self.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
+            auth_event_ids = calculated_auth_event_ids
+
         # Create events always have empty auth_events.
         if self.type == EventTypes.Create and self.is_state() and self.state_key == "":
             auth_event_ids = []
@@ -151,6 +197,8 @@ class EventBuilder:
         if auth_event_ids is None:
             # Every non-create event must have a room ID
             assert self.room_id is not None
+            # this block must not be hit for MSC4242 rooms as it resolves state with prev_events
+            assert not self.room_version.msc4242_state_dags
             state_ids = await self._state.compute_state_after_events(
                 self.room_id,
                 prev_event_ids,
@@ -205,8 +253,8 @@ class EventBuilder:
 
         format_version = self.room_version.event_format
         # The types of auth/prev events changes between event versions.
-        prev_events: Union[StrCollection, List[Tuple[str, Dict[str, str]]]]
-        auth_events: Union[List[str], List[Tuple[str, Dict[str, str]]]]
+        prev_events: StrCollection | list[tuple[str, dict[str, str]]]
+        auth_events: list[str] | list[tuple[str, dict[str, str]]]
         if format_version == EventFormatVersions.ROOM_V1_V2:
             auth_events = await self._store.add_event_hashes(auth_event_ids)
             prev_events = await self._store.add_event_hashes(prev_event_ids)
@@ -227,8 +275,7 @@ class EventBuilder:
         # rejected by other servers (and so that they can be persisted in
         # the db)
         depth = min(depth, MAX_DEPTH)
-
-        event_dict: Dict[str, Any] = {
+        event_dict: dict[str, Any] = {
             "auth_events": auth_events,
             "prev_events": prev_events,
             "type": self.type,
@@ -237,8 +284,6 @@ class EventBuilder:
             "unsigned": self.unsigned,
             "depth": depth,
         }
-        if self.room_id is not None:
-            event_dict["room_id"] = self.room_id
 
         if self.room_version.msc4291_room_ids_as_hashes:
             # In MSC4291: the create event has no room ID as the create event ID /is/ the room ID.
@@ -258,6 +303,14 @@ class EventBuilder:
                 auth_event_ids.remove(create_event_id)
                 event_dict["auth_events"] = auth_event_ids
 
+        if self.room_version.msc4242_state_dags:
+            # Auth events are removed entirely on state DAG rooms
+            event_dict.pop("auth_events")
+            assert prev_state_events is not None
+            event_dict["prev_state_events"] = prev_state_events
+        if self.room_id is not None:
+            event_dict["room_id"] = self.room_id
+
         if self.is_state():
             event_dict["state_key"] = self._state_key
 
@@ -268,6 +321,9 @@ class EventBuilder:
 
         if self._origin_server_ts is not None:
             event_dict["origin_server_ts"] = self._origin_server_ts
+
+        if self.sticky is not None:
+            event_dict[StickyEvent.EVENT_FIELD_NAME] = self.sticky
 
         return create_local_event_from_event_dict(
             clock=self._clock,
@@ -318,6 +374,7 @@ class EventBuilderFactory:
             unsigned=key_values.get("unsigned", {}),
             redacts=key_values.get("redacts", None),
             origin_server_ts=key_values.get("origin_server_ts", None),
+            sticky=key_values.get(StickyEvent.EVENT_FIELD_NAME, None),
         )
 
 
@@ -327,7 +384,7 @@ def create_local_event_from_event_dict(
     signing_key: SigningKey,
     room_version: RoomVersion,
     event_dict: JsonDict,
-    internal_metadata_dict: Optional[JsonDict] = None,
+    internal_metadata_dict: JsonDict | None = None,
 ) -> EventBase:
     """Takes a fully formed event dict, ensuring that fields like
     `origin_server_ts` have correct values for a locally produced event,

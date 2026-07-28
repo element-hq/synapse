@@ -18,7 +18,15 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, NoReturn, Protocol, Tuple
+
+# These imports are necessary for python <= 3.13 in order for the `InFlightGauge` type
+# annotations not to be evaluated at runtime.
+# Starting with python 3.14, annotations are lazily evaluated by default, which is the
+# behaviour we desire.
+# More info here: https://docs.python.org/3/reference/compound_stmts.html#annotations
+from __future__ import annotations
+
+from typing import NoReturn, Protocol
 
 from prometheus_client.core import Sample
 
@@ -33,9 +41,10 @@ from synapse.metrics import (
 from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
+from tests.metrics import get_latest_metrics
 
 
-def get_sample_labels_value(sample: Sample) -> Tuple[Dict[str, str], float]:
+def get_sample_labels_value(sample: Sample) -> tuple[dict[str, str], float]:
     """Extract the labels and values of a sample.
 
     prometheus_client 0.5 changed the sample type to a named tuple with more
@@ -54,7 +63,7 @@ def get_sample_labels_value(sample: Sample) -> Tuple[Dict[str, str], float]:
     # Otherwise fall back to treating it as a plain 3 tuple.
     else:
         # In older versions of prometheus_client Sample was a 3-tuple.
-        labels: Dict[str, str]
+        labels: dict[str, str]
         value: float
         _, labels, value = sample  # type: ignore[misc]
         return labels, value
@@ -127,7 +136,7 @@ class TestMauLimit(unittest.TestCase):
 
     def get_metrics_from_gauge(
         self, gauge: InFlightGauge
-    ) -> Dict[str, Dict[Tuple[str, ...], float]]:
+    ) -> dict[str, dict[tuple[str, ...], float]]:
         results = {}
 
         for r in gauge.collect():
@@ -382,26 +391,3 @@ class LaterGaugeTests(unittest.HomeserverTestCase):
             f"Missing metric {hs2_metric} in cache metrics {metrics_map}",
         )
         self.assertEqual(hs2_metric_value, "2.0")
-
-
-def get_latest_metrics() -> Dict[str, str]:
-    """
-    Collect the latest metrics from the registry and parse them into an easy to use map.
-    The key includes the metric name and labels.
-
-    Example output:
-    {
-        "synapse_util_caches_cache_size": "0.0",
-        "synapse_util_caches_cache_max_size{name="some_cache",server_name="hs1"}": "777.0",
-        ...
-    }
-    """
-    metric_map = {
-        x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-        for x in filter(
-            lambda x: len(x) > 0 and not x.startswith(b"#"),
-            generate_latest(REGISTRY).split(b"\n"),
-        )
-    }
-
-    return metric_map

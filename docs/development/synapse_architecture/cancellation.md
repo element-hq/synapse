@@ -299,7 +299,7 @@ logcontext is not finished before the `async` processing completes.
 
 **Bad**:
 ```python
-cache: Optional[ObservableDeferred[None]] = None
+cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -326,7 +326,7 @@ with LoggingContext("request-1"):
 
 **Good**:
 ```python
-cache: Optional[ObservableDeferred[None]] = None
+cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]
@@ -358,7 +358,7 @@ with LoggingContext("request-1"):
 
 **OK**:
 ```python
-cache: Optional[ObservableDeferred[None]] = None
+cache: ObservableDeferred[None] | None = None
 
 async def do_something_else(
     to_resolve: Deferred[None]

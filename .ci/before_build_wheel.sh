@@ -7,4 +7,4 @@ if command -v yum &> /dev/null; then
 fi
 
 # Install a Rust toolchain
-curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain 1.82.0 -y --profile minimal
+curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y --profile minimal

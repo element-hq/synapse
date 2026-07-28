@@ -20,7 +20,7 @@
 #
 
 import io
-from typing import Iterable, Optional
+from typing import Iterable
 
 from matrix_common.types.mxc_uri import MXCUri
 
@@ -63,9 +63,9 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
         media_repository = hs.get_media_repository()
 
         def _create_media_and_set_attributes(
-            last_accessed_ms: Optional[int],
-            is_quarantined: Optional[bool] = False,
-            is_protected: Optional[bool] = False,
+            last_accessed_ms: int | None,
+            is_quarantined: bool | None = False,
+            is_protected: bool | None = False,
         ) -> MXCUri:
             # "Upload" some media to the local media store
             # If the meda
@@ -113,8 +113,8 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
 
         def _cache_remote_media_and_set_attributes(
             media_id: str,
-            last_accessed_ms: Optional[int],
-            is_quarantined: Optional[bool] = False,
+            last_accessed_ms: int | None,
+            is_quarantined: bool | None = False,
         ) -> MXCUri:
             # Pretend to cache some remote media
             self.get_success(

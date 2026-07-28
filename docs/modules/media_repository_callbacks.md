@@ -11,7 +11,7 @@ The available media repository callbacks are:
 _First introduced in Synapse v1.132.0_
 
 ```python
-async def get_media_config_for_user(user_id: str) -> Optional[JsonDict]
+async def get_media_config_for_user(user_id: str) -> JsonDict | None
 ```
 
 **<span style="color:red">
@@ -70,7 +70,7 @@ implementations of this callback.
 _First introduced in Synapse v1.139.0_
 
 ```python
-async def get_media_upload_limits_for_user(user_id: str, size: int) -> Optional[List[synapse.module_api.MediaUploadLimit]]
+async def get_media_upload_limits_for_user(user_id: str, size: int) -> list[synapse.module_api.MediaUploadLimit] | None
 ```
 
 **<span style="color:red">

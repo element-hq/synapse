@@ -26,11 +26,6 @@ from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
     Collection,
-    Dict,
-    Optional,
-    Tuple,
-    Type,
-    Union,
 )
 from weakref import WeakSet
 
@@ -44,7 +39,7 @@ from synapse.metrics.background_process_metrics import wrap_as_background_proces
 from synapse.storage.databases.main.lock import Lock, LockStore
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.clock import Clock
-from synapse.util.constants import ONE_MINUTE_SECONDS
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
@@ -58,6 +53,20 @@ logger = logging.getLogger(__name__)
 # This is because it is fine to create several events concurrently, since referenced events
 # will not disappear under our feet as long as we don't delete the room.
 NEW_EVENT_DURING_PURGE_LOCK_NAME = "new_event_during_purge_lock"
+
+WORKER_LOCK_MAX_RETRY_INTERVAL = Duration(seconds=5)
+"""
+The maximum wait time before retrying to acquire the lock.
+
+Better to retry more quickly than have workers wait around. 5 seconds is still a
+reasonable gap in time to not overwhelm the CPU/Database.
+
+This matters most when locks go stale as normally, when the lock holder releases, we
+signal to other locks (with the same name/key) that they should try reacquiring the lock
+immediately. But stale locks are never released and instead forcefully reaped behind the
+scenes.
+"""
+WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION = Duration(minutes=10)
 
 
 class WorkerLocksHandler:
@@ -75,11 +84,9 @@ class WorkerLocksHandler:
 
         # Map from lock name/key to set of `WaitingLock` that are active for
         # that lock.
-        self._locks: Dict[
-            Tuple[str, str], WeakSet[Union[WaitingLock, WaitingMultiLock]]
-        ] = {}
+        self._locks: dict[tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]] = {}
 
-        self._clock.looping_call(self._cleanup_locks, 30_000)
+        self._clock.looping_call(self._cleanup_locks, Duration(seconds=30))
 
         self._notifier.add_lock_released_callback(self._on_lock_released)
 
@@ -141,7 +148,7 @@ class WorkerLocksHandler:
 
     def acquire_multi_read_write_lock(
         self,
-        lock_names: Collection[Tuple[str, str]],
+        lock_names: Collection[tuple[str, str]],
         *,
         write: bool,
     ) -> "WaitingMultiLock":
@@ -188,15 +195,13 @@ class WorkerLocksHandler:
             return
 
         def _wake_all_locks(
-            locks: Collection[Union[WaitingLock, WaitingMultiLock]],
+            locks: Collection[WaitingLock | WaitingMultiLock],
         ) -> None:
             for lock in locks:
-                deferred = lock.deferred
-                if not deferred.called:
-                    deferred.callback(None)
+                lock.release_lock()
 
         self._clock.call_later(
-            0,
+            Duration(seconds=0),
             _wake_all_locks,
             locks,
         )
@@ -214,15 +219,23 @@ class WaitingLock:
     handler: WorkerLocksHandler
     lock_name: str
     lock_key: str
-    write: Optional[bool]
+    write: bool | None
+    start_ts_ms: int = 0
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
-    _inner_lock: Optional[Lock] = None
-    _retry_interval: float = 0.1
+    _inner_lock: Lock | None = None
+    _timeout_interval: float = 0.1
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
     )
 
+    def release_lock(self) -> None:
+        """Release the lock (by resolving the deferred)"""
+        if not self.deferred.called:
+            with PreserveLoggingContext():
+                self.deferred.callback(None)
+
     async def __aenter__(self) -> None:
+        self.start_ts_ms = self.clock.time_msec()
         self._lock_span.__enter__()
 
         with start_active_span("WaitingLock.waiting_for_lock"):
@@ -243,28 +256,53 @@ class WaitingLock:
                     break
 
                 try:
-                    # Wait until the we get notified the lock might have been
+                    # Wait until the notification that the lock might have been
                     # released (by the deferred being resolved). We also
-                    # periodically wake up in case the lock was released but we
+                    # periodically wake up in case the lock was released, but we
                     # weren't notified.
                     with PreserveLoggingContext():
-                        timeout = self._get_next_retry_interval()
                         await timeout_deferred(
                             deferred=self.deferred,
-                            timeout=timeout,
+                            timeout=self._timeout_interval,
                             clock=self.clock,
                         )
-                except Exception:
-                    pass
+                except defer.TimeoutError:
+                    # Only increment the timeout value if this was an actual timeout
+                    # (defer.TimeoutError)
+                    self._increment_timeout_interval()
+
+                    now_ms = self.clock.time_msec()
+                    time_spent_trying_to_lock = Duration(
+                        milliseconds=now_ms - self.start_ts_ms
+                    )
+                    if (
+                        time_spent_trying_to_lock.as_millis()
+                        > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
+                    ):
+                        logger.warning(
+                            "(WaitingLock (%s, %s)) Time spent waiting to acquire lock "
+                            "is getting excessive: %ss. There may be a deadlock.",
+                            self.lock_name,
+                            self.lock_key,
+                            time_spent_trying_to_lock.as_secs(),
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        "Caught an exception while waiting on WaitingLock(lock_name=%s, lock_key=%s): %r",
+                        self.lock_name,
+                        self.lock_key,
+                        e,
+                    )
 
         return await self._inner_lock.__aenter__()
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
         assert self._inner_lock
 
         self.handler.notify_lock_released(self.lock_name, self.lock_key)
@@ -276,20 +314,19 @@ class WaitingLock:
 
         return r
 
-    def _get_next_retry_interval(self) -> float:
-        next = self._retry_interval
-        self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
-            logger.warning(
-                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
-                self._retry_interval,
-            )
-        return next * random.uniform(0.9, 1.1)
+    def _increment_timeout_interval(self) -> float:
+        next_interval = self._timeout_interval
+        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), next_interval * 2)
+
+        # The jitter value is maintained for the timeout, to help avoid a "thundering
+        # herd" situation when all locks may time out at the same time.
+        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
+        return self._timeout_interval
 
 
 @attr.s(auto_attribs=True, eq=False)
 class WaitingMultiLock:
-    lock_names: Collection[Tuple[str, str]]
+    lock_names: Collection[tuple[str, str]]
 
     write: bool
 
@@ -297,15 +334,23 @@ class WaitingMultiLock:
     store: LockStore
     handler: WorkerLocksHandler
 
+    start_ts_ms: int = 0
     deferred: "defer.Deferred[None]" = attr.Factory(defer.Deferred)
 
-    _inner_lock_cm: Optional[AsyncContextManager] = None
-    _retry_interval: float = 0.1
+    _inner_lock_cm: AsyncContextManager | None = None
+    _timeout_interval: float = 0.1
     _lock_span: "opentracing.Scope" = attr.Factory(
         lambda: start_active_span("WaitingLock.lock")
     )
 
+    def release_lock(self) -> None:
+        """Release the lock (by resolving the deferred)"""
+        if not self.deferred.called:
+            with PreserveLoggingContext():
+                self.deferred.callback(None)
+
     async def __aenter__(self) -> None:
+        self.start_ts_ms = self.clock.time_msec()
         self._lock_span.__enter__()
 
         with start_active_span("WaitingLock.waiting_for_lock"):
@@ -321,19 +366,42 @@ class WaitingMultiLock:
                     break
 
                 try:
-                    # Wait until the we get notified the lock might have been
+                    # Wait until the notification that the lock might have been
                     # released (by the deferred being resolved). We also
-                    # periodically wake up in case the lock was released but we
+                    # periodically wake up in case the lock was released, but we
                     # weren't notified.
                     with PreserveLoggingContext():
-                        timeout = self._get_next_retry_interval()
                         await timeout_deferred(
                             deferred=self.deferred,
-                            timeout=timeout,
+                            timeout=self._timeout_interval,
                             clock=self.clock,
                         )
-                except Exception:
-                    pass
+                except defer.TimeoutError:
+                    # Only increment the timeout value if this was an actual timeout
+                    # (defer.TimeoutError)
+                    self._increment_timeout_interval()
+
+                    now_ms = self.clock.time_msec()
+                    time_spent_trying_to_lock = Duration(
+                        milliseconds=now_ms - self.start_ts_ms
+                    )
+                    if (
+                        time_spent_trying_to_lock.as_millis()
+                        > WORKER_LOCK_EXCESSIVE_WAITING_WARN_DURATION.as_millis()
+                    ):
+                        logger.warning(
+                            "(WaitingMultiLock (%r)) Time spent waiting to acquire lock "
+                            "is getting excessive: %ss. There may be a deadlock.",
+                            self.lock_names,
+                            time_spent_trying_to_lock.as_secs(),
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        "Caught an exception while waiting on WaitingMultiLock(lock_names=%r): %r",
+                        self.lock_names,
+                        e,
+                    )
 
         assert self._inner_lock_cm
         await self._inner_lock_cm.__aenter__()
@@ -341,10 +409,10 @@ class WaitingMultiLock:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
         assert self._inner_lock_cm
 
         for lock_name, lock_key in self.lock_names:
@@ -357,12 +425,11 @@ class WaitingMultiLock:
 
         return r
 
-    def _get_next_retry_interval(self) -> float:
-        next = self._retry_interval
-        self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
-            logger.warning(
-                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
-                self._retry_interval,
-            )
-        return next * random.uniform(0.9, 1.1)
+    def _increment_timeout_interval(self) -> float:
+        next_interval = self._timeout_interval
+        next_interval = min(WORKER_LOCK_MAX_RETRY_INTERVAL.as_secs(), next_interval * 2)
+
+        # The jitter value is maintained for the timeout, to help avoid a "thundering
+        # herd" situation when all locks may time out at the same time.
+        self._timeout_interval = next_interval * random.uniform(0.9, 1.1)
+        return self._timeout_interval

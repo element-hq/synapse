@@ -22,7 +22,7 @@
 import datetime
 import importlib.resources as importlib_resources
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
@@ -54,7 +54,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
     ]
     url = b"/_matrix/client/r0/register"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["allow_guest_access"] = True
         return config
@@ -65,6 +65,17 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         hs = super().make_homeserver(reactor, clock)
         hs.get_send_email_handler()._sendmail = AsyncMock()
         return hs
+
+    def _get_sendmail_mock(self) -> AsyncMock:
+        """
+        Cast the homeserver's `_sendmail` object as an `AsyncMock`.
+
+        `_sendmail` is an `AsyncMock` (see `make_homeserver`) but this type
+        information doesn't make it through the test harness. Thus we need to
+        cast the object again.
+        """
+        sendmail = self.hs.get_send_email_handler()._sendmail
+        return cast(AsyncMock, sendmail)
 
     def test_POST_appservice_registration_valid(self) -> None:
         user_id = "@as_user_kermit:test"
@@ -742,10 +753,41 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
             "POST",
             b"register/email/requestToken",
             {"client_secret": "foobar", "email": email, "send_attempt": 1},
+            await_result=False,
         )
+        # Note: The endpoint intentionally adds up to 1000ms of jitter to avoid
+        # leaking whether the email address is bound to an account.
+        channel.await_result(timeout_ms=1000)
         self.assertEqual(200, channel.code, channel.result)
 
         self.assertIsNotNone(channel.json_body.get("sid"))
+
+    @unittest.override_config(
+        {
+            "public_baseurl": "https://test_server",
+            "email": {
+                "smtp_host": "mail_server",
+                "smtp_port": 2525,
+                "notif_from": "sender@host",
+            },
+        }
+    )
+    def test_request_token_allowed_when_email_flow_is_advertised(self) -> None:
+        sendmail = self._get_sendmail_mock()
+        sendmail.reset_mock()
+
+        channel = self.make_request(
+            "POST",
+            b"register/email/requestToken",
+            {
+                "client_secret": "foobar",
+                "email": "test@example.com",
+                "send_attempt": 1,
+            },
+        )
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertIsNotNone(channel.json_body.get("sid"))
+        sendmail.assert_awaited_once()
 
     @unittest.override_config(
         {
@@ -1032,7 +1074,7 @@ class AccountValidityRenewalByEmailTestCase(unittest.HomeserverTestCase):
         async def sendmail(*args: Any, **kwargs: Any) -> None:
             self.email_attempts.append((args, kwargs))
 
-        self.email_attempts: List[Tuple[Any, Any]] = []
+        self.email_attempts: list[tuple[Any, Any]] = []
         self.hs.get_send_email_handler()._sendmail = sendmail
 
         self.store = self.hs.get_datastores().main
@@ -1146,7 +1188,7 @@ class AccountValidityRenewalByEmailTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(len(self.email_attempts), 0)
 
-    def create_user(self) -> Tuple[str, str]:
+    def create_user(self) -> tuple[str, str]:
         user_id = self.register_user("kermit", "monkey")
         tok = self.login("kermit", "monkey")
         # We need to manually add an email address otherwise the handler will do
@@ -1250,7 +1292,7 @@ class RegistrationTokenValidityRestServletTestCase(unittest.HomeserverTestCase):
     servlets = [register.register_servlets]
     url = "/_matrix/client/v1/register/m.login.registration_token/validity"
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["registration_requires_token"] = True
         return config

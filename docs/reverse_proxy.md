@@ -86,6 +86,45 @@ server {
 }
 ```
 
+### Nginx Proxy Manager or NPMPlus
+
+```nginx
+Add New Proxy-Host
+	- Tab Details
+		- Domain Names: matrix.example.com
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+
+	- Tab Custom locations
+		- Add Location
+		- Define Location: /_matrix
+		- Scheme: http
+		- Forward Hostname / IP: localhost # IP address or hostname where Synapse is hosted. Bare-metal or Container.
+		- Forward Port: 8008
+		- Click on the gear icon to display a custom configuration field. Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
+			- Enter this in the Custom Field: client_max_body_size 50M;
+
+	- Tab SSL/TLS
+		- Choose your SSL/TLS certificate and preferred settings.
+
+	- Tab Advanced
+		- Enter this in the Custom Field. This means that port 8448 no longer needs to be opened in your Firewall.
+		  The Federation communication use now Port 443.
+
+			location /.well-known/matrix/server {
+			  return 200 '{"m.server": "matrix.example.com:443"}';
+      		  add_header Content-Type application/json;
+			}
+
+ 			location /.well-known/matrix/client {
+      		  return 200 '{"m.homeserver": {"base_url": "https://matrix.example.com"}}';
+      		  add_header Content-Type application/json;
+      		  add_header "Access-Control-Allow-Origin" *;
+			}
+
+```
+
 ### Caddy v2
 
 ```

@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import Dict
 
 from twisted.web.resource import Resource
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_resource_tree(
-    desired_tree: Dict[str, Resource], root_resource: Resource
+    desired_tree: dict[str, Resource], root_resource: Resource
 ) -> Resource:
     """Create the resource tree for this homeserver.
 
@@ -48,7 +47,7 @@ def create_resource_tree(
     # unless you give it a Request object IN ADDITION to the name :/ So
     # instead, we'll store a copy of this mapping so we can actually add
     # extra resources to existing nodes. See self._resource_id for the key.
-    resource_mappings: Dict[str, Resource] = {}
+    resource_mappings: dict[str, Resource] = {}
     for full_path_str, res in desired_tree.items():
         # twisted requires all resources to be bytes
         full_path = full_path_str.encode("utf-8")

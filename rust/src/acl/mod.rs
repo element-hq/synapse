@@ -47,7 +47,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 }
 
 #[derive(Debug, Clone)]
-#[pyclass(frozen)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct ServerAclEvaluator {
     allow_ip_literals: bool,
     allow: Vec<Regex>,

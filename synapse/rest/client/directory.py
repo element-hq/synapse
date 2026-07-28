@@ -20,11 +20,12 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import StrictStr
 
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -59,7 +60,7 @@ class ClientDirectoryServer(RestServlet):
         self.directory_handler = hs.get_directory_handler()
         self.auth = hs.get_auth()
 
-    async def on_GET(self, request: Request, room_alias: str) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: Request, room_alias: str) -> tuple[int, JsonDict]:
         if not RoomAlias.is_valid(room_alias):
             raise SynapseError(400, "Room alias invalid", errcode=Codes.INVALID_PARAM)
         room_alias_obj = RoomAlias.from_string(room_alias)
@@ -72,11 +73,11 @@ class ClientDirectoryServer(RestServlet):
         # TODO: get Pydantic to validate that this is a valid room id?
         room_id: StrictStr
         # `servers` is unspecced
-        servers: Optional[List[StrictStr]] = None
+        servers: list[StrictStr] | None = None
 
     async def on_PUT(
         self, request: SynapseRequest, room_alias: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if not RoomAlias.is_valid(room_alias):
             raise SynapseError(400, "Room alias invalid", errcode=Codes.INVALID_PARAM)
         room_alias_obj = RoomAlias.from_string(room_alias)
@@ -103,20 +104,25 @@ class ClientDirectoryServer(RestServlet):
 
     async def on_DELETE(
         self, request: SynapseRequest, room_alias: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if not RoomAlias.is_valid(room_alias):
             raise SynapseError(400, "Room alias invalid", errcode=Codes.INVALID_PARAM)
         room_alias_obj = RoomAlias.from_string(room_alias)
         requester = await self.auth.get_user_by_req(request)
 
-        if requester.app_service:
+        app_service = (
+            self.store.get_app_service_by_id(requester.app_service_id)
+            if requester.app_service_id
+            else None
+        )
+        if app_service:
             await self.directory_handler.delete_appservice_association(
-                requester.app_service, room_alias_obj
+                app_service, room_alias_obj
             )
 
             logger.info(
                 "Application service at %s deleted alias %s",
-                requester.app_service.url,
+                app_service.url,
                 room_alias_obj.to_string(),
             )
 
@@ -141,7 +147,7 @@ class ClientDirectoryListServer(RestServlet):
         self.directory_handler = hs.get_directory_handler()
         self.auth = hs.get_auth()
 
-    async def on_GET(self, request: Request, room_id: str) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: Request, room_id: str) -> tuple[int, JsonDict]:
         room = await self.store.get_room(room_id)
         if room is None:
             raise NotFoundError("Unknown room")
@@ -153,7 +159,7 @@ class ClientDirectoryListServer(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         content = parse_and_validate_json_object_from_request(request, self.PutBody)
@@ -181,13 +187,13 @@ class ClientAppserviceDirectoryListServer(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, network_id: str, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         content = parse_and_validate_json_object_from_request(request, self.PutBody)
         return await self._edit(request, network_id, room_id, content.visibility)
 
     async def on_DELETE(
         self, request: SynapseRequest, network_id: str, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         return await self._edit(request, network_id, room_id, "private")
 
     async def _edit(
@@ -196,15 +202,15 @@ class ClientAppserviceDirectoryListServer(RestServlet):
         network_id: str,
         room_id: str,
         visibility: Literal["public", "private"],
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        if not requester.app_service:
+        if not requester.app_service_id:
             raise AuthError(
                 403, "Only appservices can edit the appservice published room list"
             )
 
         await self.directory_handler.edit_published_appservice_room_list(
-            requester.app_service.id, network_id, room_id, visibility
+            requester.app_service_id, network_id, room_id, visibility
         )
 
         return 200, {}

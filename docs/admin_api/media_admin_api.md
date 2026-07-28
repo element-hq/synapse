@@ -88,6 +88,20 @@ is quarantined, Synapse will:
  - Quarantine any existing cached remote media.
  - Quarantine any future remote media.
 
+## Downloading quarantined media
+
+Normally, when media is quarantined, it will return a 404 error when downloaded.
+Admins can bypass this by adding `?admin_unsafely_bypass_quarantine=true`
+to the [normal download URL](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid).
+
+Bypassing the quarantine check is not recommended. Media is typically quarantined
+to prevent harmful content from being served to users, which includes admins. Only
+set the bypass parameter if you intentionally want to access potentially harmful
+content.
+
+Non-admin users cannot bypass quarantine checks, even when specifying the above
+query parameter.
+
 ## Quarantining media by ID
 
 This API quarantines a single piece of local or remote media.
@@ -231,6 +245,42 @@ Response:
 
 ```json
 {}
+```
+
+## Listing quarantined media changes
+
+When media is quarantined or unquarantined, a change record is created in the 
+database. This API returns those change records in the order they were created.
+
+**Note**: This API should be considered *best-effort* and expected to have missing or
+duplicate records. Currently, this only captures any media explicitly (un)quarantined by
+the media quarantine admin API, and the other cases are tracked by
+https://github.com/element-hq/synapse/issues/19672. Historical media uploaded before
+Synapse 1.152.0 is backfilled in a background update on a best-effort basis.
+
+Each page has a maximum of 100 records. The first page has the oldest records, 
+paginating forwards with each `next_batch` value.
+
+Request:
+
+```
+GET /_synapse/admin/v1/media/quarantine_changes?from=2
+```
+
+Where `from` is the `next_batch` value from a previous request. It is optional
+and defaults to the first page (the value `0`).
+
+Response:
+
+```json
+{
+  "next_batch": 4,
+  "changes": [
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": true },
+    { "origin": "example.org", "media_id": "abcdefg12345...", "quarantined": false },
+    { "origin": "another.example.org", "media_id": "abcdefg12345...", "quarantined": true }
+  ]
+}
 ```
 
 # Delete local media

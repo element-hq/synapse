@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import AuthError, NotFoundError, StoreError, SynapseError
 from synapse.http.server import HttpServer
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class GetFilterRestServlet(RestServlet):
-    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter/(?P<filter_id>[^/]*)")
+    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter/(?P<filter_id>[^/]*)$")
     CATEGORY = "Encryption requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -48,7 +48,7 @@ class GetFilterRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, filter_id: str
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         target_user = UserID.from_string(user_id)
         requester = await self.auth.get_user_by_req(request)
 
@@ -76,7 +76,7 @@ class GetFilterRestServlet(RestServlet):
 
 
 class CreateFilterRestServlet(RestServlet):
-    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter")
+    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter$")
     CATEGORY = "Encryption requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -87,7 +87,7 @@ class CreateFilterRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         target_user = UserID.from_string(user_id)
         requester = await self.auth.get_user_by_req(request)
 

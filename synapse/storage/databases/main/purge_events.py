@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, Set, Tuple, cast
+from typing import Any, cast
 
 from synapse.api.errors import SynapseError
 from synapse.storage.database import LoggingTransaction
@@ -71,6 +71,10 @@ purge_room_tables_with_room_id_column = (
     # so must be deleted first.
     "sliding_sync_joined_rooms",
     "sliding_sync_membership_snapshots",
+    # Note: msc4242_state_dag_forward_extremities/edges have a foreign key to the `events` table
+    # so must be deleted first.
+    "msc4242_state_dag_forward_extremities",
+    "msc4242_state_dag_edges",
     "events",
     "federation_inbound_events_staging",
     "receipts_graph",
@@ -103,7 +107,7 @@ The tables with a `room_id` column regardless of whether they have a useful inde
 class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
     async def purge_history(
         self, room_id: str, token: str, delete_local_events: bool
-    ) -> Set[int]:
+    ) -> set[int]:
         """Deletes room history before a certain point.
 
         Note that only a single purge can occur at once, this is guaranteed via
@@ -137,7 +141,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         room_id: str,
         token: RoomStreamToken,
         delete_local_events: bool,
-    ) -> Set[int]:
+    ) -> set[int]:
         # Tables that should be pruned:
         #     event_auth
         #     event_backward_extremities
@@ -204,9 +208,9 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         logger.info("[purge] looking for events to delete")
 
         should_delete_expr = "state_events.state_key IS NULL"
-        should_delete_params: Tuple[Any, ...] = ()
+        should_delete_params: tuple[Any, ...] = ()
         if not delete_local_events:
-            should_delete_expr += " AND event_id NOT LIKE ?"
+            should_delete_expr += " AND sender NOT LIKE ?"
 
             # We include the parameter twice since we use the expression twice
             should_delete_params += ("%:" + self.hs.hostname, "%:" + self.hs.hostname)
@@ -239,6 +243,16 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         txn.execute("SELECT event_id, should_delete FROM events_to_purge")
         event_rows = txn.fetchall()
+
+        if len(event_rows) == 0:
+            logger.info("[purge] no events found to purge")
+
+            # For the sake of cleanliness: drop the temp table.
+            # This will commit the txn in sqlite, so make sure to keep this actually last.
+            txn.execute("DROP TABLE events_to_purge")
+            # no referenced state groups
+            return set()
+
         logger.info(
             "[purge] found %i events before cutoff, of which %i can be deleted",
             len(event_rows),
@@ -312,6 +326,65 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
                 ")" % (table,)
             )
 
+        # Some of the `event_push_actions` we're about to delete may have already
+        # been rotated into the aggregate `event_push_summary` counts. Deleting
+        # the rows without adjusting those counts would leave the summary
+        # over-counting, inflating users' notification counts. So first work out
+        # how much of each summary is attributable to the events being deleted and
+        # decrement it.
+        #
+        # We only count rows that have already been rotated into the summary:
+        # those at or before the rotated-up-to position
+        # (`event_push_summary_stream_ordering`) and after the receipt used to
+        # compute the summary. Rows beyond that position aren't in the summary
+        # yet (they're still counted live from `event_push_actions`), so deleting
+        # them needs no adjustment here. This mirrors how rotation counts them in
+        # `_rotate_notifs_before_txn`.
+        logger.info("[purge] adjusting event_push_summary for deleted events")
+        txn.execute(
+            """
+            SELECT epa.user_id, epa.thread_id,
+                COUNT(CASE WHEN epa.notif = 1 THEN 1 END),
+                COUNT(CASE WHEN epa.unread = 1 THEN 1 END)
+            FROM event_push_actions AS epa
+            INNER JOIN event_push_summary AS eps USING (user_id, room_id, thread_id)
+            WHERE epa.room_id = ?
+                AND epa.event_id IN (
+                    SELECT event_id FROM events_to_purge WHERE should_delete
+                )
+                AND epa.stream_ordering <= (
+                    SELECT stream_ordering FROM event_push_summary_stream_ordering
+                )
+                AND (
+                    eps.last_receipt_stream_ordering IS NULL
+                    OR epa.stream_ordering > eps.last_receipt_stream_ordering
+                )
+            GROUP BY epa.user_id, epa.thread_id
+            """,
+            (room_id,),
+        )
+        summary_decrements = cast(list[tuple[str, str, int, int]], txn.fetchall())
+
+        # `unread_count` is nullable, so `COALESCE` it before subtracting (else
+        # the result would be NULL). Clamp both counts at 0 via `GREATEST`/`MAX`
+        # to guard against ever driving a count negative if the summary is
+        # somehow out of sync with `event_push_actions`.
+        greatest_func = (
+            "GREATEST" if isinstance(self.database_engine, PostgresEngine) else "MAX"
+        )
+        txn.execute_batch(
+            f"""
+            UPDATE event_push_summary
+            SET notif_count = {greatest_func}(notif_count - ?, 0),
+                unread_count = {greatest_func}(COALESCE(unread_count, 0) - ?, 0)
+            WHERE room_id = ? AND user_id = ? AND thread_id = ?
+            """,
+            [
+                (notif_count, unread_count, room_id, user_id, thread_id)
+                for user_id, thread_id, notif_count, unread_count in summary_decrements
+            ],
+        )
+
         # event_push_actions lacks an index on event_id, and has one on
         # (room_id, event_id) instead.
         for table in ("event_push_actions",):
@@ -355,7 +428,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         """,
             (room_id,),
         )
-        (min_depth,) = cast(Tuple[int], txn.fetchone())
+        (min_depth,) = cast(tuple[int], txn.fetchone())
 
         logger.info("[purge] updating room_depth to %d", min_depth)
 

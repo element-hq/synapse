@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Collection, Dict
+from typing import Collection
 from unittest import mock
 
 from twisted.internet.defer import CancelledError, ensureDeferred
@@ -35,9 +35,9 @@ from tests.unittest import TestCase
 class PartialStateEventsTrackerTestCase(TestCase):
     def setUp(self) -> None:
         # the results to be returned by the mocked get_partial_state_events
-        self._events_dict: Dict[str, bool] = {}
+        self._events_dict: dict[str, bool] = {}
 
-        async def get_partial_state_events(events: Collection[str]) -> Dict[str, bool]:
+        async def get_partial_state_events(events: Collection[str]) -> dict[str, bool]:
             return {e: self._events_dict[e] for e in events}
 
         self.mock_store = mock.Mock(spec_set=["get_partial_state_events"])
@@ -73,7 +73,7 @@ class PartialStateEventsTrackerTestCase(TestCase):
         # registration of the listener, it should not block.
         self._events_dict = {"event1": True, "event2": False}
 
-        async def get_partial_state_events(events: Collection[str]) -> Dict[str, bool]:
+        async def get_partial_state_events(events: Collection[str]) -> dict[str, bool]:
             res = {e: self._events_dict[e] for e in events}
             # change the result for next time
             self._events_dict = {"event1": False, "event2": False}
@@ -91,13 +91,13 @@ class PartialStateEventsTrackerTestCase(TestCase):
 
         self._events_dict = {"event1": True, "event2": False}
 
-        async def get_partial_state_events1(events: Collection[str]) -> Dict[str, bool]:
+        async def get_partial_state_events1(events: Collection[str]) -> dict[str, bool]:
             self.mock_store.get_partial_state_events.side_effect = (
                 get_partial_state_events2
             )
             return {e: self._events_dict[e] for e in events}
 
-        async def get_partial_state_events2(events: Collection[str]) -> Dict[str, bool]:
+        async def get_partial_state_events2(events: Collection[str]) -> dict[str, bool]:
             self.tracker.notify_un_partial_stated("event1")
             self._events_dict["event1"] = False
             return {e: self._events_dict[e] for e in events}

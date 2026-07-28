@@ -102,6 +102,10 @@ rc_room_creation:
   per_second: 9999
   burst_count: 9999
 
+rc_user_directory:
+  per_second: 9999
+  burst_count: 9999
+
 federation_rr_transactions_per_room_per_second: 9999
 
 allow_device_name_lookup_over_federation: true
@@ -119,8 +123,6 @@ experimental_features:
   msc3874_enabled: true
   # no UIA for x-signing upload for the first time
   msc3967_enabled: true
-  # Expose a room summary for public rooms
-  msc3266_enabled: true
   # Send to-device messages to application services
   msc2409_to_device_messages_enabled: true
   # Allow application services to masquerade devices
@@ -135,6 +137,10 @@ experimental_features:
   msc4155_enabled: true
   # Thread Subscriptions
   msc4306_enabled: true
+  # Sticky Events
+  msc4354_enabled: true
+  # `/sync` `state_after`
+  msc4222_enabled: true
 
 server_notices:
   system_mxid_localpart: _server

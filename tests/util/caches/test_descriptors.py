@@ -23,12 +23,8 @@ from typing import (
     Any,
     Generator,
     Iterable,
-    List,
     Mapping,
     NoReturn,
-    Optional,
-    Set,
-    Tuple,
     cast,
 )
 from unittest import mock
@@ -245,7 +241,7 @@ class DescriptorTestCase(unittest.TestCase):
         """The wrapped function returns a failure"""
 
         class Cls:
-            result: Optional[Deferred] = None
+            result: Deferred | None = None
             call_count = 0
             server_name = "test_server"  # nb must be called this for @cached
             _, clock = get_clock()  # nb must be called this for @cached
@@ -257,7 +253,7 @@ class DescriptorTestCase(unittest.TestCase):
                 return self.result
 
         obj = Cls()
-        callbacks: Set[str] = set()
+        callbacks: set[str] = set()
 
         # set off an asynchronous request
         origin_d: Deferred = Deferred()
@@ -435,7 +431,7 @@ class DescriptorTestCase(unittest.TestCase):
                 _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(iterable=True)
-            def fn(self, arg1: int, arg2: int) -> Tuple[str, ...]:
+            def fn(self, arg1: int, arg2: int) -> tuple[str, ...]:
                 return self.mock(arg1, arg2)
 
         obj = Cls()
@@ -925,7 +921,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
                 pass
 
             @descriptors.cachedList(cached_method_name="fn", list_name="args1")
-            def list_fn(self, args1: List[int]) -> "Deferred[Mapping[int, str]]":
+            def list_fn(self, args1: list[int]) -> "Deferred[Mapping[int, str]]":
                 return self.mock(args1)
 
         obj = Cls()
@@ -970,7 +966,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
                 pass
 
             @descriptors.cachedList(cached_method_name="fn", list_name="args1")
-            async def list_fn(self, args1: List[int], arg2: int) -> Mapping[int, str]:
+            async def list_fn(self, args1: list[int], arg2: int) -> Mapping[int, str]:
                 # we want this to behave like an asynchronous function
                 await run_on_reactor()
                 return self.mock(args1, arg2)
@@ -1012,7 +1008,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
                 pass
 
             @cachedList(cached_method_name="fn", list_name="args")
-            async def list_fn(self, args: List[int]) -> Mapping[int, str]:
+            async def list_fn(self, args: list[int]) -> Mapping[int, str]:
                 await complete_lookup
                 return {arg: str(arg) for arg in args}
 
@@ -1049,7 +1045,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
                 pass
 
             @cachedList(cached_method_name="fn", list_name="args")
-            async def list_fn(self, args: List[int]) -> Mapping[int, str]:
+            async def list_fn(self, args: list[int]) -> Mapping[int, str]:
                 await make_deferred_yieldable(complete_lookup)
                 self.inner_context_was_finished = current_context().finished
                 return {arg: str(arg) for arg in args}
@@ -1097,7 +1093,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
             # of arguments as the underlying cached function, just with one of
             # the arguments being an iterable
             @descriptors.cachedList(cached_method_name="fn", list_name="keys")
-            def list_fn(self, keys: Iterable[Tuple[str, str]]) -> None:
+            def list_fn(self, keys: Iterable[tuple[str, str]]) -> None:
                 pass
 
             # Corrected syntax ✅

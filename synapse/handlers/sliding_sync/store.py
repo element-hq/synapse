@@ -13,7 +13,6 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional
 
 import attr
 
@@ -25,9 +24,7 @@ from synapse.types.handlers.sliding_sync import (
     PerConnectionState,
     SlidingSyncConfig,
 )
-
-if TYPE_CHECKING:
-    pass
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +58,13 @@ class SlidingSyncConnectionStore:
             to mapping of room ID to `HaveSentRoom`.
     """
 
-    store: "DataStore"
+    clock: Clock
+    store: DataStore
 
     async def get_and_clear_connection_positions(
         self,
         sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
+        from_token: SlidingSyncStreamToken | None,
     ) -> PerConnectionState:
         """Fetch the per-connection state for the token.
 
@@ -75,7 +73,7 @@ class SlidingSyncConnectionStore:
         """
         # If this is our first request, there is no previous connection state to fetch out of the database
         if from_token is None or from_token.connection_position == 0:
-            return PerConnectionState()
+            return PerConnectionState(last_used_ts=None)
 
         conn_id = sync_config.conn_id or ""
 
@@ -93,7 +91,7 @@ class SlidingSyncConnectionStore:
     async def record_new_state(
         self,
         sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
+        from_token: SlidingSyncStreamToken | None,
         new_connection_state: MutablePerConnectionState,
     ) -> int:
         """Record updated per-connection state, returning the connection
@@ -101,7 +99,7 @@ class SlidingSyncConnectionStore:
         If there are no changes to the state this may return the same token as
         the existing per-connection state.
         """
-        if not new_connection_state.has_updates():
+        if not new_connection_state.has_updates(self.clock):
             if from_token is not None:
                 return from_token.connection_position
             else:

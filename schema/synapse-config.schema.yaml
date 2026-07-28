@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.140/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.157/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -94,6 +94,10 @@ properties:
       Determines whether we should freeze the internal dict object in
       `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g.
       signature dicts. However, freezing a dict is expensive.
+
+
+      > ⚠️ **Warning** – This option is known to introduce a new class of [comparison
+      bugs](https://github.com/element-hq/synapse/issues/18117) in Synapse.
     default: false
     examples:
       - true
@@ -198,6 +202,46 @@ properties:
           `include_offline_users_on_sync` to `true` will always include offline
           users in the results.
         default: false
+      last_active_granularity:
+        $ref: "#/$defs/duration"
+        description: >-
+          How long after a user was last active that they are still shown as
+          "currently active" to other users. Larger values reduce the rate of
+          presence updates sent to other users and servers.
+
+
+          *Added in Synapse 1.156.0.*
+        default: 1m
+        examples:
+          - 5m
+      sync_online_timeout:
+        $ref: "#/$defs/duration"
+        description: >-
+          How long after a client's last sync request their presence is
+          switched to offline. Clients are expected to keep a sync request
+          open at (almost) all times while online, so this only needs to
+          cover the gap between two consecutive sync requests. Note that if
+          `rc_presence` is set to ratelimit how often syncs can affect
+          presence, this must be greater than the ratelimit's interval or
+          users will incorrectly be marked as offline in between syncs.
+
+
+          *Added in Synapse 1.156.0.*
+        default: 30s
+        examples:
+          - 1m
+      idle_timeout:
+        $ref: "#/$defs/duration"
+        description: >-
+          How long after a user was last active that their presence is
+          switched to "unavailable" (idle) while they remain connected. Must
+          be greater than `last_active_granularity`.
+
+
+          *Added in Synapse 1.156.0.*
+        default: 5m
+        examples:
+          - 10m
     examples:
       - enabled: false
         include_offline_users_on_sync: false
@@ -265,7 +309,11 @@ properties:
       _Changed in Synapse 1.76:_ the default version room version was increased
       from [9](https://spec.matrix.org/v1.5/rooms/v9/) to
       [10](https://spec.matrix.org/v1.5/rooms/v10/).
-    default: "10"
+
+      _Changed in Synapse 1.157:_ the default version room version was increased
+      from [10](https://spec.matrix.org/v1.12/rooms/v10/) to
+      [11](https://spec.matrix.org/v1.12/rooms/v11/).
+    default: "11"
     examples:
       - "8"
   gc_thresholds:
@@ -676,6 +724,13 @@ properties:
           The URL where Synapse can reach MAS. This *must* have the `discovery`
           and `oauth` resources mounted.
         default: http://localhost:8080
+
+      force_http2:
+        type: boolean
+        description: >-
+          Force HTTP/2 over plaintext (H2C) when connecting to MAS. MAS supports
+          this natively, but a reverse proxy between Synapse and MAS may not.
+        default: false
 
       secret:
         type: ["string", "null"]
@@ -1113,8 +1168,11 @@ properties:
       When this option is enabled, the room "complexity" will be checked before
       a user joins a new remote room. If it is above the complexity limit, the
       server will disallow joining, or will instantly leave. This is useful for
-      homeservers that are resource-constrained. Room complexity is an arbitrary
-      measure based on factors such as the number of users in the room.
+      homeservers that are resource-constrained. In Synapse, the complexity of a
+      room is measured by the number of current state events in a room, divided
+      by 500. "Current" here means the latest state, i.e. if a user joins, then
+      leaves, then joins, that will count as 1 current `m.room.member` state
+      event.
     properties:
       enabled:
         type: boolean
@@ -2230,8 +2288,8 @@ properties:
 
 
       This is a ratelimiting option that ratelimits attempts to restart, cancel,
-      or view delayed events based on the sending client's account and device
-      ID.
+      or view delayed events based on the sending client's account,
+      or its source IP when requests are unauthenticated.
 
 
       Attempts to create or send delayed events are ratelimited not by this
@@ -2274,6 +2332,16 @@ properties:
     examples:
       - per_second: 1.0
         burst_count: 5.0
+  rc_user_directory:
+    $ref: "#/$defs/rc"
+    description: >-
+      This option allows admins to ratelimit searches in the user directory.
+
+
+      _Added in Synapse 1.145.0._
+    default:
+      per_second: 0.016
+      burst_count: 200.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -2335,6 +2403,19 @@ properties:
     description: >-
       Enable the media store service in the Synapse master. Set to false if you
       are using a separate media store worker.
+    default: true
+    examples:
+      - false
+  enable_local_media_storage:
+    type: boolean
+    description: >-
+      Enable the local on-disk media storage provider. When disabled, media is
+      stored only in configured `media_storage_providers` and temporary files are
+      used for processing.
+
+      **Warning:** If this option is set to `false` and no `media_storage_providers`
+      are configured, all media requests will return 404 errors as there will be
+      no storage backend available.
     default: true
     examples:
       - false
@@ -2424,20 +2505,42 @@ properties:
       module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
-      time_period:
-        type: "#/$defs/duration"
-        description: >-
-          The time period over which the limit applies. Required.
-      max_size:
-        type: "#/$defs/bytes"
-        description: >-
-          Amount of data that can be uploaded in the time period by the user.
-          Required.
+      type: object
+      required:
+        - time_period
+        - max_size
+      properties:
+        time_period:
+          $ref: "#/$defs/duration"
+          description: >-
+            The time period over which the limit applies. Required.
+        max_size:
+          $ref: "#/$defs/bytes"
+          description: >-
+            Amount of data that can be uploaded in the time period by the user.
+            Required.
+        info_uri:
+          type: string
+          description: >-
+            URI returned to the client for where the user can find information
+            about the upload limit and how users can reduce their upload usage
+            or request an upload limit increase. Optional.
+            If not set, Synapse serves a built-in page (customisable via the
+            `media_upload_limit_exceeded.html` template) and uses its URL
+            instead.
+        can_upgrade:
+          type: boolean
+          description: >-
+            Value returned to the client for whether the limit can be increased.
+          default: false
     examples:
       - - time_period: 1h
           max_size: 100M
+          info_uri: https://example.com/quota#hour
         - time_period: 1w
           max_size: 500M
+          info_uri: https://example.com/quota
+          can_upgrade: true
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.
@@ -2885,7 +2988,7 @@ properties:
     examples:
       - false
   matrix_rtc:
-    type: object 
+    type: object
     description: >-
       Options related to MatrixRTC.
     properties:
@@ -2905,14 +3008,13 @@ properties:
               description: >-
                 The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
               example: https://matrix-rtc.example.com/livekit/jwt
-        description:
-          A list of transport types and arguments to use for MatrixRTC connections.
+        description: A list of transport types and arguments to use for MatrixRTC connections.
         default: []
     default: {}
     examples:
       - transports:
-        - type: livekit
-          livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
+          - type: livekit
+            livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
   enable_registration:
     type: boolean
     description: >-
@@ -3188,6 +3290,10 @@ properties:
       If the room already exists, make certain it is a publicly joinable room,
       i.e. the join rule of the room must be set to `public`. You can find more
       options relating to auto-joining rooms below.
+
+
+      Invite-only rooms can also be auto-joined when setting `auto_join_mxid_localpart`
+      to a user who's part of the invite-only rooms.
 
 
       As Spaces are just rooms under the hood, Space aliases may also be used.
@@ -4583,11 +4689,15 @@ properties:
         type: boolean
         description: >-
           Use this setting to keep a user's profile fields in sync with
-          information from the identity provider. Currently only syncing the
-          displayname is supported. Fields are checked on every SSO login, and
-          are updated if necessary. Note that enabling this option will override
-          user profile information, regardless of whether users have opted-out
-          of syncing that information when first signing in.
+          information from the identity provider. Fields are checked on every
+          SSO login, and are updated if necessary. Note that enabling this
+          option will override user profile information, regardless of whether
+          users have opted-out of syncing that information when first signing
+          in.
+          Fields that will be synced:
+            * displayname
+            * picture - only if Synapse media repository is running in the main
+               process (i.e. not workerized) and media is stored locally
         default: false
     examples:
       - client_whitelist:
@@ -4695,8 +4805,9 @@ properties:
       pepper:
         type: ["string", "null"]
         description: >-
-          Set the value here to a secret random string for extra security. DO
-          NOT CHANGE THIS AFTER INITIAL SETUP!
+          A secret random string that will be appended to user's passwords
+          before they are hashed. This improves the security of short passwords.
+          DO NOT CHANGE THIS AFTER INITIAL SETUP!
         default: null
       policy:
         type: object
@@ -4793,6 +4904,45 @@ properties:
         include_content: false
         group_unread_count_by_room: false
         jitter_delay: 10s
+  push_rules:
+    type: object
+    description: Options for push rules
+    properties:
+      limits:
+        type: object
+        description: Limits on the size of push rules that users can have
+        properties:
+          rule_count:
+            type: integer
+            default: 10000
+            description: >-
+              This is the total number of push rules that each user can have.
+              Power users may expect to have one push rule per room.
+          rule_id_length:
+            type: integer
+            default: 300
+            description: >-
+              This is the maximum length of a push rule ID, in bytes.
+              Push rule IDs need to be allowed to be at least as long
+              as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))
+
+              It's recommended to leave this option as it is.
+              We expect to remove this option if/when the specification standardises on
+              a limit.
+          rule_size:
+            type: integer
+            default: 1024
+            description: >-
+              This is the maximum size of a push rule's body, in bytes.
+
+              The exact mechanism for calculating this size is currently an implementation
+              detail, subject to change.
+              This limit should be treated as a coarse sanity limit rather than something
+              to fine-tune.
+
+              It's recommended to leave this option as it is.
+              We expect to remove this option if/when the specification standardises on
+              a limit and a mechanism for calculating it.
   encryption_enabled_by_default_for_room_type:
     type: string
     description: >-
@@ -5268,6 +5418,18 @@ properties:
     default: []
     examples:
       - - "!foo:example.com"
+  exclude_rooms_from_presence:
+    type: array
+    description: >-
+      A list of rooms to exclude from presence updates. Presence will not be
+      routed between two users solely because they share one of these rooms.
+      Users who also share a non-excluded room continue to exchange presence as
+      normal.
+    items:
+      type: string
+    default: []
+    examples:
+      - - "!foo:example.com"
   opentracing:
     type: object
     description: >-
@@ -5502,11 +5664,13 @@ properties:
   outbound_federation_restricted_to:
     type: array
     description: >-
-      When using workers, you can restrict outbound federation traffic to only
-      go through a specific subset of workers. Any worker specified here must
-      also be in the [`instance_map`](#instance_map).
-      [`worker_replication_secret`](#worker_replication_secret) must also be
-      configured to authorize inter-worker communication.
+      You can restrict outbound federation traffic to only go through a specific subset
+      of workers including the [Secure Border Gateway
+      (SBG)](https://element.io/en/server-suite/secure-border-gateways). Any worker
+      specified here (including the SBG) must also be in the
+      [`instance_map`](#instance_map).
+      [`worker_replication_secret`](#worker_replication_secret) must also be configured
+      to authorize inter-worker communication.
 
 
       Also see the [worker

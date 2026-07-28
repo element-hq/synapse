@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional
 
 from parameterized import parameterized
 
@@ -64,7 +63,12 @@ class RedactionsTestCase(HomeserverTestCase):
 
         # Create a room
         self.room_id = self.helper.create_room_as(
-            self.mod_user_id, tok=self.mod_access_token
+            self.mod_user_id,
+            tok=self.mod_access_token,
+            # FIXME: Using room version 10 here as using later version requires
+            # https://github.com/element-hq/synapse/pull/19782
+            # Remove the override when the above PR is merged.
+            room_version="10",
         )
 
         # Invite the other user
@@ -85,8 +89,8 @@ class RedactionsTestCase(HomeserverTestCase):
         room_id: str,
         event_id: str,
         expect_code: int = 200,
-        with_relations: Optional[List[str]] = None,
-        content: Optional[JsonDict] = None,
+        with_relations: list[str] | None = None,
+        content: JsonDict | None = None,
     ) -> JsonDict:
         """Helper function to send a redaction event.
 
@@ -104,7 +108,7 @@ class RedactionsTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, expect_code)
         return channel.json_body
 
-    def _sync_room_timeline(self, access_token: str, room_id: str) -> List[JsonDict]:
+    def _sync_room_timeline(self, access_token: str, room_id: str) -> list[JsonDict]:
         channel = self.make_request("GET", "sync", access_token=access_token)
         self.assertEqual(channel.code, 200)
         room_sync = channel.json_body["rooms"]["join"][room_id]

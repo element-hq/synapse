@@ -24,15 +24,10 @@ import logging
 import re
 from collections import Counter
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Mapping
 
-from typing_extensions import Self
+from pydantic import StrictBool, StrictStr, field_validator
 
-from synapse._pydantic_compat import (
-    StrictBool,
-    StrictStr,
-    validator,
-)
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
     Codes,
@@ -49,7 +44,7 @@ from synapse.http.servlet import (
     validate_json_object,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.opentracing import log_kv, set_tag
+from synapse.logging.opentracing import set_tag
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
 from synapse.types.rest import RequestBodyModel
@@ -110,7 +105,7 @@ class KeyUploadServlet(RestServlet):
 
     """
 
-    PATTERNS = client_patterns("/keys/upload(/(?P<device_id>[^/]+))?$")
+    PATTERNS = client_patterns("/keys/upload$")
     CATEGORY = "Encryption requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -129,7 +124,7 @@ class KeyUploadServlet(RestServlet):
         """
 
         class DeviceKeys(RequestBodyModel):
-            algorithms: List[StrictStr]
+            algorithms: list[StrictStr]
             """The encryption algorithms supported by this device."""
 
             device_id: StrictStr
@@ -152,7 +147,7 @@ class KeyUploadServlet(RestServlet):
             key: StrictStr
             """The key, encoded using unpadded base64."""
 
-            fallback: Optional[StrictBool] = False
+            fallback: StrictBool | None = False
             """Whether this is a fallback key. Only used when handling fallback keys."""
 
             signatures: Mapping[StrictStr, Mapping[StrictStr, StrictStr]]
@@ -161,10 +156,27 @@ class KeyUploadServlet(RestServlet):
             See the following for more detail: https://spec.matrix.org/v1.16/appendices/#signing-details
             """
 
-        device_keys: Optional[DeviceKeys] = None
+        device_keys: DeviceKeys | None = None
         """Identity keys for the device. May be absent if no new identity keys are required."""
 
-        fallback_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]]
+        @field_validator("device_keys", mode="before")
+        @classmethod
+        def validate_device_keys_not_null(cls, v: Any) -> Any:
+            """Reject explicit `null` for `device_keys` while still allowing
+            the field to be omitted (in which case the default `None` is used).
+
+            The spec says `device_keys` may be omitted, but when present it
+            must be a `DeviceKeys` object — not `null`.
+
+            Pydantic's experimental `Missing` sentinel would be a cleaner way
+            to express this, but it's not stable yet:
+            https://docs.pydantic.dev/latest/concepts/experimental/#missing-sentinel
+            """
+            if v is None:
+                raise ValueError("device_keys must not be null")
+            return v
+
+        fallback_keys: Mapping[StrictStr, StrictStr | KeyObject] | None = None
         """
         The public key which should be used if the device's one-time keys are
         exhausted. The fallback key is not deleted once used, but should be
@@ -180,8 +192,9 @@ class KeyUploadServlet(RestServlet):
         May be absent if a new fallback key is not required.
         """
 
-        @validator("fallback_keys", pre=True)
-        def validate_fallback_keys(cls: Self, v: Any) -> Any:
+        @field_validator("fallback_keys", mode="before")
+        @classmethod
+        def validate_fallback_keys(cls, v: Any) -> Any:
             if v is None:
                 return v
             if not isinstance(v, dict):
@@ -197,7 +210,7 @@ class KeyUploadServlet(RestServlet):
                     )
             return v
 
-        one_time_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
+        one_time_keys: Mapping[StrictStr, StrictStr | KeyObject] | None = None
         """
         One-time public keys for "pre-key" messages. The names of the properties
         should be in the format `<algorithm>:<key_id>`.
@@ -206,8 +219,9 @@ class KeyUploadServlet(RestServlet):
         https://spec.matrix.org/v1.16/client-server-api/#key-algorithms.
         """
 
-        @validator("one_time_keys", pre=True)
-        def validate_one_time_keys(cls: Self, v: Any) -> Any:
+        @field_validator("one_time_keys", mode="before")
+        @classmethod
+        def validate_one_time_keys(cls, v: Any) -> Any:
             if v is None:
                 return v
             if not isinstance(v, dict):
@@ -223,9 +237,7 @@ class KeyUploadServlet(RestServlet):
                     )
             return v
 
-    async def on_POST(
-        self, request: SynapseRequest, device_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
 
@@ -239,38 +251,14 @@ class KeyUploadServlet(RestServlet):
         body = parse_json_object_from_request(request)
         validate_json_object(body, self.KeyUploadRequestBody)
 
-        if device_id is not None:
-            # Providing the device_id should only be done for setting keys
-            # for dehydrated devices; however, we allow it for any device for
-            # compatibility with older clients.
-            if requester.device_id is not None and device_id != requester.device_id:
-                dehydrated_device = await self.device_handler.get_dehydrated_device(
-                    user_id
-                )
-                if dehydrated_device is not None and device_id != dehydrated_device[0]:
-                    set_tag("error", True)
-                    log_kv(
-                        {
-                            "message": "Client uploading keys for a different device",
-                            "logged_in_id": requester.device_id,
-                            "key_being_uploaded": device_id,
-                        }
-                    )
-                    logger.warning(
-                        "Client uploading keys for a different device "
-                        "(logged in as %s, uploading for %s)",
-                        requester.device_id,
-                        device_id,
-                    )
-        else:
-            device_id = requester.device_id
+        device_id = requester.device_id
 
         if device_id is None:
             raise SynapseError(
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        if "device_keys" in body and isinstance(body["device_keys"], dict):
+        if "device_keys" in body:
             # Validate the provided `user_id` and `device_id` fields in
             # `device_keys` match that of the requesting user. We can't do
             # this directly in the pydantic model as we don't have access
@@ -278,13 +266,13 @@ class KeyUploadServlet(RestServlet):
             #
             # TODO: We could use ValidationInfo when we switch to Pydantic v2.
             # https://docs.pydantic.dev/latest/concepts/validators/#validation-info
-            if body["device_keys"].get("user_id") != user_id:
+            if body["device_keys"]["user_id"] != user_id:
                 raise SynapseError(
                     code=HTTPStatus.BAD_REQUEST,
                     errcode=Codes.BAD_JSON,
                     msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
                 )
-            if body["device_keys"].get("device_id") != device_id:
+            if body["device_keys"]["device_id"] != device_id:
                 raise SynapseError(
                     code=HTTPStatus.BAD_REQUEST,
                     errcode=Codes.BAD_JSON,
@@ -343,7 +331,7 @@ class KeyQueryServlet(RestServlet):
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
     @cancellable
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
         device_id = requester.device_id
@@ -388,7 +376,7 @@ class KeyChangesServlet(RestServlet):
         self.store = hs.get_datastores().main
 
     @cancellable
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         from_token_string = parse_string(request, "from", required=True)
@@ -442,13 +430,13 @@ class OneTimeKeyServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         timeout = parse_integer(request, "timeout", 10 * 1000)
         body = parse_json_object_from_request(request)
 
         # Generate a count for each algorithm, which is hard-coded to 1.
-        query: Dict[str, Dict[str, Dict[str, int]]] = {}
+        query: dict[str, dict[str, dict[str, int]]] = {}
         for user_id, one_time_keys in body.get("one_time_keys", {}).items():
             for device_id, algorithm in one_time_keys.items():
                 query.setdefault(user_id, {})[device_id] = {algorithm: 1}
@@ -490,13 +478,13 @@ class UnstableOneTimeKeyServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         timeout = parse_integer(request, "timeout", 10 * 1000)
         body = parse_json_object_from_request(request)
 
         # Generate a count for each algorithm.
-        query: Dict[str, Dict[str, Dict[str, int]]] = {}
+        query: dict[str, dict[str, dict[str, int]]] = {}
         for user_id, one_time_keys in body.get("one_time_keys", {}).items():
             for device_id, algorithms in one_time_keys.items():
                 query.setdefault(user_id, {})[device_id] = Counter(algorithms)
@@ -526,7 +514,7 @@ class SigningKeyUploadServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
         body = parse_json_object_from_request(request)
@@ -547,8 +535,8 @@ class SigningKeyUploadServlet(RestServlet):
         # setup, and that is allowed without UIA, per MSC3967.
         # If yes, then we need to authenticate the change.
         # MSC4190 can skip UIA for replacing cross-signing keys as well.
-        if is_cross_signing_setup and not requester.app_service:
-            # With MSC3861, UIA is not possible. Instead, the auth service has to
+        if is_cross_signing_setup and not requester.app_service_id:
+            # With auth delegation, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
             if self.hs.config.mas.enabled:
                 if not master_key_updatable_without_uia:
@@ -563,43 +551,14 @@ class SigningKeyUploadServlet(RestServlet):
                         {
                             "session": "dummy",
                             "flows": [
+                                {"stages": ["m.oauth"]},
+                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
                                 {"stages": ["org.matrix.cross_signing_reset"]},
                             ],
                             "params": {
-                                "org.matrix.cross_signing_reset": {
+                                "m.oauth": {
                                     "url": url,
                                 },
-                            },
-                            "msg": "To reset your end-to-end encryption cross-signing "
-                            f"identity, you first need to approve it at {url} and "
-                            "then try again.",
-                        },
-                    )
-
-            elif self.hs.config.experimental.msc3861.enabled:
-                if not master_key_updatable_without_uia:
-                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
-                    # We import lazily here because of the authlib requirement
-                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-                    assert isinstance(self.auth, MSC3861DelegatedAuth)
-
-                    uri = await self.auth.account_management_url()
-                    if uri is not None:
-                        url = f"{uri}?action=org.matrix.cross_signing_reset"
-                    else:
-                        url = await self.auth.issuer()
-
-                    # We use a dummy session ID as this isn't really a UIA flow, but we
-                    # reuse the same API shape for better client compatibility.
-                    raise InteractiveAuthIncompleteError(
-                        "dummy",
-                        {
-                            "session": "dummy",
-                            "flows": [
-                                {"stages": ["org.matrix.cross_signing_reset"]},
-                            ],
-                            "params": {
                                 "org.matrix.cross_signing_reset": {
                                     "url": url,
                                 },
@@ -611,7 +570,7 @@ class SigningKeyUploadServlet(RestServlet):
                     )
 
             else:
-                # Without MSC3861, we require UIA.
+                # Without auth delegation, we require UIA.
                 await self.auth_handler.validate_user_via_ui_auth(
                     requester,
                     request,
@@ -659,7 +618,7 @@ class SignaturesUploadServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
         body = parse_json_object_from_request(request)

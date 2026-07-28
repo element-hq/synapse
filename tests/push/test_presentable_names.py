@@ -19,15 +19,16 @@
 #
 #
 
-from typing import Iterable, List, Optional, Tuple, cast
+from typing import Iterable, cast
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, FrozenEvent
+from synapse.events import EventBase
 from synapse.push.presentable_names import calculate_room_name
 from synapse.types import StateKey, StateMap
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 
 
 class MockDataStore:
@@ -36,7 +37,7 @@ class MockDataStore:
     (I.e. the state key is used as the event ID.)
     """
 
-    def __init__(self, events: Iterable[Tuple[StateKey, dict]]):
+    def __init__(self, events: Iterable[tuple[StateKey, dict]]):
         """
         Args:
             events: A state map to event contents.
@@ -44,7 +45,7 @@ class MockDataStore:
         self._events = {}
 
         for i, (event_id, content) in enumerate(events):
-            self._events[event_id] = FrozenEvent(
+            self._events[event_id] = make_test_event(
                 {
                     "event_id": "$event_id",
                     "type": event_id[0],
@@ -59,11 +60,11 @@ class MockDataStore:
 
     async def get_event(
         self, event_id: str, allow_none: bool = False
-    ) -> Optional[FrozenEvent]:
+    ) -> EventBase | None:
         assert allow_none, "Mock not configured for allow_none = False"
 
         # Decode the state key from the event ID.
-        state_key = cast(Tuple[str, str], tuple(event_id.split("|", 1)))
+        state_key = cast(tuple[str, str], tuple(event_id.split("|", 1)))
         return self._events.get(state_key)
 
     async def get_events(self, event_ids: Iterable[StateKey]) -> StateMap[EventBase]:
@@ -77,11 +78,11 @@ class PresentableNamesTestCase(unittest.HomeserverTestCase):
 
     def _calculate_room_name(
         self,
-        events: Iterable[Tuple[Tuple[str, str], dict]],
+        events: Iterable[tuple[tuple[str, str], dict]],
         user_id: str = "",
         fallback_to_members: bool = True,
         fallback_to_single_member: bool = True,
-    ) -> Optional[str]:
+    ) -> str | None:
         # Encode the state key into the event ID.
         room_state_ids = {k[0]: "|".join(k[0]) for k in events}
 
@@ -97,7 +98,7 @@ class PresentableNamesTestCase(unittest.HomeserverTestCase):
 
     def test_name(self) -> None:
         """A room name event should be used."""
-        events: List[Tuple[Tuple[str, str], dict]] = [
+        events: list[tuple[tuple[str, str], dict]] = [
             ((EventTypes.Name, ""), {"name": "test-name"}),
         ]
         self.assertEqual("test-name", self._calculate_room_name(events))
@@ -111,7 +112,7 @@ class PresentableNamesTestCase(unittest.HomeserverTestCase):
 
     def test_canonical_alias(self) -> None:
         """An canonical alias should be used."""
-        events: List[Tuple[Tuple[str, str], dict]] = [
+        events: list[tuple[tuple[str, str], dict]] = [
             ((EventTypes.CanonicalAlias, ""), {"alias": "#test-name:test"}),
         ]
         self.assertEqual("#test-name:test", self._calculate_room_name(events))
@@ -125,7 +126,7 @@ class PresentableNamesTestCase(unittest.HomeserverTestCase):
 
     def test_invite(self) -> None:
         """An invite has special behaviour."""
-        events: List[Tuple[Tuple[str, str], dict]] = [
+        events: list[tuple[tuple[str, str], dict]] = [
             ((EventTypes.Member, self.USER_ID), {"membership": Membership.INVITE}),
             ((EventTypes.Member, self.OTHER_USER_ID), {"displayname": "Other User"}),
         ]
@@ -151,7 +152,7 @@ class PresentableNamesTestCase(unittest.HomeserverTestCase):
 
     def test_no_members(self) -> None:
         """Behaviour of an empty room."""
-        events: List[Tuple[Tuple[str, str], dict]] = []
+        events: list[tuple[tuple[str, str], dict]] = []
         self.assertEqual("Empty Room", self._calculate_room_name(events))
 
         # Note that events with invalid (or missing) membership are ignored.

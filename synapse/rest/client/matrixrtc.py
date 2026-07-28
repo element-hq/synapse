@@ -15,7 +15,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
@@ -37,7 +37,7 @@ class MatrixRTCRestServlet(RestServlet):
         self._auth = hs.get_auth()
         self._transports = hs.config.matrix_rtc.transports
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # Require authentication for this endpoint.
         await self._auth.get_user_by_req(request)
 

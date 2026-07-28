@@ -16,3 +16,9 @@ appropriate locations of your installation.
 5. Start Synapse: `sudo systemctl start matrix-synapse`
 6. Verify Synapse is running: `sudo systemctl status matrix-synapse`
 7. *optional* Enable Synapse to start at system boot: `sudo systemctl enable matrix-synapse`
+
+## Logging
+
+If you use `contrib/systemd/log_config.yaml`, install `systemd-python` in the
+same Python environment as Synapse. The config uses
+`systemd.journal.JournalHandler`, which requires that package.

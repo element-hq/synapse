@@ -15,9 +15,10 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
-from synapse._pydantic_compat import StrictStr
+from pydantic import StrictStr
+
 from synapse.api.errors import NotFoundError
 from synapse.http.servlet import parse_and_validate_json_object_from_request
 from synapse.types import JsonDict, UserID
@@ -52,11 +53,11 @@ class MasUpsertDeviceResource(MasBaseResource):
     class PostBody(RequestBodyModel):
         localpart: StrictStr
         device_id: StrictStr
-        display_name: Optional[StrictStr]
+        display_name: StrictStr | None = None
 
     async def _async_render_POST(
         self, request: "SynapseRequest"
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
@@ -97,7 +98,7 @@ class MasDeleteDeviceResource(MasBaseResource):
 
     async def _async_render_POST(
         self, request: "SynapseRequest"
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
@@ -138,7 +139,7 @@ class MasUpdateDeviceDisplayNameResource(MasBaseResource):
 
     async def _async_render_POST(
         self, request: "SynapseRequest"
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
@@ -176,11 +177,11 @@ class MasSyncDevicesResource(MasBaseResource):
 
     class PostBody(RequestBodyModel):
         localpart: StrictStr
-        devices: set[StrictStr]
+        devices: list[str]
 
     async def _async_render_POST(
         self, request: "SynapseRequest"
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
@@ -194,6 +195,16 @@ class MasSyncDevicesResource(MasBaseResource):
         current_devices = await self.store.get_devices_by_user(user_id=str(user_id))
         current_devices_list = set(current_devices.keys())
         target_device_list = set(body.devices)
+
+        # Exclude the dehydrated device (MSC3814): it has no MAS session, so MAS
+        # never lists it in the target set and the reconciliation below would
+        # otherwise treat it as extra and delete it. This mirrors the admin
+        # devices API and MAS's own legacy device-sync path, which both skip it.
+        dehydrated_device = await self.device_handler.get_dehydrated_device(
+            user_id=str(user_id)
+        )
+        if dehydrated_device is not None:
+            current_devices_list.discard(dehydrated_device[0])
 
         to_add = target_device_list - current_devices_list
         to_delete = current_devices_list - target_device_list

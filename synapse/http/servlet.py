@@ -27,26 +27,17 @@ import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
-    List,
     Literal,
     Mapping,
-    Optional,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     overload,
 )
 
+from pydantic import BaseModel, ValidationError
+
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import (
-    BaseModel,
-    ErrorWrapper,
-    MissingError,
-    PydanticValueError,
-    ValidationError,
-)
 from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri
 from synapse.http.server import HttpServer
@@ -88,26 +79,26 @@ def parse_integer(
 
 
 @overload
-def parse_integer(request: Request, name: str, *, negative: bool) -> Optional[int]: ...
+def parse_integer(request: Request, name: str, *, negative: bool) -> int | None: ...
 
 
 @overload
 def parse_integer(
     request: Request,
     name: str,
-    default: Optional[int] = None,
+    default: int | None = None,
     required: bool = False,
     negative: bool = False,
-) -> Optional[int]: ...
+) -> int | None: ...
 
 
 def parse_integer(
     request: Request,
     name: str,
-    default: Optional[int] = None,
+    default: int | None = None,
     required: bool = False,
     negative: bool = False,
-) -> Optional[int]:
+) -> int | None:
     """Parse an integer parameter from the request string
 
     Args:
@@ -144,8 +135,8 @@ def parse_integer_from_args(
 def parse_integer_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[int] = None,
-) -> Optional[int]: ...
+    default: int | None = None,
+) -> int | None: ...
 
 
 @overload
@@ -161,19 +152,19 @@ def parse_integer_from_args(
 def parse_integer_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[int] = None,
+    default: int | None = None,
     required: bool = False,
     negative: bool = False,
-) -> Optional[int]: ...
+) -> int | None: ...
 
 
 def parse_integer_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[int] = None,
+    default: int | None = None,
     required: bool = False,
     negative: bool = False,
-) -> Optional[int]:
+) -> int | None:
     """Parse an integer parameter from the request string
 
     Args:
@@ -225,13 +216,13 @@ def parse_boolean(request: Request, name: str, *, required: Literal[True]) -> bo
 
 @overload
 def parse_boolean(
-    request: Request, name: str, default: Optional[bool] = None, required: bool = False
-) -> Optional[bool]: ...
+    request: Request, name: str, default: bool | None = None, required: bool = False
+) -> bool | None: ...
 
 
 def parse_boolean(
-    request: Request, name: str, default: Optional[bool] = None, required: bool = False
-) -> Optional[bool]:
+    request: Request, name: str, default: bool | None = None, required: bool = False
+) -> bool | None:
     """Parse a boolean parameter from the request query string
 
     Args:
@@ -273,17 +264,17 @@ def parse_boolean_from_args(
 def parse_boolean_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[bool] = None,
+    default: bool | None = None,
     required: bool = False,
-) -> Optional[bool]: ...
+) -> bool | None: ...
 
 
 def parse_boolean_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[bool] = None,
+    default: bool | None = None,
     required: bool = False,
-) -> Optional[bool]:
+) -> bool | None:
     """Parse a boolean parameter from the request query string
 
     Args:
@@ -326,8 +317,8 @@ def parse_boolean_from_args(
 def parse_bytes_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[bytes] = None,
-) -> Optional[bytes]: ...
+    default: bytes | None = None,
+) -> bytes | None: ...
 
 
 @overload
@@ -344,17 +335,17 @@ def parse_bytes_from_args(
 def parse_bytes_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[bytes] = None,
+    default: bytes | None = None,
     required: bool = False,
-) -> Optional[bytes]: ...
+) -> bytes | None: ...
 
 
 def parse_bytes_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[bytes] = None,
+    default: bytes | None = None,
     required: bool = False,
-) -> Optional[bytes]:
+) -> bytes | None:
     """
     Parse a string parameter as bytes from the request query string.
 
@@ -388,7 +379,7 @@ def parse_string(
     name: str,
     default: str,
     *,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
 ) -> str: ...
 
@@ -399,7 +390,7 @@ def parse_string(
     name: str,
     *,
     required: Literal[True],
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
 ) -> str: ...
 
@@ -409,21 +400,21 @@ def parse_string(
     request: Request,
     name: str,
     *,
-    default: Optional[str] = None,
+    default: str | None = None,
     required: bool = False,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[str]: ...
+) -> str | None: ...
 
 
 def parse_string(
     request: Request,
     name: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     required: bool = False,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[str]:
+) -> str | None:
     """
     Parse a string parameter from the request query string.
 
@@ -463,10 +454,10 @@ def parse_string(
 def parse_json(
     request: Request,
     name: str,
-    default: Optional[dict] = None,
+    default: dict | None = None,
     required: bool = False,
     encoding: str = "ascii",
-) -> Optional[JsonDict]:
+) -> JsonDict | None:
     """
     Parse a JSON parameter from the request query string.
 
@@ -500,10 +491,10 @@ def parse_json(
 def parse_json_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[dict] = None,
+    default: dict | None = None,
     required: bool = False,
     encoding: str = "ascii",
-) -> Optional[JsonDict]:
+) -> JsonDict | None:
     """
     Parse a JSON parameter from the request query string.
 
@@ -548,7 +539,7 @@ EnumT = TypeVar("EnumT", bound=enum.Enum)
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     default: EnumT,
 ) -> EnumT: ...
 
@@ -557,7 +548,7 @@ def parse_enum(
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     *,
     required: Literal[True],
 ) -> EnumT: ...
@@ -566,10 +557,10 @@ def parse_enum(
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
-    default: Optional[EnumT] = None,
+    E: type[EnumT],
+    default: EnumT | None = None,
     required: bool = False,
-) -> Optional[EnumT]:
+) -> EnumT | None:
     """
     Parse an enum parameter from the request query string.
 
@@ -609,7 +600,7 @@ def parse_enum(
 
 def _parse_string_value(
     value: bytes,
-    allowed_values: Optional[StrCollection],
+    allowed_values: StrCollection | None,
     name: str,
     encoding: str,
 ) -> str:
@@ -635,20 +626,20 @@ def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
     *,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]: ...
+) -> list[str] | None: ...
 
 
 @overload
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: List[str],
+    default: list[str],
     *,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> List[str]: ...
+) -> list[str]: ...
 
 
 @overload
@@ -657,31 +648,31 @@ def parse_strings_from_args(
     name: str,
     *,
     required: Literal[True],
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> List[str]: ...
+) -> list[str]: ...
 
 
 @overload
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[List[str]] = None,
+    default: list[str] | None = None,
     *,
     required: bool = False,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]: ...
+) -> list[str] | None: ...
 
 
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[List[str]] = None,
+    default: list[str] | None = None,
     required: bool = False,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]:
+) -> list[str] | None:
     """
     Parse a string parameter from the request query string list.
 
@@ -728,21 +719,21 @@ def parse_strings_from_args(
 def parse_string_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     *,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[str]: ...
+) -> str | None: ...
 
 
 @overload
 def parse_string_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     *,
     required: Literal[True],
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
 ) -> str: ...
 
@@ -751,21 +742,21 @@ def parse_string_from_args(
 def parse_string_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     required: bool = False,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[str]: ...
+) -> str | None: ...
 
 
 def parse_string_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[str] = None,
+    default: str | None = None,
     required: bool = False,
-    allowed_values: Optional[StrCollection] = None,
+    allowed_values: StrCollection | None = None,
     encoding: str = "ascii",
-) -> Optional[str]:
+) -> str | None:
     """
     Parse the string parameter from the request query string list
     and return the first result.
@@ -820,12 +811,12 @@ def parse_json_value_from_request(
 @overload
 def parse_json_value_from_request(
     request: Request, allow_empty_body: bool = False
-) -> Optional[JsonDict]: ...
+) -> JsonDict | None: ...
 
 
 def parse_json_value_from_request(
     request: Request, allow_empty_body: bool = False
-) -> Optional[JsonDict]:
+) -> JsonDict | None:
     """Parse a JSON value from the body of a twisted HTTP request.
 
     Args:
@@ -892,7 +883,7 @@ def parse_json_object_from_request(
 Model = TypeVar("Model", bound=BaseModel)
 
 
-def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
+def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
     """Validate a deserialized JSON object using the given pydantic model.
 
     Raises:
@@ -900,20 +891,20 @@ def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
             if it wasn't a JSON object.
     """
     try:
-        instance = model_type.parse_obj(content)
+        instance = model_type.model_validate(content)
     except ValidationError as e:
+        err_type = e.errors()[0]["type"]
+
         # Choose a matrix error code. The catch-all is BAD_JSON, but we try to find a
         # more specific error if possible (which occasionally helps us to be spec-
         # compliant) This is a bit awkward because the spec's error codes aren't very
         # clear-cut: BAD_JSON arguably overlaps with MISSING_PARAM and INVALID_PARAM.
         errcode = Codes.BAD_JSON
 
-        raw_errors = e.raw_errors
-        if len(raw_errors) == 1 and isinstance(raw_errors[0], ErrorWrapper):
-            raw_error = raw_errors[0].exc
-            if isinstance(raw_error, MissingError):
+        if e.error_count() == 1:
+            if err_type == "missing":
                 errcode = Codes.MISSING_PARAM
-            elif isinstance(raw_error, PydanticValueError):
+            elif err_type == "value_error":
                 errcode = Codes.INVALID_PARAM
 
         raise SynapseError(HTTPStatus.BAD_REQUEST, str(e), errcode=errcode)
@@ -922,7 +913,7 @@ def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
 
 
 def parse_and_validate_json_object_from_request(
-    request: Request, model_type: Type[Model]
+    request: Request, model_type: type[Model]
 ) -> Model:
     """Parse a JSON object from the body of a twisted HTTP request, then deserialise and
     validate using the given pydantic model.
@@ -988,8 +979,8 @@ class ResolveRoomIdMixin:
         self.room_member_handler = hs.get_room_member_handler()
 
     async def resolve_room_id(
-        self, room_identifier: str, remote_room_hosts: Optional[List[str]] = None
-    ) -> Tuple[str, Optional[List[str]]]:
+        self, room_identifier: str, remote_room_hosts: list[str] | None = None
+    ) -> tuple[str, list[str] | None]:
         """
         Resolve a room identifier to a room ID, if necessary.
 

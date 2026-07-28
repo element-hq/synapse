@@ -20,7 +20,6 @@
 #
 import random
 import string
-from typing import Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -51,11 +50,11 @@ class ManageRegistrationTokensTestCase(unittest.HomeserverTestCase):
 
     def _new_token(
         self,
-        token: Optional[str] = None,
-        uses_allowed: Optional[int] = None,
+        token: str | None = None,
+        uses_allowed: int | None = None,
         pending: int = 0,
         completed: int = 0,
-        expiry_time: Optional[int] = None,
+        expiry_time: int | None = None,
     ) -> str:
         """Helper function to create a token."""
         if token is None:

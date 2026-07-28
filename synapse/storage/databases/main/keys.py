@@ -22,7 +22,7 @@
 import itertools
 import json
 import logging
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple, Union, cast
+from typing import Iterable, Mapping, cast
 
 from canonicaljson import encode_canonical_json
 from signedjson.key import decode_verify_key_bytes
@@ -50,7 +50,7 @@ class KeyStore(CacheInvalidationWorkerStore):
         server_name: str,
         from_server: str,
         ts_added_ms: int,
-        verify_keys: Dict[str, FetchKeyResult],
+        verify_keys: dict[str, FetchKeyResult],
         response_json: JsonDict,
     ) -> None:
         """Stores the keys for the given server that we got from `from_server`.
@@ -113,10 +113,20 @@ class KeyStore(CacheInvalidationWorkerStore):
             # invalidate takes a tuple corresponding to the params of
             # _get_server_keys_json. _get_server_keys_json only takes one
             # param, which is itself the 2-tuple (server_name, key_id).
-            self._invalidate_cache_and_stream_bulk(
+            #
+            # Invalidate the local cache directly, but we can only send
+            # primitive types per argument over replication, so JSON-encode the
+            # nested key and unpack it on the receiving side (see
+            # `CacheInvalidationWorkerStore.process_replication_rows`).
+            for key_id in verify_keys:
+                txn.call_after(
+                    self._get_server_keys_json.invalidate,
+                    ((server_name, key_id),),
+                )
+            self._send_invalidation_to_replication_bulk(
                 txn,
-                self._get_server_keys_json,
-                [((server_name, key_id),) for key_id in verify_keys],
+                self._get_server_keys_json.__name__,
+                [(json.dumps([server_name, key_id]),) for key_id in verify_keys],
             )
             self._invalidate_cache_and_stream_bulk(
                 txn,
@@ -130,7 +140,7 @@ class KeyStore(CacheInvalidationWorkerStore):
 
     @cached()
     def _get_server_keys_json(
-        self, server_name_and_key_id: Tuple[str, str]
+        self, server_name_and_key_id: tuple[str, str]
     ) -> FetchKeyResult:
         raise NotImplementedError()
 
@@ -138,8 +148,8 @@ class KeyStore(CacheInvalidationWorkerStore):
         cached_method_name="_get_server_keys_json", list_name="server_name_and_key_ids"
     )
     async def get_server_keys_json(
-        self, server_name_and_key_ids: Iterable[Tuple[str, str]]
-    ) -> Mapping[Tuple[str, str], FetchKeyResult]:
+        self, server_name_and_key_ids: Iterable[tuple[str, str]]
+    ) -> Mapping[tuple[str, str], FetchKeyResult]:
         """
         Args:
             server_name_and_key_ids:
@@ -151,7 +161,7 @@ class KeyStore(CacheInvalidationWorkerStore):
         """
         keys = {}
 
-        def _get_keys(txn: Cursor, batch: Tuple[Tuple[str, str], ...]) -> None:
+        def _get_keys(txn: Cursor, batch: tuple[tuple[str, str], ...]) -> None:
             """Processes a batch of keys to fetch, and adds the result to `keys`."""
 
             # batch_iter always returns tuples so it's safe to do len(batch)
@@ -189,7 +199,7 @@ class KeyStore(CacheInvalidationWorkerStore):
                     valid_until_ts=ts_valid_until_ms,
                 )
 
-        def _txn(txn: Cursor) -> Dict[Tuple[str, str], FetchKeyResult]:
+        def _txn(txn: Cursor) -> dict[tuple[str, str], FetchKeyResult]:
             for batch in batch_iter(server_name_and_key_ids, 50):
                 _get_keys(txn, batch)
             return keys
@@ -201,7 +211,7 @@ class KeyStore(CacheInvalidationWorkerStore):
         self,
         server_name: str,
         key_id: str,
-    ) -> Optional[FetchKeyResultForRemote]:
+    ) -> FetchKeyResultForRemote | None:
         raise NotImplementedError()
 
     @cachedList(
@@ -209,13 +219,13 @@ class KeyStore(CacheInvalidationWorkerStore):
     )
     async def get_server_keys_json_for_remote(
         self, server_name: str, key_ids: Iterable[str]
-    ) -> Mapping[str, Optional[FetchKeyResultForRemote]]:
+    ) -> Mapping[str, FetchKeyResultForRemote | None]:
         """Fetch the cached keys for the given server/key IDs.
 
         If we have multiple entries for a given key ID, returns the most recent.
         """
         rows = cast(
-            List[Tuple[str, str, int, int, Union[bytes, memoryview]]],
+            list[tuple[str, str, int, int, bytes | memoryview]],
             await self.db_pool.simple_select_many_batch(
                 table="server_keys_json",
                 column="key_id",
@@ -252,13 +262,13 @@ class KeyStore(CacheInvalidationWorkerStore):
     async def get_all_server_keys_json_for_remote(
         self,
         server_name: str,
-    ) -> Dict[str, FetchKeyResultForRemote]:
+    ) -> dict[str, FetchKeyResultForRemote]:
         """Fetch the cached keys for the given server.
 
         If we have multiple entries for a given key ID, returns the most recent.
         """
         rows = cast(
-            List[Tuple[str, str, int, int, Union[bytes, memoryview]]],
+            list[tuple[str, str, int, int, bytes | memoryview]],
             await self.db_pool.simple_select_list(
                 table="server_keys_json",
                 keyvalues={"server_name": server_name},

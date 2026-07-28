@@ -28,7 +28,7 @@ import fcntl
 import logging
 import struct
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Collection, List, Optional
+from typing import TYPE_CHECKING, Any, Collection
 
 from prometheus_client import Counter
 from zope.interface import Interface, implementer
@@ -55,6 +55,7 @@ from synapse.replication.tcp.commands import (
     parse_command_from_line,
 )
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ tcp_outbound_commands_counter = Counter(
 
 # A list of all connected protocols. This allows us to send metrics about the
 # connections.
-connected_connections: "List[BaseReplicationStreamProtocol]" = []
+connected_connections: "list[BaseReplicationStreamProtocol]" = []
 
 
 logger = logging.getLogger(__name__)
@@ -153,7 +154,7 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.last_received_command = self.clock.time_msec()
         self.last_sent_command = 0
         # When we requested the connection be closed
-        self.time_we_closed: Optional[int] = None
+        self.time_we_closed: int | None = None
 
         self.received_ping = False  # Have we received a ping from the other side
 
@@ -163,10 +164,10 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.conn_id = random_string(5)  # To dedupe in case of name clashes.
 
         # List of pending commands to send once we've established the connection
-        self.pending_commands: List[Command] = []
+        self.pending_commands: list[Command] = []
 
         # The LoopingCall for sending pings.
-        self._send_ping_loop: Optional[task.LoopingCall] = None
+        self._send_ping_loop: task.LoopingCall | None = None
 
         # a logcontext which we use for processing incoming commands. We declare it as a
         # background process so that the CPU stats get reported to prometheus.
@@ -193,7 +194,9 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self._send_pending_commands()
 
         # Starts sending pings
-        self._send_ping_loop = self.clock.looping_call(self.send_ping, 5000)
+        self._send_ping_loop = self.clock.looping_call(
+            self.send_ping, Duration(seconds=5)
+        )
 
         # Always send the initial PING so that the other side knows that they
         # can time us out.

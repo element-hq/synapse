@@ -22,7 +22,7 @@
 import logging
 import random
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable
 
 import attr
 
@@ -34,7 +34,7 @@ from synapse.logging.context import make_deferred_yieldable
 
 logger = logging.getLogger(__name__)
 
-SERVER_CACHE: Dict[bytes, List["Server"]] = {}
+SERVER_CACHE: dict[bytes, list["Server"]] = {}
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -58,11 +58,11 @@ class Server:
     expires: int = 0
 
 
-def _sort_server_list(server_list: List[Server]) -> List[Server]:
+def _sort_server_list(server_list: list[Server]) -> list[Server]:
     """Given a list of SRV records sort them into priority order and shuffle
     each priority with the given weight.
     """
-    priority_map: Dict[int, List[Server]] = {}
+    priority_map: dict[int, list[Server]] = {}
 
     for server in server_list:
         priority_map.setdefault(server.priority, []).append(server)
@@ -116,14 +116,14 @@ class SrvResolver:
     def __init__(
         self,
         dns_client: Any = client,
-        cache: Dict[bytes, List[Server]] = SERVER_CACHE,
+        cache: dict[bytes, list[Server]] = SERVER_CACHE,
         get_time: Callable[[], float] = time.time,
     ):
         self._dns_client = dns_client
         self._cache = cache
         self._get_time = get_time
 
-    async def resolve_service(self, service_name: bytes) -> List[Server]:
+    async def resolve_service(self, service_name: bytes) -> list[Server]:
         """Look up a SRV record
 
         Args:

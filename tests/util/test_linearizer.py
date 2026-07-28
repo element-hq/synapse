@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Hashable, Protocol, Tuple
+from typing import Hashable, Protocol
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred
@@ -43,7 +43,7 @@ class LinearizerTestCase(unittest.TestCase):
 
     def _start_task(
         self, linearizer: Linearizer, key: Hashable
-    ) -> Tuple["Deferred[None]", "Deferred[None]", UnblockFunction]:
+    ) -> tuple["Deferred[None]", "Deferred[None]", UnblockFunction]:
         """Starts a task which acquires the linearizer lock, blocks, then completes.
 
         Args:

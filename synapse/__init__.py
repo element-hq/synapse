@@ -24,7 +24,7 @@
 
 import os
 import sys
-from typing import Any, Dict
+from typing import Any
 
 from PIL import ImageFile
 
@@ -39,8 +39,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Note that we use an (unneeded) variable here so that pyupgrade doesn't nuke the
 # if-statement completely.
 py_version = sys.version_info
-if py_version < (3, 9):
-    print("Synapse requires Python 3.9 or above.")
+if py_version < (3, 10):
+    print("Synapse requires Python 3.10 or above.")
     sys.exit(1)
 
 # Allow using the asyncio reactor via env var.
@@ -49,7 +49,9 @@ if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
 
     from twisted.internet import asyncioreactor
 
-    asyncioreactor.install(asyncio.get_event_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    asyncioreactor.install(loop)
 
 # Twisted and canonicaljson will fail to import when this file is executed to
 # get the __version__ during a fresh install. That's OK and subsequent calls to
@@ -65,12 +67,13 @@ try:
 except ImportError:
     pass
 
-# Teach canonicaljson how to serialise immutabledicts.
+
+# Teach canonicaljson how to serialise immutabledicts and JsonObjects.
 try:
     from canonicaljson import register_preserialisation_callback
     from immutabledict import immutabledict
 
-    def _immutabledict_cb(d: immutabledict) -> Dict[str, Any]:
+    def _immutabledict_cb(d: immutabledict) -> dict[str, Any]:
         try:
             return d._dict
         except Exception:
@@ -79,6 +82,12 @@ try:
             return dict(d)
 
     register_preserialisation_callback(immutabledict, _immutabledict_cb)
+
+    #  Teach canonicaljson how to serialise JsonObjects, which is just to
+    #  convert them to dicts.
+    from synapse.synapse_rust.events import JsonObject  # noqa: E402
+
+    register_preserialisation_callback(JsonObject, lambda obj: dict(obj))
 except ImportError:
     pass
 

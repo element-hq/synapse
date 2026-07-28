@@ -44,31 +44,3 @@ groups:
   ###
   ### End of 'Prometheus Console Only' rules block
   ###
-
-
-  ###
-  ### Grafana Only
-  ### The following rules are only needed if you use the Grafana dashboard
-  ### in contrib/grafana/synapse.json
-  ###
-  - record: synapse_storage_events_persisted_by_source_type
-    expr: sum without(type, origin_type, origin_entity) (synapse_storage_events_persisted_events_sep_total{origin_type="remote"})
-    labels:
-      type: remote
-  - record: synapse_storage_events_persisted_by_source_type
-    expr: sum without(type, origin_type, origin_entity) (synapse_storage_events_persisted_events_sep_total{origin_entity="*client*",origin_type="local"})
-    labels:
-      type: local
-  - record: synapse_storage_events_persisted_by_source_type
-    expr: sum without(type, origin_type, origin_entity) (synapse_storage_events_persisted_events_sep_total{origin_entity!="*client*",origin_type="local"})
-    labels:
-      type: bridges
-
-  - record: synapse_storage_events_persisted_by_event_type
-    expr: sum without(origin_entity, origin_type) (synapse_storage_events_persisted_events_sep_total)
-
-  - record: synapse_storage_events_persisted_by_origin
-    expr: sum without(type) (synapse_storage_events_persisted_events_sep_total)
-  ###
-  ### End of 'Grafana Only' rules block
-  ###

@@ -20,7 +20,6 @@
 #
 
 
-from typing import List, Tuple
 from unittest.mock import Mock, patch
 
 from synapse.metrics.jemalloc import JemallocStats
@@ -84,7 +83,7 @@ class LruCacheTestCase(unittest.HomeserverTestCase):
 
     def test_del_multi(self) -> None:
         # The type here isn't quite correct as they don't handle TreeCache well.
-        cache: LruCache[Tuple[str, str], str] = LruCache(
+        cache: LruCache[tuple[str, str], str] = LruCache(
             max_size=4,
             clock=self.clock,
             cache_type=TreeCache,
@@ -211,7 +210,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
         m3 = Mock()
         m4 = Mock()
         # The type here isn't quite correct as they don't handle TreeCache well.
-        cache: LruCache[Tuple[str, str], str] = LruCache(
+        cache: LruCache[tuple[str, str], str] = LruCache(
             max_size=4,
             clock=self.clock,
             cache_type=TreeCache,
@@ -295,7 +294,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
 
 class LruCacheSizedTestCase(unittest.HomeserverTestCase):
     def test_evict(self) -> None:
-        cache: LruCache[str, List[int]] = LruCache(
+        cache: LruCache[str, list[int]] = LruCache(
             max_size=5, clock=self.clock, size_callback=len, server_name="test_server"
         )
         cache["key1"] = [0]
@@ -320,7 +319,7 @@ class LruCacheSizedTestCase(unittest.HomeserverTestCase):
 
     def test_zero_size_drop_from_cache(self) -> None:
         """Test that `drop_from_cache` works correctly with 0-sized entries."""
-        cache: LruCache[str, List[int]] = LruCache(
+        cache: LruCache[str, list[int]] = LruCache(
             max_size=5,
             clock=self.clock,
             size_callback=lambda x: 0,

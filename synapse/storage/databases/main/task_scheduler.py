@@ -19,7 +19,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
@@ -34,7 +34,7 @@ from synapse.util.json import json_encoder
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-ScheduledTaskRow = Tuple[str, str, str, int, str, str, str, str]
+ScheduledTaskRow = tuple[str, str, str, int, str, str, str, str]
 
 
 class TaskSchedulerWorkerStore(SQLBaseStore):
@@ -63,12 +63,12 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
     async def get_scheduled_tasks(
         self,
         *,
-        actions: Optional[List[str]] = None,
-        resource_id: Optional[str] = None,
-        statuses: Optional[List[TaskStatus]] = None,
-        max_timestamp: Optional[int] = None,
-        limit: Optional[int] = None,
-    ) -> List[ScheduledTask]:
+        actions: list[str] | None = None,
+        resource_id: str | None = None,
+        statuses: list[TaskStatus] | None = None,
+        max_timestamp: int | None = None,
+        limit: int | None = None,
+    ) -> list[ScheduledTask]:
         """Get a list of scheduled tasks from the DB.
 
         Args:
@@ -82,9 +82,9 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         Returns: a list of `ScheduledTask`, ordered by increasing timestamps
         """
 
-        def get_scheduled_tasks_txn(txn: LoggingTransaction) -> List[ScheduledTaskRow]:
-            clauses: List[str] = []
-            args: List[Any] = []
+        def get_scheduled_tasks_txn(txn: LoggingTransaction) -> list[ScheduledTaskRow]:
+            clauses: list[str] = []
+            args: list[Any] = []
             if resource_id:
                 clauses.append("resource_id = ?")
                 args.append(resource_id)
@@ -115,7 +115,7 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
                 args.append(limit)
 
             txn.execute(sql, args)
-            return cast(List[ScheduledTaskRow], txn.fetchall())
+            return cast(list[ScheduledTaskRow], txn.fetchall())
 
         rows = await self.db_pool.runInteraction(
             "get_scheduled_tasks", get_scheduled_tasks_txn
@@ -152,9 +152,9 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         id: str,
         timestamp: int,
         *,
-        status: Optional[TaskStatus] = None,
-        result: Optional[JsonMapping] = None,
-        error: Optional[str] = None,
+        status: TaskStatus | None = None,
+        result: JsonMapping | None = None,
+        error: str | None = None,
     ) -> bool:
         """Update a scheduled task in the DB with some new value(s).
 
@@ -182,7 +182,7 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         )
         return nb_rows > 0
 
-    async def get_scheduled_task(self, id: str) -> Optional[ScheduledTask]:
+    async def get_scheduled_task(self, id: str) -> ScheduledTask | None:
         """Get a specific `ScheduledTask` from its id.
 
         Args:
@@ -191,7 +191,7 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         Returns: the task if available, `None` otherwise
         """
         row = cast(
-            Optional[ScheduledTaskRow],
+            ScheduledTaskRow | None,
             await self.db_pool.simple_select_one(
                 table="scheduled_tasks",
                 keyvalues={"id": id},

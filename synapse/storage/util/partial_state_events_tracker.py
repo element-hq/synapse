@@ -21,7 +21,7 @@
 
 import logging
 from collections import defaultdict
-from typing import Collection, Dict, Set
+from typing import Collection
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
@@ -43,7 +43,7 @@ class PartialStateEventsTracker:
         self._store = store
         # a map from event id to a set of Deferreds which are waiting for that event to be
         # un-partial-stated.
-        self._observers: Dict[str, Set[Deferred[None]]] = defaultdict(set)
+        self._observers: dict[str, set[Deferred[None]]] = defaultdict(set)
 
     def notify_un_partial_stated(self, event_id: str) -> None:
         """Notify that we now have full state for a given event
@@ -93,7 +93,7 @@ class PartialStateEventsTracker:
         )
 
         # create an observer for each lazy-joined event
-        observers: Dict[str, Deferred[None]] = {
+        observers: dict[str, Deferred[None]] = {
             event_id: Deferred() for event_id in partial_state_event_ids
         }
         for event_id, observer in observers.items():
@@ -140,7 +140,7 @@ class PartialCurrentStateTracker:
 
         # a map from room id to a set of Deferreds which are waiting for that room to be
         # un-partial-stated.
-        self._observers: Dict[str, Set[Deferred[None]]] = defaultdict(set)
+        self._observers: dict[str, set[Deferred[None]]] = defaultdict(set)
 
     def notify_un_partial_stated(self, room_id: str) -> None:
         """Notify that we now have full current state for a given room

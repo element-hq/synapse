@@ -20,26 +20,28 @@
 #
 
 import unittest
-from typing import Any, Collection, Dict, Iterable, List, Optional
+from collections import namedtuple
+from typing import Any, Collection, Iterable
 
 from parameterized import parameterized
 
 from synapse import event_auth
-from synapse.api.constants import EventContentFields
+from synapse.api.constants import EventContentFields, RejectedReason
 from synapse.api.errors import AuthError, SynapseError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase, event_exists_in_state_dag
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import JsonDict, get_domain_from_id
 
 from tests.test_utils import get_awaitable_result
+from tests.test_utils.event_builders import make_test_event
 
 
 class _StubEventSourceStore:
     """A stub implementation of the EventSourceStore"""
 
     def __init__(self) -> None:
-        self._store: Dict[str, EventBase] = {}
+        self._store: dict[str, EventBase] = {}
 
     def add_event(self, event: EventBase) -> None:
         self._store[event.event_id] = event
@@ -54,7 +56,7 @@ class _StubEventSourceStore:
         redact_behaviour: EventRedactBehaviour,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
-    ) -> Dict[str, EventBase]:
+    ) -> dict[str, EventBase]:
         assert allow_rejected
         assert not get_prev_content
         assert redact_behaviour == EventRedactBehaviour.as_is
@@ -91,8 +93,8 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V9,
             creator,
             "public",
+            rejected_reason="stinky",
         )
-        rejected_join_rules.rejected_reason = "stinky"
         auth_events.append(rejected_join_rules)
         event_store.add_event(rejected_join_rules)
 
@@ -127,7 +129,7 @@ class EventAuthTestCase(unittest.TestCase):
 
         # we make both a good event and a bad event, to check that we are rejecting
         # the bad event for the reason we think we are.
-        good_event = make_event_from_dict(
+        good_event = make_test_event(
             {
                 "room_id": TEST_ROOM_ID,
                 "type": "m.room.create",
@@ -142,7 +144,7 @@ class EventAuthTestCase(unittest.TestCase):
             },
             room_version=RoomVersions.V9,
         )
-        bad_event = make_event_from_dict(
+        bad_event = make_test_event(
             {**good_event.get_dict(), "prev_events": ["$fakeevent"]},
             room_version=RoomVersions.V9,
         )
@@ -373,6 +375,195 @@ class EventAuthTestCase(unittest.TestCase):
                 _alias_event(RoomVersions.V6, other),
                 auth_events,
             )
+
+    def test_msc4242_state_dag_rules(self) -> None:
+        """Tests additional rules in place for state DAG rooms.
+
+        1. m.room.create => if it has any prev_state_events, reject.
+        2. Considering the event's prev_state_events:
+         i. If there are entries which do not belong in the same room, reject.
+         ii. If there are entries which do not have a state_key, reject.
+         iii. If there are entries which were themselves rejected under the checks performed on receipt of a PDU, reject.
+        """
+        creator = "@creator:example.com"
+        room_version = RoomVersions.MSC4242v12
+
+        create_event = make_test_event(
+            {
+                "type": "m.room.create",
+                "sender": creator,
+                "state_key": "",
+                "content": {"creator": creator},
+                "prev_events": [],
+                "prev_state_events": [],
+            },
+            room_version,
+        )
+        create_event_2 = make_test_event(
+            {
+                "type": "m.room.create",
+                "sender": creator,
+                "state_key": "",
+                "content": {"creator": creator, "another": "room"},
+                "prev_events": [],
+                "prev_state_events": [],
+            },
+            room_version,
+        )
+        room_id = create_event.room_id
+        another_room_id = create_event_2.room_id
+        join_event = make_test_event(
+            {
+                "room_id": room_id,
+                "type": "m.room.member",
+                "sender": creator,
+                "state_key": creator,
+                "content": {"membership": "join"},
+                "prev_events": [create_event.event_id],
+                "prev_state_events": [create_event.event_id],
+            },
+            room_version,
+            {"calculated_auth_event_ids": [create_event.event_id]},
+        )
+        event_in_another_room = make_test_event(
+            {
+                "room_id": another_room_id,
+                "type": "m.room.join_rules",
+                "sender": creator,
+                "state_key": "",
+                "content": {"join_rule": "public"},
+                "prev_events": [join_event.event_id],
+                "prev_state_events": [join_event.event_id],
+            },
+            room_version,
+            {"calculated_auth_event_ids": [create_event.event_id, join_event.event_id]},
+        )
+        msg_event = make_test_event(
+            {
+                "room_id": room_id,
+                "type": "m.room.message",
+                "sender": creator,
+                "content": {"msgtype": "m.text", "body": "I am a message"},
+                "prev_events": [join_event.event_id],
+                "prev_state_events": [join_event.event_id],
+            },
+            room_version,
+            {"calculated_auth_event_ids": [create_event.event_id, join_event.event_id]},
+        )
+        rejected_event = make_test_event(
+            {
+                "room_id": room_id,
+                "type": "m.room.name",
+                "sender": creator,
+                "state_key": "",
+                "content": {"name": "REJECTED"},
+                "prev_events": [join_event.event_id],
+                "prev_state_events": [join_event.event_id],
+            },
+            room_version,
+            {"calculated_auth_event_ids": [create_event.event_id, join_event.event_id]},
+            rejected_reason=RejectedReason.AUTH_ERROR,
+        )
+        RejectingTestCase = namedtuple(
+            "RejectingTestCase", "name events_in_store test_event"
+        )
+        rejecting_test_cases = [
+            RejectingTestCase(
+                name="create event has prev_state_events",
+                events_in_store=[],
+                test_event=make_test_event(
+                    {
+                        "type": "m.room.create",
+                        "sender": creator,
+                        "state_key": "",
+                        "content": {"creator": creator},
+                        "prev_events": [],
+                        "prev_state_events": [create_event.event_id],
+                    },
+                    room_version,
+                    {},
+                ),
+            ),
+            RejectingTestCase(
+                name="prev_state_event belongs in a different room",
+                events_in_store=[create_event, join_event, event_in_another_room],
+                test_event=make_test_event(
+                    {
+                        "room_id": room_id,
+                        "type": "m.room.name",
+                        "sender": creator,
+                        "state_key": "",
+                        "content": {"name": "prev_state_event is in another room"},
+                        "prev_events": [join_event.event_id],
+                        "prev_state_events": [event_in_another_room.event_id],
+                    },
+                    room_version,
+                    {
+                        "calculated_auth_event_ids": [
+                            create_event.event_id,
+                            join_event.event_id,
+                        ]
+                    },
+                ),
+            ),
+            RejectingTestCase(
+                name="prev_state_event is a message event",
+                events_in_store=[create_event, join_event, msg_event],
+                test_event=make_test_event(
+                    {
+                        "room_id": room_id,
+                        "type": "m.room.name",
+                        "sender": creator,
+                        "state_key": "",
+                        "content": {"name": "prev state event is a message"},
+                        "prev_events": [msg_event.event_id],
+                        "prev_state_events": [msg_event.event_id],
+                    },
+                    room_version,
+                    {
+                        "calculated_auth_event_ids": [
+                            create_event.event_id,
+                            join_event.event_id,
+                        ]
+                    },
+                ),
+            ),
+            RejectingTestCase(
+                name="prev_state_event was rejected",
+                events_in_store=[create_event, join_event, rejected_event],
+                test_event=make_test_event(
+                    {
+                        "room_id": room_id,
+                        "type": "m.room.name",
+                        "sender": creator,
+                        "state_key": "",
+                        "content": {"name": "prev state event was rejected"},
+                        "prev_events": [join_event.event_id],
+                        "prev_state_events": [rejected_event.event_id],
+                    },
+                    room_version,
+                    {
+                        "calculated_auth_event_ids": [
+                            create_event.event_id,
+                            join_event.event_id,
+                        ]
+                    },
+                ),
+            ),
+        ]
+
+        for test_case in rejecting_test_cases:
+            event_store = _StubEventSourceStore()
+            event_store.add_events(test_case.events_in_store)
+
+            with self.assertRaises(
+                AuthError, msg=f"test case {test_case.name} was not rejected"
+            ):
+                get_awaitable_result(
+                    event_auth.check_state_independent_auth_rules(
+                        event_store, test_case.test_event
+                    )
+                )
 
     @parameterized.expand([(RoomVersions.V1, True), (RoomVersions.V6, False)])
     def test_notifications(
@@ -702,7 +893,7 @@ class EventAuthTestCase(unittest.TestCase):
 
     def test_room_v10_rejects_string_power_levels(self) -> None:
         pl_event_content = {"users_default": "42"}
-        pl_event = make_event_from_dict(
+        pl_event = make_test_event(
             {
                 "room_id": TEST_ROOM_ID,
                 **_maybe_get_event_id_dict_for_room_version(RoomVersions.V10),
@@ -716,7 +907,7 @@ class EventAuthTestCase(unittest.TestCase):
         )
 
         pl_event2_content = {"events": {"m.room.name": "42", "m.room.power_levels": 42}}
-        pl_event2 = make_event_from_dict(
+        pl_event2 = make_test_event(
             {
                 "room_id": TEST_ROOM_ID,
                 **_maybe_get_event_id_dict_for_room_version(RoomVersions.V10),
@@ -745,8 +936,8 @@ class EventAuthTestCase(unittest.TestCase):
         test_room_v10_rejects_string_power_levels above handles the string case.
         """
 
-        def create_event(pl_event_content: Dict[str, Any]) -> EventBase:
-            return make_event_from_dict(
+        def create_event(pl_event_content: dict[str, Any]) -> EventBase:
+            return make_test_event(
                 {
                     "room_id": TEST_ROOM_ID,
                     **_maybe_get_event_id_dict_for_room_version(RoomVersions.V10),
@@ -759,7 +950,7 @@ class EventAuthTestCase(unittest.TestCase):
                 room_version=RoomVersions.V10,
             )
 
-        contents: Iterable[Dict[str, Any]] = [
+        contents: Iterable[dict[str, Any]] = [
             {"notifications": {"room": None}},
             {"users": {"@alice:wonderland": []}},
             {"users_default": {}},
@@ -768,6 +959,105 @@ class EventAuthTestCase(unittest.TestCase):
             event = create_event(content)
             with self.assertRaises(SynapseError):
                 event_auth._check_power_levels(event.room_version, event, {})
+
+    def test_event_exists_in_state_dag(self) -> None:
+        events_that_exist_in_state_dag = [
+            {
+                "type": "m.room.create",
+                "state_key": "",
+                "content": {},
+            },
+            {
+                "type": "m.room.join_rules",
+                "state_key": "",
+                "content": {},
+            },
+            {
+                "type": "m.room.power_levels",
+                "state_key": "",
+                "content": {},
+            },
+            {
+                "type": "m.room.server_acl",
+                "state_key": "",
+                "content": {},
+            },
+            {
+                "type": "m.room.member",
+                "state_key": "@alice:somewhere",
+                "content": {},
+            },
+            {
+                "type": "m.room.third_party_invite",
+                "state_key": "flibble",
+                "content": {},
+            },
+            {
+                "type": "m.room.create",
+                "state_key": " ",
+                "content": {},
+            },
+            {
+                "type": "m.room.join_rules",
+                "state_key": " ",
+                "content": {},
+            },
+            {
+                "type": "m.room.power_levels",
+                "state_key": " ",
+                "content": {},
+            },
+            {
+                "type": "m.room.name",
+                "state_key": "",
+                "content": {},
+            },
+            {
+                "type": "m.room.member",
+                "state_key": "",
+                "content": {},
+            },
+            {
+                "type": "m.room.member",
+                "state_key": "hello_world",
+                "content": {},
+            },
+        ]
+        events_that_dont_exist_in_state_dag = [
+            {
+                "type": "m.room.message",
+                "content": {},
+            },
+            {
+                "type": "m.room.create",
+                "content": {},
+            },
+            {
+                "type": "m.room.join_rules",
+                "content": {},
+            },
+            {
+                "type": "m.room.power_levels",
+                "content": {},
+            },
+        ]
+
+        def check_events(events: list[dict], should_exist: bool) -> None:
+            for ev in events:
+                base = {
+                    "room_id": TEST_ROOM_ID,
+                    "sender": "@test:test.com",
+                    "signatures": {"test.com": {"ed25519:0": "some9signature"}},
+                }
+                base.update(ev)
+                event = make_test_event(base, RoomVersions.V10)
+                got = event_exists_in_state_dag(event)
+                self.assertEqual(
+                    got, should_exist, f"{ev} should_exist={should_exist} but got {got}"
+                )
+
+        check_events(events_that_exist_in_state_dag, should_exist=True)
+        check_events(events_that_dont_exist_in_state_dag, should_exist=False)
 
 
 # helpers for making events
@@ -779,7 +1069,7 @@ def _create_event(
     room_version: RoomVersion,
     user_id: str,
 ) -> EventBase:
-    return make_event_from_dict(
+    return make_test_event(
         {
             "room_id": TEST_ROOM_ID,
             **_maybe_get_event_id_dict_for_room_version(room_version),
@@ -797,10 +1087,10 @@ def _member_event(
     room_version: RoomVersion,
     user_id: str,
     membership: str,
-    sender: Optional[str] = None,
-    additional_content: Optional[dict] = None,
+    sender: str | None = None,
+    additional_content: dict | None = None,
 ) -> EventBase:
-    return make_event_from_dict(
+    return make_test_event(
         {
             "room_id": TEST_ROOM_ID,
             **_maybe_get_event_id_dict_for_room_version(room_version),
@@ -818,7 +1108,7 @@ def _member_event(
 def _join_event(
     room_version: RoomVersion,
     user_id: str,
-    additional_content: Optional[dict] = None,
+    additional_content: dict | None = None,
 ) -> EventBase:
     return _member_event(
         room_version,
@@ -833,7 +1123,7 @@ def _power_levels_event(
     sender: str,
     content: JsonDict,
 ) -> EventBase:
-    return make_event_from_dict(
+    return make_test_event(
         {
             "room_id": TEST_ROOM_ID,
             **_maybe_get_event_id_dict_for_room_version(room_version),
@@ -856,12 +1146,12 @@ def _alias_event(room_version: RoomVersion, sender: str, **kwargs: Any) -> Event
         "content": {"aliases": []},
     }
     data.update(**kwargs)
-    return make_event_from_dict(data, room_version=room_version)
+    return make_test_event(data, room_version=room_version)
 
 
 def _build_auth_dict_for_room_version(
     room_version: RoomVersion, auth_events: Iterable[EventBase]
-) -> List:
+) -> list:
     if room_version.event_format == EventFormatVersions.ROOM_V1_V2:
         return [(e.event_id, "not_used") for e in auth_events]
     else:
@@ -871,11 +1161,11 @@ def _build_auth_dict_for_room_version(
 def _random_state_event(
     room_version: RoomVersion,
     sender: str,
-    auth_events: Optional[Iterable[EventBase]] = None,
+    auth_events: Iterable[EventBase] | None = None,
 ) -> EventBase:
     if auth_events is None:
         auth_events = []
-    return make_event_from_dict(
+    return make_test_event(
         {
             "room_id": TEST_ROOM_ID,
             **_maybe_get_event_id_dict_for_room_version(room_version),
@@ -890,9 +1180,12 @@ def _random_state_event(
 
 
 def _join_rules_event(
-    room_version: RoomVersion, sender: str, join_rule: str
+    room_version: RoomVersion,
+    sender: str,
+    join_rule: str,
+    rejected_reason: str | None = None,
 ) -> EventBase:
-    return make_event_from_dict(
+    return make_test_event(
         {
             "room_id": TEST_ROOM_ID,
             **_maybe_get_event_id_dict_for_room_version(room_version),
@@ -904,6 +1197,7 @@ def _join_rules_event(
             },
         },
         room_version=room_version,
+        rejected_reason=rejected_reason,
     )
 
 

@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, List, Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -43,12 +42,12 @@ from tests.utils import USE_POSTGRES_FOR_TESTS
 
 class MultiWriterIdGeneratorBase(HomeserverTestCase):
     positive: bool = True
-    tables: List[str] = ["foobar"]
+    tables: list[str] = ["foobar"]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.db_pool: DatabasePool = self.store.db_pool
-        self.instances: Dict[str, MultiWriterIdGenerator] = {}
+        self.instances: dict[str, MultiWriterIdGenerator] = {}
 
         self.get_success(self.db_pool.runInteraction("_setup_db", self._setup_db))
 
@@ -76,10 +75,10 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
     def _create_id_generator(
         self,
         instance_name: str = "master",
-        writers: Optional[List[str]] = None,
+        writers: list[str] | None = None,
     ) -> MultiWriterIdGenerator:
         def _create(conn: LoggingDatabaseConnection) -> MultiWriterIdGenerator:
-            return MultiWriterIdGenerator(
+            id_gen = MultiWriterIdGenerator(
                 db_conn=conn,
                 db=self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
@@ -91,6 +90,15 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
                 writers=writers or ["master"],
                 positive=self.positive,
             )
+            # Constructing the generator prunes stale `stream_positions` rows
+            # (writers no longer in the config); commit so that persists for the
+            # next generator we create.
+            #
+            # Note we need to commit manually here as the generator is created
+            # in a `runWithConnection` call, which doesn't automatically
+            # commit/rollback.
+            conn.commit()
+            return id_gen
 
         self.instances[instance_name] = self.get_success_or_raise(
             self.db_pool.runWithConnection(_create)
@@ -113,7 +121,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
             self._replicate(instance_name)
 
     def _insert_row(
-        self, instance_name: str, stream_id: int, table: Optional[str] = None
+        self, instance_name: str, stream_id: int, table: str | None = None
     ) -> None:
         """Insert one row as the given instance with given stream_id."""
 
@@ -144,7 +152,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         self,
         instance_name: str,
         number: int,
-        table: Optional[str] = None,
+        table: str | None = None,
         update_stream_table: bool = True,
     ) -> None:
         """Insert N rows as the given instance, inserting with stream IDs pulled

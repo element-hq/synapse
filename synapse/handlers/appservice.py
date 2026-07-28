@@ -22,13 +22,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
     Iterable,
-    List,
     Mapping,
-    Optional,
-    Tuple,
-    Union,
 )
 
 from prometheus_client import Counter
@@ -143,7 +138,7 @@ class ApplicationServicesHandler:
                         event_to_received_ts.keys(), get_prev_content=True
                     )
 
-                    events_by_room: Dict[str, List[EventBase]] = {}
+                    events_by_room: dict[str, list[EventBase]] = {}
                     for event in events:
                         events_by_room.setdefault(event.room_id, []).append(event)
 
@@ -243,8 +238,8 @@ class ApplicationServicesHandler:
     def notify_interested_services_ephemeral(
         self,
         stream_key: StreamKeyType,
-        new_token: Union[int, RoomStreamToken, MultiWriterStreamToken],
-        users: Collection[Union[str, UserID]],
+        new_token: int | RoomStreamToken | MultiWriterStreamToken,
+        users: Collection[str | UserID],
     ) -> None:
         """
         This is called by the notifier in the background when an ephemeral event is handled
@@ -260,9 +255,8 @@ class ApplicationServicesHandler:
                 will cause this function to return early.
 
                 Ephemeral events will only be pushed to appservices that have opted into
-                receiving them by setting `push_ephemeral` to true in their registration
-                file. Note that while MSC2409 is experimental, this option is called
-                `de.sorunome.msc2409.push_ephemeral`.
+                receiving them by setting `receive_ephemeral` to true in their
+                registration file(previously this was `push_ephemeral`).
 
                 Appservices will only receive ephemeral events that fall within their
                 registered user and room namespaces.
@@ -275,7 +269,6 @@ class ApplicationServicesHandler:
 
         # Notify appservices of updates in ephemeral event streams.
         # Only the following streams are currently supported.
-        # FIXME: We should use constants for these values.
         if stream_key not in (
             StreamKeyType.TYPING,
             StreamKeyType.RECEIPT,
@@ -320,7 +313,10 @@ class ApplicationServicesHandler:
                     StreamKeyType.PRESENCE,
                     StreamKeyType.TO_DEVICE,
                 )
-                and service.supports_ephemeral
+                # Honour both the stable `receive_ephemeral` registration flag and the
+                # legacy `de.sorunome.msc2409.push_ephemeral` one, matching the
+                # transaction body built in `ApplicationServiceApi.push_bulk`.
+                and (service.supports_ephemeral or service.supports_unstable_ephemeral)
             )
             or (
                 stream_key == StreamKeyType.DEVICE_LIST
@@ -341,10 +337,10 @@ class ApplicationServicesHandler:
     @wrap_as_background_process("notify_interested_services_ephemeral")
     async def _notify_interested_services_ephemeral(
         self,
-        services: List[ApplicationService],
+        services: list[ApplicationService],
         stream_key: StreamKeyType,
-        new_token: Union[int, MultiWriterStreamToken],
-        users: Collection[Union[str, UserID]],
+        new_token: int | MultiWriterStreamToken,
+        users: Collection[str | UserID],
     ) -> None:
         logger.debug("Checking interested services for %s", stream_key)
         with Measure(
@@ -429,7 +425,7 @@ class ApplicationServicesHandler:
 
     async def _handle_typing(
         self, service: ApplicationService, new_token: int
-    ) -> List[JsonMapping]:
+    ) -> list[JsonMapping]:
         """
         Return the typing events since the given stream token that the given application
         service should receive.
@@ -464,7 +460,7 @@ class ApplicationServicesHandler:
 
     async def _handle_receipts(
         self, service: ApplicationService, new_token: MultiWriterStreamToken
-    ) -> List[JsonMapping]:
+    ) -> list[JsonMapping]:
         """
         Return the latest read receipts that the given application service should receive.
 
@@ -501,9 +497,9 @@ class ApplicationServicesHandler:
     async def _handle_presence(
         self,
         service: ApplicationService,
-        users: Collection[Union[str, UserID]],
-        new_token: Optional[int],
-    ) -> List[JsonMapping]:
+        users: Collection[str | UserID],
+        new_token: int | None,
+    ) -> list[JsonMapping]:
         """
         Return the latest presence updates that the given application service should receive.
 
@@ -523,7 +519,7 @@ class ApplicationServicesHandler:
             A list of json dictionaries containing data derived from the presence events
             that should be sent to the given application service.
         """
-        events: List[JsonMapping] = []
+        events: list[JsonMapping] = []
         presence_source = self.event_sources.sources.presence
         from_key = await self.store.get_type_stream_id_for_appservice(
             service, "presence"
@@ -562,8 +558,8 @@ class ApplicationServicesHandler:
         self,
         service: ApplicationService,
         new_token: int,
-        users: Collection[Union[str, UserID]],
-    ) -> List[JsonDict]:
+        users: Collection[str | UserID],
+    ) -> list[JsonDict]:
         """
         Given an application service, determine which events it should receive
         from those between the last-recorded to-device message stream token for this
@@ -585,7 +581,7 @@ class ApplicationServicesHandler:
         )
 
         # Filter out users that this appservice is not interested in
-        users_appservice_is_interested_in: List[str] = []
+        users_appservice_is_interested_in: list[str] = []
         for user in users:
             # FIXME: We should do this farther up the call stack. We currently repeat
             #  this operation in _handle_presence.
@@ -612,7 +608,7 @@ class ApplicationServicesHandler:
         #
         # So we mangle this dict into a flat list of to-device messages with the relevant
         # user ID and device ID embedded inside each message dict.
-        message_payload: List[JsonDict] = []
+        message_payload: list[JsonDict] = []
         for (
             user_id,
             device_id,
@@ -736,7 +732,7 @@ class ApplicationServicesHandler:
 
     async def query_room_alias_exists(
         self, room_alias: RoomAlias
-    ) -> Optional[RoomAliasMapping]:
+    ) -> RoomAliasMapping | None:
         """Check if an application service knows this room alias exists.
 
         Args:
@@ -761,8 +757,8 @@ class ApplicationServicesHandler:
         return None
 
     async def query_3pe(
-        self, kind: str, protocol: str, fields: Dict[bytes, List[bytes]]
-    ) -> List[JsonDict]:
+        self, kind: str, protocol: str, fields: dict[bytes, list[bytes]]
+    ) -> list[JsonDict]:
         services = self._get_services_for_3pn(protocol)
 
         results = await make_deferred_yieldable(
@@ -785,10 +781,10 @@ class ApplicationServicesHandler:
         return ret
 
     async def get_3pe_protocols(
-        self, only_protocol: Optional[str] = None
-    ) -> Dict[str, JsonDict]:
+        self, only_protocol: str | None = None
+    ) -> dict[str, JsonDict]:
         services = self.store.get_app_services()
-        protocols: Dict[str, List[JsonDict]] = {}
+        protocols: dict[str, list[JsonDict]] = {}
 
         # Collect up all the individual protocol responses out of the ASes
         for s in services:
@@ -804,7 +800,7 @@ class ApplicationServicesHandler:
                 if info is not None:
                     protocols[p].append(info)
 
-        def _merge_instances(infos: List[JsonDict]) -> JsonDict:
+        def _merge_instances(infos: list[JsonDict]) -> JsonDict:
             # Merge the 'instances' lists of multiple results, but just take
             # the other fields from the first as they ought to be identical
             # copy the result so as not to corrupt the cached one
@@ -822,7 +818,7 @@ class ApplicationServicesHandler:
 
     async def _get_services_for_event(
         self, event: EventBase
-    ) -> List[ApplicationService]:
+    ) -> list[ApplicationService]:
         """Retrieve a list of application services interested in this event.
 
         Args:
@@ -842,11 +838,11 @@ class ApplicationServicesHandler:
 
         return interested_list
 
-    def _get_services_for_user(self, user_id: str) -> List[ApplicationService]:
+    def _get_services_for_user(self, user_id: str) -> list[ApplicationService]:
         services = self.store.get_app_services()
         return [s for s in services if (s.is_interested_in_user(user_id))]
 
-    def _get_services_for_3pn(self, protocol: str) -> List[ApplicationService]:
+    def _get_services_for_3pn(self, protocol: str) -> list[ApplicationService]:
         services = self.store.get_app_services()
         return [s for s in services if s.is_interested_in_protocol(protocol)]
 
@@ -872,9 +868,9 @@ class ApplicationServicesHandler:
         return True
 
     async def claim_e2e_one_time_keys(
-        self, query: Iterable[Tuple[str, str, str, int]]
-    ) -> Tuple[
-        Dict[str, Dict[str, Dict[str, JsonDict]]], List[Tuple[str, str, str, int]]
+        self, query: Iterable[tuple[str, str, str, int]]
+    ) -> tuple[
+        dict[str, dict[str, dict[str, JsonDict]]], list[tuple[str, str, str, int]]
     ]:
         """Claim one time keys from application services.
 
@@ -896,7 +892,7 @@ class ApplicationServicesHandler:
         services = self.store.get_app_services()
 
         # Partition the users by appservice.
-        query_by_appservice: Dict[str, List[Tuple[str, str, str, int]]] = {}
+        query_by_appservice: dict[str, list[tuple[str, str, str, int]]] = {}
         missing = []
         for user_id, device, algorithm, count in query:
             if not self.store.get_if_app_services_interested_in_user(user_id):
@@ -929,7 +925,7 @@ class ApplicationServicesHandler:
 
         # Patch together the results -- they are all independent (since they
         # require exclusive control over the users, which is the outermost key).
-        claimed_keys: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
+        claimed_keys: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for success, result in results:
             if success:
                 claimed_keys.update(result[0])
@@ -938,8 +934,8 @@ class ApplicationServicesHandler:
         return claimed_keys, missing
 
     async def query_keys(
-        self, query: Mapping[str, Optional[List[str]]]
-    ) -> Dict[str, Dict[str, Dict[str, JsonDict]]]:
+        self, query: Mapping[str, list[str] | None]
+    ) -> dict[str, dict[str, dict[str, JsonDict]]]:
         """Query application services for device keys.
 
         Users which are exclusively owned by an application service are queried
@@ -954,7 +950,7 @@ class ApplicationServicesHandler:
         services = self.store.get_app_services()
 
         # Partition the users by appservice.
-        query_by_appservice: Dict[str, Dict[str, List[str]]] = {}
+        query_by_appservice: dict[str, dict[str, list[str]]] = {}
         for user_id, device_ids in query.items():
             if not self.store.get_if_app_services_interested_in_user(user_id):
                 continue
@@ -986,7 +982,7 @@ class ApplicationServicesHandler:
         # Patch together the results -- they are all independent (since they
         # require exclusive control over the users). They get returned as a single
         # dictionary.
-        key_queries: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
+        key_queries: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for success, result in results:
             if success:
                 key_queries.update(result)

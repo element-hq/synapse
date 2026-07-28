@@ -6,7 +6,7 @@ import os
 import platform
 import subprocess
 import sys
-from typing import Any, Dict, List, Mapping, MutableMapping, NoReturn, Optional
+from typing import Any, Mapping, MutableMapping, NoReturn
 
 import jinja2
 
@@ -31,6 +31,25 @@ def flush_buffers() -> None:
     sys.stderr.flush()
 
 
+def strtobool(val: str) -> bool:
+    """Convert a string representation of truth to True or False
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+
+    This is lifted from distutils.util.strtobool, with the exception that it actually
+    returns a bool, rather than an int.
+    """
+    val = val.lower()
+    if val in ("y", "yes", "t", "true", "on", "1"):
+        return True
+    elif val in ("n", "no", "f", "false", "off", "0"):
+        return False
+    else:
+        raise ValueError("invalid truth value %r" % (val,))
+
+
 def convert(src: str, dst: str, environ: Mapping[str, object]) -> None:
     """Generate a file from a template
 
@@ -50,7 +69,7 @@ def generate_config_from_template(
     config_dir: str,
     config_path: str,
     os_environ: Mapping[str, str],
-    ownership: Optional[str],
+    ownership: str | None,
 ) -> None:
     """Generate a homeserver.yaml from environment variables
 
@@ -69,7 +88,7 @@ def generate_config_from_template(
             )
 
     # populate some params from data files (if they exist, else create new ones)
-    environ: Dict[str, Any] = dict(os_environ)
+    environ: dict[str, Any] = dict(os_environ)
     secrets = {
         "registration": "SYNAPSE_REGISTRATION_SHARED_SECRET",
         "macaroon": "SYNAPSE_MACAROON_SECRET_KEY",
@@ -98,19 +117,16 @@ def generate_config_from_template(
         os.mkdir(config_dir)
 
     # Convert SYNAPSE_NO_TLS to boolean if exists
-    if "SYNAPSE_NO_TLS" in environ:
-        tlsanswerstring = str.lower(environ["SYNAPSE_NO_TLS"])
-        if tlsanswerstring in ("true", "on", "1", "yes"):
-            environ["SYNAPSE_NO_TLS"] = True
-        else:
-            if tlsanswerstring in ("false", "off", "0", "no"):
-                environ["SYNAPSE_NO_TLS"] = False
-            else:
-                error(
-                    'Environment variable "SYNAPSE_NO_TLS" found but value "'
-                    + tlsanswerstring
-                    + '" unrecognized; exiting.'
-                )
+    tlsanswerstring = environ.get("SYNAPSE_NO_TLS")
+    if tlsanswerstring is not None:
+        try:
+            environ["SYNAPSE_NO_TLS"] = strtobool(tlsanswerstring)
+        except ValueError:
+            error(
+                'Environment variable "SYNAPSE_NO_TLS" found but value "'
+                + tlsanswerstring
+                + '" unrecognized; exiting.'
+            )
 
     if "SYNAPSE_LOG_CONFIG" not in environ:
         environ["SYNAPSE_LOG_CONFIG"] = config_dir + "/log.config"
@@ -147,7 +163,7 @@ def generate_config_from_template(
     subprocess.run(args, check=True)
 
 
-def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) -> None:
+def run_generate_config(environ: Mapping[str, str], ownership: str | None) -> None:
     """Run synapse with a --generate-config param to generate a template config file
 
     Args:
@@ -164,6 +180,18 @@ def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) ->
     config_dir = environ.get("SYNAPSE_CONFIG_DIR", "/data")
     config_path = environ.get("SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml")
     data_dir = environ.get("SYNAPSE_DATA_DIR", "/data")
+    enable_metrics_raw = environ.get("SYNAPSE_ENABLE_METRICS", "0")
+
+    enable_metrics = False
+    if enable_metrics_raw is not None:
+        try:
+            enable_metrics = strtobool(enable_metrics_raw)
+        except ValueError:
+            error(
+                'Environment variable "SYNAPSE_ENABLE_METRICS" found but value "'
+                + enable_metrics_raw
+                + '" unrecognized; exiting.'
+            )
 
     # create a suitable log config from our template
     log_config_file = "%s/%s.log.config" % (config_dir, server_name)
@@ -190,6 +218,9 @@ def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) ->
         "--open-private-ports",
     ]
 
+    if enable_metrics:
+        args.append("--enable-metrics")
+
     if ownership is not None:
         # make sure that synapse has perms to write to the data dir.
         log(f"Setting ownership on {data_dir} to {ownership}")
@@ -200,7 +231,7 @@ def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) ->
     subprocess.run(args, check=True)
 
 
-def main(args: List[str], environ: MutableMapping[str, str]) -> None:
+def main(args: list[str], environ: MutableMapping[str, str]) -> None:
     mode = args[1] if len(args) > 1 else "run"
 
     # if we were given an explicit user to switch to, do so

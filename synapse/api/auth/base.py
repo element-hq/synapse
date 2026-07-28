@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from netaddr import IPAddress
 
@@ -64,7 +64,7 @@ class BaseAuth:
         room_id: str,
         requester: Requester,
         allow_departed_users: bool = False,
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Check if the user is in the room, or was at some point.
         Args:
             room_id: The room to check.
@@ -114,7 +114,7 @@ class BaseAuth:
     @trace
     async def check_user_in_room_or_world_readable(
         self, room_id: str, requester: Requester, allow_departed_users: bool = False
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """Checks that the user is or was in the room or the room is world
         readable. If it isn't then an exception is raised.
 
@@ -294,7 +294,7 @@ class BaseAuth:
     @cancellable
     async def get_appservice_user(
         self, request: Request, access_token: str
-    ) -> Optional[Requester]:
+    ) -> Requester | None:
         """
         Given a request, reads the request parameters to determine:
         - whether it's an application service that's making this request
@@ -371,7 +371,9 @@ class BaseAuth:
         """
         ip_addr = request.get_client_ip_if_available()
 
-        if ip_addr and (not requester.app_service or self._track_appservice_user_ips):
+        if ip_addr and (
+            not requester.app_service_id or self._track_appservice_user_ips
+        ):
             user_agent = get_request_user_agent(request)
             access_token = self.get_access_token_from_request(request)
 
@@ -381,7 +383,7 @@ class BaseAuth:
             # table during the transition
             recorded_device_id = (
                 "dummy-device"
-                if requester.device_id is None and requester.app_service is not None
+                if requester.device_id is None and requester.app_service_id is not None
                 else requester.device_id
             )
             await self.store.insert_client_ip(

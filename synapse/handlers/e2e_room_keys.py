@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Literal, Optional, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from synapse.api.errors import (
     Codes,
@@ -63,10 +63,10 @@ class E2eRoomKeysHandler:
         self,
         user_id: str,
         version: str,
-        room_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-    ) -> Dict[
-        Literal["rooms"], Dict[str, Dict[Literal["sessions"], Dict[str, RoomKey]]]
+        room_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[
+        Literal["rooms"], dict[str, dict[Literal["sessions"], dict[str, RoomKey]]]
     ]:
         """Bulk get the E2E room keys for a given backup, optionally filtered to a given
         room, or a given session.
@@ -109,8 +109,8 @@ class E2eRoomKeysHandler:
         self,
         user_id: str,
         version: str,
-        room_id: Optional[str] = None,
-        session_id: Optional[str] = None,
+        room_id: str | None = None,
+        session_id: str | None = None,
     ) -> JsonDict:
         """Bulk delete the E2E room keys for a given backup, optionally filtered to a given
         room or a given session.
@@ -299,7 +299,7 @@ class E2eRoomKeysHandler:
 
     @staticmethod
     def _should_replace_room_key(
-        current_room_key: Optional[RoomKey], room_key: RoomKey
+        current_room_key: RoomKey | None, room_key: RoomKey
     ) -> bool:
         """
         Determine whether to replace a given current_room_key (if any)
@@ -360,7 +360,7 @@ class E2eRoomKeysHandler:
             return new_version
 
     async def get_version_info(
-        self, user_id: str, version: Optional[str] = None
+        self, user_id: str, version: str | None = None
     ) -> JsonDict:
         """Get the info about a given version of the user's backup
 
@@ -394,7 +394,7 @@ class E2eRoomKeysHandler:
             return res
 
     @trace
-    async def delete_version(self, user_id: str, version: Optional[str] = None) -> None:
+    async def delete_version(self, user_id: str, version: str | None = None) -> None:
         """Deletes a given version of the user's e2e_room_keys backup
 
         Args:

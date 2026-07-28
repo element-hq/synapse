@@ -64,3 +64,7 @@ class _BackgroundUpdates:
     )
 
     FIXUP_MAX_DEPTH_CAP = "fixup_max_depth_cap"
+
+    REDACTIONS_RECHECK_BG_UPDATE = "redactions_recheck"
+
+    EVENT_RESIGN = "event_resign"

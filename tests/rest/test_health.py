@@ -33,3 +33,16 @@ class HealthCheckTests(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], b"OK")
+
+    def test_health_path_traversal(self) -> None:
+        """
+        Test that the health endpoint does not allow extra path segments,
+        which could be used to access other resources.
+
+        Regression test for: https://github.com/element-hq/synapse/issues/19395
+        """
+        channel = self.make_request("GET", "/health/extra/path", shorthand=False)
+
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
+        self.assertIn("error", channel.json_body)

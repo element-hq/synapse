@@ -26,53 +26,19 @@ import os
 import signal
 import sys
 from types import FrameType
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 from twisted.internet.main import installReactor
 
+from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
+
 # a list of the original signal handlers, before we installed our custom ones.
 # We restore these in our child processes.
-_original_signal_handlers: Dict[int, Any] = {}
-
-
-class ProxiedReactor:
-    """
-    Twisted tracks the 'installed' reactor as a global variable.
-    (Actually, it does some module trickery, but the effect is similar.)
-
-    The default EpollReactor is buggy if it's created before a process is
-    forked, then used in the child.
-    See https://twistedmatrix.com/trac/ticket/4759#comment:17.
-
-    However, importing certain Twisted modules will automatically create and
-    install a reactor if one hasn't already been installed.
-    It's not normally possible to re-install a reactor.
-
-    Given the goal of launching workers with fork() to only import the code once,
-    this presents a conflict.
-    Our work around is to 'install' this ProxiedReactor which prevents Twisted
-    from creating and installing one, but which lets us replace the actual reactor
-    in use later on.
-    """
-
-    def __init__(self) -> None:
-        self.___reactor_target: Any = None
-
-    def _install_real_reactor(self, new_reactor: Any) -> None:
-        """
-        Install a real reactor for this ProxiedReactor to forward lookups onto.
-
-        This method is specific to our ProxiedReactor and should not clash with
-        any names used on an actual Twisted reactor.
-        """
-        self.___reactor_target = new_reactor
-
-    def __getattr__(self, attr_name: str) -> Any:
-        return getattr(self.___reactor_target, attr_name)
+_original_signal_handlers: dict[int, Any] = {}
 
 
 def _worker_entrypoint(
-    func: Callable[[], None], proxy_reactor: ProxiedReactor, args: List[str]
+    func: Callable[[], None], proxy_reactor: ProxiedReactor, args: list[str]
 ) -> None:
     """
     Entrypoint for a forked worker process.
@@ -128,7 +94,7 @@ def main() -> None:
 
     # Split up the subsequent arguments into each workers' arguments;
     # `--` is our delimiter of choice.
-    args_by_worker: List[List[str]] = [
+    args_by_worker: list[list[str]] = [
         list(args)
         for cond, args in itertools.groupby(ns.args, lambda ele: ele != "--")
         if cond and args
@@ -167,12 +133,12 @@ def main() -> None:
     update_proc.join()
     print("===== PREPARED DATABASE =====", file=sys.stderr)
 
-    processes: List[multiprocessing.Process] = []
+    processes: list[multiprocessing.Process] = []
 
     # Install signal handlers to propagate signals to all our children, so that they
     # shut down cleanly. This also inhibits our own exit, but that's good: we want to
     # wait until the children have exited.
-    def handle_signal(signum: int, frame: Optional[FrameType]) -> None:
+    def handle_signal(signum: int, frame: FrameType | None) -> None:
         print(
             f"complement_fork_starter: Caught signal {signum}. Stopping children.",
             file=sys.stderr,

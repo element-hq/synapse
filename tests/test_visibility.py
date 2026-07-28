@@ -18,12 +18,11 @@
 #
 #
 import logging
-from typing import Optional
 from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventUnsignedContentFields
+from synapse.api.constants import AccountDataTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -32,7 +31,10 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import create_requester
 from synapse.util.clock import Clock
-from synapse.visibility import filter_events_for_client, filter_events_for_server
+from synapse.visibility import (
+    filter_and_transform_events_for_client,
+    filter_events_for_server,
+)
 
 from tests import unittest
 from tests.test_utils.event_injection import inject_event, inject_member_event
@@ -331,7 +333,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -339,7 +341,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
         )
         self.assertEqual(
             [e.event_id for e in [self.regular_event]],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
     def test_see_soft_failed_events(self) -> None:
@@ -370,7 +372,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -378,7 +380,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
         )
         self.assertEqual(
             [e.event_id for e in [self.regular_event, self.soft_failed_event]],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
     def test_see_policy_server_spammy_events(self) -> None:
@@ -417,7 +419,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -425,7 +427,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
         )
         self.assertEqual(
             [e.event_id for e in [self.regular_event, self.spammy_event]],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
     def test_see_soft_failed_and_policy_server_spammy_events(self) -> None:
@@ -464,7 +466,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Do filter & assert
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@admin:test",
                 events_to_filter,
@@ -475,7 +477,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
                 e.event_id
                 for e in [self.regular_event, self.soft_failed_event, self.spammy_event]
             ],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
 
@@ -539,14 +541,14 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
         # accidentally serving the same event object (with the same unsigned.membership
         # property) to both users.
         joiner_filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@joiner:test",
                 events_to_filter,
             )
         )
         resident_filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@resident:test",
                 events_to_filter,
@@ -557,14 +559,11 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
         # and messages sent between the two, but not before or after.
         self.assertEqual(
             [e.event_id for e in [join_event, during_event, leave_event]],
-            [e.event_id for e in joiner_filtered_events],
+            [e.event.event_id for e in joiner_filtered_events],
         )
         self.assertEqual(
             ["join", "join", "leave"],
-            [
-                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
-                for e in joiner_filtered_events
-            ],
+            [e.membership for e in joiner_filtered_events],
         )
 
         # The resident user should see all the events.
@@ -579,14 +578,11 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
                     after_event,
                 ]
             ],
-            [e.event_id for e in resident_filtered_events],
+            [e.event.event_id for e in resident_filtered_events],
         )
         self.assertEqual(
             ["join", "join", "join", "join", "join"],
-            [
-                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
-                for e in resident_filtered_events
-            ],
+            [e.membership for e in resident_filtered_events],
         )
 
 
@@ -642,28 +638,25 @@ class FilterEventsOutOfBandEventsForClientTestCase(
 
         # the invited user should be able to see both the invite and the rejection
         filtered_events = self.get_success(
-            filter_events_for_client(
+            filter_and_transform_events_for_client(
                 self.hs.get_storage_controllers(),
                 "@user:test",
                 [invite_event, reject_event],
             )
         )
         self.assertEqual(
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
             [e.event_id for e in [invite_event, reject_event]],
         )
         self.assertEqual(
             ["invite", "leave"],
-            [
-                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
-                for e in filtered_events
-            ],
+            [e.membership for e in filtered_events],
         )
 
         # other users should see neither
         self.assertEqual(
             self.get_success(
-                filter_events_for_client(
+                filter_and_transform_events_for_client(
                     self.hs.get_storage_controllers(),
                     "@other:test",
                     [invite_event, reject_event],
@@ -693,9 +686,9 @@ async def inject_message_event(
     hs: HomeServer,
     room_id: str,
     sender: str,
-    body: Optional[str] = "testytest",
-    soft_failed: Optional[bool] = False,
-    policy_server_spammy: Optional[bool] = False,
+    body: str | None = "testytest",
+    soft_failed: bool | None = False,
+    policy_server_spammy: bool | None = False,
 ) -> EventBase:
     return await inject_event(
         hs,

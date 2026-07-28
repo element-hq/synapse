@@ -143,7 +143,7 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"creator": user2_id, "room_version": "10"},
+                    "content": {"room_version": "11"},
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",
@@ -253,7 +253,7 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"creator": user2_id, "room_version": "10"},
+                    "content": {"room_version": "11"},
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",
@@ -374,7 +374,7 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"creator": user2_id, "room_version": "10"},
+                    "content": {"room_version": "11"},
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",
@@ -500,7 +500,7 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"creator": user2_id, "room_version": "10"},
+                    "content": {"room_version": "11"},
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",

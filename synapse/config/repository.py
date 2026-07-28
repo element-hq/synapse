@@ -3,6 +3,7 @@
 #
 # Copyright 2014, 2015 OpenMarket Ltd
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -21,14 +22,16 @@
 
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Annotated, Any
 
 import attr
+from pydantic import AnyUrl, BeforeValidator, ValidationError
 
 from synapse.config.server import generate_ip_set, parse_proxy_config
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
 from synapse.util.module_loader import load_module
+from synapse.util.pydantic_models import ParseModel
 
 from ._base import Config, ConfigError
 
@@ -80,8 +83,8 @@ class MediaStorageProviderConfig:
 
 
 def parse_thumbnail_requirements(
-    thumbnail_sizes: List[JsonDict],
-) -> Dict[str, Tuple[ThumbnailRequirement, ...]]:
+    thumbnail_sizes: list[JsonDict],
+) -> dict[str, tuple[ThumbnailRequirement, ...]]:
     """Takes a list of dictionaries with "width", "height", and "method" keys
     and creates a map from image media types to the thumbnail size, thumbnailing
     method, and thumbnail media type to precalculate
@@ -92,7 +95,7 @@ def parse_thumbnail_requirements(
     Returns:
         Dictionary mapping from media type string to list of ThumbnailRequirement.
     """
-    requirements: Dict[str, List[ThumbnailRequirement]] = {}
+    requirements: dict[str, list[ThumbnailRequirement]] = {}
     for size in thumbnail_sizes:
         width = size["width"]
         height = size["height"]
@@ -134,11 +137,48 @@ class MediaUploadLimit:
     time_period_ms: int
     """The time period in milliseconds."""
 
+    info_uri: str | None = None
+    """The URI to return with the M_USER_LIMIT_EXCEEDED error.
+
+    If left unset (`None`), Synapse falls back to a static page served by itself
+    (see `MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH`), which explains that the limit has been
+    exceeded and can be customized by server administrators via a custom
+    template."""
+
+    can_upgrade: bool = False
+    """Whether the user can upgrade their plan to increase the limit. This is returned in the M_USER_LIMIT_EXCEEDED error."""
+
+
+class MediaUploadLimitConfigModel(ParseModel):
+    """Internal model for parsing a single media_upload_limits config entry."""
+
+    max_size: Annotated[int, BeforeValidator(Config.parse_size)]
+    time_period: Annotated[int, BeforeValidator(Config.parse_duration)]
+    info_uri: AnyUrl | None = None
+    """We accept AnyUrl as a subset of valid URIs. It could be widened in future if needed."""
+    can_upgrade: bool = False
+
 
 class ContentRepositoryConfig(Config):
     section = "media"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+        # We need to set this configuration flag even if this worker
+        # is not a media repo worker, as it's exposed in `/capabilities`
+        self.url_preview_enabled = bool(config.get("url_preview_enabled", False))
+
+        # Load the template used to render the fallback page.
+        #
+        # We set this up on all workers (not just the media repo) as the
+        # fallback page is served by whichever process handles
+        # `/_synapse/client/media_upload_limit_exceeded`, so every process must
+        # be able to render it. This must happen before the early return below,
+        # which is taken by workers that do not load the media repo.
+        self.media_upload_limit_exceeded_template = self.read_templates(
+            ["media_upload_limit_exceeded.html"],
+            (td for td in (self.root.server.custom_template_directory,) if td),
+        )[0]
+
         # Only enable the media repo if either the media repo is enabled or the
         # current worker app is the media repo.
         if (
@@ -174,6 +214,11 @@ class ContentRepositoryConfig(Config):
             config.get("media_store_path", "media_store")
         )
 
+        # Whether to enable the local media storage provider. When disabled,
+        # media will only be stored in configured storage providers and temp
+        # files will be used for processing.
+        self.enable_local_media_storage = config.get("enable_local_media_storage", True)
+
         backup_media_store_path = config.get("backup_media_store_path")
 
         synchronous_backup_media_store = config.get(
@@ -206,7 +251,7 @@ class ContentRepositoryConfig(Config):
         #
         # We don't create the storage providers here as not all workers need
         # them to be started.
-        self.media_storage_providers: List[tuple] = []
+        self.media_storage_providers: list[tuple] = []
 
         for i, provider_config in enumerate(storage_providers):
             # We special case the module "file_system" so as not to need to
@@ -237,7 +282,7 @@ class ContentRepositoryConfig(Config):
         self.thumbnail_requirements = parse_thumbnail_requirements(
             config.get("thumbnail_sizes", DEFAULT_THUMBNAIL_SIZES)
         )
-        self.url_preview_enabled = config.get("url_preview_enabled", False)
+
         if self.url_preview_enabled:
             check_requirements("url-preview")
 
@@ -298,12 +343,41 @@ class ContentRepositoryConfig(Config):
 
         self.enable_authenticated_media = config.get("enable_authenticated_media", True)
 
-        self.media_upload_limits: List[MediaUploadLimit] = []
-        for limit_config in config.get("media_upload_limits", []):
-            time_period_ms = self.parse_duration(limit_config["time_period"])
-            max_bytes = self.parse_size(limit_config["max_size"])
+        self.media_upload_limits: list[MediaUploadLimit] = []
+        for raw_entry in config.get("media_upload_limits", []):
+            try:
+                entry = MediaUploadLimitConfigModel.model_validate(
+                    raw_entry, strict=True
+                )
+            except ValidationError as e:
+                raise ConfigError(
+                    "Could not validate media_upload_limits entry",
+                    ("media_upload_limits",),
+                ) from e
 
-            self.media_upload_limits.append(MediaUploadLimit(max_bytes, time_period_ms))
+            info_uri = str(entry.info_uri) if entry.info_uri is not None else None
+            self.media_upload_limits.append(
+                MediaUploadLimit(
+                    max_bytes=entry.max_size,
+                    time_period_ms=entry.time_period,
+                    info_uri=info_uri,
+                    can_upgrade=entry.can_upgrade,
+                )
+            )
+
+        # The absolute URI of the static fallback page, used as the `info_uri`
+        # for any media upload limit (whether from config or a module callback)
+        # that doesn't specify one. Built from public_baseurl so that it is a
+        # usable absolute URL. We import here to avoid a circular import at
+        # module load time.
+        from synapse.rest.synapse.client.media_upload_limit_exceeded import (
+            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
+        )
+
+        self.media_upload_limit_fallback_info_uri = (
+            self.root.server.public_baseurl
+            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
+        )
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None

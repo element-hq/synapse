@@ -30,6 +30,7 @@ from prometheus_client.core import REGISTRY, GaugeMetricFamily
 from twisted.internet import reactor, selectreactor
 from twisted.internet.asyncioreactor import AsyncioSelectorReactor
 
+from synapse.app.complement_fork_proxied_reactor import ProxiedReactor
 from synapse.metrics._types import Collector
 
 try:
@@ -124,48 +125,65 @@ class ReactorLastSeenMetric(Collector):
         yield cm
 
 
-# Twisted has already select a reasonable reactor for us, so assumptions can be
-# made about the shape.
-wrapper = None
-try:
-    if isinstance(reactor, (PollReactor, EPollReactor)):
-        reactor._poller = ObjWrapper(reactor._poller, "poll")  # type: ignore[attr-defined]
-        wrapper = reactor._poller._wrapped_method  # type: ignore[attr-defined]
+def install_reactor_metrics(target_reactor: Any) -> None:
+    # Twisted has already select a reasonable reactor for us, so assumptions can be
+    # made about the shape.
+    wrapper = None
+    try:
+        if isinstance(target_reactor, (PollReactor, EPollReactor)):
+            target_reactor._poller = ObjWrapper(reactor._poller, "poll")  # type: ignore[attr-defined]
+            wrapper = target_reactor._poller._wrapped_method  # type: ignore[attr-defined]
 
-    elif isinstance(reactor, selectreactor.SelectReactor):
-        # Twisted uses a module-level _select function.
-        wrapper = selectreactor._select = CallWrapper(selectreactor._select)
+        elif isinstance(target_reactor, selectreactor.SelectReactor):
+            # Twisted uses a module-level _select function.
+            wrapper = selectreactor._select = CallWrapper(selectreactor._select)
 
-    elif isinstance(reactor, AsyncioSelectorReactor):
-        # For asyncio look at the underlying asyncio event loop.
-        asyncio_loop = reactor._asyncioEventloop  # A sub-class of BaseEventLoop,
+        elif isinstance(target_reactor, AsyncioSelectorReactor):
+            # For asyncio look at the underlying asyncio event loop.
+            asyncio_loop = (
+                target_reactor._asyncioEventloop
+            )  # A sub-class of BaseEventLoop,
 
-        # A sub-class of BaseSelector.
-        selector = asyncio_loop._selector  # type: ignore[attr-defined]
+            # A sub-class of BaseSelector.
+            selector = asyncio_loop._selector  # type: ignore[attr-defined]
 
-        if isinstance(selector, SelectSelector):
-            wrapper = selector._select = CallWrapper(selector._select)  # type: ignore[attr-defined]
+            if isinstance(selector, SelectSelector):
+                wrapper = selector._select = CallWrapper(selector._select)  # type: ignore[attr-defined]
 
-        # poll, epoll, and /dev/poll.
-        elif isinstance(selector, _PollLikeSelector):
-            selector._selector = ObjWrapper(selector._selector, "poll")  # type: ignore[attr-defined]
-            wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
+            # poll, epoll, and /dev/poll.
+            elif isinstance(selector, _PollLikeSelector):
+                selector._selector = ObjWrapper(selector._selector, "poll")  # type: ignore[attr-defined]
+                wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
 
-        elif isinstance(selector, KqueueSelector):
-            selector._selector = ObjWrapper(selector._selector, "control")  # type: ignore[attr-defined]
-            wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
+            elif isinstance(selector, KqueueSelector):
+                selector._selector = ObjWrapper(selector._selector, "control")  # type: ignore[attr-defined]
+                wrapper = selector._selector._wrapped_method  # type: ignore[attr-defined]
 
+            else:
+                # E.g. this does not support the (Windows-only) ProactorEventLoop.
+                logger.warning(
+                    "Skipping configuring reactor metrics: unexpected asyncio loop selector: %r via %r",
+                    selector,
+                    asyncio_loop,
+                )
         else:
-            # E.g. this does not support the (Windows-only) ProactorEventLoop.
             logger.warning(
-                "Skipping configuring ReactorLastSeenMetric: unexpected asyncio loop selector: %r via %r",
-                selector,
-                asyncio_loop,
+                "Skipping configuring reactor metrics: unexpected reactor type: %r",
+                target_reactor,
             )
-except Exception as e:
-    logger.warning("Configuring ReactorLastSeenMetric failed: %r", e)
+    except Exception as e:
+        logger.warning("Configuring reactor metrics failed: %r", e)
+
+    if wrapper:
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        REGISTRY.register(ReactorLastSeenMetric(wrapper))  # type: ignore[missing-server-name-label]
 
 
-if wrapper:
-    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
-    REGISTRY.register(ReactorLastSeenMetric(wrapper))  # type: ignore[missing-server-name-label]
+# Install reactor metrics for the global reactor.
+#
+# Skip installation if using `ProxiedReactor` (used by `complement_fork_starter.py`).
+# The `ProxiedReactor` will handle calling `install_reactor_metrics(...)` itself when
+# ready. Skipping allows us to avoid seeing confusing `Skipping configuring reactor
+# metrics: unexpected reactor type: ProxiedReactor` warnings.
+if not isinstance(reactor, ProxiedReactor):
+    install_reactor_metrics(reactor)

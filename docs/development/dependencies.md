@@ -6,7 +6,7 @@ This is a quick cheat sheet for developers on how to use [`poetry`](https://pyth
 
 See the [contributing guide](contributing_guide.md#4-install-the-dependencies).
 
-Developers should use Poetry 1.3.2 or higher. If you encounter problems related
+Developers should use Poetry 2.2.0 or higher. If you encounter problems related
 to poetry, please [double-check your poetry version](#check-the-version-of-poetry-with-poetry---version).
 
 # Background
@@ -79,17 +79,17 @@ phonenumbers = [
 We can see this pinned version inside the docker image for that release:
 
 ```
-$ docker pull vectorim/synapse:v1.97.0
+$ docker pull matrixdotorg/synapse:latest
 ...
-$ docker run --entrypoint pip vectorim/synapse:v1.97.0 show phonenumbers
+$ docker run --entrypoint pip matrixdotorg/synapse:latest show phonenumbers
 Name: phonenumbers
-Version: 8.12.44
+Version: 9.0.15
 Summary: Python version of Google's common library for parsing, formatting, storing and validating international phone numbers.
 Home-page: https://github.com/daviddrysdale/python-phonenumbers
 Author: David Drysdale
 Author-email: dmd@lurklurk.org
 License: Apache License 2.0
-Location: /usr/local/lib/python3.9/site-packages
+Location: /usr/local/lib/python3.12/site-packages
 Requires:
 Required-by: matrix-synapse
 ```
