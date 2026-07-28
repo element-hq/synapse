@@ -3849,7 +3849,7 @@
         },
         "update_profile_information": {
           "type": "boolean",
-          "description": "Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:\n  * displayname\n  * picture - only if Synapse media repository is running in the main\n     process (i.e. not workerized) and media is stored locally",
+          "description": "Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Fields that will be synced:\n  * displayname\n  * picture - only if Synapse media repository is running in the main\n     process (i.e. not workerized) and media is stored locally",
           "default": false
         }
       },
@@ -4046,6 +4046,33 @@
           "jitter_delay": "10s"
         }
       ]
+    },
+    "push_rules": {
+      "type": "object",
+      "description": "Options for push rules",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "description": "Limits on the size of push rules that users can have",
+          "properties": {
+            "rule_count": {
+              "type": "integer",
+              "default": 10000,
+              "description": "This is the total number of push rules that each user can have. Power users may expect to have one push rule per room."
+            },
+            "rule_id_length": {
+              "type": "integer",
+              "default": 300,
+              "description": "This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))\nIt's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit."
+            },
+            "rule_size": {
+              "type": "integer",
+              "default": 1024,
+              "description": "This is the maximum size of a push rule's body, in bytes.\nThe exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.\nIt's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it."
+            }
+          }
+        }
+      }
     },
     "encryption_enabled_by_default_for_room_type": {
       "type": "string",
