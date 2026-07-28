@@ -89,6 +89,21 @@ class VersionsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         self._sanity_check_versions_response(channel.json_body)
 
+    def test_msc4258_not_advertised_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertIs(
+            channel.json_body["unstable_features"]["org.matrix.msc4258"], False
+        )
+
+    @unittest.override_config({"experimental_features": {"msc4258_enabled": True}})
+    def test_msc4258_advertised_when_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertIs(
+            channel.json_body["unstable_features"]["org.matrix.msc4258"], True
+        )
+
     def test_authenticated_with_per_user_feature(self) -> None:
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")

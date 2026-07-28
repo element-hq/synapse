@@ -52,6 +52,7 @@ class UserDirectorySearchRestServlet(RestServlet):
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.rc_user_directory,
         )
+        self._msc4258_enabled = hs.config.experimental.msc4258_enabled
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonMapping]:
         """Searches for users in directory
@@ -88,11 +89,67 @@ class UserDirectorySearchRestServlet(RestServlet):
         except Exception:
             raise SynapseError(400, "`search_term` is required field")
 
+        # MSC4258 federated search parameters. `search_scope` is from the MSC
+        # (local/restricted searches must not leave this server); `server` is
+        # a targeted extension letting the client search one specific remote
+        # server's directory (analogous to /publicRooms?server=).
+        search_scope = body.get("search_scope", "remote")
+        if search_scope not in ("local", "restricted", "remote"):
+            raise SynapseError(400, "Invalid search_scope")
+        server = body.get("server")
+        if server is not None and not isinstance(server, str):
+            raise SynapseError(400, "Invalid server")
+        if server is not None and self.hs.is_mine_server_name(server):
+            server = None
+
+        federate = (
+            self._msc4258_enabled
+            and search_scope == "remote"
+            # Mirror the remote side's anti-enumeration threshold rather than
+            # sending queries that will be refused.
+            and len(search_term) >= 4
+        )
+
+        if federate and server is not None:
+            # The client asked for one specific server's directory: return
+            # that server's results alone.
+            results = await self.user_directory_handler.search_remote_users(
+                user_id, search_term, limit, server
+            )
+            return 200, results
+
         results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
 
+        if federate:
+            remote_results = await self.user_directory_handler.search_remote_users(
+                user_id, search_term, limit, None
+            )
+            return 200, _merge_search_results(results, remote_results, limit)
+
         return 200, results
+
+
+def _merge_search_results(
+    local_results: JsonMapping, remote_results: JsonMapping, limit: int
+) -> JsonMapping:
+    """Concatenate local and remote user directory results, deduplicating by
+    user ID. Local results come first, preserving their relevance ordering.
+    """
+    seen = set()
+    results = []
+    for user in list(local_results["results"]) + list(remote_results["results"]):
+        if user["user_id"] not in seen:
+            seen.add(user["user_id"])
+            results.append(user)
+
+    limited = bool(local_results.get("limited")) or bool(remote_results.get("limited"))
+    if len(results) > limit:
+        results = results[:limit]
+        limited = True
+
+    return {"limited": limited, "results": results}
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

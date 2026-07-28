@@ -94,6 +94,117 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(500, channel.code, channel.result)
 
 
+class FederationUserDirectorySearchTests(unittest.FederatingHomeserverTestCase):
+    """Tests for the MSC4258 federated user directory search servlet."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+    ]
+
+    PATH = "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4258_enabled": True}
+        config["user_directory"] = {
+            "enabled": True,
+            "search_all_users": True,
+        }
+        return config
+
+    def test_search(self) -> None:
+        self.register_user("userlambda", "password")
+
+        channel = self.make_signed_federation_request(
+            "POST",
+            self.PATH,
+            content={
+                "requester": f"@requester:{self.OTHER_SERVER_NAME}",
+                "search_term": "userlambda",
+                "limit": 10,
+            },
+        )
+
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body["limited"], False)
+        results = channel.json_body["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["user_id"], "@userlambda:test")
+
+    def test_no_results(self) -> None:
+        self.register_user("userlambda", "password")
+
+        channel = self.make_signed_federation_request(
+            "POST",
+            self.PATH,
+            content={
+                "requester": f"@requester:{self.OTHER_SERVER_NAME}",
+                "search_term": "nonexistent",
+                "limit": 10,
+            },
+        )
+
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body["results"], [])
+
+    def test_missing_search_term(self) -> None:
+        channel = self.make_signed_federation_request(
+            "POST",
+            self.PATH,
+            content={"requester": f"@requester:{self.OTHER_SERVER_NAME}", "limit": 10},
+        )
+
+        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
+
+    def test_requester_must_match_origin(self) -> None:
+        """A requester on a different server than the request signer is rejected."""
+        channel = self.make_signed_federation_request(
+            "POST",
+            self.PATH,
+            content={
+                "requester": "@requester:not.the.origin.example.com",
+                "search_term": "userlambda",
+            },
+        )
+
+        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], "M_BAD_JSON")
+
+    def test_short_term_returns_nothing(self) -> None:
+        """Directory-trawling with very short terms is refused."""
+        self.register_user("userlambda", "password")
+
+        channel = self.make_signed_federation_request(
+            "POST",
+            self.PATH,
+            content={
+                "requester": f"@requester:{self.OTHER_SERVER_NAME}",
+                "search_term": "use",
+            },
+        )
+
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body["results"], [])
+
+
+class FederationUserDirectorySearchDisabledTests(unittest.FederatingHomeserverTestCase):
+    """The MSC4258 servlet is not registered when the flag is off."""
+
+    def test_unrecognised(self) -> None:
+        channel = self.make_signed_federation_request(
+            "POST",
+            "/_matrix/federation/unstable/org.matrix.msc4258/user_directory/search",
+            content={
+                "requester": f"@requester:{self.OTHER_SERVER_NAME}",
+                "search_term": "whatever",
+            },
+        )
+
+        self.assertEqual(channel.code, 404, channel.result)
+
+
 def _create_acl_event(content: JsonDict) -> EventBase:
     return make_test_event(
         {
