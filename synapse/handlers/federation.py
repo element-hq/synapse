@@ -909,7 +909,7 @@ class FederationHandler:
             )
             # Replace with our sanitized `knock_room_state`
             event.unsigned["knock_room_state"] = [
-                stripped_state_event.serialize()
+                stripped_state_event.as_json_dict()
                 for stripped_state_event in stripped_room_state
             ]
         except Exception as exc:
@@ -946,7 +946,7 @@ class FederationHandler:
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `knock_room_state`
                 event.unsigned["knock_room_state"] = [
-                    stripped_state_event.serialize()
+                    stripped_state_event.as_json_dict()
                     for stripped_state_event in stripped_room_state_for_client
                 ]
 
@@ -1320,7 +1320,7 @@ class FederationHandler:
             )
             # Replace with our sanitized `invite_room_state`
             event.unsigned["invite_room_state"] = [
-                stripped_state_event.serialize()
+                stripped_state_event.as_json_dict()
                 for stripped_state_event in stripped_room_state
             ]
         except Exception as exc:
@@ -1355,7 +1355,7 @@ class FederationHandler:
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `invite_room_state`
                 event.unsigned["invite_room_state"] = [
-                    stripped_state_event.serialize()
+                    stripped_state_event.as_json_dict()
                     for stripped_state_event in stripped_room_state_for_client
                 ]
 

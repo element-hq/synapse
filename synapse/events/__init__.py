@@ -199,7 +199,7 @@ class StrippedStateEvent:
     sender: str
     content: dict[str, Any]
 
-    def serialize(self) -> JsonDict:
+    def as_json_dict(self) -> JsonDict:
         """
         Serialize to the JSON representation of 'Stripped State' according to the Matrix
         spec
