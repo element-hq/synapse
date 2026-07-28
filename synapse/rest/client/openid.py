@@ -67,7 +67,7 @@ class IdTokenServlet(RestServlet):
     }
     """
 
-    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/openid/request_token")
+    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/openid/request_token$")
 
     EXPIRES_MS = 3600 * 1000
 

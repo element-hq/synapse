@@ -58,7 +58,7 @@ def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
 
 
 class ProfileRestServlet(RestServlet):
-    PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)", v1=True)
+    PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
     CATEGORY = "Event sending requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -92,13 +92,13 @@ class ProfileRestServlet(RestServlet):
 class ProfileFieldRestServlet(RestServlet):
     PATTERNS = [
         *client_patterns(
-            "/profile/(?P<user_id>[^/]*)/(?P<field_name>displayname)", v1=True
+            "/profile/(?P<user_id>[^/]*)/(?P<field_name>displayname)$", v1=True
         ),
         *client_patterns(
-            "/profile/(?P<user_id>[^/]*)/(?P<field_name>avatar_url)", v1=True
+            "/profile/(?P<user_id>[^/]*)/(?P<field_name>avatar_url)$", v1=True
         ),
         re.compile(
-            r"^/_matrix/client/v3/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)"
+            r"^/_matrix/client/v3/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)$",
         ),
     ]
 
@@ -112,7 +112,7 @@ class ProfileFieldRestServlet(RestServlet):
         if hs.config.experimental.msc4133_enabled:
             self.PATTERNS.append(
                 re.compile(
-                    r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)"
+                    r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)$"
                 )
             )
 

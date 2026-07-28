@@ -3822,7 +3822,7 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Fields that will be synced:
     * displayname
     * picture - only if Synapse media repository is running in the main
        process (i.e. not workerized) and media is stored locally Defaults to `false`.
@@ -3951,6 +3951,25 @@ push:
   group_unread_count_by_room: false
   jitter_delay: 10s
 ```
+---
+### `push_rules`
+
+*(object)* Options for push rules
+
+This setting has the following sub-options:
+
+* `limits` (object): Limits on the size of push rules that users can have
+
+  This setting has the following sub-options:
+
+  * `rule_count` (integer): This is the total number of push rules that each user can have. Power users may expect to have one push rule per room. Defaults to `10000`.
+
+  * `rule_id_length` (integer): This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit. Defaults to `300`.
+
+  * `rule_size` (integer): This is the maximum size of a push rule's body, in bytes.
+    The exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it. Defaults to `1024`.
 ---
 ## Rooms
 
