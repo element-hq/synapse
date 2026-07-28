@@ -1,3 +1,33 @@
+# Synapse 1.157.2 (2026-07-28)
+
+This security release addresses several vulnerabilities.
+
+Please upgrade when you can, particularly if your homeserver participates in open federation
+and/or has untrusted local users.
+
+## Security Fixes
+
+High severity:
+
+- Fix [ELEMENTSEC-2026-1071](https://github.com/element-hq/synapse/security/advisories/GHSA-fp53-rw9v-hcf9)
+- Fix [ELEMENTSEC-2024-1520](https://github.com/element-hq/synapse/security/advisories/GHSA-rgv2-84w7-5j9p)
+- Fix [ELEMENTSEC-2026-1717](https://github.com/element-hq/synapse/security/advisories/GHSA-27p5-4f45-gx76)
+- Fix [ELEMENTSEC-2026-1721](https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq)
+- Fix [ELEMENTSEC-2026-1729](https://github.com/element-hq/synapse/security/advisories/GHSA-cjh7-rcpx-xpf8)
+- Fix [ELEMENTSEC-2026-1740](https://github.com/element-hq/synapse/security/advisories/GHSA-6wjm-9p2x-gvpm)
+
+Moderate severity:
+
+- Fix [ELEMENTSEC-2026-1714](https://github.com/element-hq/synapse/security/advisories/GHSA-qcjr-46gf-7f4r)
+- Fix [ELEMENTSEC-2026-1718](https://github.com/element-hq/synapse/security/advisories/GHSA-r66v-qhwx-8rg4)
+- Fix [ELEMENTSEC-2026-1751](https://github.com/element-hq/synapse/security/advisories/GHSA-jhcg-5392-5mjw)
+
+Low severity:
+
+- Fix [ELEMENTSEC-2026-1703](https://github.com/element-hq/synapse/security/advisories/GHSA-vh4c-pqh4-w3wq)
+- Fix [ELEMENTSEC-2026-1760](https://github.com/element-hq/synapse/security/advisories/GHSA-hgcg-p9gx-fq5f)
+
+
 # Synapse 1.157.1 (2026-07-22)
 
 ## Bugfixes
