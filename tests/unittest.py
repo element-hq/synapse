@@ -78,6 +78,7 @@ from synapse.storage.background_updates import UpdaterStatus
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
+from synapse.util.duration import Duration
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -104,7 +105,7 @@ P = ParamSpec("P")
 R = TypeVar("R")
 S = TypeVar("S")
 
-BACKGROUND_UPDATE_TIMEOUT_SECONDS = 5
+BACKGROUND_UPDATE_TIMEOUT = Duration(seconds=5)
 """
 We expect this to be pretty immediate as we're working with an empty database.
 """
@@ -699,7 +700,7 @@ class HomeserverTestCase(TestCase):
             # Timeout if it takes too long. This should be pretty immediate as we're
             # working with an empty database.
             current_time_s = time.time()
-            if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT_SECONDS:
+            if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT.as_secs():
                 background_update_status = store.db_pool.updates.get_status()
 
                 # Add some better context when we give up
@@ -716,7 +717,7 @@ class HomeserverTestCase(TestCase):
                     )
 
                 raise AssertionError(
-                    f"Timed out waiting for background updates to complete ({BACKGROUND_UPDATE_TIMEOUT_SECONDS}s). "
+                    f"Timed out waiting for background updates to complete ({BACKGROUND_UPDATE_TIMEOUT.as_secs()}s). "
                     + extra_message
                 )
 
