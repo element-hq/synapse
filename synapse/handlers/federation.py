@@ -60,10 +60,6 @@ from synapse.crypto.event_signing import compute_event_signature
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
-from synapse.events.utils import (
-    parse_stripped_state_event,
-    serialize_stripped_state_event,
-)
 from synapse.events.validator import EventValidator
 from synapse.federation.federation_base import (
     InvalidEventSignatureError,
@@ -913,7 +909,7 @@ class FederationHandler:
             )
             # Replace with our sanitized `knock_room_state`
             event.unsigned["knock_room_state"] = [
-                serialize_stripped_state_event(stripped_state_event)
+                stripped_state_event.serialize()
                 for stripped_state_event in stripped_room_state
             ]
         except Exception as exc:
@@ -950,7 +946,7 @@ class FederationHandler:
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `knock_room_state`
                 event.unsigned["knock_room_state"] = [
-                    serialize_stripped_state_event(stripped_state_event)
+                    stripped_state_event.serialize()
                     for stripped_state_event in stripped_room_state_for_client
                 ]
 
@@ -1139,7 +1135,7 @@ class FederationHandler:
         parsed_stripped_room_state = []
         for raw_stripped_event in stripped_room_state:
             # Parse each stripped event
-            parsed_stripped_event = parse_stripped_state_event(raw_stripped_event)
+            parsed_stripped_event = StrippedStateEvent.parse(raw_stripped_event)
             if parsed_stripped_event is None:
                 # Drop any invalid stripped state events as this is spec'ed and we
                 # might as well save the client from dealing with anything crazy.
@@ -1220,7 +1216,7 @@ class FederationHandler:
                 includes_create_event = True
 
             # Parse the stripped events to ensure it has all of the fields necessary
-            parsed_stripped_event = parse_stripped_state_event(raw_stripped_event)
+            parsed_stripped_event = StrippedStateEvent.parse(raw_stripped_event)
             if parsed_stripped_event is None:
                 raise ValueError("Unable to parse as stripped event")
             parsed_stripped_room_state.append(parsed_stripped_event)
@@ -1320,7 +1316,7 @@ class FederationHandler:
             )
             # Replace with our sanitized `invite_room_state`
             event.unsigned["invite_room_state"] = [
-                serialize_stripped_state_event(stripped_state_event)
+                stripped_state_event.serialize()
                 for stripped_state_event in stripped_room_state
             ]
         except Exception as exc:
@@ -1355,7 +1351,7 @@ class FederationHandler:
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `invite_room_state`
                 event.unsigned["invite_room_state"] = [
-                    serialize_stripped_state_event(stripped_state_event)
+                    stripped_state_event.serialize()
                     for stripped_state_event in stripped_room_state_for_client
                 ]
 

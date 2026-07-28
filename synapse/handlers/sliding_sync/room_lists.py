@@ -37,7 +37,6 @@ from synapse.api.constants import (
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import StrippedStateEvent
-from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import start_active_span, trace
 from synapse.storage.databases.main.sliding_sync import UPDATE_INTERVAL_LAST_USED_TS
 from synapse.storage.databases.main.state import (
@@ -1618,7 +1617,7 @@ class SlidingSyncRoomLists:
                 stripped_state_map = {}
                 if isinstance(raw_stripped_state_events, list):
                     for raw_stripped_event in raw_stripped_state_events:
-                        stripped_state_event = parse_stripped_state_event(
+                        stripped_state_event = StrippedStateEvent.parse(
                             raw_stripped_event
                         )
                         if stripped_state_event is not None:

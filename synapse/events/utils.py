@@ -54,7 +54,7 @@ from synapse.synapse_rust.events import (
 from synapse.synapse_rust.types import Requester
 from synapse.types import JsonDict
 
-from . import EventBase, StrippedStateEvent
+from . import EventBase
 
 # These are imported only to re-export them (callers import them from this
 # module); listing them in __all__ stops the unused-import lint flagging them
@@ -553,40 +553,4 @@ def strip_event(event: EventBase) -> JsonDict:
         "state_key": event.state_key,
         "content": dict(event.content),
         "sender": event.sender,
-    }
-
-
-def parse_stripped_state_event(raw_stripped_event: Any) -> StrippedStateEvent | None:
-    """
-    Given a raw value from an event's `unsigned` field, attempt to parse it into a
-    `StrippedStateEvent`.
-    """
-    if isinstance(raw_stripped_event, dict):
-        # All of these fields are required
-        type = raw_stripped_event.get("type")
-        state_key = raw_stripped_event.get("state_key")
-        sender = raw_stripped_event.get("sender")
-        content = raw_stripped_event.get("content")
-        if (
-            isinstance(type, str)
-            and isinstance(state_key, str)
-            and isinstance(sender, str)
-            and isinstance(content, dict)
-        ):
-            return StrippedStateEvent(
-                type=type,
-                state_key=state_key,
-                sender=sender,
-                content=content,
-            )
-
-    return None
-
-
-def serialize_stripped_state_event(stripped_event: StrippedStateEvent) -> JsonDict:
-    return {
-        "type": stripped_event.type,
-        "state_key": stripped_event.state_key,
-        "sender": stripped_event.sender,
-        "content": stripped_event.content,
     }
