@@ -50,7 +50,7 @@ impl HttpClient {
     #[new]
     #[pyo3(signature = (runtime, user_agent, http2_only = false))]
     pub fn py_new(
-        runtime: RustRuntime,
+        runtime: &RustRuntime,
         user_agent: &str,
         http2_only: bool,
     ) -> PyResult<HttpClient> {
@@ -64,7 +64,10 @@ impl HttpClient {
 
         let client = builder.build().context("building reqwest client")?;
 
-        Ok(HttpClient { client, runtime })
+        Ok(HttpClient {
+            client,
+            runtime: runtime.clone(),
+        })
     }
 
     pub fn get<'a>(

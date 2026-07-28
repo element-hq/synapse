@@ -128,7 +128,7 @@ impl Drop for RustRuntimeInner {
 /// constructor argument — pyo3 extracts a `#[pyclass]` that is `Clone` by
 /// cloning, which here is just an `Arc` refcount bump — and hold their own
 /// clone. Derefs to [`RustRuntimeInner`].
-#[pyclass(frozen, from_py_object, module = "synapse.synapse_rust")]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct RustRuntime {
     inner: Arc<RustRuntimeInner>,
@@ -191,8 +191,16 @@ impl ShutdownHook {
 }
 
 /// Called when registering modules with python.
-pub fn register_module(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<RustRuntime>()?;
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module = PyModule::new(py, "runtime")?;
+
+    child_module.add_class::<RustRuntime>()?;
+
+    m.add_submodule(&child_module)?;
+
+    py.import("sys")?
+        .getattr("modules")?
+        .set_item("synapse.synapse_rust.runtime", child_module)?;
 
     Ok(())
 }

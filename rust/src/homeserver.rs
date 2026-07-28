@@ -44,7 +44,9 @@ impl HomeServer {
             .0
             .bind(py)
             .call_method0(intern!(py, "get_rust_runtime"))?
-            .extract()?)
+            .cast::<RustRuntime>()?
+            .get()
+            .clone())
     }
 
     /// The Rust-side view of `hs.config`.

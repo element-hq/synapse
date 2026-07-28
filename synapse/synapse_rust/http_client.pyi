@@ -14,7 +14,7 @@ from typing import Mapping
 
 from twisted.internet.defer import Deferred
 
-from synapse.synapse_rust import RustRuntime
+from synapse.synapse_rust.runtime import RustRuntime
 
 class HttpClient:
     """
