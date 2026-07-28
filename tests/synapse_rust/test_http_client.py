@@ -90,8 +90,6 @@ class HttpClientTestCase(HomeserverTestCase):
         hs = self.setup_test_homeserver()
 
         self._http_client = hs.get_proxied_http_client()
-        # The tokio thread pool is started lazily on first use, so no
-        # reactor startup hooks need to run here.
         self._rust_http_client = HttpClient(
             runtime=hs.get_rust_runtime(),
             user_agent=self._http_client.user_agent.decode("utf8"),
