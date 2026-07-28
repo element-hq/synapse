@@ -1617,7 +1617,7 @@ class SlidingSyncRoomLists:
                 stripped_state_map = {}
                 if isinstance(raw_stripped_state_events, list):
                     for raw_stripped_event in raw_stripped_state_events:
-                        stripped_state_event = StrippedStateEvent.parse(
+                        stripped_state_event = StrippedStateEvent.from_json_dict(
                             raw_stripped_event
                         )
                         if stripped_state_event is not None:

@@ -1135,7 +1135,9 @@ class FederationHandler:
         parsed_stripped_room_state = []
         for raw_stripped_event in stripped_room_state:
             # Parse each stripped event
-            parsed_stripped_event = StrippedStateEvent.parse(raw_stripped_event)
+            parsed_stripped_event = StrippedStateEvent.from_json_dict(
+                raw_stripped_event
+            )
             if parsed_stripped_event is None:
                 # Drop any invalid stripped state events as this is spec'ed and we
                 # might as well save the client from dealing with anything crazy.
@@ -1216,7 +1218,9 @@ class FederationHandler:
                 includes_create_event = True
 
             # Parse the stripped events to ensure it has all of the fields necessary
-            parsed_stripped_event = StrippedStateEvent.parse(raw_stripped_event)
+            parsed_stripped_event = StrippedStateEvent.from_json_dict(
+                raw_stripped_event
+            )
             if parsed_stripped_event is None:
                 raise ValueError("Unable to parse as stripped event")
             parsed_stripped_room_state.append(parsed_stripped_event)

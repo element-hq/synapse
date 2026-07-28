@@ -213,7 +213,7 @@ class StrippedStateEvent:
         }
 
     @staticmethod
-    def parse(raw_stripped_event: Any) -> "StrippedStateEvent" | None:
+    def from_json_dict(raw_stripped_event: JsonDict) -> "StrippedStateEvent" | None:
         """
         Given a raw value from an event's `unsigned` field, attempt to parse it into a
         `StrippedStateEvent`.

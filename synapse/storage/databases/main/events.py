@@ -2251,7 +2251,9 @@ class PersistEventsStore:
             stripped_state_map: MutableStateMap[StrippedStateEvent] = {}
             if isinstance(unsigned_stripped_state_events, list):
                 for raw_stripped_event in unsigned_stripped_state_events:
-                    stripped_state_event = StrippedStateEvent.parse(raw_stripped_event)
+                    stripped_state_event = StrippedStateEvent.from_json_dict(
+                        raw_stripped_event
+                    )
                     if stripped_state_event is not None:
                         stripped_state_map[
                             (
