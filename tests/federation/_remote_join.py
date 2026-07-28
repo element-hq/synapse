@@ -127,6 +127,7 @@ class RemoteJoinHelper:
         room_create_event = make_test_event(
             test_case.add_hashes_and_signatures_from_other_server(
                 create_event_dict,
+                room_version=room_version,
             ),
             room_version=room_version,
         )
@@ -146,7 +147,8 @@ class RemoteJoinHelper:
                     "content": {"membership": Membership.JOIN},
                     "auth_events": [room_create_event.event_id],
                     "prev_events": [room_create_event.event_id],
-                }
+                },
+                room_version=room_version,
             ),
             room_version=room_version,
         )
@@ -172,7 +174,8 @@ class RemoteJoinHelper:
                             creator_membership_event.event_id,
                         ],
                         "prev_events": [prev_event.event_id],
-                    }
+                    },
+                    room_version=room_version,
                 ),
                 room_version=room_version,
             )
@@ -217,7 +220,8 @@ class RemoteJoinHelper:
                         if extra_events
                         else creator_membership_event.event_id
                     ],
-                }
+                },
+                room_version=room_version,
             ),
             room_version=room_version,
         )
@@ -315,7 +319,9 @@ class RemoteJoinHelper:
             ):
                 # As the remote server, sign the join event before returning it.
                 join_membership_event_signed = make_test_event(
-                    self._test_case.add_hashes_and_signatures_from_other_server(data),
+                    self._test_case.add_hashes_and_signatures_from_other_server(
+                        data, room_version=room_version
+                    ),
                     room_version=room_version,
                 )
                 return SendJoinResponse(
