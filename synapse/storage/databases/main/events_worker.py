@@ -1175,11 +1175,8 @@ class EventsWorkerStore(SQLBaseStore):
         # Start with the configured default set of stripped state to include
         state_filter = self._room_prejoin_state_types
 
-        # We want to send membership events of the inviter, so that the invitee can
-        # display the inviter's profile information if the room lacks any.
-        #
-        # FIXME: Doesn't seem to be in the spec but tracked by
-        # [MSC4319](https://github.com/matrix-org/matrix-spec-proposals/pull/4319)
+        # MSC4319: We want to send membership events of the inviter, so that the invitee
+        # can display the inviter's profile information if the room lacks any.
         is_invite_event = (
             event.type == EventTypes.Member and event.membership == Membership.INVITE
         )
