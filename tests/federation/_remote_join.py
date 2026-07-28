@@ -21,7 +21,8 @@ from unittest.mock import Mock
 import attr
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.api.room_versions import RoomVersion, RoomVersions
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
+from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
@@ -87,7 +88,7 @@ class RemoteJoinHelper:
         federation_http_client: Mock,
         *,
         remote_creator_user_id: str | None = None,
-        room_version: RoomVersion = RoomVersions.V10,
+        room_version: RoomVersion = KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION],
         create_content: JsonDict | None = None,
         state_events: list[RemoteStateEvent] | None = None,
     ) -> None:
