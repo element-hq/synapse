@@ -363,8 +363,9 @@ Known room versions are listed [here](https://spec.matrix.org/latest/rooms/#comp
 For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
+_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
 
-Defaults to `"10"`.
+Defaults to `"11"`.
 
 Example configuration:
 ```yaml
@@ -2227,13 +2228,26 @@ These settings can be overridden using the `get_media_upload_limits_for_user` mo
 
 Defaults to `[]`.
 
+Options for each entry include:
+
+* `time_period` (duration): The time period over which the limit applies. Required.
+
+* `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
+
+* `info_uri` (string): URI returned to the client for where the user can find information about the upload limit and how users can reduce their upload usage or request an upload limit increase. Optional. If not set, Synapse serves a built-in page (customisable via the `media_upload_limit_exceeded.html` template) and uses its URL instead.
+
+* `can_upgrade` (boolean): Value returned to the client for whether the limit can be increased. Defaults to `false`.
+
 Example configuration:
 ```yaml
 media_upload_limits:
 - time_period: 1h
   max_size: 100M
+  info_uri: https://example.com/quota#hour
 - time_period: 1w
   max_size: 500M
+  info_uri: https://example.com/quota
+  can_upgrade: true
 ```
 ---
 ### `max_image_pixels`
@@ -3808,7 +3822,7 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Fields that will be synced:
     * displayname
     * picture - only if Synapse media repository is running in the main
        process (i.e. not workerized) and media is stored locally Defaults to `false`.
@@ -3937,6 +3951,25 @@ push:
   group_unread_count_by_room: false
   jitter_delay: 10s
 ```
+---
+### `push_rules`
+
+*(object)* Options for push rules
+
+This setting has the following sub-options:
+
+* `limits` (object): Limits on the size of push rules that users can have
+
+  This setting has the following sub-options:
+
+  * `rule_count` (integer): This is the total number of push rules that each user can have. Power users may expect to have one push rule per room. Defaults to `10000`.
+
+  * `rule_id_length` (integer): This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit. Defaults to `300`.
+
+  * `rule_size` (integer): This is the maximum size of a push rule's body, in bytes.
+    The exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it. Defaults to `1024`.
 ---
 ## Rooms
 
@@ -4307,6 +4340,16 @@ forget_rooms_on_leave: true
 Example configuration:
 ```yaml
 exclude_rooms_from_sync:
+- '!foo:example.com'
+```
+---
+### `exclude_rooms_from_presence`
+
+*(array)* A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to `[]`.
+
+Example configuration:
+```yaml
+exclude_rooms_from_presence:
 - '!foo:example.com'
 ```
 ---

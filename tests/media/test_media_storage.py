@@ -52,7 +52,11 @@ from synapse.media.storage_provider import (
     FileStorageProviderBackend,
     StorageProviderWrapper,
 )
-from synapse.media.thumbnailer import ThumbnailProvider
+from synapse.media.thumbnailer import (
+    ANIMATED_THUMBNAIL_TYPE,
+    Thumbnailer,
+    ThumbnailProvider,
+)
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.rest import admin
@@ -1407,3 +1411,67 @@ class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
         self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=413)
         assert self.last_user_id == self.user
         assert self.last_size == len(SMALL_PNG)
+
+
+def _make_animated_gif() -> bytes:
+    """Build a small two-frame animated GIF."""
+    frames = [Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))]
+    out = BytesIO()
+    frames[0].save(
+        out,
+        format="GIF",
+        save_all=True,
+        append_images=frames[1:],
+        duration=100,
+        loop=0,
+    )
+    return out.getvalue()
+
+
+class ThumbnailerAnimatedTestCase(unittest.TestCase):
+    """Tests that the thumbnailer only animates when explicitly asked to."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tempdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tempdir, ignore_errors=True)
+
+        self.gif_path = os.path.join(self.tempdir, "animated.gif")
+        with open(self.gif_path, "wb") as f:
+            f.write(_make_animated_gif())
+
+        self.png_path = os.path.join(self.tempdir, "static.png")
+        with open(self.png_path, "wb") as f:
+            f.write(SMALL_PNG)
+
+    def test_scale_static_by_default(self) -> None:
+        """An animated source produces a static thumbnail unless animated=True."""
+        with Thumbnailer(self.gif_path) as thumbnailer:
+            out = thumbnailer.scale(32, 32, "image/png")
+        result = Image.open(out)
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    def test_scale_animated_when_requested(self) -> None:
+        """An animated source produces an animated thumbnail when animated=True."""
+        with Thumbnailer(self.gif_path) as thumbnailer:
+            out = thumbnailer.scale(32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        result = Image.open(out)
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(result.n_frames, 2)
+
+    def test_crop_animated_when_requested(self) -> None:
+        with Thumbnailer(self.gif_path) as thumbnailer:
+            out = thumbnailer.crop(32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        result = Image.open(out)
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(result.size, (32, 32))
+
+    def test_static_source_never_animates(self) -> None:
+        """A non-animated source stays static even when animated=True."""
+        with Thumbnailer(self.png_path) as thumbnailer:
+            self.assertFalse(thumbnailer.is_animated)
+            out = thumbnailer.scale(1, 1, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        result = Image.open(out)
+        self.assertFalse(getattr(result, "is_animated", False))

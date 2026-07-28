@@ -263,6 +263,7 @@ class FederationServer(FederationBase):
             body including `event_id`.
         """
         async with self._server_linearizer.queue((origin, room_id)):
+            await self._event_auth_handler.assert_host_in_room(room_id, origin)
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
 
@@ -1173,7 +1174,7 @@ class FederationServer(FederationBase):
             await self.check_server_matches_acl(origin_host, room_id)
 
             time_now = self._clock.time_msec()
-            auth_pdus = await self.handler.on_event_auth(event_id)
+            auth_pdus = await self.handler.on_event_auth(event_id, room_id)
             res = {"auth_chain": serialize_and_filter_pdus(auth_pdus, time_now)}
         return 200, res
 

@@ -41,15 +41,14 @@ impl RustHandlers {
 
         // The Twisted reactor, used both to drive our Tokio runtime and to
         // marshal database work back onto the reactor thread.
-        let reactor: Py<PyAny> = homeserver.call_method0("get_reactor")?.unbind();
+        let reactor = homeserver.call_method0("get_reactor")?.unbind();
 
         // hs.get_datastores().main.db_pool
-        let db_pool_py: Py<PyAny> = homeserver
+        let db_pool_py = homeserver
             .call_method0("get_datastores")?
             .getattr("main")?
-            .getattr("db_pool")?
-            .unbind();
-        let db_pool = PythonDatabasePoolWrapper::new(db_pool_py, reactor.clone_ref(py));
+            .getattr("db_pool")?;
+        let db_pool = PythonDatabasePoolWrapper::new(&db_pool_py, reactor.clone_ref(py))?;
 
         // Store is shared across all of the handlers so let's use an `Arc`
         let store = Arc::new(Store {

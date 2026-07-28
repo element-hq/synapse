@@ -31,6 +31,7 @@ import sys
 import time
 import urllib.request
 from os import path
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -257,10 +258,16 @@ def _prepare() -> None:
     subprocess.check_output(["poetry", "version", new_version])
 
     # Update config schema $id.
-    schema_file = "schema/synapse-config.schema.yaml"
+    schema_file_path = Path("schema/synapse-config.schema.yaml")
     major_minor_version = ".".join(new_version.split(".")[:2])
     url = f"https://element-hq.github.io/synapse/schema/synapse/v{major_minor_version}/synapse-config.schema.json"
-    subprocess.check_output(["sed", "-i", f"0,/^\\$id: .*/s||$id: {url}|", schema_file])
+    # Find/replace the `$id: ...` line in `schema/synapse-config.schema.yaml` with a new
+    # unique identifier for this release
+    schema_file_content = schema_file_path.read_text()
+    new_schema_file_content = re.sub(
+        r"^\$id: .*", f"$id: {url}", schema_file_content, count=1, flags=re.MULTILINE
+    )
+    schema_file_path.write_text(new_schema_file_content)
 
     # Generate changelogs.
     generate_and_write_changelog(synapse_repo, current_version, new_version)
@@ -366,19 +373,10 @@ def _tag(gh_token: str | None) -> None:
         )
         click.get_current_context().abort()
 
-    # Get the appropriate changelogs and tag.
-    changes = get_changes_for_version(current_version)
+    # We simply point to the changelog instead of duplicating the content into the git tag/release
+    tag_message = f"Changelog: https://github.com/element-hq/synapse/blob/{repo.active_branch.name}/CHANGES.md"
 
-    click.echo_via_pager(changes)
-    if click.confirm("Edit text?", default=False):
-        edited_changes = click.edit(changes, require_save=False)
-        # This assert is for mypy's benefit. click's docs are a little unclear, but
-        # when `require_save=False`, not saving the temp file in the editor returns
-        # the original string.
-        assert edited_changes is not None
-        changes = edited_changes
-
-    repo.create_tag(tag_name, message=changes, sign=True)
+    repo.create_tag(tag_name, message=tag_message, sign=True)
 
     if not click.confirm("Push tag to GitHub?", default=True):
         print("")
@@ -413,7 +411,7 @@ def _tag(gh_token: str | None) -> None:
     release = gh_repo.create_git_release(
         tag=tag_name,
         name=tag_name,
-        message=changes,
+        message=tag_message,
         draft=True,
         prerelease=current_version.is_prerelease,
     )
@@ -738,6 +736,7 @@ def announce(_gh_token: str | None) -> None:
 def _announce() -> None:
     """Generate markdown to announce the release."""
 
+    synapse_repo = get_repo_and_check_clean_checkout()
     current_version = get_package_version()
     tag_name = f"v{current_version}"
     is_rc = "rc" in tag_name
@@ -757,7 +756,7 @@ Hi everyone. Synapse {current_version} has just been released.
         )
 
     release_text += f"""
-[notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
+[notes](https://github.com/element-hq/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md) | \
 [docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
@@ -806,7 +805,6 @@ def full(gh_token: str) -> None:
     _prepare()
 
     click.echo("Deploy to matrix.org and ensure that it hasn't fallen over.")
-    click.echo("Remember to silence the alerts to prevent alert spam.")
     click.confirm("Deployed?", abort=True)
 
     click.echo("\n*** tag ***")

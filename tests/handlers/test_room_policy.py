@@ -12,17 +12,22 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
+from http import HTTPStatus
 from unittest import mock
 
 import signedjson
+from parameterized import parameterized
 from signedjson.key import encode_verify_key_base64, get_verify_key
 
+from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
+from twisted.web.client import Agent
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import HttpResponseException, SynapseError
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
+from synapse.federation.transport.client import TransportLayerClient
 from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
@@ -31,7 +36,7 @@ from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.test_utils import event_injection
+from tests.test_utils import FakeResponse, event_injection
 from tests.test_utils.event_builders import make_test_event
 
 
@@ -546,3 +551,92 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             if ev["event_id"] == event_id:
                 return ev
         return None
+
+    def _mock_policy_server_response_with_http_error(
+        self,
+        status: HTTPStatus,
+        error_body: JsonDict,
+    ) -> None:
+        """
+        Make the policy server reply to its `/sign` endpoint with an error.
+
+        Args:
+            status: the HTTP status to return
+            error_body: the JSON error body to return
+        """
+
+        def request(
+            method: bytes,
+            uri: bytes,
+            headers: object = None,
+            bodyProducer: object = None,
+        ) -> "defer.Deferred":
+            # For our test, we don't expect any other outbound request
+            assert b"/_matrix/policy/v1/sign" in uri, (
+                f"unexpected outbound request to {uri!r}"
+            )
+            return defer.succeed(
+                FakeResponse.json(
+                    code=status,
+                    payload=error_body,
+                )
+            )
+
+        fake_agent = mock.create_autospec(Agent, spec_set=True)
+        fake_agent.request.side_effect = request
+        self.handler._federation_client.transport_layer = TransportLayerClient(self.hs)
+        self.hs.get_federation_http_client().agent = fake_agent
+
+    @parameterized.expand(
+        (
+            (
+                HTTPStatus.IM_A_TEAPOT,
+                {"errcode": "M_FORBIDDEN", "error": "No coffee here"},
+                HTTPStatus.IM_A_TEAPOT,
+                {"errcode": "M_FORBIDDEN", "error": "No coffee here"},
+            ),
+            # This case is https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq
+            # The error is rewritten for safety.
+            (
+                HTTPStatus.UNAUTHORIZED,
+                {"errcode": "M_UNKNOWN_TOKEN", "error": "unknown token"},
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "errcode": "M_UNKNOWN",
+                    "error": "unknown token",
+                },
+            ),
+        )
+    )
+    def test_policy_server_error_bubbling_to_client(
+        self,
+        policy_server_error_status: HTTPStatus,
+        policy_server_error_body: JsonDict,
+        expected_client_facing_error_status: HTTPStatus,
+        expected_client_facing_error_body: JsonDict,
+    ) -> None:
+        """
+        Tests how errors from the policy server are forwarded back to clients.
+
+        Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq
+        """
+
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+
+        # Mock the policy server (at the HTTP level) to return
+        # the configured error
+        self._mock_policy_server_response_with_http_error(
+            policy_server_error_status,
+            policy_server_error_body,
+        )
+
+        response_body = self.helper.send_event(
+            self.room_id,
+            "m.room.message",
+            {"body": "honk", "msgtype": "m.text"},
+            tok=self.creator_token,
+            expect_code=expected_client_facing_error_status,
+        )
+
+        self.assertEqual(response_body, expected_client_facing_error_body)

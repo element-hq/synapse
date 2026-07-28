@@ -37,6 +37,7 @@ from typing import (
     MutableMapping,
     NoReturn,
     Optional,
+    Sequence,
     TypedDict,
     TypeVar,
     Union,
@@ -101,6 +102,47 @@ JsonDict = dict[str, Any]
 JsonMapping = Mapping[str, Any]
 # A JSON-serialisable object.
 JsonSerializable = object
+
+StrictJsonValue = Union[
+    None,
+    bool,
+    int,
+    float,
+    str,
+    "StrictJsonList",
+    "StrictJsonDict",
+    "StrictJsonSequence",
+    "StrictJsonMapping",
+]
+"""
+Type that represents any valid JSON value, recursively.
+Does not fall back to `Any` at deeper levels, which makes it more safe than `JsonValue`.
+
+Can also represent immutable mapping and tuple types.
+(Not sure if we would be better splitting them out.)
+"""
+
+StrictJsonList = list["StrictJsonValue"]
+"""
+Type that represents a list of any valid JSON value.
+"""
+
+StrictJsonDict = dict[str, "StrictJsonValue"]
+"""
+Type that represents a dict with string keys (as per JSON) and values of any
+valid JSON type.
+Does not fall back to `Any` at deeper levels, which makes it more safe than `JsonDict`.
+"""
+
+StrictJsonSequence = Sequence["StrictJsonValue"]
+"""
+Like `StrictJsonList` but using a `Sequence` as the collection type.
+"""
+
+StrictJsonMapping = Mapping[str, "StrictJsonValue"]
+"""
+Like `StrictJsonDict` but using `Mapping` as the collection type.
+"""
 
 # Collection[str] that does not include str itself; str being a Sequence[str]
 # is very misleading and results in bugs.

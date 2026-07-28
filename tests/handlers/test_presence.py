@@ -19,7 +19,7 @@
 #
 #
 import itertools
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock, call
 
 from parameterized import parameterized
@@ -50,6 +50,9 @@ from synapse.handlers.presence import (
     FEDERATION_PING_INTERVAL,
     FEDERATION_TIMEOUT,
     PresenceHandler,
+    WorkerPresenceHandler,
+    get_interested_parties,
+    get_interested_remotes,
     handle_timeout,
     handle_update,
 )
@@ -998,6 +1001,125 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
             presence_handler.get_state(UserID.from_string(self.user_id))
         )
         self.assertEqual(state.state, sync_state)
+
+    @unittest.override_config({"presence": {"enabled": False}})
+    def test_restored_presence_flushed_offline_when_presence_disabled(self) -> None:
+        """If presence is disabled, any non-offline presence states left in the
+        database from when presence was enabled should be marked as offline at
+        startup, and the updates streamed out to clients.
+        """
+        main_store = self.hs.get_datastores().main
+        before_token = main_store.get_current_presence_token()
+
+        # Get the handler, which schedules the startup flush.
+        presence_handler = self.hs.get_presence_handler()
+
+        # Fire pending `call_when_running` hooks and let the flush complete.
+        self.reactor.run()
+        self.reactor.advance(0)
+
+        # The user should now be offline, both in memory and in the database.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(self.user_id))
+        )
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
+        db_state = self.get_success(main_store.get_presence_for_users([self.user_id]))[
+            self.user_id
+        ]
+        self.assertEqual(db_state.state, PresenceState.OFFLINE)
+
+        # The flush must advance the presence stream so that syncing clients
+        # are sent the offline updates.
+        self.assertGreater(main_store.get_current_presence_token(), before_token)
+
+
+class PresenceDisabledSyncTestCase(unittest.HomeserverTestCase):
+    """Tests that stale presence states left over from when presence was
+    enabled reach clients over /sync, and that the startup flush marks them as
+    offline and sends the offline updates down /sync too.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    @unittest.override_config({"presence": {"enabled": False}})
+    def test_stale_presence_flushed_offline_and_sent_on_sync(self) -> None:
+        user1 = self.register_user("alice", "pass")
+        user1_tok = self.login(user1, "pass")
+        user2 = self.register_user("bob", "pass")
+        user2_tok = self.login(user2, "pass")
+
+        room_id = self.helper.create_room_as(user1, tok=user1_tok)
+        self.helper.join(room_id, user2, tok=user2_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=user2_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch = channel.json_body["next_batch"]
+
+        # Seed a stale online presence state for user1, left over from when
+        # presence was enabled: in the database, and in the presence handler's
+        # in-memory state (which at startup is preloaded from the database).
+        now = self.clock.time_msec()
+        stale_state = UserPresenceState(
+            user_id=user1,
+            state=PresenceState.ONLINE,
+            last_active_ts=now,
+            last_federation_update_ts=now,
+            last_user_sync_ts=now,
+            status_msg=None,
+            currently_active=True,
+        )
+        main_store = self.hs.get_datastores().main
+        self.get_success(main_store.update_presence([stale_state]))
+
+        presence_handler = self.hs.get_presence_handler()
+        assert isinstance(presence_handler, PresenceHandler)
+        presence_handler.user_to_current_state[user1] = stale_state
+
+        # The stale state comes down user2's incremental sync, even though
+        # presence is disabled.
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=user2_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        presence_events = channel.json_body["presence"]["events"]
+        self.assertEqual(
+            [(e["sender"], e["content"]["presence"]) for e in presence_events],
+            [(user1, PresenceState.ONLINE)],
+        )
+        next_batch = channel.json_body["next_batch"]
+
+        # Run the startup flush, as scheduled when the presence writer starts
+        # up with presence disabled.
+        self.get_success(presence_handler._mark_stale_presence_as_offline())
+
+        # The stale state should have been marked offline in the database...
+        db_state = self.get_success(main_store.get_presence_for_users([user1]))[user1]
+        self.assertEqual(db_state.state, PresenceState.OFFLINE)
+
+        # ... and the offline update also comes down user2's sync.
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=user2_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        presence_events = channel.json_body["presence"]["events"]
+        self.assertEqual(
+            [(e["sender"], e["content"]["presence"]) for e in presence_events],
+            [(user1, PresenceState.OFFLINE)],
+        )
+
+        # Once caught up, further syncs include no presence.
+        next_batch = channel.json_body["next_batch"]
+        channel = self.make_request(
+            "GET", f"/sync?since={next_batch}", access_token=user2_tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body.get("presence", {}).get("events", []), [])
 
 
 # Timer values used by `PresenceConfigurableTimersTestCase`, all larger than
@@ -2320,3 +2442,391 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
 
         return event
+
+
+class PresenceExcludeRoomsTestCase(unittest.HomeserverTestCase):
+    """Tests that `exclude_rooms_from_presence` stops presence being routed
+    between users solely because they share an excluded room."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.hs = hs
+        self.store = hs.get_datastores().main
+        self.presence_router = hs.get_presence_router()
+        self.presence_handler = hs.get_presence_handler()
+
+        self.user1 = self.register_user("user1", "pass")
+        self.token1 = self.login("user1", "pass")
+        self.user2 = self.register_user("user2", "pass")
+        self.token2 = self.login("user2", "pass")
+
+    def test_excluded_rooms_not_routed(self) -> None:
+        # Two rooms that user1 is joined to.
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+
+        state = UserPresenceState.default(self.user1)
+
+        # Without any exclusions both rooms are interested in user1's presence.
+        room_ids_to_states, users_to_states = self.get_success(
+            get_interested_parties(self.store, self.presence_router, [state])
+        )
+        self.assertIn(excluded_room, room_ids_to_states)
+        self.assertIn(shared_room, room_ids_to_states)
+
+        # Excluding one room drops it as an interested party, but the other
+        # (non-excluded) room still routes presence...
+        room_ids_to_states, users_to_states = self.get_success(
+            get_interested_parties(
+                self.store,
+                self.presence_router,
+                [state],
+                frozenset({excluded_room}),
+            )
+        )
+        self.assertNotIn(excluded_room, room_ids_to_states)
+        self.assertIn(shared_room, room_ids_to_states)
+
+        # ...and the user always receives their own presence, even when all of
+        # their rooms are excluded.
+        room_ids_to_states, users_to_states = self.get_success(
+            get_interested_parties(
+                self.store,
+                self.presence_router,
+                [state],
+                frozenset({excluded_room, shared_room}),
+            )
+        )
+        self.assertNotIn(excluded_room, room_ids_to_states)
+        self.assertNotIn(shared_room, room_ids_to_states)
+        self.assertIn(self.user1, users_to_states)
+
+    @override_config({"exclude_rooms_from_presence": ["!excluded:test"]})
+    def test_config_populates_handler(self) -> None:
+        """The config option should be plumbed through to the presence handler
+        and the presence event source as a frozenset."""
+        self.assertEqual(
+            self.presence_handler._rooms_to_exclude_from_presence,
+            frozenset({"!excluded:test"}),
+        )
+
+        event_source = self.hs.get_event_sources().sources.presence
+        self.assertEqual(
+            event_source._rooms_to_exclude_from_presence,
+            frozenset({"!excluded:test"}),
+        )
+
+    def test_is_visible_respects_excluded_rooms(self) -> None:
+        """`is_visible` (which drives the read side of /sync) should not
+        consider two users to share presence solely via an excluded room."""
+        user1 = UserID.from_string(self.user1)
+        user2 = UserID.from_string(self.user2)
+
+        # A single shared room: the two users can see each other's presence.
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(excluded_room, self.user2, tok=self.token2)
+
+        self.assertTrue(
+            self.get_success(self.presence_handler.is_visible(user2, user1))
+        )
+
+        # Excluding the only shared room hides presence between them.
+        self.presence_handler._rooms_to_exclude_from_presence = frozenset(
+            {excluded_room}
+        )
+        self.assertFalse(
+            self.get_success(self.presence_handler.is_visible(user2, user1))
+        )
+
+        # But a second, non-excluded shared room restores visibility.
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(shared_room, self.user2, tok=self.token2)
+        self.assertTrue(
+            self.get_success(self.presence_handler.is_visible(user2, user1))
+        )
+
+    def test_get_interested_remotes_respects_excluded_rooms(self) -> None:
+        """The federation fan-out side (`get_interested_remotes`) must not route
+        presence to servers reached solely via an excluded room."""
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        state = UserPresenceState.default(self.user1)
+
+        def hosts_for(excluded: frozenset) -> set:
+            result = self.get_success(
+                get_interested_remotes(
+                    self.store, self.presence_router, [state], excluded
+                )
+            )
+            hosts: set[str] = set()
+            for room_hosts, _ in result:
+                hosts.update(room_hosts)
+            return hosts
+
+        # The local server is a host in the room (all members are local here),
+        # so presence would be routed there...
+        self.assertIn("test", hosts_for(frozenset()))
+        # ...but excluding the only room removes it as a source of destinations.
+        self.assertNotIn("test", hosts_for(frozenset({excluded_room})))
+
+
+class PresenceGetNewEventsStreamTestCase(unittest.HomeserverTestCase):
+    """Tests the incremental (`from_key`) branch of
+    `PresenceEventSource.get_new_events`, which decides which updated users are
+    interesting to the syncing user by intersecting their cached room sets.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.presence_handler = hs.get_presence_handler()
+        self.event_source = hs.get_event_sources().sources.presence
+
+        self.user1 = self.register_user("user1", "pass")
+        self.token1 = self.login("user1", "pass")
+        self.user2 = self.register_user("user2", "pass")
+        self.token2 = self.login("user2", "pass")
+        self.user3 = self.register_user("user3", "pass")
+        self.token3 = self.login("user3", "pass")
+
+    def _set_presence(self, user_id: str, state: str = "online") -> None:
+        self.get_success(
+            self.presence_handler.set_state(
+                UserID.from_string(user_id), "dev", {"presence": state}
+            )
+        )
+
+    def _updated_users_seen_by(self, user_id: str, from_key: int) -> set[str]:
+        states, _ = self.get_success(
+            self.event_source.get_new_events(
+                user=UserID.from_string(user_id), from_key=from_key
+            )
+        )
+        return {state.user_id for state in states}
+
+    def test_incremental_interest(self) -> None:
+        """A syncing user sees updates from users they share a room with (and
+        themselves), but not from strangers."""
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(shared_room, self.user2, tok=self.token2)
+        # user3 is in an unrelated room.
+        self.helper.create_room_as(self.user3, tok=self.token3)
+
+        from_key = self.event_source.get_current_key()
+        self._set_presence(self.user1)
+        self._set_presence(self.user2)
+        self._set_presence(self.user3)
+
+        seen = self._updated_users_seen_by(self.user2, from_key)
+        self.assertIn(self.user1, seen)
+        self.assertIn(self.user2, seen)  # always sees own updates
+        self.assertNotIn(self.user3, seen)
+
+    def test_incremental_interest_excluded_room(self) -> None:
+        """Sharing only an excluded room does not make an updated user
+        interesting; sharing an additional normal room does."""
+        excluded_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(excluded_room, self.user2, tok=self.token2)
+
+        self.event_source._rooms_to_exclude_from_presence = frozenset({excluded_room})
+
+        from_key = self.event_source.get_current_key()
+        self._set_presence(self.user1, "online")
+        seen = self._updated_users_seen_by(self.user2, from_key)
+        self.assertNotIn(self.user1, seen)
+
+        # A second, non-excluded shared room restores interest. (Use a
+        # different presence state, as repeating the same one would not
+        # generate a new update.)
+        shared_room = self.helper.create_room_as(self.user1, tok=self.token1)
+        self.helper.join(shared_room, self.user2, tok=self.token2)
+
+        from_key = self.event_source.get_current_key()
+        self._set_presence(self.user1, "unavailable")
+        seen = self._updated_users_seen_by(self.user2, from_key)
+        self.assertIn(self.user1, seen)
+
+
+class WorkerPresenceThrottleTestCase(BaseMultiWorkerStreamTestCase):
+    """Tests that sync workers suppress the per-sync-request presence updates
+    that the presence writer would discard anyway, while relaying genuine
+    state changes immediately."""
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = f"@throttled:{hs.config.server.server_name}"
+        self.user_id_obj = UserID.from_string(self.user_id)
+        self.device_id = "dev-1"
+        # In this test setup the main process is the presence writer.
+        self.writer_handler = hs.get_presence_handler()
+
+    def _make_sync_worker(self) -> tuple[Any, list, list]:
+        """Create a sync worker whose proxied presence calls are recorded."""
+        worker = self.make_worker_hs(
+            "synapse.app.generic_worker", {"worker_name": "synchrotron"}
+        )
+        presence = worker.get_presence_handler()
+        assert isinstance(presence, WorkerPresenceHandler)
+
+        set_state_calls: list = []
+        bump_calls: list = []
+        real_set_state = presence._set_state_client
+        real_bump = presence._bump_active_client
+
+        async def recording_set_state(**kwargs: Any) -> Any:
+            set_state_calls.append(kwargs)
+            return await real_set_state(**kwargs)
+
+        async def recording_bump(**kwargs: Any) -> Any:
+            bump_calls.append(kwargs)
+            return await real_bump(**kwargs)
+
+        presence._set_state_client = recording_set_state
+        presence._bump_active_client = recording_bump
+        return presence, set_state_calls, bump_calls
+
+    def _sync(self, presence: Any, state: str = PresenceState.ONLINE) -> Any:
+        # Note: `get_success` only advances the fake clock by tiny epsilon steps
+        # while pumping the replication traffic; the throttle window is
+        # time-sensitive and these tests advance time explicitly.
+        return self.get_success(
+            presence.user_syncing(self.user_id, self.device_id, True, state),
+        )
+
+    def test_repeated_syncs_are_throttled(self) -> None:
+        presence, set_state_calls, _ = self._make_sync_worker()
+
+        # Several syncs in quick succession only relay one set_state.
+        for _ in range(3):
+            self._sync(presence)
+        self.assertEqual(len(set_state_calls), 1)
+
+        # The user did come online on the writer.
+        state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        # Once the relay window has passed, the next sync relays again.
+        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
+        self._sync(presence)
+        self.assertEqual(len(set_state_calls), 2)
+
+    def test_state_changes_are_relayed_immediately(self) -> None:
+        presence, set_state_calls, _ = self._make_sync_worker()
+
+        self._sync(presence, PresenceState.ONLINE)
+        self._sync(presence, PresenceState.UNAVAILABLE)
+        self._sync(presence, PresenceState.ONLINE)
+        self.assertEqual(len(set_state_calls), 3)
+
+        # A repeat of the current state within the window is suppressed.
+        self._sync(presence, PresenceState.ONLINE)
+        self.assertEqual(len(set_state_calls), 3)
+
+    def test_resends_after_device_stops_syncing(self) -> None:
+        """After a USER_SYNC stop is sent the writer may time the user out, so
+        a device that reconnects within the window must be relayed afresh."""
+        presence, set_state_calls, _ = self._make_sync_worker()
+
+        with self._sync(presence):
+            pass
+        self.assertEqual(len(set_state_calls), 1)
+
+        # Wait for the going-offline grace period to elapse: USER_SYNC stop is
+        # sent and the throttle entry evicted. The writer then times the user
+        # out to offline. Advance in steps (rather than one jump) so the
+        # replicated stop command is delivered before the writer's timeout
+        # loop fires (which only starts 30s after startup).
+        for _ in range(4):
+            self.reactor.advance(12)
+        state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
+        # Reconnecting relays the state immediately, even though the presence
+        # value is unchanged from the last relayed one.
+        self._sync(presence)
+        self.assertEqual(len(set_state_calls), 2)
+        state = self.get_success(self.writer_handler.get_state(self.user_id_obj))
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+    def test_bumps_are_throttled(self) -> None:
+        presence, set_state_calls, bump_calls = self._make_sync_worker()
+
+        # While we recently relayed an online state, bumps are suppressed.
+        self._sync(presence, PresenceState.ONLINE)
+        for _ in range(3):
+            self.get_success(
+                presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+            )
+        self.assertEqual(len(bump_calls), 0)
+
+        # After the window passes, a bump goes through (and then suppresses
+        # further bumps).
+        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
+        for _ in range(2):
+            self.get_success(
+                presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+            )
+        self.assertEqual(len(bump_calls), 1)
+
+    def test_explicit_set_state_always_relayed_and_resets(self) -> None:
+        """An explicit (non-sync) set_state is always relayed, and resets the
+        throttle so the next sync-driven update is relayed afresh."""
+        presence, set_state_calls, _ = self._make_sync_worker()
+
+        self._sync(presence, PresenceState.ONLINE)
+        self.assertEqual(len(set_state_calls), 1)
+
+        # An explicit update of the same state within the window still goes
+        # through (it isn't sync-driven)...
+        self.get_success(
+            presence.set_state(
+                self.user_id_obj,
+                self.device_id,
+                {"presence": PresenceState.ONLINE},
+            ),
+        )
+        self.assertEqual(len(set_state_calls), 2)
+
+        # ...and the following sync-driven update is relayed rather than
+        # suppressed, re-establishing the writer's sync timestamps.
+        self._sync(presence, PresenceState.ONLINE)
+        self.assertEqual(len(set_state_calls), 3)
+
+    def test_bump_after_non_online_state_goes_through(self) -> None:
+        presence, set_state_calls, bump_calls = self._make_sync_worker()
+
+        # The user is unavailable; a bump may un-idle them so it must not be
+        # suppressed.
+        self._sync(presence, PresenceState.UNAVAILABLE)
+        self.get_success(
+            presence.bump_presence_active_time(self.user_id_obj, self.device_id),
+        )
+        self.assertEqual(len(bump_calls), 1)
+
+    @override_config({"presence": {"sync_online_timeout": "12s"}})
+    def test_relay_interval_scales_with_config(self) -> None:
+        """The throttle window is derived from the configurable presence timers,
+        so it stays comfortably below a lowered sync online timeout rather than
+        being a hardcoded 25s (which would make users flap)."""
+        presence, set_state_calls, _ = self._make_sync_worker()
+
+        # 5/6 of min(12s sync online timeout, 60s default last-active
+        # granularity).
+        self.assertEqual(presence._sync_presence_relay_interval, 10 * 1000)
+
+        # A repeat within the (now shorter) window is still suppressed...
+        self._sync(presence)
+        self._sync(presence)
+        self.assertEqual(len(set_state_calls), 1)
+
+        # ...and once it passes, the next sync relays again.
+        self.reactor.advance(presence._sync_presence_relay_interval / 1000 + 1)
+        self._sync(presence)
+        self.assertEqual(len(set_state_calls), 2)

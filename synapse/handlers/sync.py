@@ -1759,9 +1759,19 @@ class SyncHandler:
             await self._generate_sync_entry_for_account_data(sync_result_builder)
 
         # Presence data is included if the server has it enabled and not filtered out.
-        include_presence_data = bool(
-            self.hs_config.server.presence_enabled
-            and not sync_config.filter_collection.blocks_all_presence()
+        presence_enabled = bool(self.hs_config.server.presence_enabled)
+        if not presence_enabled and since_token is not None:
+            # Even with presence disabled we send down any presence updates the
+            # client hasn't yet seen, so that the "mark everyone as offline"
+            # updates written when presence was disabled reach clients that
+            # would otherwise show the old presence states forever. The stream
+            # doesn't advance while presence is disabled, so once clients have
+            # caught up this check stops any further presence work.
+            presence_enabled = (
+                since_token.presence_key < sync_result_builder.now_token.presence_key
+            )
+        include_presence_data = (
+            presence_enabled and not sync_config.filter_collection.blocks_all_presence()
         )
         # Device list updates are sent if a since token is provided.
         include_device_list_updates = bool(since_token and since_token.device_list_key)

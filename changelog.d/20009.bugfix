@@ -1,0 +1,1 @@
+Fix `HomeServer.shutdown()` not being able to cleanly shutdown the homeserver (caused by Rust code referencing Python `DatabasePool`).

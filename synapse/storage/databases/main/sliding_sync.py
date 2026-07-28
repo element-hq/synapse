@@ -104,6 +104,14 @@ class SlidingSyncStore(SQLBaseStore):
             where_clause="last_used_ts IS NOT NULL",
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_connection_lazy_members_conn_pos_idx",
+            index_name="sliding_sync_connection_lazy_members_conn_pos_idx",
+            table="sliding_sync_connection_lazy_members",
+            columns=("connection_position",),
+            where_clause="connection_position IS NOT NULL",
+        )
+
         if self.hs.config.worker.run_background_tasks:
             self.clock.looping_call(
                 self.delete_old_sliding_sync_connections,

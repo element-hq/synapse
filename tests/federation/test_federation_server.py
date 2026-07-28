@@ -27,7 +27,7 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import FederationError
+from synapse.api.errors import Codes, FederationError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.crypto.event_signing import add_hashes_and_signatures
@@ -38,7 +38,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -92,6 +92,293 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+
+class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):
+    """
+    Regression tests for room confusion in /get_missing_events
+    https://github.com/element-hq/synapse/security/advisories/GHSA-27p5-4f45-gx76
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        # Local user
+        self.local_user_id = self.register_user("alice", "pass")
+        self.local_user_token = self.login("alice", "pass")
+        self.local_user = UserID.from_string(self.local_user_id)
+
+        # Create 2 rooms (one with the remote server, one without).
+        # - The remote server will be in this room
+        self.room_allowed = self.helper.create_room_as(
+            self.local_user_id, tok=self.local_user_token
+        )
+        self.inject_room_member(
+            self.room_allowed, f"@remote:{self.OTHER_SERVER_NAME}", "join"
+        )
+        # - The remote server will _not_ be in this room
+        self.room_blocked = self.helper.create_room_as(
+            self.local_user_id, tok=self.local_user_token
+        )
+
+        # Insert a linear chain of events in both rooms
+        self.room_allowed_event_ids = self.helper.send_messages(
+            self.room_allowed, num_events=5, tok=self.local_user_token
+        )
+        self.room_blocked_event_ids = self.helper.send_messages(
+            self.room_blocked, num_events=5, tok=self.local_user_token
+        )
+
+    def _extract_returned_event_ids(self, json_body: JsonDict) -> set[str]:
+        """
+        Given the response body of `/get_missing_events`, return the event IDs
+        of the events that were returned in the response.
+        This only includes event IDs from `self.room_allowed_event_ids` and
+        `self.room_blocked_event_ids`; other events are ignored.
+
+        As the federation PDU format doesn't include event IDs
+        (at least not for every room version), we match on the
+        `(room_id, content.body, prev_events)` triple against the events
+        we sent in the setup.
+        """
+        store = self.hs.get_datastores().main
+        events = self.get_success(
+            store.get_events_as_list(
+                list(self.room_allowed_event_ids) + list(self.room_blocked_event_ids)
+            )
+        )
+        # (room_id, content.body, prev_events) -> event ID
+        event_lookup: dict[tuple[str, str, tuple[str, ...]], str] = {}
+        for event in events:
+            key = (
+                event.room_id,
+                event.content["body"],
+                tuple(event.prev_event_ids()),
+            )
+            event_lookup[key] = event.event_id
+
+        returned_event_ids: set[str] = set()
+        for pdu in json_body["events"]:
+            key = (
+                pdu.get("room_id"),
+                pdu.get("content", {}).get("body"),
+                tuple(pdu.get("prev_events", [])),
+            )
+            event_id = event_lookup.get(key)
+            if event_id is None:
+                # Not one of the events we created; ignore it.
+                continue
+            returned_event_ids.add(event_id)
+        return returned_event_ids
+
+    def test_get_missing_events_returns_events_from_correct_room(self) -> None:
+        """
+        Tests the happy path when `latest_events` and `earliest_events`
+        are both in the correct room.
+
+                returned
+                  |
+                  v
+            e1 <- e2 <- e3 <- e4 <- e5
+            ^           ^
+            |           |
+            earliest    latest
+
+        Not a regression test; I'm just filling a gap in our (in-repo) testing
+        as far as I can tell.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [self.room_allowed_event_ids[1]],
+                "latest_events": [self.room_allowed_event_ids[3]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            {self.room_allowed_event_ids[2]},
+        )
+
+    def test_get_missing_events_with_empty_earliest_events(self) -> None:
+        """
+        Tests that `/get_missing_events`, when given no `earliest_events`,
+        walks back to the start of the room, capped at `limit`.
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [],
+                "latest_events": [self.room_allowed_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            set(self.room_allowed_event_ids[:-1]),
+        )
+
+    def test_get_missing_events_with_unknown_earliest_event(self) -> None:
+        """
+        Tests that `/get_missing_events` ignores unknown event IDs given in
+        `earliest_events`.
+
+        This makes sense as the `earliest_events` are intuitively
+        'events to stop at' when walking backwards.
+        Since we don't know about those events, we don't use them as stopping conditions.
+        (In other words, this falls back to the same behaviour as
+        `test_get_missing_events_with_empty_earliest_events`.)
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": ["$someUnknownEventId"],
+                "latest_events": [self.room_allowed_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            set(self.room_allowed_event_ids[:-1]),
+        )
+
+    def test_get_missing_events_with_no_latest_event(self) -> None:
+        """
+        Tests that when the `/get_missing_events` request references
+        no events in `latest_events`, the response is 200 OK
+        with an empty `events` list.
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": ["$someOtherUnknownEventId"],
+                "latest_events": [],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_with_unknown_latest_event(self) -> None:
+        """
+        Tests that when the `/get_missing_events` request references
+        unknown events in `latest_events`, the response is 200 OK
+        with an empty `events` list.
+
+        I imagine this makes sense as you might request several events
+        in `latest_events` to start walking back from and we need to be
+        tolerant of the fact that servers don't always know about every event.
+
+        (Not a regression test; documents pre-existing behaviour)
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": ["$someOtherUnknownEventId"],
+                "latest_events": ["$someUnknownEventId"],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_ignores_events_from_other_room(self) -> None:
+        """
+        Tests that providing `earliest_events` and `latest_events` from the wrong room
+        treats them the same as being unknown.
+
+        From `test_get_missing_events_with_unknown_latest_event` we established that
+        unknown events in `latest_events` get skipped (to the point of returning an empty
+        `events: []` response)
+
+        From `test_get_missing_events_with_unknown_earliest_event` we established that
+        unknown events in `earliest_events` get ignored as stopping conditions.
+
+        This regression test previously failed.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [self.room_blocked_event_ids[0]],
+                "latest_events": [self.room_blocked_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_skips_latest_events_from_other_room(self) -> None:
+        """
+        Tests that providing `latest_events` from the wrong room
+        treats it as being unknown, even if `earliest_events` are from the correct
+        room.
+
+        From `test_get_missing_events_with_unknown_latest_event` we established that
+        unknown events in `latest_events` get skipped (to the point of returning an empty
+        `events: []` response)
+
+        This regression test previously failed.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                "earliest_events": [self.room_allowed_event_ids[0]],
+                "latest_events": [self.room_blocked_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"events": []})
+
+    def test_get_missing_events_ignores_earliest_events_from_other_room(self) -> None:
+        """
+        Tests that providing `earliest_events` from the wrong room causes those
+        events to be ignored as stopping conditions,
+        even though `latest_events` are from the correct room.
+
+        From `test_get_missing_events_with_unknown_earliest_event` we established that
+        unknown events in `earliest_events` get ignored as stopping conditions.
+
+        This test was previously fine, but is an obvious extra case.
+        """
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_allowed}",
+            content={
+                # Use [-3] here as we want to see if the walk-back algorithm
+                # confuses depth (topological ordering) across the two rooms.
+                "earliest_events": [self.room_blocked_event_ids[-3]],
+                "latest_events": [self.room_allowed_event_ids[-1]],
+                "limit": 10,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(
+            self._extract_returned_event_ids(channel.json_body),
+            set(self.room_allowed_event_ids[:-1]),
+        )
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:
@@ -324,6 +611,95 @@ class StateQueryTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
 
 
+class TimestampToEventTests(unittest.FederatingHomeserverTestCase):
+    """Tests for `GET /_matrix/federation/v1/timestamp_to_event/<roomID>`."""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # Create a room and join the remote server so it's allowed to query
+        user = self.register_user("u1", "pass")
+        tok = self.login("u1", "pass")
+        self.room_id = self.helper.create_room_as(user, tok=tok)
+        # Send one event at time = 1000s
+        self.reactor.advance(1000)
+        self.event_at_1000 = self.helper.send_messages(self.room_id, 1, tok=tok)[0]
+
+        # Send another event at time = 4000s
+        self.reactor.advance(3000)
+        self.event_at_4000 = self.helper.send_messages(self.room_id, 1, tok=tok)[0]
+
+        # Send another event at time = 8000s
+        self.reactor.advance(4000)
+        self.event_at_8000 = self.helper.send_messages(self.room_id, 1, tok=tok)[0]
+
+        super().prepare(reactor, clock, hs)
+
+    @parameterized.expand(
+        [
+            # Query backwards from 5000s, should find the event at 4000s
+            (5000000, "b"),
+            # Query forwards from 1100s, should find the event at 4000s
+            (1100000, "f"),
+        ]
+    )
+    def test_happy_path(self, ts: int, dir: str) -> None:
+        """
+        Tests that a server in the room gets 200 OK
+        with the closest event IDs as requested for a given timestamp,
+        in both forward and backward directions.
+        """
+        # Join the remote server to the room
+        self.inject_room_member(self.room_id, "@user:" + self.OTHER_SERVER_NAME, "join")
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/timestamp_to_event/{self.room_id}?ts={ts}&dir={dir}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["event_id"], self.event_at_4000)
+
+    @parameterized.expand(
+        [
+            # Query backwards at 0s, no events to be found.
+            (0, "b"),
+            # Query forwards from 8100s, no events to be found.
+            (8100000, "f"),
+        ]
+    )
+    def test_no_matching_event(self, ts: int, dir: str) -> None:
+        """
+        Tests that a 404 / M_NOT_FOUND is returned when no event occurs
+        in the requested direction of a timestamp.
+        """
+        # Join the remote server to the room
+        self.inject_room_member(self.room_id, "@user:" + self.OTHER_SERVER_NAME, "join")
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/timestamp_to_event/{self.room_id}?ts={ts}&dir={dir}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_NOT_FOUND")
+
+    def test_requires_server_in_room(self) -> None:
+        """
+        Tests that a server not in the room is rejected with 403 / M_FORBIDDEN.
+        """
+        # Notably: _don't_ join the remote server to the room
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/timestamp_to_event/{self.room_id}?ts=2000000&dir=b",
+        )
+        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.json_body)
+        self.assertEqual(channel.json_body["errcode"], "M_FORBIDDEN")
+
+
 class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
     servlets = [
         admin.register_servlets,
@@ -471,6 +847,84 @@ class UnstableGetExtremitiesTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.json_body)
         self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
+
+
+class EventAuthFederationTests(unittest.FederatingHomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # Create a local user
+        self.user_id = self.register_user("alice", "password")
+        self.user_tok = self.login("alice", "password")
+
+        # Set up a room and join the remote server to it
+        self.room_id = self.helper.create_room_as(
+            self.user_id,
+            is_public=True,
+            room_version=RoomVersions.V10.identifier,
+            tok=self.user_tok,
+        )
+        self.inject_room_member(
+            self.room_id, f"@remote:{self.OTHER_SERVER_NAME}", Membership.JOIN
+        )
+
+        # Create a known event whose auth chain we can request back.
+        self.event_id = self.helper.send_messages(
+            self.room_id, num_events=1, tok=self.user_tok
+        )[0]
+
+        return super().prepare(reactor, clock, hs)
+
+    def test_event_auth_unknown_event_returns_404(self) -> None:
+        """
+        Tests that requesting the auth chain of an unknown event
+        returns 404 / M_NOT_FOUND.
+        """
+
+        # Request an event that doesn't exist in self.room_id.
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/event_auth/{self.room_id}/$unknownevent",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_FOUND, channel.json_body
+        )
+
+    def test_event_auth_wrong_room_returns_404(self) -> None:
+        """
+        Tests that a request whose `room_id` is wrong for the event
+        acts the same as though it were an unknown event.
+
+        Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-qcjr-46gf-7f4r
+        """
+
+        # Create a second room with its own event.
+        other_room_id = self.helper.create_room_as(
+            self.user_id,
+            is_public=True,
+            room_version=RoomVersions.V10.identifier,
+            tok=self.user_tok,
+        )
+        other_room_event_id = self.helper.send_messages(
+            other_room_id, num_events=1, tok=self.user_tok
+        )[0]
+
+        # Request the chain of other_room_id's event, but pretend it's part of the room
+        # we are in.
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/event_auth/{self.room_id}/{other_room_event_id}",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_FOUND, channel.json_body
+        )
 
 
 class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):

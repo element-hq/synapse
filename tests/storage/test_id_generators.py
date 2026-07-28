@@ -78,7 +78,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         writers: list[str] | None = None,
     ) -> MultiWriterIdGenerator:
         def _create(conn: LoggingDatabaseConnection) -> MultiWriterIdGenerator:
-            return MultiWriterIdGenerator(
+            id_gen = MultiWriterIdGenerator(
                 db_conn=conn,
                 db=self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
@@ -90,6 +90,15 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
                 writers=writers or ["master"],
                 positive=self.positive,
             )
+            # Constructing the generator prunes stale `stream_positions` rows
+            # (writers no longer in the config); commit so that persists for the
+            # next generator we create.
+            #
+            # Note we need to commit manually here as the generator is created
+            # in a `runWithConnection` call, which doesn't automatically
+            # commit/rollback.
+            conn.commit()
+            return id_gen
 
         self.instances[instance_name] = self.get_success_or_raise(
             self.db_pool.runWithConnection(_create)
