@@ -763,6 +763,8 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
     if hs.config.worker.run_background_tasks:
         hs.start_background_tasks()
 
+    hs.set_synapse_started()
+
     if freeze:
         # We now freeze all allocated objects in the hopes that (almost)
         # everything currently allocated are things that will be used for the

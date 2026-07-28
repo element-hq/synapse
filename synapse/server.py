@@ -361,6 +361,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
         self._is_shutdown = False
+        self._is_synapse_started = False
         self._async_shutdown_handlers: list[ShutdownInfo] = []
         self._sync_shutdown_handlers: list[ShutdownInfo] = []
         self._background_processes: set[defer.Deferred[Any | None]] = set()
@@ -425,6 +426,22 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         deferred.addBoth(on_done)
         return deferred
+
+    def set_synapse_started(self) -> None:
+        """Marks this homeserver as having completed its startup sequence.
+
+        Called once, from `synapse.app._base.start`, after listeners are open
+        and background tasks have been registered. Used by `/ready` to report
+        whether the process has finished starting up.
+        """
+        self._is_synapse_started = True
+
+    def is_synapse_started(self) -> bool:
+        """Whether this homeserver has completed its startup sequence.
+
+        See `set_synapse_started`.
+        """
+        return self._is_synapse_started
 
     async def shutdown(self) -> None:
         """
