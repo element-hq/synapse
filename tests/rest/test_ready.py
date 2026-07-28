@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2026 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -52,10 +52,6 @@ class ReadyCheckTests(unittest.HomeserverTestCase):
         )
 
     def test_ready_path_traversal(self) -> None:
-        """
-        Test that the ready endpoint does not allow extra path segments,
-        which could be used to access other resources.
-        """
         channel = self.make_request("GET", "/ready/extra/path", shorthand=False)
 
         self.assertEqual(channel.code, 404)
@@ -76,8 +72,6 @@ class ReadyCheckTests(unittest.HomeserverTestCase):
         )
 
     def test_ready_main_process_ignores_replication_connected(self) -> None:
-        """The main process shouldn't be considered unready just because no
-        workers/redis clients happen to be attached to it right now."""
         self.hs.set_synapse_started()
 
         with mock.patch.object(
