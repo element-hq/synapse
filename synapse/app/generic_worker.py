@@ -55,6 +55,7 @@ from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
+from synapse.rest.ready import ReadyResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
@@ -187,6 +188,7 @@ class GenericWorkerServer(HomeServer):
         resources: dict[str, Resource] = {
             # We always include a health resource.
             "/health": HealthResource(),
+            "/ready": ReadyResource(self),
             "/_synapse/admin": admin_resource,
         }
 
@@ -242,6 +244,9 @@ class GenericWorkerServer(HomeServer):
                         )
                 elif name == "health":
                     # Skip loading, health resource is always included
+                    continue
+                elif name == "ready":
+                    # Skip loading, ready resource is always included
                     continue
 
                 if name == "openid" and "federation" not in res.names:

@@ -66,6 +66,7 @@ from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
+from synapse.rest.ready import ReadyResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
@@ -98,7 +99,10 @@ class SynapseHomeServer(HomeServer):
         site_tag = listener_config.get_site_tag()
 
         # We always include a health resource.
-        resources: dict[str, Resource] = {"/health": HealthResource()}
+        resources: dict[str, Resource] = {
+            "/health": HealthResource(),
+            "/ready": ReadyResource(self),
+        }
 
         for res in listener_config.http_options.resources:
             for name in res.names:
@@ -114,6 +118,9 @@ class SynapseHomeServer(HomeServer):
                     continue
                 if name == "health":
                     # Skip loading, health resource is always included
+                    continue
+                if name == "ready":
+                    # Skip loading, ready resource is always included
                     continue
                 resources.update(self._configure_named_resource(name, res.compress))
 

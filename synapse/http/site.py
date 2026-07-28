@@ -675,7 +675,7 @@ class SynapseRequest(Request):
 
     def _should_log_request(self) -> bool:
         """Whether we should log at INFO that we processed the request."""
-        if self.path == b"/health":
+        if self.path in (b"/health", b"/ready"):
             return False
 
         if self.method == b"OPTIONS":
