@@ -202,14 +202,14 @@ class TransactionManager:
                     txn_id,
                 )
             else:
-                for e_id, r in pdu_responses.items():
-                    if "error" in r:
+                for event_id, pdu_response in pdu_responses.items():
+                    if not isinstance(pdu_response, Mapping) or "error" in pdu_response:
                         logger.warning(
                             "TX [%s] {%s} Remote returned error for %s: %s",
                             destination,
                             txn_id,
-                            e_id,
-                            r,
+                            event_id,
+                            pdu_response,
                         )
 
                 # If modules have requested to be notified about delivered events,
