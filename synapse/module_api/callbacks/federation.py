@@ -17,7 +17,7 @@ from typing import Awaitable, Callable, Collection
 
 import attr
 
-from synapse.module_api import EventBase
+from synapse.events import EventBase
 
 logger = logging.getLogger(__name__)
 
