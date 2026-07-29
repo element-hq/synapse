@@ -109,8 +109,10 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             message_event_id3,
         ) = self.helper.send_messages(self.room_id, 3, tok=self.creator_tok)
 
-        # Call twice to make sure that potential caching doesn't prevent the callback
-        # on subsequent requests.
+        # Call the endpoint twice to make sure that it doesn't forget to
+        # trigger the callback a second time, for example because it has
+        # a `ResponseCache` that bypasses the logic that triggers the
+        # callback.
         for _ in range(2):
             channel = self.make_signed_federation_request(
                 "GET",
@@ -133,8 +135,10 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             self.room_id, 1, tok=self.creator_tok
         )
 
-        # Call twice to make sure that potential caching doesn't prevent the callback
-        # on subsequent requests.
+        # Call the endpoint twice to make sure that it doesn't forget to
+        # trigger the callback a second time, for example because it has
+        # a `ResponseCache` that bypasses the logic that triggers the
+        # callback.
         for _ in range(2):
             channel = self.make_signed_federation_request(
                 "GET", f"/_matrix/federation/v1/event/{message_event_id}"
@@ -151,8 +155,10 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             self.room_id, 1, tok=self.creator_tok
         )
 
-        # Call twice to make sure that potential caching doesn't prevent the callback
-        # on subsequent requests.
+        # Call the endpoint twice to make sure that it doesn't forget to
+        # trigger the callback a second time, for example because it has
+        # a `ResponseCache` that bypasses the logic that triggers the
+        # callback.
         for _ in range(2):
             channel = self.make_signed_federation_request(
                 "GET",
@@ -181,8 +187,10 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             self.room_id, 1, tok=self.creator_tok
         )
 
-        # Call twice to make sure that potential caching doesn't prevent the callback
-        # on subsequent requests.
+        # Call the endpoint twice to make sure that it doesn't forget to
+        # trigger the callback a second time, for example because it has
+        # a `ResponseCache` that bypasses the logic that triggers the
+        # callback.
         for _ in range(2):
             channel = self.make_signed_federation_request(
                 "GET",
@@ -216,8 +224,10 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             message_event_id3,
         ) = self.helper.send_messages(self.room_id, 3, tok=self.creator_tok)
 
-        # Call twice to make sure that potential caching doesn't prevent the callback
-        # on subsequent requests.
+        # Call the endpoint twice to make sure that it doesn't forget to
+        # trigger the callback a second time, for example because it has
+        # a `ResponseCache` that bypasses the logic that triggers the
+        # callback.
         for _ in range(2):
             channel = self.make_signed_federation_request(
                 "POST",
