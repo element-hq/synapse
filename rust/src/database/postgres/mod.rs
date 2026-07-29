@@ -16,6 +16,7 @@ use pyo3::types::PyModule;
 // stops clippy's `dead_code` lint from firing on them before the
 // cursor/connection code (added in later changes) wires them up; the visibility
 // is tightened back to private once that happens.
+pub mod cursor_state;
 pub mod helpers;
 pub mod value;
 
