@@ -1411,6 +1411,7 @@ class FederationClient(FederationBase):
             ):
                 raise SynapseError(
                     500,
+                    "The other user's server did not understand our invite. "
                     f"Received {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} response from remote homeserver "
                     "while trying to send the invite over federation. This indicates a compatibility problem "
                     "between your homeserver and the homeserver you're trying to send the invite to "
@@ -1457,6 +1458,7 @@ class FederationClient(FederationBase):
             ):
                 raise SynapseError(
                     500,
+                    "The other user's server did not understand our invite. "
                     f"Received {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} response from remote homeserver "
                     "while trying to send the invite over federation. This indicates a compatibility problem "
                     "between your homeserver and the homeserver you're trying to send the invite to "
