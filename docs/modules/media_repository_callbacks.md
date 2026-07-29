@@ -116,9 +116,13 @@ may change without notice.
 Called when a user attempts to upload media that would exceed a
 [configured media upload limit](../usage/configuration/config_documentation.html#media_upload_limits).
 
-This callback will only be called on workers which handle
+This callback will be called on whichever process handles the upload, which is either
+a worker which handles
 [POST /_matrix/media/v3/upload](https://spec.matrix.org/v1.15/client-server-api/#post_matrixmediav3upload)
-requests.
+or
+[PUT /_matrix/media/v3/upload/{serverName}/{mediaId}](https://spec.matrix.org/v1.15/client-server-api/#put_matrixmediav3uploadservernamemediaid)
+requests, or the main process when storing an avatar that has been downloaded from an
+SSO identity provider.
 
 This could be used to inform the user that they have reached a media upload limit through
 some external method.

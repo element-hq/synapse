@@ -1,0 +1,1 @@
+Correct the documentation for the `on_media_upload_limit_exceeded` module callback to describe all of the situations in which it is called.
