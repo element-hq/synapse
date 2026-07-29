@@ -78,6 +78,7 @@ from synapse.storage.background_updates import UpdaterStatus
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
+from synapse.util.duration import Duration
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -715,7 +716,13 @@ class HomeserverTestCase(TestCase):
                 )
 
             # Keep driving any potential database interactions
-            self.reactor.advance(0)
+            self.reactor.advance(
+                # Ideally, we could just use `0` but the background update waits
+                # `sleep_duration_ms` between each background update.
+                Duration(
+                    milliseconds=hs.config.background_updates.sleep_duration_ms
+                ).as_secs()
+            )
 
         return hs
 
