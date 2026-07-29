@@ -901,6 +901,12 @@ class FederationServer(FederationBase):
         if servers_in_room is not None:
             resp["servers_in_room"] = list(servers_in_room)
 
+        await self._federation_callbacks.notify_on_event_delivered_over_federation(
+            origin,
+            [event, *state_events, *auth_chain_events],
+            FederatedEventDeliveryMethod.SEND_JOIN,
+        )
+
         return resp
 
     async def on_make_leave_request(
