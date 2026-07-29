@@ -259,9 +259,10 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
         delivery = self._assert_only_delivery(FederatedEventDeliveryMethod.SEND_JOIN)
 
         # Check that we got notified about delivery for all the expected state events
-        # included in a `/send_join` response
+        # included in a `/send_join` response (the join itself, the room state
+        # and the auth chain events)
         state_key_pairs_included = {(e.type, e.state_key) for e in delivery.events}
-        self.assertEqual(
+        self.assertIncludes(
             state_key_pairs_included,
             {
                 (EventTypes.Create, ""),
@@ -272,6 +273,7 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
                 (EventTypes.Member, self.remote_user),
                 (EventTypes.Member, joining_user),
             },
+            exact=True,
         )
 
     def test_send_outbound_transaction(self) -> None:
