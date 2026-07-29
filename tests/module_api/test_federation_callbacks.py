@@ -191,6 +191,8 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
             delivery = self._assert_only_delivery(FederatedEventDeliveryMethod.STATE)
 
+            # Check that we got notified about delivery for all the expected state events
+            # included in a `/state` response (all the state in the room at the event)
             state_key_pairs_included = {(e.type, e.state_key) for e in delivery.events}
             self.assertEqual(
                 state_key_pairs_included,
