@@ -1,0 +1,1 @@
+Add room type filter on admin room list API. Contributed by @velikopter.
