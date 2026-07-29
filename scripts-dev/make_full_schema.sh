@@ -240,11 +240,12 @@ psql "$POSTGRES_STATE_DB_NAME" -w <<< "$DROP_COMMON_TABLES"
 echo "Dumping SQLite3 schema..."
 
 mkdir -p "$OUTPUT_DIR/"{common,main,state}"/full_schemas/$SCHEMA_NUMBER"
-sqlite3 "$SQLITE_COMMON_DB" ".schema"                    > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
+# `--nosys` prevents emitting `sqlite_sequence`
+sqlite3 "$SQLITE_COMMON_DB" ".schema --nosys"            > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_COMMON_DB" ".dump --data-only --nosys" >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
-sqlite3 "$SQLITE_MAIN_DB"   ".schema"                    > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
+sqlite3 "$SQLITE_MAIN_DB"   ".schema --nosys"            > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_MAIN_DB"   ".dump --data-only --nosys" >> "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
-sqlite3 "$SQLITE_STATE_DB"  ".schema"                    > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
+sqlite3 "$SQLITE_STATE_DB"  ".schema --nosys"            > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_STATE_DB"  ".dump --data-only --nosys" >> "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 
 cleanup_pg_schema() {
