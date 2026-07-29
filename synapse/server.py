@@ -670,7 +670,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.get_task_scheduler()
         self.get_common_usage_metrics_manager().setup()
         start_phone_stats_home(self)
-        self.get_datastores().main.db_pool.updates.start_doing_background_updates()
+        for db in self.get_datastores().databases:
+            db.updates.start_doing_background_updates()
 
     def get_reactor(self) -> ISynapseReactor:
         """
