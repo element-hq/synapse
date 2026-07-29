@@ -81,6 +81,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.module_api.callbacks.federation import FederatedEventDeliveryMethod
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
 )
@@ -142,6 +143,7 @@ class FederationServer(FederationBase):
         self.server_name = hs.hostname
         self.handler = hs.get_federation_handler()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self._federation_callbacks = hs.get_module_api_callbacks().federation
         self._federation_event_handler = hs.get_federation_event_handler()
         self.state = hs.get_state_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
@@ -243,6 +245,10 @@ class FederationServer(FederationBase):
             )
 
             res = self._transaction_dict_from_pdus(pdus)
+
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, pdus, FederatedEventDeliveryMethod.BACKFILL
+            )
 
         return 200, res
 
