@@ -157,7 +157,17 @@ class FederationModuleApiCallbacks:
         on_event_delivered_over_federation: ON_EVENT_DELIVERED_OVER_FEDERATION_CALLBACK
         | None = None,
     ) -> None:
-        """Register callbacks from module for each hook."""
+        """
+        Register callbacks from module for each hook.
+
+        on_event_delivered_over_federation:
+            Callback fired when an event is delivered over federation.
+            See `FederationEventDeliveryEvent` for details.
+
+            Performance note:
+                Registering this hook causes a performance (caching) optimisation on the
+                Federation `/state` endpoint to be bypassed.
+        """
         if on_event_delivered_over_federation is not None:
             self._on_event_delivered_over_federation_callbacks.append(
                 on_event_delivered_over_federation
