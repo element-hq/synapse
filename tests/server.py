@@ -1258,7 +1258,19 @@ def setup_test_homeserver(
             database = DatabaseConnectionConfig("master", database_config)
             config.database.databases = [database]
             prepare_database(
-                PREPPED_SQLITE_DB_CONN, create_engine(database_config), config
+                PREPPED_SQLITE_DB_CONN,
+                create_engine(database_config),
+                # We pass `config=None` here so that the template database is prepared the
+                # same way regardless of which test happens to be the first one to run.
+                #
+                # Notably, `prepare_database` refuses to initialise an empty database
+                # when given a worker config, which would otherwise make any test using
+                # `homeserver_to_use=GenericWorkerServer` fail when run on its own.
+                #
+                # Each test still runs `prepare_database` with its own config against its own
+                # copy of this template (via `hs.setup()`), so anything config specific (like
+                # module schemas) is still applied per-test.
+                config=None,
             )
 
         database_config["_TEST_PREPPED_CONN"] = PREPPED_SQLITE_DB_CONN
