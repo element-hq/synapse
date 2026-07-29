@@ -1651,7 +1651,7 @@ class UserInfo:
         consent_server_notice_sent:  Version of policy documents the user has been sent.
         consent_version:  Version of policy documents the user has consented to.
         consent_ts: Time the user consented
-        creation_ts:  Creation timestamp of the user.
+        creation_ts:  Creation timestamp of the user (in seconds).
         is_admin:  True if the user is an admin.
         is_deactivated:  True if the user has been deactivated.
         is_guest:  True if the user is a guest user.
