@@ -1222,6 +1222,10 @@ class FederationServer(FederationBase):
             else:
                 logger.debug("Returning %d events", len(missing_events))
 
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, missing_events, FederatedEventDeliveryMethod.GET_MISSING_EVENTS
+            )
+
             time_now = self._clock.time_msec()
 
         return {"events": serialize_and_filter_pdus(missing_events, time_now)}
