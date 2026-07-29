@@ -687,7 +687,7 @@ class HomeserverTestCase(TestCase):
         # We could use `self._wait_for_background_updates(hs)` to accomplish the same
         # thing but we don't want to start or drive the background updates here. We want
         # to ensure the homeserver itself is doing that.
-        start_time_s = time.time()
+        start_time_s = reactor.seconds()
         store = hs.get_datastores().main
         while not self.get_success(
             # This check is slightly naive. It only checks if there is anything left in
@@ -699,7 +699,7 @@ class HomeserverTestCase(TestCase):
         ):
             # Timeout if it takes too long. This should be pretty immediate as we're
             # working with an empty database.
-            current_time_s = time.time()
+            current_time_s = reactor.seconds()
             if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT.as_secs():
                 background_update_status = store.db_pool.updates.get_status()
 
@@ -721,7 +721,8 @@ class HomeserverTestCase(TestCase):
                     + extra_message
                 )
 
-            self.pump(by=0.1)
+            # Keep driving any potential database interactions
+            self.reactor.advance(0)
 
         return hs
 
