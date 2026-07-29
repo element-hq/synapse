@@ -110,9 +110,9 @@ class PostgresConnectionTestCase(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_connect_bad_dsn_raises(self) -> None:
-        # A syntactically valid but unconnectable DSN should raise rather than
-        # return a half-open connection.
-        with self.assertRaises(RuntimeError):
+        # A syntactically valid but unconnectable DSN should raise one of our
+        # DBAPI2 errors rather than return a half-open connection.
+        with self.assertRaises(postgres.Error):
             _connect("host=127.0.0.1 port=1 dbname=does_not_exist")
 
     # ------------------------------------------------------------------
@@ -179,6 +179,107 @@ class PostgresConnectionTestCase(unittest.TestCase):
             return results
 
         self.assertEqual(run_interaction(self.conn, interaction), [1, 2, 3])
+
+    # ------------------------------------------------------------------
+    # executemany()
+    # ------------------------------------------------------------------
+
+    def test_executemany_runs_once_per_param_set(self) -> None:
+        """executemany applies the statement for each parameter set."""
+
+        def interaction(cursor: Any) -> list[Any]:
+            cursor.execute("CREATE TEMP TABLE em (id int, name text)")
+            cursor.executemany(
+                "INSERT INTO em (id, name) VALUES ($1, $2)",
+                [[1, "a"], [2, "b"], [3, "c"]],
+            )
+            cursor.execute("SELECT id, name FROM em ORDER BY id")
+            return cursor.fetch_all()
+
+        self.assertEqual(
+            run_interaction(self.conn, interaction),
+            [(1, "a"), (2, "b"), (3, "c")],
+        )
+
+    def test_executemany_rowcount_is_total_affected(self) -> None:
+        """rowcount after executemany is the sum across all executions."""
+
+        def interaction(cursor: Any) -> int:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [[1], [2], [3]])
+            return cursor.rowcount()
+
+        self.assertEqual(run_interaction(self.conn, interaction), 3)
+
+    def test_executemany_leaves_no_result_set(self) -> None:
+        """executemany produces nothing to describe."""
+
+        def describe(cursor: Any) -> Any:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [[1], [2]])
+            return cursor.description()
+
+        self.assertIsNone(run_interaction(self.conn, describe))
+
+    def test_executemany_fetch_after_raises(self) -> None:
+        """There is no result set after executemany, so fetching is an error."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [[1], [2]])
+            cursor.fetch_one()
+
+        with self.assertRaises(RuntimeError):
+            run_interaction(self.conn, interaction)
+
+    def test_executemany_empty_is_noop(self) -> None:
+        """An empty parameter sequence runs nothing and affects no rows."""
+
+        def interaction(cursor: Any) -> int:
+            cursor.execute("CREATE TEMP TABLE em (id int)")
+            cursor.executemany("INSERT INTO em VALUES ($1)", [])
+            # Nothing ran, so rowcount is the "unknown" sentinel...
+            self.assertEqual(cursor.rowcount(), -1)
+            # ...and the table is untouched.
+            cursor.execute("SELECT count(*) FROM em")
+            row = cursor.fetch_one()
+            assert row is not None
+            return row[0]
+
+        self.assertEqual(run_interaction(self.conn, interaction), 0)
+
+    def test_executemany_rolls_back_on_error(self) -> None:
+        """A failure part-way through executemany aborts the transaction, so
+        no rows from the batch survive."""
+
+        table = "rust_pg_test_executemany_rollback"
+        try:
+
+            def interaction(cursor: Any) -> None:
+                cursor.execute(f"CREATE TABLE {table} (id int PRIMARY KEY)")
+                # The third set duplicates the first, violating the primary key.
+                cursor.executemany(
+                    f"INSERT INTO {table} VALUES ($1)",
+                    [[1], [2], [1]],
+                )
+
+            with self.assertRaises(postgres.IntegrityError):
+                run_interaction(self.conn, interaction)
+
+            # The CREATE TABLE and the whole batch were in one transaction that
+            # rolled back, so the table should not exist.
+            def table_exists(cursor: Any) -> Any:
+                cursor.execute("SELECT to_regclass($1)::text", [table])
+                row = cursor.fetch_one()
+                assert row is not None
+                return row[0]
+
+            self.assertIsNone(run_interaction(self.conn, table_exists))
+        finally:
+            run_interaction(
+                self.conn,
+                lambda cursor: cursor.execute(f"DROP TABLE IF EXISTS {table}"),
+            )
 
     # ------------------------------------------------------------------
     # fetch_next_batch()
@@ -468,8 +569,12 @@ class PostgresConnectionTestCase(unittest.TestCase):
             cursor.execute("CREATE TEMP TABLE oor (x int4)")
             cursor.execute("INSERT INTO oor VALUES ($1)", [10**12])
 
-        with self.assertRaises(RuntimeError):
+        # This is a client-side encoding error (no SQLSTATE), so it surfaces as
+        # a plain DatabaseError -- not an OperationalError, since retrying a
+        # deterministic bad value would be pointless.
+        with self.assertRaises(postgres.DatabaseError) as ctx:
             run_interaction(self.conn, interaction)
+        self.assertNotIsInstance(ctx.exception, postgres.OperationalError)
 
     # ------------------------------------------------------------------
     # rowcount()
@@ -493,6 +598,55 @@ class PostgresConnectionTestCase(unittest.TestCase):
             return [inserted, updated, deleted]
 
         self.assertEqual(run_interaction(self.conn, interaction), [3, 2, 3])
+
+    # ------------------------------------------------------------------
+    # description
+    # ------------------------------------------------------------------
+
+    def test_description_is_none_before_query(self) -> None:
+        """A cursor that has not run a query has no description."""
+
+        def interaction(cursor: Any) -> Any:
+            return cursor.description()
+
+        self.assertIsNone(run_interaction(self.conn, interaction))
+
+    def test_description_reports_column_names(self) -> None:
+        """A row-returning statement describes its columns; only the name is
+        populated, in a PEP-249 7-tuple."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("SELECT 1 AS a, 'x'::text AS b")
+            return cursor.description()
+
+        description = run_interaction(self.conn, interaction)
+        self.assertEqual([col[0] for col in description], ["a", "b"])
+        # Each entry is a PEP-249 7-tuple with only the name populated.
+        for col in description:
+            self.assertEqual(len(col), 7)
+            self.assertTrue(all(field is None for field in col[1:]))
+
+    def test_description_available_after_fetch(self) -> None:
+        """The description survives after the rows have been fetched."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("SELECT 1 AS a")
+            cursor.fetch_all()  # exhausts the result set
+            return cursor.description()
+
+        description = run_interaction(self.conn, interaction)
+        self.assertEqual([col[0] for col in description], ["a"])
+
+    def test_description_is_none_for_dml(self) -> None:
+        """A statement that returns no rows (a bare INSERT) has no
+        description, matching psycopg2."""
+
+        def interaction(cursor: Any) -> Any:
+            cursor.execute("CREATE TEMP TABLE d (id int)")
+            cursor.execute("INSERT INTO d VALUES (1)")
+            return cursor.description()
+
+        self.assertIsNone(run_interaction(self.conn, interaction))
 
     # ------------------------------------------------------------------
     # Transaction handling (COMMIT on success, ROLLBACK on error)
@@ -583,10 +737,10 @@ class PostgresConnectionTestCase(unittest.TestCase):
 
         def bad_sql(cursor: Any) -> None:
             # A syntax error: the server rejects this during prepare, which
-            # surfaces as a RuntimeError and rolls the transaction back.
+            # surfaces as a DatabaseError and rolls the transaction back.
             cursor.execute("SELECT FROM WHERE not valid sql")
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(postgres.DatabaseError):
             run_interaction(self.conn, bad_sql)
 
         # The transaction was rolled back and the connection handed back clean,
@@ -606,12 +760,15 @@ class PostgresConnectionTestCase(unittest.TestCase):
             cursor.execute("INSERT INTO uniq VALUES (1)")
             # Duplicate key. The error is reported by the server while the
             # statement's result stream is driven, so we drain it (via
-            # rowcount) to surface it as a RuntimeError.
+            # rowcount) to surface it -- as an IntegrityError, the same class
+            # (with the same 23505 pgcode) it would carry had it surfaced at
+            # execute time.
             cursor.execute("INSERT INTO uniq VALUES (1)")
             cursor.rowcount()
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(postgres.IntegrityError) as ctx:
             run_interaction(self.conn, violate)
+        self.assertEqual(ctx.exception.pgcode, "23505")
 
         # TEMP table lived only in the rolled-back transaction; the connection
         # itself is fine.
@@ -820,6 +977,136 @@ class PostgresConnectionDrivenTestCase(unittest.TestCase):
         cursor.execute("SELECT 1")  # opens an implicit transaction
         with self.assertRaises(RuntimeError):
             self.conn.set_autocommit(True)
+        self.conn.rollback()
+
+    # -- executescript (multi-statement) ------------------------------------
+
+    def test_executescript_runs_all_statements(self) -> None:
+        """A `;`-separated script runs every statement (unlike `execute`, which
+        prepares a single one)."""
+        table = "rust_pg_script"
+        try:
+            cursor = self.conn.cursor()
+            cursor.executescript(
+                f"CREATE TABLE {table} (id int); "
+                f"INSERT INTO {table} VALUES (1); "
+                f"INSERT INTO {table} VALUES (2), (3);"
+            )
+            self.conn.commit()
+
+            read = self.conn.cursor()
+            read.execute(f"SELECT id FROM {table} ORDER BY id")
+            self.assertEqual(read.fetch_all(), [(1,), (2,), (3,)])
+            self.conn.commit()
+        finally:
+            self._exec_commit(f"DROP TABLE IF EXISTS {table}")
+
+    def test_executescript_leaves_transaction_open_for_caller(self) -> None:
+        """The script runs in the connection's transaction, left open — so a
+        following `rollback()` undoes it (it was not autocommitted)."""
+        table = "rust_pg_script_open"
+        try:
+            self.conn.cursor().executescript(f"CREATE TABLE {table} (id int);")
+            self.conn.rollback()
+            self.assertFalse(self._table_exists(table))
+            self.conn.commit()
+        finally:
+            self._exec_commit(f"DROP TABLE IF EXISTS {table}")
+
+    def test_executescript_error_surfaces_as_database_error(self) -> None:
+        """A failing statement mid-script surfaces via the exception hierarchy;
+        the aborted transaction rolls back cleanly."""
+        cursor = self.conn.cursor()
+        with self.assertRaises(postgres.DatabaseError):
+            cursor.executescript("CREATE TABLE rust_pg_script_bad (id int); NOT SQL;")
+        self.conn.rollback()
+        # The CREATE was in the same aborted, rolled-back transaction, so it
+        # left nothing behind.
+        self.assertFalse(self._table_exists("rust_pg_script_bad"))
+        self.conn.commit()
+
+    def test_successive_scripts_share_one_transaction(self) -> None:
+        """Successive `executescript` calls accumulate in the same open
+        transaction -- there is no implicit commit between them (unlike
+        `sqlite3.executescript`) -- so a single rollback discards them all.
+        This is the atomicity `prepare_database` relies on."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.executescript("CREATE TABLE rust_pg_script_a (id int);")
+            cursor.executescript("CREATE TABLE rust_pg_script_b (id int);")
+            # Nothing was committed between the two calls, so one rollback
+            # undoes both.
+            self.conn.rollback()
+            self.assertFalse(self._table_exists("rust_pg_script_a"))
+            self.assertFalse(self._table_exists("rust_pg_script_b"))
+            self.conn.commit()
+        finally:
+            self._exec_commit("DROP TABLE IF EXISTS rust_pg_script_a")
+            self._exec_commit("DROP TABLE IF EXISTS rust_pg_script_b")
+
+
+@unittest.skip_unless(
+    bool(USE_POSTGRES_FOR_TESTS), "requires a Postgres server (set SYNAPSE_POSTGRES)"
+)
+class PostgresErrorMappingTestCase(unittest.TestCase):
+    """The DBAPI2 exception hierarchy and the SQLSTATE→exception mapping.
+
+    Synapse's transaction driver branches on the *type* of the exception a
+    database call raises (``OperationalError`` → retry, ``IntegrityError`` →
+    retry upserts) and on its ``pgcode`` (``is_deadlock``). These tests check
+    the Rust backend raises the right class and carries a ``pgcode``, the way
+    psycopg2 does.
+    """
+
+    def setUp(self) -> None:
+        self.conn = _connect(_build_dsn())
+
+    def tearDown(self) -> None:
+        del self.conn
+
+    def _exec_commit(self, sql: str) -> None:
+        """Run a single statement and commit it (its own transaction)."""
+        self.conn.cursor().execute(sql)
+        self.conn.commit()
+
+    # -- the hierarchy exposed on the module --------------------------------
+
+    def test_module_exposes_dbapi2_hierarchy(self) -> None:
+        """The exception attributes Synapse's engine code and DBAPI2Module
+        protocol rely on, with the expected subclass links."""
+        self.assertTrue(issubclass(postgres.DatabaseError, postgres.Error))
+        self.assertTrue(issubclass(postgres.OperationalError, postgres.DatabaseError))
+        self.assertTrue(issubclass(postgres.IntegrityError, postgres.DatabaseError))
+
+    # -- SQLSTATE → exception class -----------------------------------------
+
+    def test_unique_violation_is_integrity_error(self) -> None:
+        """A constraint violation raises ``IntegrityError`` with pgcode 23505."""
+        table = "rust_pg_err_integrity"
+        try:
+            self._exec_commit(f"CREATE TABLE {table} (id int PRIMARY KEY)")
+            self._exec_commit(f"INSERT INTO {table} VALUES (1)")
+
+            cursor = self.conn.cursor()
+            with self.assertRaises(postgres.IntegrityError) as ctx:
+                cursor.execute(f"INSERT INTO {table} VALUES (1)")
+                # The INSERT's error is reported while its result stream is
+                # driven, so drain it (via rowcount) to surface it.
+                cursor.rowcount()
+            self.assertEqual(ctx.exception.pgcode, "23505")
+            self.conn.rollback()
+        finally:
+            self._exec_commit(f"DROP TABLE IF EXISTS {table}")
+
+    def test_undefined_table_is_plain_database_error(self) -> None:
+        """An error we don't single out surfaces as a plain ``DatabaseError``
+        (not one of the specialised subclasses), still carrying its pgcode."""
+        cursor = self.conn.cursor()
+        with self.assertRaises(postgres.DatabaseError) as ctx:
+            cursor.execute("SELECT * FROM rust_pg_no_such_table")
+        self.assertNotIsInstance(ctx.exception, postgres.OperationalError)
+        self.assertNotIsInstance(ctx.exception, postgres.IntegrityError)
+        self.assertEqual(ctx.exception.pgcode, "42P01")  # undefined_table
         self.conn.rollback()
 
 

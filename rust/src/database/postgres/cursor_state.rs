@@ -37,6 +37,7 @@ use pyo3::{
 use tokio_postgres::RowStream;
 
 use crate::database::postgres::{
+    errors::pg_err_to_py,
     helpers::{BlockingPostgres, BlockingPostgresStream as _},
     value::pg_row_to_py,
 };
@@ -83,7 +84,11 @@ impl CursorRowStream for RowStream {
     }
 
     fn stream_err(err: &Self::Error) -> PyErr {
-        PyRuntimeError::new_err(format!("error fetching row from postgres: {err}"))
+        // Route through the shared mapping so a server error surfacing while
+        // the result stream is drained (e.g. a constraint violation on an
+        // `INSERT`) becomes the right DBAPI2 exception with its `pgcode`, just
+        // as it would if it surfaced at `execute` time.
+        pg_err_to_py(err)
     }
 }
 
@@ -102,9 +107,7 @@ pub enum CursorQueryState<S = RowStream> {
         /// Live row stream for the current query.
         stream: FusedStream<S>,
         /// Column names for the result set (empty for a DML statement).
-        ///
-        /// TODO: currently write-only; kept to back a future PEP-249
-        /// `Cursor.description` accessor.
+        /// Exposed to Python via [`CursorQueryState::description`].
         description: Vec<String>,
     },
     /// The result set has been fully consumed and exhaustion reported — a fetch
@@ -112,13 +115,9 @@ pub enum CursorQueryState<S = RowStream> {
     /// `fetch_*` is a programming error; `rowcount` still returns the count.
     Closed {
         /// Column names for the result set, carried over from `Active` so they
-        /// survive once the rows are gone.
-        ///
-        /// TODO: currently write-only; like `Active::description` it is kept to
-        /// back a future PEP-249 `Cursor.description` accessor. `#[allow]`d
-        /// until that reader lands rather than dropped, so the column metadata
-        /// isn't silently lost at the `Active` -> `Closed` transition.
-        #[allow(dead_code)]
+        /// survive once the rows are gone (PEP-249 keeps `description`
+        /// available after the rows have been fetched). Exposed to Python via
+        /// [`CursorQueryState::description`].
         description: Vec<String>,
         /// PEP-249 `rowcount` from the command tag, if it was captured.
         rowcount: Option<u64>,
@@ -337,6 +336,47 @@ impl<S: CursorRowStream> CursorQueryState<S> {
             // get here, so "not yet drained" isn't a case. PEP-249 says -1.
             _ => Ok(PyInt::new(py, -1)),
         }
+    }
+
+    /// The column names of the current result set, or `None` when there is no
+    /// row-returning result set to describe.
+    ///
+    /// This backs the PEP-249 `Cursor.description`. It is `None` in the `Idle`
+    /// state (no query has run yet, or an error reset the cursor) and also for
+    /// a statement that returns no columns — e.g. an `INSERT`/`UPDATE`/`DELETE`
+    /// without `RETURNING` — matching psycopg2, which reports `description` as
+    /// `None` for such statements. For a row-returning statement the names stay
+    /// available after the rows have been fetched (the `Closed` state), as
+    /// PEP-249 requires.
+    ///
+    /// Only the column *names* are tracked (see `on_query_start`); it is the
+    /// caller's job to shape them into PEP-249's 7-tuples.
+    pub fn description(&self) -> Option<&[String]> {
+        let columns = match self {
+            Self::Active { description, .. } | Self::Closed { description, .. } => description,
+            Self::Idle => return None,
+        };
+
+        // A statement that returns no columns (DML) has an empty column list;
+        // PEP-249 / psycopg2 report `description` as `None` in that case.
+        if columns.is_empty() {
+            None
+        } else {
+            Some(columns)
+        }
+    }
+
+    /// Record a completed command that produced no fetchable rows, retaining
+    /// its affected-row count for `rowcount`.
+    ///
+    /// Used by `executemany`, which runs a statement repeatedly for its side
+    /// effects: there is no result set to fetch (`description` is `None` and
+    /// any `fetch_*` errors as exhausted), but the (summed) rowcount is kept.
+    pub fn on_command_complete(&mut self, rowcount: Option<u64>) {
+        *self = Self::Closed {
+            description: Vec::new(),
+            rowcount,
+        };
     }
 
     /// The error to raise when a `fetch_*` method finds no rows available,
@@ -801,6 +841,100 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("exhausted"));
+        });
+    }
+
+    #[test]
+    fn description_is_none_before_any_query() {
+        let state = CursorQueryState::<FakeStream>::new();
+        assert!(state.description().is_none());
+    }
+
+    #[test]
+    fn description_reports_columns_while_active_and_after_close() {
+        Python::initialize();
+        Python::attach(|py| {
+            let _guard = enter_runtime();
+            // `active_with` builds an `Active` state whose columns are `["col"]`.
+            let mut state = active_with(vec![vec![1]], Some(0));
+            assert_eq!(state.description(), Some(["col".to_string()].as_slice()));
+
+            // Draining the rows moves the cursor to `Closed`, but the column
+            // names survive so `description` is still available (PEP-249).
+            let _ = state.fetch_all(py).unwrap();
+            assert!(matches!(state, CursorQueryState::Closed { .. }));
+            assert_eq!(state.description(), Some(["col".to_string()].as_slice()));
+        });
+    }
+
+    #[test]
+    fn description_is_none_for_a_column_less_result() {
+        // A DML statement yields no columns; `description` should be `None`
+        // even while the (empty) result set is `Active`.
+        let mut state = CursorQueryState::<FakeStream>::new();
+        state.on_query_start(
+            FakeStream {
+                items: VecDeque::new(),
+                rows_affected: Some(3),
+            },
+            vec![],
+        );
+        assert!(state.description().is_none());
+    }
+
+    #[test]
+    fn description_is_none_after_an_error_resets_to_idle() {
+        Python::initialize();
+        Python::attach(|py| {
+            let _guard = enter_runtime();
+            let mut state = CursorQueryState::<FakeStream>::new();
+            state.on_query_start(
+                FakeStream {
+                    items: VecDeque::from(vec![Err(FakeError("boom"))]),
+                    rows_affected: None,
+                },
+                vec!["col".to_string()],
+            );
+
+            // The error resets the cursor to `Idle`, dropping the columns.
+            let _ = state.fetch_one(py).unwrap_err();
+            assert!(matches!(state, CursorQueryState::Idle));
+            assert!(state.description().is_none());
+        });
+    }
+
+    #[test]
+    fn on_command_complete_retains_rowcount_without_a_result_set() {
+        Python::initialize();
+        Python::attach(|py| {
+            let _guard = enter_runtime();
+            let mut state = CursorQueryState::<FakeStream>::new();
+            // Simulate a completed `executemany` that affected 5 rows.
+            state.on_command_complete(Some(5));
+
+            assert!(matches!(state, CursorQueryState::Closed { .. }));
+            // The rowcount is retained, but there is nothing to describe or
+            // fetch.
+            assert_eq!(state.rowcount(py).unwrap().extract::<i64>().unwrap(), 5);
+            assert!(state.description().is_none());
+            assert!(state
+                .fetch_one(py)
+                .unwrap_err()
+                .to_string()
+                .contains("exhausted"));
+        });
+    }
+
+    #[test]
+    fn on_command_complete_with_no_count_reports_minus_one() {
+        Python::initialize();
+        Python::attach(|py| {
+            let _guard = enter_runtime();
+            let mut state = CursorQueryState::<FakeStream>::new();
+            // An empty `executemany` batch: nothing ran, so no count.
+            state.on_command_complete(None);
+            assert_eq!(state.rowcount(py).unwrap().extract::<i64>().unwrap(), -1);
+            assert!(state.description().is_none());
         });
     }
 

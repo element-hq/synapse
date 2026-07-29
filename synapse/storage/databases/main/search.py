@@ -286,9 +286,9 @@ class SearchBackgroundUpdateStore(SearchWorkerStore):
                 # if we skipped the conversion to GIST, we may already/still
                 # have an event_search_fts_idx; unfortunately postgres 9.4
                 # doesn't support CREATE INDEX IF EXISTS so we just catch the
-                # exception and ignore it.
-                import psycopg2
-
+                # exception and ignore it. Catch the error class via the
+                # engine's module so this works on both the psycopg2 and the
+                # native Rust drivers.
                 try:
                     c.execute(
                         """
@@ -296,7 +296,7 @@ class SearchBackgroundUpdateStore(SearchWorkerStore):
                         ON event_search USING GIN (vector)
                         """
                     )
-                except psycopg2.ProgrammingError as e:
+                except self.database_engine.module.ProgrammingError as e:
                     logger.warning(
                         "Ignoring error %r when trying to switch from GIST to GIN", e
                     )
