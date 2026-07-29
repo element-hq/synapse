@@ -31,6 +31,11 @@ class FederatedEventDeliveryMethod(str, Enum):
 
     Modules should anticipate more methods being added to this enum
     over time (it is non-exhaustive).
+
+    Only methods that deliver full, signed PDUs are included in this mechanism.
+    Some notable exclusions for example:
+       - `/send_knock` is excluded as it only returns unsigned 'stripped state'.
+       - `/timestamp_to_event` is excluded as it only returns event IDs, not events themselves.
     """
 
     SEND = "/send"
