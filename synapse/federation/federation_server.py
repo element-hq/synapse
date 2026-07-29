@@ -721,6 +721,9 @@ class FederationServer(FederationBase):
         pdu = await self.handler.get_persisted_pdu(origin, event_id)
 
         if pdu:
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, [pdu], FederatedEventDeliveryMethod.EVENT
+            )
             return 200, self._transaction_dict_from_pdus([pdu])
         else:
             return 404, ""
