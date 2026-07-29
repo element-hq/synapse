@@ -78,7 +78,6 @@ from synapse.storage.background_updates import UpdaterStatus
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
-from synapse.util.duration import Duration
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -104,11 +103,6 @@ _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
 P = ParamSpec("P")
 R = TypeVar("R")
 S = TypeVar("S")
-
-BACKGROUND_UPDATE_TIMEOUT = Duration(seconds=5)
-"""
-We expect this to be pretty immediate as we're working with an empty database.
-"""
 
 
 class _TypedFailure(Generic[_ExcType], Protocol):
@@ -687,7 +681,7 @@ class HomeserverTestCase(TestCase):
         # We could use `self._wait_for_background_updates(hs)` to accomplish the same
         # thing but we don't want to start or drive the background updates here. We want
         # to ensure the homeserver itself is doing that.
-        start_time_s = reactor.seconds()
+        loop_count = 0
         store = hs.get_datastores().main
         while not self.get_success(
             # This check is slightly naive. It only checks if there is anything left in
@@ -697,10 +691,9 @@ class HomeserverTestCase(TestCase):
             # really assert that everything was registered as expected.
             store.db_pool.updates.has_completed_background_updates()
         ):
-            # Timeout if it takes too long. This should be pretty immediate as we're
+            # 100 loops is arbitrary but we expect this to be pretty immediate as we're
             # working with an empty database.
-            current_time_s = reactor.seconds()
-            if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT.as_secs():
+            if loop_count > 100:
                 background_update_status = store.db_pool.updates.get_status()
 
                 # Add some better context when we give up
@@ -717,7 +710,7 @@ class HomeserverTestCase(TestCase):
                     )
 
                 raise AssertionError(
-                    f"Timed out waiting for background updates to complete ({BACKGROUND_UPDATE_TIMEOUT.as_secs()}s). "
+                    "Timed out waiting for background updates to complete. "
                     + extra_message
                 )
 
