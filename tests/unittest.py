@@ -687,7 +687,7 @@ class HomeserverTestCase(TestCase):
         # We could use `self._wait_for_background_updates(hs)` to accomplish the same
         # thing but we don't want to start or drive the background updates here. We want
         # to ensure the homeserver itself is doing that.
-        start_time_s = reactor.seconds()
+        start_time_s = time.time()
         store = hs.get_datastores().main
         while not self.get_success(
             # This check is slightly naive. It only checks if there is anything left in
@@ -698,8 +698,10 @@ class HomeserverTestCase(TestCase):
             store.db_pool.updates.has_completed_background_updates()
         ):
             # Timeout if it takes too long. This should be pretty immediate as we're
-            # working with an empty database.
-            current_time_s = reactor.seconds()
+            # working with an empty database. We use real wall-clock time for the
+            # timeout as it's easiest to just drive the reactor forward hoping the
+            # background updates finish within the timeout.
+            current_time_s = time.time()
             if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT.as_secs():
                 background_update_status = store.db_pool.updates.get_status()
 
@@ -717,14 +719,15 @@ class HomeserverTestCase(TestCase):
                     )
 
                 raise AssertionError(
-                    f"Timed out waiting for background updates to complete ({BACKGROUND_UPDATE_TIMEOUT.as_secs()}s). "
+                    "Timed out waiting for background updates to complete "
+                    + f"(waited {BACKGROUND_UPDATE_TIMEOUT.as_secs()}s of real wall-clock time). "
                     + extra_message
                 )
 
             # Keep driving any potential database interactions
             self.reactor.advance(
-                # Ideally, we could just use `0` but the background update waits
-                # `sleep_duration_ms` between each background update.
+                # Ideally, we could just use `0` but the background update machinery
+                # waits `sleep_duration_ms` between each background update.
                 Duration(
                     milliseconds=hs.config.background_updates.sleep_duration_ms
                 ).as_secs()
