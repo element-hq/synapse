@@ -155,7 +155,11 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             )
             self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
             delivery = self._assert_only_delivery(FederatedEventDeliveryMethod.EVENT)
-            self.assertEqual({e.event_id for e in delivery.events}, {message_event_id})
+            self.assertIncludes(
+                {e.event_id for e in delivery.events},
+                {message_event_id},
+                exact=True,
+            )
 
     def test_event_auth(self) -> None:
         """
@@ -252,7 +256,11 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             delivery = self._assert_only_delivery(
                 FederatedEventDeliveryMethod.GET_MISSING_EVENTS
             )
-            self.assertEqual({e.event_id for e in delivery.events}, {message_event_id2})
+            self.assertIncludes(
+                {e.event_id for e in delivery.events},
+                {message_event_id2},
+                exact=True,
+            )
 
     def test_send_join(self) -> None:
         """
@@ -331,7 +339,9 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
 
         delivery = self._assert_only_delivery(FederatedEventDeliveryMethod.SEND)
         self.assertEqual(delivery.server_name, self.OTHER_SERVER_NAME)
-        self.assertEqual([e.event_id for e in delivery.events], [message_event_id])
+        self.assertIncludes(
+            {e.event_id for e in delivery.events}, {message_event_id}, exact=True
+        )
 
     def test_send_outbound_excludes_rejected_pdus(self) -> None:
         """
@@ -363,4 +373,4 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
         )
         self.pump()
 
-        self.assertEqual(self._deliveries, [])
+        self.assertIncludes(set(self._deliveries), set(), exact=True)
