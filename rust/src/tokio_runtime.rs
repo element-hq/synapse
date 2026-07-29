@@ -15,7 +15,7 @@
 
 use anyhow::Context;
 use pyo3::prelude::*;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
 
 /// This is the name of the attribute where we store the runtime on the reactor
 static TOKIO_RUNTIME_ATTR: &str = "__synapse_rust_tokio_runtime";
@@ -32,15 +32,7 @@ pub struct PyTokioRuntime {
 #[pymethods]
 impl PyTokioRuntime {
     fn start(&mut self) -> PyResult<()> {
-        // TODO: allow customization of the runtime like the number of threads
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(4)
-            .enable_all()
-            .build()?;
-
-        self.runtime = Some(runtime);
-
-        Ok(())
+        self.ensure_started()
     }
 
     fn shutdown(&mut self) -> PyResult<()> {
@@ -57,6 +49,28 @@ impl PyTokioRuntime {
 }
 
 impl PyTokioRuntime {
+    /// Build the runtime if it hasn't been built yet.
+    ///
+    /// Idempotent, so it is safe to call both from the reactor's
+    /// `callWhenRunning(start)` hook and from a caller that needs the runtime
+    /// before the reactor has run that hook (see [`runtime_handle`]): whichever
+    /// runs first builds it, the other is a no-op.
+    fn ensure_started(&mut self) -> PyResult<()> {
+        if self.runtime.is_some() {
+            return Ok(());
+        }
+
+        // TODO: allow customization of the runtime like the number of threads
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()?;
+
+        self.runtime = Some(runtime);
+
+        Ok(())
+    }
+
     /// Get the handle to the Tokio runtime, if it is running.
     pub fn handle(&self) -> PyResult<&tokio::runtime::Handle> {
         let handle = self
@@ -72,11 +86,22 @@ impl PyTokioRuntime {
 /// Get a handle to the Tokio runtime stored on the reactor instance, or create
 /// a new one.
 pub fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
-    if !reactor.hasattr(TOKIO_RUNTIME_ATTR)? {
-        install_runtime(reactor)?;
-    }
+    Ok(get_or_install(reactor)?.borrow())
+}
 
-    get_runtime(reactor)
+/// Get a clonable handle to the shared runtime, starting it on demand.
+///
+/// Unlike [`runtime`], this does not require the reactor to have already run
+/// its `callWhenRunning(start)` hook: it starts the runtime if necessary. That
+/// lets callers that need the runtime before the reactor is up — the database
+/// backend's schema setup, `synapse_port_db`, and trial tests — still get a
+/// working handle. Once the reactor does run, its `start` hook finds the
+/// runtime already built and is a no-op, so there is still only one runtime.
+pub fn runtime_handle(reactor: &Bound<'_, PyAny>) -> PyResult<Handle> {
+    let runtime = get_or_install(reactor)?;
+    let mut runtime = runtime.borrow_mut();
+    runtime.ensure_started()?;
+    Ok(runtime.handle()?.clone())
 }
 
 /// Install a new Tokio runtime on the reactor instance.
@@ -97,11 +122,16 @@ fn install_runtime(reactor: &Bound<PyAny>) -> PyResult<()> {
     Ok(())
 }
 
-/// Get a reference to a Tokio runtime handle stored on the reactor instance.
-fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
+/// Get the [`PyTokioRuntime`] stored on the reactor instance, installing a
+/// fresh one (wired to the reactor's start/shutdown) if it isn't there yet.
+fn get_or_install<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<Bound<'a, PyTokioRuntime>> {
+    if !reactor.hasattr(TOKIO_RUNTIME_ATTR)? {
+        install_runtime(reactor)?;
+    }
+
     // This will raise if `TOKIO_RUNTIME_ATTR` is not set or if it is
     // not a `Runtime`. Careful that this could happen if the user sets it
     // manually, or if multiple versions of `pyo3-twisted` are used!
     let runtime: Bound<PyTokioRuntime> = reactor.getattr(TOKIO_RUNTIME_ATTR)?.extract()?;
-    Ok(runtime.borrow())
+    Ok(runtime)
 }
