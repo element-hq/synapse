@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 from http import HTTPStatus
+from typing import Callable
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -19,7 +20,8 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.config.server import DEFAULT_ROOM_VERSION
-from synapse.federation.sender.transaction_manager import TransactionManager
+from synapse.federation.federation_base import event_from_pdu_json
+from synapse.federation.units import Transaction
 from synapse.module_api.callbacks.federation import (
     FederatedEventDeliveryMethod,
     FederationEventDeliveryEvent,
@@ -27,6 +29,7 @@ from synapse.module_api.callbacks.federation import (
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -53,6 +56,13 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
         )
 
         return hs
+
+    def default_config(self) -> JsonDict:
+        # By default, federation sending is disabled in tests.
+        # Re-enable it for the main process.
+        config = super().default_config()
+        config["federation_sender_instances"] = None
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
@@ -293,24 +303,34 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
         Tests that the callback is triggered for outgoing `/send` transactions
         when the remote acknowledges the PDU.
         """
+
+        async def _acknowledge_pdus(
+            transaction: Transaction,
+            json_data_cb: Callable[[], JsonDict],
+        ) -> JsonDict:
+            """
+            Acknowledge the PDUs.
+            """
+            body = json_data_cb()
+            pdu_responses: JsonDict = {}
+            for pdu_json in body.get("pdus", []):
+                # We have to construct the event to calculate its event ID
+                event = event_from_pdu_json(
+                    pdu_json, KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION]
+                )
+                # Empty dict means 'OK'
+                pdu_responses[event.event_id] = {}
+            return {"pdus": pdu_responses}
+
+        self.fed_transport_client.send_transaction.side_effect = _acknowledge_pdus
+
         (message_event_id,) = self.helper.send_messages(
             self.room_id, 1, tok=self.creator_tok
         )
+        self.pump()
 
-        self.fed_transport_client.send_transaction = AsyncMock(
-            return_value={"pdus": {message_event_id: {}}}
-        )
-
-        event = self.get_success(
-            self.hs.get_datastores().main.get_event(message_event_id)
-        )
-        txn_manager = TransactionManager(self.hs)
-        self.get_success(
-            txn_manager.send_new_transaction(self.OTHER_SERVER_NAME, [event], [])
-        )
-        delivery = self._assert_only_delivery(
-            FederatedEventDeliveryMethod.SEND,
-        )
+        delivery = self._assert_only_delivery(FederatedEventDeliveryMethod.SEND)
+        self.assertEqual(delivery.server_name, self.OTHER_SERVER_NAME)
         self.assertEqual([e.event_id for e in delivery.events], [message_event_id])
 
     def test_send_outbound_excludes_rejected_pdus(self) -> None:
@@ -318,19 +338,29 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
         Tests that the event is NOT triggered for outgoing `/send` transactions
         when the remote marks the PDU as failed.
         """
+
+        async def _error_pdus(
+            transaction: Transaction,
+            json_data_cb: Callable[[], JsonDict],
+        ) -> JsonDict:
+            """
+            Return an error for the PDUs.
+            """
+            body = json_data_cb()
+            pdu_responses: JsonDict = {}
+            for pdu_json in body.get("pdus", []):
+                # We have to construct the event to calculate its event ID
+                event = event_from_pdu_json(
+                    pdu_json, KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION]
+                )
+                pdu_responses[event.event_id] = {"error": "failed"}
+            return {"pdus": pdu_responses}
+
+        self.fed_transport_client.send_transaction.side_effect = _error_pdus
+
         (message_event_id,) = self.helper.send_messages(
             self.room_id, 1, tok=self.creator_tok
         )
+        self.pump()
 
-        self.fed_transport_client.send_transaction = AsyncMock(
-            return_value={"pdus": {message_event_id: {"error": "failed"}}}
-        )
-
-        event = self.get_success(
-            self.hs.get_datastores().main.get_event(message_event_id)
-        )
-        txn_manager = TransactionManager(self.hs)
-        self.get_success(
-            txn_manager.send_new_transaction(self.OTHER_SERVER_NAME, [event], [])
-        )
         self.assertEqual(self._deliveries, [])
