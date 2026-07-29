@@ -317,7 +317,11 @@ class TestCase(unittest.TestCase):
         )
         diff_message = f"{first_message}\n{expected_string}\n{actual_string}"
 
-        self.fail(f"{diff_message}\n{message}")
+        extra_message = ""
+        if message is not None:
+            extra_message = "f\n{message}"
+
+        self.fail(f"{diff_message}{extra_message}")
 
 
 def DEBUG(target: TV) -> TV:
