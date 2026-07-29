@@ -660,14 +660,27 @@ class FederationServer(FederationBase):
         # - but that's non-trivial to get right, and anyway somewhat defeats
         # the point of the linearizer.
         async with self._server_linearizer.queue((origin, room_id)):
-            resp = await self._state_resp_cache.wrap(
-                (room_id, event_id),
-                self._on_context_state_request_compute,
-                room_id,
-                event_id,
-            )
-
-        return 200, resp
+            if not self._federation_callbacks.interested_in_events_delivered_over_federation():
+                # In the usual case where no module is interested in tracking event deliveries,
+                # use the response cache.
+                resp = await self._state_resp_cache.wrap(
+                    (room_id, event_id),
+                    self._on_context_state_request_compute,
+                    room_id,
+                    event_id,
+                )
+                return 200, resp
+            else:
+                # When a module is interested in tracking event deliveries,
+                # we can't use the response cache that returns pre-serialised
+                # events, as we wouldn't have the raw events to track.
+                resp, events = await self._on_context_state_request_compute_with_events(
+                    room_id, event_id
+                )
+                await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                    origin, events, FederatedEventDeliveryMethod.STATE
+                )
+                return 200, resp
 
     @trace
     @tag_args
@@ -702,6 +715,28 @@ class FederationServer(FederationBase):
     async def _on_context_state_request_compute(
         self, room_id: str, event_id: str
     ) -> dict[str, list]:
+        """
+        Respond to a `/state` request, returning just the response.
+
+        This separation exists because we don't want to hold on to the underlying
+        events in the response cache, just the serialised JSON.
+        """
+        resp, _ = await self._on_context_state_request_compute_with_events(
+            room_id, event_id
+        )
+        return resp
+
+    async def _on_context_state_request_compute_with_events(
+        self, room_id: str, event_id: str
+    ) -> tuple[dict[str, list], list[EventBase]]:
+        """
+        Respond to a `/state` request.
+
+        Returns:
+            Tuple of:
+                1. the `/state` response
+                2. list of the events used to build that response
+        """
         pdus: Collection[EventBase]
         event_ids = await self.handler.get_state_ids_for_pdu(room_id, event_id)
         pdus = await self.store.get_events_as_list(event_ids)
@@ -710,10 +745,13 @@ class FederationServer(FederationBase):
             room_id, [pdu.event_id for pdu in pdus]
         )
 
-        return {
-            "pdus": serialize_and_filter_pdus(pdus),
-            "auth_chain": serialize_and_filter_pdus(auth_chain),
-        }
+        return (
+            {
+                "pdus": serialize_and_filter_pdus(pdus),
+                "auth_chain": serialize_and_filter_pdus(auth_chain),
+            },
+            [*pdus, *auth_chain],
+        )
 
     async def on_pdu_request(
         self, origin: str, event_id: str
