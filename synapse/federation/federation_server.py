@@ -1136,6 +1136,10 @@ class FederationServer(FederationBase):
             time_now = self._clock.time_msec()
             auth_pdus = await self.handler.on_event_auth(event_id)
             res = {"auth_chain": serialize_and_filter_pdus(auth_pdus, time_now)}
+
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, auth_pdus, FederatedEventDeliveryMethod.EVENT_AUTH
+            )
         return 200, res
 
     async def on_query_client_keys(
