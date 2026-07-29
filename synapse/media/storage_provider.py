@@ -145,7 +145,7 @@ class StorageProviderWrapper(StorageProvider):
     @trace_with_opname("StorageProviderWrapper.delete")
     async def delete(self, path: str, file_info: FileInfo) -> None:
         # see: fetch
-        if file_info.url_cache:
+        if file_info.url_cache or getattr(self.backend, "delete", None) is None:
             return None
 
         return await maybe_awaitable(self.backend.delete(path, file_info))
