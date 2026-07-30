@@ -16,7 +16,7 @@
 
 ## Improved Documentation
 
-- Clarify the usage of the `guests` parameter when using the List user API with the Matrix Authentication Service integration enabled. ([\#19963](https://github.com/element-hq/synapse/issues/19963))
+- Clarify the usage of the `guests` parameter when using the [List Accounts (V2) admin API](https://element-hq.github.io/synapse/develop/admin_api/user_admin_api.html#list-accounts-v2) with the Matrix Authentication Service integration enabled. ([\#19963](https://github.com/element-hq/synapse/issues/19963))
 
 ## Internal Changes
 
