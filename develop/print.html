@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-d60ccf57.js";
+            window.path_to_searchindex_js = "searchindex-b0b4f94d.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4dc10a98.js"></script>
+        <script src="toc-64310643.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -12124,6 +12124,37 @@ be taken to ensure with respect to performance.</p>
 by Synapse itself.</p>
 <p>If multiple such callbacks try to add the same field to an event’s unsigned
 section, the last-registered callback wins.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="federation-callbacks"><a class="header" href="#federation-callbacks">Federation callbacks</a></h1>
+<p>Federation callbacks can be registered using the module API’s <code>register_federation_callbacks</code> method.</p>
+<h2 id="callbacks-5"><a class="header" href="#callbacks-5">Callbacks</a></h2>
+<p>The available federation callbacks are:</p>
+<h3 id="on_event_delivered_over_federation"><a class="header" href="#on_event_delivered_over_federation"><code>on_event_delivered_over_federation</code></a></h3>
+<p><em>First introduced in Synapse v1.158.0</em></p>
+<pre><code class="language-python">async def on_event_delivered_over_federation(
+    event: FederationEventDeliveryEvent,
+) -&gt; None:
+</code></pre>
+<p>Called when an event has been delivered over federation.
+See <code>FederationEventDeliveryEvent</code> for detailed information available on the event.</p>
+<p>Note that depending on the specific method, delivery may not have
+actually been acknowledged by the other homeserver.
+See <code>FederatedEventDeliveryMethod</code> for details on which cases imply acknowledgment.</p>
+<p>Modules should anticipate more methods being added to the <code>FederatedEventDeliveryMethod</code> enum
+over time (it is non-exhaustive).</p>
+<p>Only methods that deliver full, signed PDUs are included in this mechanism.
+Some notable examples of excluded endpoints:</p>
+<ul>
+<li><code>/send_knock</code> is excluded as it only returns unsigned ‘stripped state’.</li>
+<li><code>/timestamp_to_event</code> is excluded as it only returns event IDs, not events themselves.</li>
+</ul>
+<p>If multiple modules implement this callback, Synapse runs them all in order.
+Exceptions are logged and otherwise ignored.</p>
+<p>Performance note:</p>
+<ul>
+<li>Registering this hook causes a performance (caching) optimisation on the
+Federation <code>/state</code> endpoint to be bypassed.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="media-repository-callbacks"><a class="header" href="#media-repository-callbacks">Media repository callbacks</a></h1>
 <p>Media repository callbacks allow module developers to customise the behaviour of the

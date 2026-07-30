@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>CAS - Synapse</title>
+        <title>Federation callbacks - Synapse</title>
 
 
         <!-- Custom HTML head -->
@@ -163,7 +163,7 @@
                         <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
                         </a>
-                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/development/cas.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/modules/federation_callbacks.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
                             <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
                         </a>
 
@@ -197,78 +197,46 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="how-to-test-cas-as-a-developer-without-a-server"><a class="header" href="#how-to-test-cas-as-a-developer-without-a-server">How to test CAS as a developer without a server</a></h1>
-<p>The <a href="https://github.com/jbittel/django-mama-cas">django-mama-cas</a> project is an
-easy to run CAS implementation built on top of Django.</p>
-<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
-<ol>
-<li>Create a new virtualenv: <code>python3 -m venv &lt;your virtualenv&gt;</code></li>
-<li>Activate your virtualenv: <code>source /path/to/your/virtualenv/bin/activate</code></li>
-<li>Install Django and django-mama-cas:
-<pre><code class="language-sh">python -m pip install "django&lt;3" "django-mama-cas==2.4.0"
+                        <h1 id="federation-callbacks"><a class="header" href="#federation-callbacks">Federation callbacks</a></h1>
+<p>Federation callbacks can be registered using the module API’s <code>register_federation_callbacks</code> method.</p>
+<h2 id="callbacks"><a class="header" href="#callbacks">Callbacks</a></h2>
+<p>The available federation callbacks are:</p>
+<h3 id="on_event_delivered_over_federation"><a class="header" href="#on_event_delivered_over_federation"><code>on_event_delivered_over_federation</code></a></h3>
+<p><em>First introduced in Synapse v1.158.0</em></p>
+<pre><code class="language-python">async def on_event_delivered_over_federation(
+    event: FederationEventDeliveryEvent,
+) -&gt; None:
 </code></pre>
-</li>
-<li>Create a Django project in the current directory:
-<pre><code class="language-sh">django-admin startproject cas_test .
-</code></pre>
-</li>
-<li>Follow the <a href="https://django-mama-cas.readthedocs.io/en/latest/installation.html#configuring">install directions</a> for django-mama-cas</li>
-<li>Setup the SQLite database: <code>python manage.py migrate</code></li>
-<li>Create a user:
-<pre><code class="language-sh">python manage.py createsuperuser
-</code></pre>
-<ol>
-<li>Use whatever you want as the username and password.</li>
-<li>Leave the other fields blank.</li>
-</ol>
-</li>
-<li>Use the built-in Django test server to serve the CAS endpoints on port 8000:
-<pre><code class="language-sh">python manage.py runserver
-</code></pre>
-</li>
-</ol>
-<p>You should now have a Django project configured to serve CAS authentication with
-a single user created.</p>
-<h2 id="configure-synapse-and-element-to-use-cas"><a class="header" href="#configure-synapse-and-element-to-use-cas">Configure Synapse (and Element) to use CAS</a></h2>
-<ol>
-<li>Modify your <code>homeserver.yaml</code> to enable CAS and point it to your locally
-running Django test server:
-<pre><code class="language-yaml">cas_config:
-  enabled: true
-  server_url: "http://localhost:8000"
-  service_url: "http://localhost:8081"
-  #displayname_attribute: name
-  #required_attributes:
-  #    name: value
-</code></pre>
-</li>
-<li>Restart Synapse.</li>
-</ol>
-<p>Note that the above configuration assumes the homeserver is running on port 8081
-and that the CAS server is on port 8000, both on localhost.</p>
-<h2 id="testing-the-configuration"><a class="header" href="#testing-the-configuration">Testing the configuration</a></h2>
-<p>Then in Element:</p>
-<ol>
-<li>Visit the login page with a Element pointing at your homeserver.</li>
-<li>Click the Single Sign-On button.</li>
-<li>Login using the credentials created with <code>createsuperuser</code>.</li>
-<li>You should be logged in.</li>
-</ol>
-<p>If you want to repeat this process you’ll need to manually logout first:</p>
-<ol>
-<li>http://localhost:8000/admin/</li>
-<li>Click “logout” in the top right.</li>
-</ol>
+<p>Called when an event has been delivered over federation.
+See <code>FederationEventDeliveryEvent</code> for detailed information available on the event.</p>
+<p>Note that depending on the specific method, delivery may not have
+actually been acknowledged by the other homeserver.
+See <code>FederatedEventDeliveryMethod</code> for details on which cases imply acknowledgment.</p>
+<p>Modules should anticipate more methods being added to the <code>FederatedEventDeliveryMethod</code> enum
+over time (it is non-exhaustive).</p>
+<p>Only methods that deliver full, signed PDUs are included in this mechanism.
+Some notable examples of excluded endpoints:</p>
+<ul>
+<li><code>/send_knock</code> is excluded as it only returns unsigned ‘stripped state’.</li>
+<li><code>/timestamp_to_event</code> is excluded as it only returns event IDs, not events themselves.</li>
+</ul>
+<p>If multiple modules implement this callback, Synapse runs them all in order.
+Exceptions are logged and otherwise ignored.</p>
+<p>Performance note:</p>
+<ul>
+<li>Registering this hook causes a performance (caching) optimisation on the
+Federation <code>/state</code> endpoint to be bypassed.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../development/saml.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../modules/add_extra_fields_to_client_events_unsigned.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../development/room-dag-concepts.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../modules/media_repository_callbacks.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -278,11 +246,11 @@ and that the CAS server is on port 8000, both on localhost.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../development/saml.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../modules/add_extra_fields_to_client_events_unsigned.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../development/room-dag-concepts.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../modules/media_repository_callbacks.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
