@@ -25,10 +25,12 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import secrets
+import sys
 import time
+from collections.abc import Set
 from typing import (
-    AbstractSet,
     Any,
     Awaitable,
     Callable,
@@ -46,7 +48,7 @@ from unittest.mock import Mock, patch
 import canonicaljson
 import signedjson.key
 import unpaddedbase64
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, Never, ParamSpec, override
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred, ensureDeferred
@@ -103,6 +105,19 @@ _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
 P = ParamSpec("P")
 R = TypeVar("R")
 S = TypeVar("S")
+
+
+def _use_colour() -> bool:
+    """
+    Whether assertion failures should be coloured with ANSI escapes.
+
+    Follow the `NO_COLOR`/`FORCE_COLOR` conventions (https://no-color.org, https://force-color.org/).
+    """
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return sys.stdout.isatty()
 
 
 class _TypedFailure(Generic[_ExcType], Protocol):
@@ -269,10 +284,138 @@ class TestCase(unittest.TestCase):
                 required[key], actual[key], msg="%s mismatch. %s" % (key, actual)
             )
 
+    def _fail_with_set_inequality(
+        self,
+        actual_items: Set[TV],
+        expected_items: Set[TV],
+        message: str | None,
+        exact: bool,
+    ) -> Never:
+        """
+        Fail the current test, printing a rich message showing
+        the set inequality.
+
+        If `exact` is True, we expect no extra items in `actual_items`.
+        If `exact` is False, we clarify that extra items are permissible.
+        """
+        if _use_colour():
+            BOLD = "\033[1m"
+            DIM_GREY = "\033[2;37m"
+            RED = "\033[31m"
+            BRIGHT_YELLOW = "\033[93m"
+            DIM_BLUE = "\033[94m"
+            RESET = "\033[0m"
+        else:
+            BOLD = DIM_GREY = RED = BRIGHT_YELLOW = DIM_BLUE = RESET = ""
+
+        # If it's correct, use dim grey: we don't want to draw your attention to it
+        # Grey out the whole item
+        CORRECT_MARKER = f"{DIM_GREY}      ok"
+
+        # If it's wrong, use red: that's the most important information here
+        MISSING_MARKER = f" {RED}missing{RESET}{BRIGHT_YELLOW}"
+        UNEXPECTED_MARKER = f"{RED}unwanted{RESET}{BRIGHT_YELLOW}"
+
+        # If it's a harmless extra, give it a slight bit more emphasis than something correct
+        # (as it could be a sign of something unexpected), but not enough to make it seem wrong.
+        EXTRA_MARKER = f"{DIM_BLUE}   extra{RESET}"
+
+        expected_lines: list[str] = []
+
+        # sorted() only accepts objects that support at least `<` or `>`.
+        # Virtually every immutable data type in Python supports these, so virtually
+        # everything inside a set supports these.
+        # Ignore the type error arising from not proving that `TV` supports comparison.
+        for expected_item in sorted(expected_items):  # type: ignore[type-var]
+            is_missing = expected_item not in actual_items
+
+            marker = MISSING_MARKER if is_missing else CORRECT_MARKER
+
+            expected_lines.append(f"{marker}   {expected_item!r}{RESET}")
+
+        actual_lines: list[str] = []
+        used_markers = set()
+        # See note above about type ignore.
+        for actual_item in sorted(actual_items):  # type: ignore[type-var]
+            is_expected = actual_item in expected_items
+
+            if is_expected:
+                marker = CORRECT_MARKER
+            elif exact:
+                # We want an exact match, so this 'extra' is actively 'unwanted'
+                marker = UNEXPECTED_MARKER
+            else:
+                # Harmless 'extra'
+                marker = EXTRA_MARKER
+            used_markers.add(marker)
+
+            actual_lines.append(f"{marker}   {actual_item!r}{RESET}")
+
+        newline = "\n"
+        expected_string = f"{BOLD}Expected items:{RESET}\n         {{\n{newline.join(expected_lines)}\n         }}"
+        actual_string = f"{BOLD}Actually received items:{RESET}\n         {{\n{newline.join(actual_lines)}\n         }}"
+        first_message = (
+            "Items must match exactly (sets are not equal)"
+            if exact
+            else "Some expected items are missing."
+        )
+
+        legend = f"{BOLD}Legend:{RESET}\n"
+        if CORRECT_MARKER in used_markers:
+            legend += f"  {CORRECT_MARKER}{RESET}: item is correct as it was both expected and received\n"
+        if MISSING_MARKER in used_markers:
+            legend += (
+                f"  {MISSING_MARKER}{RESET}: item is expected but was not received\n"
+            )
+        if UNEXPECTED_MARKER in used_markers:
+            legend += (
+                f"  {UNEXPECTED_MARKER}{RESET}: item was received but is not expected\n"
+            )
+        if EXTRA_MARKER in used_markers:
+            legend += f"  {EXTRA_MARKER}{RESET}: item was received and allowed, though not explicitly expected\n"
+
+        diff_message = (
+            f"{first_message}\n{legend}\n{expected_string}\n\n{actual_string}"
+        )
+
+        extra_message = ""
+        if message is not None:
+            extra_message = "f\n{message}"
+
+        self.fail(f"{diff_message}{extra_message}")
+
+    @override
+    def assertEqual(self, first: TV, second: TV, msg: object | None = None) -> None:
+        """
+        Override of `assertEqual` to make it print better errors.
+
+        Note that `first` is treated as 'actual' and `second` as 'expected`.
+
+        Specifically:
+            - better errors for set inequality
+        """
+        if first == second:
+            return
+
+        if isinstance(first, Set) and isinstance(second, Set):
+            self._fail_with_set_inequality(
+                first,
+                second,
+                # Any `str()`-able object is valid as a message. We frequently pass in raw JSON responses, for instance.
+                str(msg) if msg is not None else msg,
+                exact=True,
+            )
+
+        # Fall back to the base implementation for other types
+        # Since we know `first == second` does not hold,
+        # we expect this must diverge by raising an exception.
+        super().assertEqual(first=first, second=second, msg=msg)
+        raise AssertionError("unreachable")
+
     def assertIncludes(
         self,
-        actual_items: AbstractSet[TV],
-        expected_items: AbstractSet[TV],
+        actual_items: Set[TV],
+        expected_items: Set[TV],
         exact: bool = False,
         message: str | None = None,
     ) -> None:
@@ -295,33 +438,7 @@ class TestCase(unittest.TestCase):
         elif not exact and actual_items >= expected_items:
             return
 
-        expected_lines: list[str] = []
-        for expected_item in expected_items:
-            is_expected_in_actual = expected_item in actual_items
-            expected_lines.append(
-                "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
-            )
-
-        actual_lines: list[str] = []
-        for actual_item in actual_items:
-            is_actual_in_expected = actual_item in expected_items
-            actual_lines.append(
-                "{}  {}".format("+" if is_actual_in_expected else " ", actual_item)
-            )
-
-        newline = "\n"
-        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n {{\n{newline.join(expected_lines)}\n }}"
-        actual_string = f"Actual ('+' = found expected items):\n {{\n{newline.join(actual_lines)}\n }}"
-        first_message = (
-            "Items must match exactly" if exact else "Some expected items are missing."
-        )
-        diff_message = f"{first_message}\n{expected_string}\n{actual_string}"
-
-        extra_message = ""
-        if message is not None:
-            extra_message = "f\n{message}"
-
-        self.fail(f"{diff_message}{extra_message}")
+        self._fail_with_set_inequality(actual_items, expected_items, message, exact)
 
 
 def DEBUG(target: TV) -> TV:
