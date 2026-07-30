@@ -7,7 +7,9 @@ export PGHOST="localhost"
 POSTGRES_MAIN_DB_NAME="synapse_full_schema_main.$$"
 POSTGRES_COMMON_DB_NAME="synapse_full_schema_common.$$"
 POSTGRES_STATE_DB_NAME="synapse_full_schema_state.$$"
-REQUIRED_DEPS=("matrix-synapse" "psycopg2")
+
+# Python package names that must be importable
+REQUIRED_DEPS=("synapse" "sqlite3" "psycopg2")
 
 usage() {
   echo
@@ -69,10 +71,10 @@ done
 # Check that required dependencies are installed
 unsatisfied_requirements=()
 for dep in "${REQUIRED_DEPS[@]}"; do
-  pip show "$dep" --quiet || unsatisfied_requirements+=("$dep")
+  python -c "import $dep" &> /dev/null || unsatisfied_requirements+=("$dep")
 done
 if [ ${#unsatisfied_requirements} -ne 0 ]; then
-  echo "Please install the following python packages: ${unsatisfied_requirements[*]}"
+  echo 'Please `poetry install --extras postgres` first as the following Python modules are not importable: '"${unsatisfied_requirements[*]}"
   exit 1
 fi
 
