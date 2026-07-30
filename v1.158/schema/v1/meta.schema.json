@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json",
+  "$vocabulary": {
+    "https://json-schema.org/draft/2020-12/vocab/core": true,
+    "https://json-schema.org/draft/2020-12/vocab/applicator": true,
+    "https://json-schema.org/draft/2020-12/vocab/unevaluated": true,
+    "https://json-schema.org/draft/2020-12/vocab/validation": true,
+    "https://json-schema.org/draft/2020-12/vocab/meta-data": true,
+    "https://json-schema.org/draft/2020-12/vocab/format-annotation": true,
+    "https://json-schema.org/draft/2020-12/vocab/content": true,
+    "https://element-hq.github.io/synapse/latest/schema/v1/vocab/documentation": false
+  },
+  "$ref": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "io.element.type_name": {
+      "type": "string",
+      "description": "Human-readable type of a schema that is displayed instead of the standard JSON Schema types like `object` or `integer`. In case the JSON Schema type contains `null`, this information should be presented alongside the human-readable type name.",
+      "examples": ["duration", "byte size"]
+    },
+    "io.element.post_description": {
+      "type": "string",
+      "description": "Additional description of a schema, better suited to be placed less prominently in the generated documentation, e.g., at the end of a section after listings of items and properties.",
+      "examples": [
+        "### Advanced uses\n\nThe spent coffee grounds can be added to compost for improving soil and growing plants."
+      ]
+    }
+  }
+}
