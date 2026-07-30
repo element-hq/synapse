@@ -1,0 +1,79 @@
+name: Schema Diff
+
+on:
+  pull_request:
+    paths:
+      - synapse/storage/schema/*/delta/**
+      - synapse/storage/schema/*/full_schemas/**
+      - .github/workflows/schema_diff.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Posts a GitHub PR comment that shows what the effective change to the schema is.
+  show-schema-diff:
+    name: Show schema diff
+    runs-on: ubuntu-latest
+
+    permissions:
+      pull-requests: write
+
+    services:
+      postgres:
+        image: postgres:14-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: "--lc-collate C --lc-ctype C --encoding UTF8"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get -qq install postgresql-client
+
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          poetry-version: "2.4.1"
+          extras: "postgres"
+          python-version: "3.x"
+
+      - name: Generate schema diff
+        id: schema_diff
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          poetry run python .ci/scripts/schema_diff.py \
+            --base origin/develop \
+            > "${{ runner.temp }}/schema_diff.md"
+
+      # If the generation step failed, write an error message so the sticky
+      # comment step still has a file to read.
+      - name: Ensure output file exists on failure
+        if: always() && steps.schema_diff.outcome == 'failure'
+        run: |
+          echo "⚠️ Schema diff generation failed. See job logs for details." \
+            > "${{ runner.temp }}/schema_diff.md"
+
+      - name: Post sticky PR comment
+        uses: marocchino/sticky-pull-request-comment@3d7b8546315c63df45a03981d50a43ec19237f80 # v3
+        if: always()
+        with:
+          header: schema-diff
+          path: ${{ runner.temp }}/schema_diff.md
+          ignore_empty: true
