@@ -5,7 +5,7 @@
 - Change default room version to 11, implementing [MSC4239](https://github.com/matrix-org/matrix-spec-proposals/pull/4239) as part of Matrix v1.14. ([\#18680](https://github.com/element-hq/synapse/issues/18680))
 - Add animation support to the media thumbnailer, gated behind the `animated` query parameter on the thumbnail endpoint (defaults to off). ([\#18831](https://github.com/element-hq/synapse/issues/18831))
 - Return `M_USER_LIMIT_EXCEEDED` error code for media upload limits from [MSC4335](https://github.com/matrix-org/matrix-spec-proposals/pull/4335). ([\#18876](https://github.com/element-hq/synapse/issues/18876))
-- Add Synapse Module API hook that notifies modules when events are delivered over federation (`register_federation_callbacks(...)`).. ([\#20019](https://github.com/element-hq/synapse/issues/20019))
+- Add Synapse Module API hook that notifies modules when events are delivered over federation (`register_federation_callbacks(...)`). ([\#20019](https://github.com/element-hq/synapse/issues/20019))
 
 ## Bugfixes
 
