@@ -173,6 +173,7 @@ from synapse.server_notices.worker_server_notices_sender import (
 from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
+from synapse.storage.schema import SCHEMA_VERSION
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.handlers import RustHandlers
 from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
@@ -632,10 +633,12 @@ class HomeServer(metaclass=abc.ABCMeta):
         """
         return self._instance_name
 
-    def setup(self) -> None:
+    def setup(self, *, target_schema_version: int = SCHEMA_VERSION) -> None:
         logger.info("Setting up.")
         self.start_time = int(self.get_clock().time())
-        self.datastores = Databases(self.DATASTORE_CLASS, self)
+        self.datastores = Databases(
+            self.DATASTORE_CLASS, self, target_schema_version=target_schema_version
+        )
         logger.info("Finished setting up.")
 
     # def __del__(self) -> None:
