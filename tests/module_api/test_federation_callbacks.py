@@ -214,7 +214,7 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
             delivery = self._assert_only_delivery(FederatedEventDeliveryMethod.STATE)
 
             # Check that we got notified about delivery for all the expected state events
-            # included in a `/state` response (all the state in the room at the event)
+            # included in a `/state` response (including `pdus` and `auth_chain`)
             state_key_pairs_included = {(e.type, e.state_key) for e in delivery.events}
             self.assertEqual(
                 state_key_pairs_included,
@@ -332,10 +332,11 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
 
         self.fed_transport_client.send_transaction.side_effect = _acknowledge_pdus
 
+        # After sending, the event propagates to the federation transmission queue
+        # and gets fired as a `/send` request
         (message_event_id,) = self.helper.send_messages(
             self.room_id, 1, tok=self.creator_tok
         )
-        self.pump()
 
         delivery = self._assert_only_delivery(FederatedEventDeliveryMethod.SEND)
         self.assertEqual(delivery.server_name, self.OTHER_SERVER_NAME)
@@ -368,9 +369,10 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
 
         self.fed_transport_client.send_transaction.side_effect = _error_pdus
 
-        (message_event_id,) = self.helper.send_messages(
+        # After sending, the event propagates to the federation transmission queue
+        # and gets fired as a `/send` request
+        (_message_event_id,) = self.helper.send_messages(
             self.room_id, 1, tok=self.creator_tok
         )
-        self.pump()
 
         self.assertIncludes(set(self._deliveries), set(), exact=True)

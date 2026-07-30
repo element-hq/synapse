@@ -20,7 +20,7 @@ Called when an event has been delivered over federation.
 See `FederationEventDeliveryEvent` for detailed information available on the event.
 
 Note that depending on the specific method, delivery may not have
-actually been acknowledged.
+actually been acknowledged by the other homeserver.
 See `FederatedEventDeliveryMethod` for details on which cases imply acknowledgment.
 
 Modules should anticipate more methods being added to the `FederatedEventDeliveryMethod` enum
