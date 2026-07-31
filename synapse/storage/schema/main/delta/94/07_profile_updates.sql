@@ -46,8 +46,6 @@ CREATE INDEX IF NOT EXISTS profile_updates_by_user ON profile_updates (user_id, 
 
 -- Track which local users should receive each profile update.
 CREATE TABLE IF NOT EXISTS profile_updates_per_user (
-  id $%AUTO_INCREMENT_PRIMARY_KEY%$,
-
   -- Stream ID reference to `profile_updates`
   stream_id BIGINT NOT NULL REFERENCES profile_updates (stream_id),
 
@@ -56,7 +54,7 @@ CREATE TABLE IF NOT EXISTS profile_updates_per_user (
 
   -- Unix timestamp (milliseconds). Used to determine when to prune rows (to prevent the table
   -- from growing indefinitely).
-  inserted_ts BIGINT NOT NULL
-);
+  inserted_ts BIGINT NOT NULL,
 
-CREATE INDEX IF NOT EXISTS profile_updates_per_user_by_user_stream ON profile_updates_per_user (user_id, stream_id);
+  PRIMARY KEY (user_id, stream_id)
+);
