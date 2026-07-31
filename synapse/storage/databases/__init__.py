@@ -30,7 +30,6 @@ from synapse.storage.databases.state import StateGroupDataStore
 from synapse.storage.databases.state.deletion import StateDeletionDataStore
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
-from synapse.storage.schema import SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -68,13 +67,7 @@ class Databases(Generic[DataStoreT]):
     persist_events: PersistEventsStore | None
     state_deletion: StateDeletionDataStore
 
-    def __init__(
-        self,
-        main_store_class: type[DataStoreT],
-        hs: "HomeServer",
-        *,
-        target_schema_version: int = SCHEMA_VERSION,
-    ):
+    def __init__(self, main_store_class: type[DataStoreT], hs: "HomeServer"):
         # Note we pass in the main store class here as workers use a different main
         # store.
 
@@ -109,7 +102,6 @@ class Databases(Generic[DataStoreT]):
                     engine,
                     hs.config,
                     databases=database_config.databases,
-                    target_schema_version=target_schema_version,
                 )
 
                 database = DatabasePool(hs, database_config, engine)

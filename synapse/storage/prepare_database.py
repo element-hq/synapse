@@ -96,8 +96,6 @@ def prepare_database(
     database_engine: BaseDatabaseEngine,
     config: HomeServerConfig | None,
     databases: Collection[str] = ("main", "state"),
-    *,
-    target_schema_version: int = SCHEMA_VERSION,
 ) -> None:
     """Prepares a physical database for usage. Will either create all necessary tables
     or upgrade from an older schema version.
@@ -113,9 +111,6 @@ def prepare_database(
             database which we expect to be configured already
         databases: The name of the databases that will be used
             with this physical database. Defaults to all databases.
-        target_schema_version:
-            Can be set to override `SCHEMA_VERSION` as the target
-            schema version for upgrades.
     """
 
     try:
@@ -161,7 +156,6 @@ def prepare_database(
                 database_engine,
                 config,
                 databases=databases,
-                target_schema_version=target_schema_version,
             )
 
         else:
@@ -172,12 +166,7 @@ def prepare_database(
             if config and config.worker.worker_app is not None:
                 raise UpgradeDatabaseException(EMPTY_DATABASE_ON_WORKER_ERROR)
 
-            _setup_new_database(
-                cur,
-                database_engine,
-                databases=databases,
-                target_schema_version=target_schema_version,
-            )
+            _setup_new_database(cur, database_engine, databases=databases)
 
         # check if any of our configured dynamic modules want a database
         if config is not None:
@@ -194,8 +183,6 @@ def _setup_new_database(
     cur: LoggingTransaction,
     database_engine: BaseDatabaseEngine,
     databases: Collection[str],
-    *,
-    target_schema_version: int = SCHEMA_VERSION,
 ) -> None:
     """Sets up the physical database by finding a base set of "full schemas" and
     then applying any necessary deltas, including schemas from the given data
@@ -203,7 +190,7 @@ def _setup_new_database(
 
     The "full_schemas" directory has subdirectories named after versions. This
     function searches for the highest version less than or equal to
-    `target_schema_version` and executes all .sql files in that directory.
+    `SCHEMA_VERSION` and executes all .sql files in that directory.
 
     The function will then apply all deltas for all versions after the base
     version.
@@ -238,7 +225,6 @@ def _setup_new_database(
         cur: a database cursor
         database_engine
         databases: The names of the databases to instantiate on the given physical database.
-        target_schema_version: The target schema version to use instead of SCHEMA_VERSION.
     """
 
     # We're about to set up a brand new database so we check that its
@@ -256,7 +242,7 @@ def _setup_new_database(
         except ValueError:
             continue
 
-        if ver <= target_schema_version:
+        if ver <= SCHEMA_VERSION:
             valid_versions.append(ver)
 
     if not valid_versions:
@@ -313,7 +299,6 @@ def _setup_new_database(
         config=None,
         databases=databases,
         is_empty=True,
-        target_schema_version=target_schema_version,
     )
 
 
@@ -324,8 +309,6 @@ def _upgrade_existing_database(
     config: HomeServerConfig | None,
     databases: Collection[str],
     is_empty: bool = False,
-    *,
-    target_schema_version: int = SCHEMA_VERSION,
 ) -> None:
     """Upgrades an existing physical database.
 
@@ -341,7 +324,7 @@ def _upgrade_existing_database(
     the same result when applied in any order. No guarantees are made on the
     order of execution of these scripts.
 
-    This is a no-op if current_version == target_schema_version.
+    This is a no-op of current_version == SCHEMA_VERSION.
 
     Example directory structure:
 
@@ -377,7 +360,6 @@ def _upgrade_existing_database(
             on the given physical database.
         is_empty: Is this a blank database? I.e. do we need to run the
             upgrade portions of the delta scripts.
-        target_schema_version: The target schema version to use instead of SCHEMA_VERSION.
     """
     if is_empty:
         assert not current_schema_state.applied_deltas
@@ -389,7 +371,7 @@ def _upgrade_existing_database(
     # If the schema version needs to be updated, and we are on a worker, we immediately
     # know to bail out as workers cannot update the database schema. Only one process
     # must update the database at the time, therefore we delegate this task to the master.
-    if is_worker and current_schema_state.current_version < target_schema_version:
+    if is_worker and current_schema_state.current_version < SCHEMA_VERSION:
         # If the DB is on an older version than we expect then we refuse
         # to start the worker (as the main process needs to run first to
         # update the schema).
@@ -400,7 +382,7 @@ def _upgrade_existing_database(
 
     if (
         current_schema_state.compat_version is not None
-        and current_schema_state.compat_version > target_schema_version
+        and current_schema_state.compat_version > SCHEMA_VERSION
     ):
         raise ValueError(
             "Cannot use this database as it is too "
@@ -443,7 +425,7 @@ def _upgrade_existing_database(
 
     specific_engine_extensions = (".sqlite", ".postgres")
 
-    for v in range(start_ver, target_schema_version + 1):
+    for v in range(start_ver, SCHEMA_VERSION + 1):
         if not is_worker:
             logger.info("Applying schema deltas for v%d", v)
 

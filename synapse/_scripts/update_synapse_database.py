@@ -41,18 +41,12 @@ logger = logging.getLogger("update_database")
 class MockHomeserver(HomeServer):
     DATASTORE_CLASS = DataStore
 
-    def __init__(
-        self, config: HomeServerConfig, target_schema_version: int | None = None
-    ):
+    def __init__(self, config: HomeServerConfig):
         super().__init__(
             hostname=config.server.server_name,
             config=config,
             reactor=reactor,
         )
-        self._target_schema_version = target_schema_version
-
-    def setup(self) -> None:
-        super().setup(target_schema_version=self._target_schema_version)
 
 
 def run_background_updates(hs: HomeServer) -> None:
@@ -100,15 +94,6 @@ def main() -> None:
         required=False,
         help="run background updates after upgrading the database schema",
     )
-    parser.add_argument(
-        "--target-schema-version",
-        type=int,
-        required=False,
-        help=(
-            "If set, only apply schema deltas up to (and including) this version. "
-            "Defaults to the full current SCHEMA_VERSION."
-        ),
-    )
 
     args = parser.parse_args()
 
@@ -124,10 +109,7 @@ def main() -> None:
     config.parse_config_dict(hs_config, "", "")
 
     # Instantiate and initialise the homeserver object.
-    hs = MockHomeserver(
-        config,
-        target_schema_version=args.target_schema_version,
-    )
+    hs = MockHomeserver(config)
 
     # Setup instantiates the store within the homeserver object and updates the
     # DB.
