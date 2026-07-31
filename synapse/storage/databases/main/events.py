@@ -2130,20 +2130,27 @@ class PersistEventsStore:
             # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
             # for concerns around the current implementation of the profile
             # updates stream.
-            # Note, we're skipped Membership.BAN, as we would expect there to also
-            # be a leave event?
             profile_update_additions = {
                 c.user_id
                 for c in sliding_sync_table_changes.to_insert_membership_snapshots
                 if self.hs.is_mine_id(c.user_id)
-                and c.membership
-                in (Membership.JOIN, Membership.KNOCK, Membership.INVITE)
+                # FIXME: Ideally we would filter out JOIN -> JOIN. See note below.
+                and c.membership == Membership.JOIN
             }
             profile_update_leaves = {
                 c.user_id
                 for c in sliding_sync_table_changes.to_insert_membership_snapshots
-                if self.hs.is_mine_id(c.user_id) and c.membership == Membership.LEAVE
-            }
+                if self.hs.is_mine_id(c.user_id)
+                # Any transition from JOIN to something else counts as a leave here.
+                # Even the 'invalid' transitions might effectively happen due to
+                # state resolution.
+                and c.membership != Membership.JOIN
+            } | (
+                # We also need to consider users that get fully state reset out of the room.
+                # These should be treated as 'leave'
+                set(sliding_sync_table_changes.to_delete_membership_snapshots)
+            )
+
             if profile_update_additions:
                 # Write the profile updates for additions to the room, from either
                 # a join, knock, invite, etc.

@@ -28,8 +28,6 @@ from twisted.internet.testing import MemoryReactor
 import synapse.types
 from synapse.api.constants import (
     EventTypes,
-    JoinRules,
-    Membership,
     ProfileFields,
     ProfileUpdateAction,
 )
@@ -458,20 +456,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ],
         )
 
-    @parameterized.expand(
-        [
-            Membership.JOIN,
-            Membership.KNOCK,
-            Membership.INVITE,
-        ]
-    )
     @override_config({"include_profile_updates_in_sync": True})
     def test_membership_addition_to_room_adds_the_right_join_action_to_profile_streams(
         self,
-        membership: str,
     ) -> None:
-        """Test that a membership event that adds a user as joined, invited or knocked,
-        to a room, adds the relevant joined action to the profile update stream tables.
+        """Test that a membership event, which adds a user as joined to a room,
+        adds the relevant joined action to the profile update stream tables.
 
         Here we consider join, knock and invite to all be additions to the room
         list of members for answering the question "which profiles should we send
@@ -483,20 +473,9 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             room_creator=self.frank.to_string(),
             tok=self.frank_token,
         )
-        if membership == Membership.JOIN:
-            self.helper.join(room_id, "@roger:test", tok=roger_token)
-        elif membership == Membership.INVITE:
-            self.helper.invite(
-                room_id, self.frank.to_string(), "@roger:test", tok=self.frank_token
-            )
-        elif membership == Membership.KNOCK:
-            self.helper.send_state(
-                room_id,
-                EventTypes.JoinRules,
-                {"join_rule": JoinRules.KNOCK},
-                tok=self.frank_token,
-            )
-            self.helper.knock(room_id, "@roger:test", tok=roger_token)
+
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
                 from_id=0,
