@@ -25,6 +25,7 @@ from typing import (
     AbstractSet,
     Collection,
     Iterable,
+    Literal,
     Mapping,
     Sequence,
     cast,
@@ -857,21 +858,21 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         user_id: str,
         other_user_ids: Collection[str],
         exclude_room_id: str | None = None,
-    ) -> dict[str, bool]:
+    ) -> dict[str, Literal[True]]:
         """Return mapping from user ID to whether they share a room with the
         given user.
 
         Optionally, exclude a room when querying the database.
 
-        Note: `None` and `False` are equivalent and mean they don't share a
-        room.
+        Users sharing rooms get `True` returned, users who don't are omitted from the return.
+        (This is for friendliness with `cachedList` on `_do_users_share_a_room`)
         """
         state_key_clause, state_key_args = make_in_list_sql_clause(
             self.database_engine, "state_key", other_user_ids
         )
         # Build SQL args based on whether we are excluding a room ID or not
         exclude_room_id_clause = ""
-        exclude_room_id_args = ()
+        exclude_room_id_args: tuple[str, ...] = ()
 
         if exclude_room_id:
             exclude_room_id_clause = "AND room_id != ?"
@@ -916,14 +917,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         user_id: str,
         other_user_ids: Collection[str],
         exclude_room_id: str | None = None,
-    ) -> Mapping[str, bool | None]:
+    ) -> Mapping[str, Literal[True] | None]:
         """Return mapping from user ID to whether they share a room with the
         given user.
 
         Optionally, exclude a room when querying the database.
 
-        Note: `None` and `False` are equivalent and mean they don't share a
-        room.
+        This returns `True` for users that share a room and `None` for users that don't.
+        (This is because of the `cachedList` annotation.)
         """
 
         to_return = {}
