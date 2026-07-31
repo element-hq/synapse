@@ -195,19 +195,13 @@ databases:
 trusted_key_servers: []
 EOF
 
-# Build the --target-schema-version flag only if a specific schema number was requested.
-SCHEMA_LIMIT_FLAG=""
-if [ "$SCHEMA_NUMBER" != "9999" ]; then
-    SCHEMA_LIMIT_FLAG="--target-schema-version $SCHEMA_NUMBER"
-fi
-
 # Generate the server's signing key.
 echo "Generating SQLite3 db schema..."
 python -m synapse.app.homeserver --generate-keys -c "$SQLITE_CONFIG"
 
 # Make sure the SQLite3 database is using the latest schema and has no pending background update.
 echo "Running db background jobs..."
-poetry run python synapse/_scripts/update_synapse_database.py --database-config "$SQLITE_CONFIG" --run-background-updates $SCHEMA_LIMIT_FLAG
+poetry run python synapse/_scripts/update_synapse_database.py --database-config "$SQLITE_CONFIG" --run-background-updates
 
 # Create the PostgreSQL database.
 echo "Creating postgres databases..."
@@ -216,7 +210,7 @@ createdb --lc-collate=C --lc-ctype=C --template=template0 "$POSTGRES_MAIN_DB_NAM
 createdb --lc-collate=C --lc-ctype=C --template=template0 "$POSTGRES_STATE_DB_NAME"
 
 echo "Running db background jobs..."
-poetry run python synapse/_scripts/update_synapse_database.py --database-config "$POSTGRES_CONFIG" --run-background-updates $SCHEMA_LIMIT_FLAG
+poetry run python synapse/_scripts/update_synapse_database.py --database-config "$POSTGRES_CONFIG" --run-background-updates
 
 
 echo "Dropping unwanted db tables..."
