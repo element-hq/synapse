@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS profile_updates (
   -- at once.
   affected_fields JSONB NULL,
 
-  -- Unix timestamp for debugging purposes
+  -- Unix timestamp (milliseconds) for debugging purposes
   inserted_ts BIGINT NOT NULL
 );
 
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS profile_updates_per_user (
   -- The full user ID of the local user that should receive the profile update.
   user_id TEXT NOT NULL,
 
-  -- Unix timestamp. Used to determine when to cull rows (to prevent the table
+  -- Unix timestamp (milliseconds). Used to determine when to prune rows (to prevent the table
   -- from growing indefinitely).
   inserted_ts BIGINT NOT NULL
 );
