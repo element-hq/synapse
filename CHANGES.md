@@ -1,3 +1,34 @@
+# Synapse 1.158.0rc1 (2026-07-30)
+
+## Features
+
+- Change default room version to 11, implementing [MSC4239](https://github.com/matrix-org/matrix-spec-proposals/pull/4239) as part of Matrix v1.14. ([\#18680](https://github.com/element-hq/synapse/issues/18680))
+- Add animation support to the media thumbnailer, gated behind the `animated` query parameter on the thumbnail endpoint (defaults to off). ([\#18831](https://github.com/element-hq/synapse/issues/18831))
+- Return `M_USER_LIMIT_EXCEEDED` error code for media upload limits from [MSC4335](https://github.com/matrix-org/matrix-spec-proposals/pull/4335). ([\#18876](https://github.com/element-hq/synapse/issues/18876))
+- Add Synapse Module API hook that notifies modules when events are delivered over federation (`register_federation_callbacks(...)`). ([\#20019](https://github.com/element-hq/synapse/issues/20019))
+
+## Bugfixes
+
+- Fix third-party (3pid) invites over federation failing intermittently in version 12 rooms, whose room IDs no longer encode a server name. ([#19898](https://github.com/element-hq/synapse/issues/19898))
+- Fix `/createRoom` intermittently failing with a 500 error in version 12 rooms when the same user creates several rooms at once, due to colliding room IDs. ([\#19898](https://github.com/element-hq/synapse/issues/19898))
+- Fix server key cache invalidations being silently dropped on workers. ([\#19966](https://github.com/element-hq/synapse/issues/19966))
+- Fix `HomeServer.shutdown()` not being able to cleanly shutdown the homeserver (caused by Rust code referencing Python `DatabasePool`). ([\#20009](https://github.com/element-hq/synapse/issues/20009))
+
+## Improved Documentation
+
+- Clarify the usage of the `guests` parameter when using the [List Accounts (V2) admin API](https://element-hq.github.io/synapse/develop/admin_api/user_admin_api.html#list-accounts-v2) with the Matrix Authentication Service integration enabled. ([\#19963](https://github.com/element-hq/synapse/issues/19963))
+
+## Internal Changes
+
+- Update release script JSON schema find/replace task to be compatible with macOS. ([\#19962](https://github.com/element-hq/synapse/issues/19962))
+- Remove alert silencing deploy step from release script instructions as it's no longer necessary. ([\#19968](https://github.com/element-hq/synapse/issues/19968))
+- Link to changelog instead of duplicating content in the tag/release. ([\#19984](https://github.com/element-hq/synapse/issues/19984))
+- Fix `RemoteJoinHelper` test helper signing events with the default room version (room version mismatch). ([\#20015](https://github.com/element-hq/synapse/issues/20015))
+- Fix `assertIncludes` printing `None` at the end of the message. ([\#20020](https://github.com/element-hq/synapse/issues/20020))
+
+
+
+
 # Synapse 1.157.2 (2026-07-28)
 
 This security release addresses several vulnerabilities.

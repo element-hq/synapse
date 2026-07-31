@@ -1,1 +1,0 @@
-Fix `RemoteJoinHelper` test helper signing events with the default room version (room version mismatch).

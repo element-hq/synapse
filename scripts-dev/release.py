@@ -736,8 +736,8 @@ def announce(_gh_token: str | None) -> None:
 def _announce() -> None:
     """Generate markdown to announce the release."""
 
-    synapse_repo = get_repo_and_check_clean_checkout()
     current_version = get_package_version()
+    release_branch_name = get_release_branch_name(current_version)
     tag_name = f"v{current_version}"
     is_rc = "rc" in tag_name
 
@@ -756,7 +756,7 @@ Hi everyone. Synapse {current_version} has just been released.
         )
 
     release_text += f"""
-[notes](https://github.com/element-hq/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md) | \
+[notes](https://github.com/element-hq/synapse/blob/{release_branch_name}/CHANGES.md) | \
 [docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
