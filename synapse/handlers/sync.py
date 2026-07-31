@@ -2378,17 +2378,19 @@ class SyncHandler:
             updated_user_fields: dict[str, set[str]] = {}
             # Set fields from updates
             for update in updates:
-                # Skip the update if there is no field update (a joined or left room
-                # action), the client didn't ask for this field, or we're not
-                # interested in this user.
                 if (
-                    not update.field_name
-                    or update.field_name not in profile_fields
+                    # Skip the update if there is no field update (a joined or left room action),
+                    update.action != ProfileUpdateAction.UPDATE
+                    or update.affected_fields is None
+                    # or if the client isn't interested in any of the fields
+                    or update.affected_fields.isdisjoint(profile_fields)
+                    # or we're not interested in this user.
                     or update.user_id not in users
                 ):
                     continue
-                updated_user_fields.setdefault(update.user_id, set()).add(
-                    update.field_name
+                updated_user_fields.setdefault(update.user_id, set()).update(
+                    # Add any fields that were affected and that we're interested in
+                    update.affected_fields & profile_fields
                 )
 
             # Note: there's a small race condition here where a profile update may

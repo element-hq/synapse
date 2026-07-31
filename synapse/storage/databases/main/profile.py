@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, Collection, cast
+from typing import TYPE_CHECKING, AbstractSet, Collection, cast
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -32,7 +32,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, StoreError
 from synapse.replication.tcp.streams._base import ProfileUpdatesStream
-from synapse.storage._base import SQLBaseStore, make_in_list_sql_clause
+from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -42,6 +42,7 @@ from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonValue, UserID
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -58,7 +59,7 @@ class ProfileUpdate:
     stream_id: int
     user_id: str
     action: str
-    field_name: str | None
+    affected_fields: frozenset[str] | None
 
 
 class ProfileWorkerStore(SQLBaseStore):
@@ -351,7 +352,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
     async def get_updated_profile_updates(
         self, *, from_id: int, to_id: int, limit: int
-    ) -> list[tuple[int, str, str, str | None]]:
+    ) -> list[tuple[int, str, str, frozenset[str] | None]]:
         """Get updates to profile updates between two stream IDs.
 
         Bounds: from_id < ... <= to_id
@@ -369,11 +370,11 @@ class ProfileWorkerStore(SQLBaseStore):
 
         def _get_updated_profile_updates_txn(
             txn: LoggingTransaction,
-        ) -> list[tuple[int, str, str, str | None]]:
+        ) -> list[tuple[int, str, str, frozenset[str] | None]]:
             txn.execute(
                 """
                 SELECT
-                    stream_id, user_id, action, field_name
+                    stream_id, user_id, action, affected_fields
                 FROM profile_updates
                 WHERE
                     ? < stream_id AND stream_id <= ?
@@ -381,7 +382,21 @@ class ProfileWorkerStore(SQLBaseStore):
                 """,
                 (from_id, to_id, limit),
             )
-            return cast(list[tuple[int, str, str, str | None]], txn.fetchall())
+
+            return [
+                (
+                    stream_id,
+                    user_id,
+                    action,
+                    (
+                        # affected_fields is a JSON array, turn it to a frozenset[str]
+                        frozenset(db_to_json(affected_fields))
+                        if affected_fields is not None
+                        else None
+                    ),
+                )
+                for stream_id, user_id, action, affected_fields in txn
+            ]
 
         return await self.db_pool.runInteraction(
             "get_updated_profile_updates", _get_updated_profile_updates_txn
@@ -392,7 +407,7 @@ class ProfileWorkerStore(SQLBaseStore):
         *,
         from_id: int,
         to_id: int,
-        field_names: Collection[str],
+        field_names: AbstractSet[str],
     ) -> list[ProfileUpdate]:
         """Get profile update markers for the given fields in a stream range.
 
@@ -405,6 +420,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         Returns:
             list of ProfileUpdates update rows
+            The `affected_fields` entry in the ProfileUpdates will be filtered.
         """
         if from_id >= to_id:
             return []
@@ -415,29 +431,59 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_profile_updates_for_fields_txn(
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
-            clause, args = make_in_list_sql_clause(
-                txn.database_engine, "field_name", field_names
+            wanted_field_in_elems_clause, wanted_field_in_elems_args = (
+                make_in_list_sql_clause(
+                    txn.database_engine, "field_names.value", field_names
+                )
             )
+
+            if isinstance(txn.database_engine, PostgresEngine):
+                # Note that if we had a GIN index on `affected_fields`, this would defeat it.
+                # If we decide we want one, we should consider using the `?|` operator or its
+                # clearer-named `jsonb_exists_any` equivalent.
+                all_field_names_table_expression = (
+                    "jsonb_array_elements_text(affected_fields) AS field_names(value)"
+                )
+            else:
+                # json_each is a table-valued function that gives `value` as one of its column names
+                all_field_names_table_expression = (
+                    "json_each(affected_fields) AS field_names"
+                )
+
             txn.execute(
                 f"""
-                SELECT stream_id, user_id, action, field_name
-                    FROM profile_updates
+                SELECT stream_id, user_id, action, affected_fields
+                FROM profile_updates
                 WHERE ? < stream_id AND stream_id <= ?
-                    AND ({clause} OR action != ?)
+                    AND (
+                        (EXISTS (SELECT 1 FROM {all_field_names_table_expression} WHERE {wanted_field_in_elems_clause}))
+                        OR action != ?
+                    )
                 ORDER BY stream_id ASC
                 """,
-                (from_id, to_id, *args, ProfileUpdateAction.UPDATE.value),
+                (
+                    from_id,
+                    to_id,
+                    *wanted_field_in_elems_args,
+                    ProfileUpdateAction.UPDATE.value,
+                ),
             )
             rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
             updates: list[ProfileUpdate] = []
-            for stream_id, user_id, action, field_name in rows:
+            for stream_id, user_id, action, affected_fields_dbjson in rows:
                 updates.append(
                     ProfileUpdate(
                         stream_id=stream_id,
                         user_id=user_id,
                         action=action,
-                        field_name=field_name,
+                        affected_fields=(
+                            # Get the field names that were affected by this update
+                            # and intersect with the field names we care about
+                            frozenset(db_to_json(affected_fields_dbjson)) & field_names
+                        )
+                        if affected_fields_dbjson is not None
+                        else None,
                     )
                 )
 
@@ -453,7 +499,7 @@ class ProfileWorkerStore(SQLBaseStore):
         from_id: int,
         to_id: int,
         user_id: str,
-        field_names: set[str],
+        field_names: AbstractSet[str],
         include_users: set[str] | None = None,
     ) -> list[ProfileUpdate]:
         """Get profile update markers for a user in a stream range.
@@ -486,9 +532,23 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_profile_updates_for_user_and_fields_txn(
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
-            field_clause, field_args = make_in_list_sql_clause(
-                txn.database_engine, "pu.field_name", field_names
+            wanted_field_in_elems_clause, wanted_field_in_elems_args = (
+                make_in_list_sql_clause(
+                    txn.database_engine, "field_names.value", field_names
+                )
             )
+
+            if isinstance(txn.database_engine, PostgresEngine):
+                # Note that if we had a GIN index on `affected_fields`, this would defeat it.
+                # If we decide we want one, we should consider using the `?|` operator or its
+                # clearer-named `jsonb_exists_any` equivalent.
+                all_field_names_table_expression = "jsonb_array_elements_text(pu.affected_fields) AS field_names(value)"
+            else:
+                # json_each is a table-valued function that gives `value` as one of its column names
+                all_field_names_table_expression = (
+                    "json_each(pu.affected_fields) AS field_names"
+                )
+
             user_clause = ""
             user_args: list[str] = []
             if include_users is not None:
@@ -504,14 +564,17 @@ class ProfileWorkerStore(SQLBaseStore):
             # and the `user_id` and `field_names` match.
             txn.execute(
                 f"""
-                SELECT pu.stream_id, pu.user_id, pu.action, pu.field_name
+                SELECT pu.stream_id, pu.user_id, pu.action, pu.affected_fields
                 FROM profile_updates AS pu
-                    INNER JOIN profile_updates_per_user AS puf
+                INNER JOIN profile_updates_per_user AS puf
                     ON pu.stream_id = puf.stream_id
                 WHERE ? < pu.stream_id AND pu.stream_id <= ?
                     AND puf.user_id = ?
                     {user_clause}
-                    AND ({field_clause} OR pu.action != ?)
+                    AND (
+                        (EXISTS (SELECT 1 FROM {all_field_names_table_expression} WHERE {wanted_field_in_elems_clause}))
+                        OR pu.action != ?
+                    )
                 ORDER BY pu.stream_id ASC
                 """,
                 (
@@ -519,20 +582,26 @@ class ProfileWorkerStore(SQLBaseStore):
                     to_id,
                     user_id,
                     *user_args,
-                    *field_args,
+                    *wanted_field_in_elems_args,
                     ProfileUpdateAction.UPDATE.value,
                 ),
             )
             rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
 
             updates: list[ProfileUpdate] = []
-            for stream_id, updated_user_id, action, field_name in rows:
+            for stream_id, updated_user_id, action, affected_fields_dbjson in rows:
                 updates.append(
                     ProfileUpdate(
                         stream_id=stream_id,
                         user_id=updated_user_id,
                         action=action,
-                        field_name=field_name,
+                        affected_fields=(
+                            # Get the field names that were affected by this update
+                            # and intersect with the field names we care about
+                            frozenset(db_to_json(affected_fields_dbjson)) & field_names
+                        )
+                        if affected_fields_dbjson is not None
+                        else None,
                     )
                 )
 
@@ -801,7 +870,7 @@ class ProfileWorkerStore(SQLBaseStore):
         txn: LoggingTransaction,
         user_id: UserID,
         action: ProfileUpdateAction,
-        field_names: list[str] | None,
+        field_names: Collection[str] | None,
         user_rooms: set[str] | None = None,
         target_users: set[str] | None = None,
     ) -> int | None:
@@ -874,54 +943,25 @@ class ProfileWorkerStore(SQLBaseStore):
 
         # Record the profile update
         inserted_ts = self.clock.time_msec()
-        if field_names:
-            stream_ids = self._profile_updates_id_gen.get_next_mult_txn(
-                txn, len(field_names)
-            )
-            values: list[tuple[int, str, str, str, str | None, int]] = [
-                (
-                    stream_id,
-                    self._instance_name,
-                    user_id.to_string(),
-                    action.value,
-                    field_name,
-                    inserted_ts,
-                )
-                for stream_id, field_name in zip(stream_ids, field_names)
-            ]
-        else:
-            stream_ids = [self._profile_updates_id_gen.get_next_txn(txn)]
-            values = [
-                (
-                    stream_ids[0],
-                    self._instance_name,
-                    user_id.to_string(),
-                    action.value,
-                    None,
-                    inserted_ts,
-                )
-            ]
-        self.db_pool.simple_insert_many_txn(
+        stream_id = self._profile_updates_id_gen.get_next_txn(txn)
+
+        self.db_pool.simple_insert_txn(
             txn,
             table="profile_updates",
-            keys=[
-                "stream_id",
-                "instance_name",
-                "user_id",
-                "action",
-                "field_name",
-                "inserted_ts",
-            ],
-            values=values,
+            values={
+                "stream_id": stream_id,
+                "instance_name": self._instance_name,
+                "user_id": user_id.to_string(),
+                "action": action.value,
+                "affected_fields": json_encoder.encode(sorted(field_names))
+                if field_names
+                else None,
+                "inserted_ts": inserted_ts,
+            },
         )
 
         # Add per user tracking rows for each generated stream ID
-        inserted_ts = self.clock.time_msec()
-        per_user_values = [
-            (stream_id, user_id, inserted_ts)
-            for user_id in users
-            for stream_id in stream_ids
-        ]
+        per_user_values = [(stream_id, user_id, inserted_ts) for user_id in users]
         self.db_pool.simple_insert_many_txn(
             txn,
             table="profile_updates_per_user",
@@ -932,7 +972,7 @@ class ProfileWorkerStore(SQLBaseStore):
             ],
             values=per_user_values,
         )
-        return stream_ids[-1]
+        return stream_id
 
     async def set_profile_field(
         self,

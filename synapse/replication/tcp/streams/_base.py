@@ -774,11 +774,11 @@ class ProfileUpdatesStreamRow:
     """The full user ID with the profile update."""
     action: ProfileUpdateAction
     """The action, either 'update' for a field update, 'left_room' if the user left
-    a room or `joined_room` if the user joined a room, see ProfileUpdateAction constant.
+    a room or `joined_room` if the user joined a room, see ProfileUpdateAction enum.
     """
-    field_name: str | None
-    """The profile field that was updated, see https://spec.matrix.org/unstable/client-server-api/#profiles.
-    This is None if `action` is not 'update'.
+    affected_fields: frozenset[str] | None
+    """Names of the profile fields that were added, updated or removed, see https://spec.matrix.org/unstable/client-server-api/#profiles.
+    This is None if `action` is not `update`.
     """
 
 

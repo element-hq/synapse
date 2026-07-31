@@ -902,7 +902,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             (
                 user_id,
                 *exclude_room_id_args,
-                state_key_args,
+                *state_key_args,
                 *exclude_room_id_args,
             ),
         )

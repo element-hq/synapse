@@ -11,7 +11,9 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Track updates to profile fields for MSC4429 legacy /sync.
+-- Track updates to profile fields.
+-- For MSC4429 legacy /sync and others.
+-- See https://github.com/element-hq/synapse/issues/19981 for potential future directions of this table.
 CREATE TABLE IF NOT EXISTS profile_updates (
   stream_id BIGINT NOT NULL PRIMARY KEY,
   instance_name TEXT NOT NULL,
@@ -22,17 +24,25 @@ CREATE TABLE IF NOT EXISTS profile_updates (
   -- Profile action that has happened, see ProfileUpdateAction enum.
   action TEXT NOT NULL,
 
-  -- Profile field name that has been updated,
-  -- see https://spec.matrix.org/unstable/client-server-api/#profiles
-  -- This is only required if "action" is "update"
-  field_name TEXT NULL,
+  -- JSON array of the profile field names that have been
+  -- added, updated or removed in this update.
+  -- See https://spec.matrix.org/unstable/client-server-api/#profiles
+  -- This is only present if `action` is `update`.
+  --
+  -- We support multiple field updates at once because it is easy to foresee features
+  -- involving multiple fields (where getting the illusion of a torn write might be harmful),
+  -- as well as synchronisation over federation being likely to lead to multiple field changes
+  -- at once.
+  affected_fields JSONB NULL,
 
   -- Unix timestamp for debugging purposes
   inserted_ts BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS profile_updates_by_user ON profile_updates (user_id, stream_id);
-CREATE INDEX IF NOT EXISTS profile_updates_by_field ON profile_updates (field_name, stream_id);
+
+-- We aren't creating a GIN index on `affected_fields` at this time because we don't expect
+-- field names to be very selective and therefore an index might not be that useful.
 
 -- Track which local users should receive each profile update.
 CREATE TABLE IF NOT EXISTS profile_updates_per_user (

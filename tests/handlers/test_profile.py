@@ -313,14 +313,19 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             updates[0],
-            (2, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, field_name),
+            (
+                2,
+                "@1234abcd:test",
+                ProfileUpdateAction.UPDATE.value,
+                {field_name},
+            ),
         )
 
         fields_updates = self.get_success(
             self.store.get_profile_updates_for_fields(
                 from_id=1,
                 to_id=2,
-                field_names=[field_name],
+                field_names={field_name},
             )
         )
         self.assertEqual(
@@ -329,7 +334,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 stream_id=2,
                 user_id="@1234abcd:test",
                 action=ProfileUpdateAction.UPDATE.value,
-                field_name=field_name,
+                affected_fields=frozenset({field_name}),
             ),
         )
 
@@ -350,7 +355,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             delete_updates[0],
-            (3, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, field_name),
+            (3, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, {field_name}),
         )
 
     @override_config({"include_profile_updates_in_sync": True})
@@ -392,13 +397,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=3,
                     user_id="@millie:test",
                     action="joined_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
                 ProfileUpdate(
                     stream_id=4,
                     user_id=self.frank.to_string(),
                     action="update",
-                    field_name="m.status",
+                    affected_fields=frozenset({"m.status"}),
                 ),
             ],
         )
@@ -417,7 +422,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=4,
                     user_id=self.frank.to_string(),
                     action="update",
-                    field_name="m.status",
+                    affected_fields=frozenset({"m.status"}),
                 ),
             ],
         )
@@ -436,19 +441,19 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=2,
                     user_id="@roger:test",
                     action="joined_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
                 ProfileUpdate(
                     stream_id=3,
                     user_id="@millie:test",
                     action="joined_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
                 ProfileUpdate(
                     stream_id=4,
                     user_id=self.frank.to_string(),
                     action="update",
-                    field_name="m.status",
+                    affected_fields=frozenset({"m.status"}),
                 ),
             ],
         )
@@ -507,7 +512,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=2,
                     user_id="@roger:test",
                     action="joined_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
             ],
         )
@@ -563,13 +568,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=4,
                     user_id="@gracie:test",
                     action="joined_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
                 ProfileUpdate(
                     stream_id=5,
                     user_id=self.frank.to_string(),
                     action="update",
-                    field_name="m.status",
+                    affected_fields=frozenset({"m.status"}),
                 ),
             ],
         )
@@ -588,7 +593,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=5,
                     user_id=self.frank.to_string(),
                     action="update",
-                    field_name="m.status",
+                    affected_fields=frozenset({"m.status"}),
                 ),
             ],
         )
@@ -611,13 +616,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=4,
                     user_id="@gracie:test",
                     action="joined_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
                 ProfileUpdate(
                     stream_id=6,
                     user_id=self.frank.to_string(),
                     action="left_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
             ],
         )
@@ -638,13 +643,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=6,
                     user_id=self.frank.to_string(),
                     action="left_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
                 ProfileUpdate(
                     stream_id=7,
                     user_id="@gracie:test",
                     action="left_room",
-                    field_name=None,
+                    affected_fields=None,
                 ),
             ],
         )
@@ -665,7 +670,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     stream_id=5,
                     user_id=self.frank.to_string(),
                     action="update",
-                    field_name="m.status",
+                    affected_fields=frozenset({"m.status"}),
                 ),
             ],
         )
