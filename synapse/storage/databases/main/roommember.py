@@ -866,39 +866,44 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         Note: `None` and `False` are equivalent and mean they don't share a
         room.
         """
-        clause, args = make_in_list_sql_clause(
+        state_key_clause, state_key_args = make_in_list_sql_clause(
             self.database_engine, "state_key", other_user_ids
         )
         # Build SQL args based on whether we are excluding a room ID or not
         exclude_room_id_clause = ""
-        sql_args = [
-            user_id,
-        ]
+        exclude_room_id_args = ()
+
         if exclude_room_id:
             exclude_room_id_clause = "AND room_id != ?"
-            sql_args.extend([exclude_room_id, *args, exclude_room_id])
-        else:
-            sql_args.extend([*args])
+            exclude_room_id_args = (exclude_room_id,)
 
         # This query works by fetching both the list of rooms for the target
         # user and the set of other users, and then checking if there is any
         # overlap.
-        sql = f"""
-            SELECT DISTINCT b.state_key
-            FROM (
-                SELECT room_id FROM current_state_events
-                WHERE type = 'm.room.member' AND membership = 'join' AND state_key = ?
-                    {exclude_room_id_clause}
-            ) AS a
-            INNER JOIN (
-                SELECT room_id, state_key FROM current_state_events
-                WHERE type = 'm.room.member' AND membership = 'join' AND {clause}
-                    {exclude_room_id_clause}
-            ) AS b using (room_id)
-        """
         txn.execute(
-            sql,
-            sql_args,
+            f"""
+                SELECT DISTINCT b.state_key
+                FROM (
+                    SELECT room_id FROM current_state_events
+                    WHERE type = 'm.room.member'
+                        AND membership = 'join'
+                        AND state_key = ?
+                        {exclude_room_id_clause}
+                ) AS a
+                INNER JOIN (
+                    SELECT room_id, state_key FROM current_state_events
+                    WHERE type = 'm.room.member'
+                        AND membership = 'join'
+                        AND {state_key_clause}
+                        {exclude_room_id_clause}
+                ) AS b USING (room_id)
+            """,
+            (
+                user_id,
+                *exclude_room_id_args,
+                state_key_args,
+                *exclude_room_id_args,
+            ),
         )
         return {u: True for (u,) in txn}
 
