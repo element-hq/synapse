@@ -534,6 +534,20 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
 
         return destinations
 
+    async def get_known_destinations(self) -> list[str]:
+        """Return the names of all homeserver destinations we know about.
+
+        These are servers we have previously recorded in the `destinations`
+        table (e.g. because we have federated with them). The local server is
+        not filtered out here; callers should do so if required.
+        """
+        return await self.db_pool.simple_select_onecol(
+            table="destinations",
+            keyvalues={},
+            retcol="destination",
+            desc="get_known_destinations",
+        )
+
     async def get_destinations_paginate(
         self,
         start: int,

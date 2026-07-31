@@ -70,6 +70,16 @@ class GetUserDirectoryTables:
         )
         return set(r)
 
+    async def get_users_in_federated_search(self) -> set[tuple[str, str]]:
+        """Fetch the federated user directory visibility entries."""
+        rows = cast(
+            list[tuple[str, str]],
+            await self.store.db_pool.simple_select_list(
+                "users_in_federated_search", None, ("user_id", "homeserver")
+            ),
+        )
+        return set(rows)
+
     async def get_users_who_share_private_rooms(self) -> set[tuple[str, str, str]]:
         """Fetch the entire `users_who_share_private_rooms` table.
 

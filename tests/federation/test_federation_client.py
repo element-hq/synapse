@@ -20,18 +20,21 @@
 #
 
 from unittest import mock
+from unittest.mock import AsyncMock
 
 import twisted.web.client
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import HttpResponseException
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
+from tests.storage.test_user_directory import GetUserDirectoryTables
 from tests.test_utils import FakeResponse, event_injection
 from tests.unittest import FederatingHomeserverTestCase
 
@@ -41,7 +44,18 @@ class FederationClientTest(FederatingHomeserverTestCase):
         admin.register_servlets,
         room.register_servlets,
         login.register_servlets,
+        user_directory.register_servlets,
+        register.register_servlets,
     ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        """Create a homeserver with federation enabled and user directory enabled."""
+        config = self.default_config()
+        config["user_directory"] = {
+            "enabled": True,
+            "search_all_users": True,
+        }
+        return self.setup_test_homeserver(config=config)
 
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -59,6 +73,8 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         self.creator = f"@creator:{self.OTHER_SERVER_NAME}"
         self.test_room_id = "!room_id"
+        self.federation_client = homeserver.get_federation_client()
+        self.transport_layer = self.federation_client.transport_layer
 
     def test_get_room_state(self) -> None:
         # mock up some events to use in the response.
@@ -317,3 +333,196 @@ class FederationClientTest(FederatingHomeserverTestCase):
         # This is 2 because it failed once from `self.OTHER_SERVER_NAME` and the
         # other from "yet.another.server"
         self.assertEqual(backfill_num_attempts, 2)
+
+    def test_user_directory_search(self) -> None:
+        """Test that the federation client correctly handles user directory search requests."""
+        # Mock the transport layer's user_directory_search method
+        mock_results = {
+            "results": [
+                {
+                    "user_id": "@user:other.example.com",
+                    "display_name": "Test User",
+                    "avatar_url": "mxc://example.com/avatar",
+                }
+            ],
+        }
+        self.transport_layer.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+            return_value=mock_results
+        )
+
+        # Call the federation client method
+        result = self.get_success(
+            self.federation_client.user_directory_search("other.example.com", 2000)
+        )
+
+        # Check that the result is correct
+        self.assertEqual(result, mock_results)
+
+        # Check that user_directory_search was called with the correct arguments
+        self.transport_layer.user_directory_search.assert_called_once_with(
+            "other.example.com", 2000
+        )
+
+    def test_user_directory_search_endpoint_not_found(self) -> None:
+        """Test that the federation client handles 404 responses correctly."""
+        # Mock the transport layer to raise a 404 error
+        self.transport_layer.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+            side_effect=HttpResponseException(
+                404, "Not Found", b'{"errcode": "M_NOT_FOUND"}'
+            )
+        )
+
+        # Call the federation client method
+        result = self.get_success(
+            self.federation_client.user_directory_search("other.example.com", 10)
+        )
+
+        # A failed fetch returns an empty result set (never None), as some
+        # callers rely on the dict shape.
+        self.assertEqual(result, {"results": []})
+
+
+class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
+    """Tests the federation-side periodic user directory sync background job."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        user_directory.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        # Enable writing to the user directory on this process.
+        config["update_user_directory_from_worker"] = None
+        config["user_directory"] = {"enabled": True, "search_all_users": True}
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+        }
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.federation_client = homeserver.get_federation_client()
+        self.user_dir_helper = GetUserDirectoryTables(self.store)
+
+    def test_sync_uses_db_destinations_and_upserts_remote_users(self) -> None:
+        # Record a known destination in the DB.
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "results": [
+                    {
+                        "user_id": "@bob:remote.example.com",
+                        "display_name": "Bob Remote",
+                        "avatar_url": None,
+                    }
+                ],
+            }
+        )
+
+        self.get_success(self.federation_client._sync_federated_user_directory())
+
+        self.federation_client.user_directory_search.assert_called_once_with(
+            "remote.example.com",
+            self.hs.config.experimental.bwi_federated_user_dir_federation_search_timeout,
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@bob:remote.example.com", profiles)
+        self.assertIn(
+            ("@bob:remote.example.com", "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+
+    def test_sync_skips_own_server(self) -> None:
+        # Our own server name should never be queried, even if present in the DB.
+        self.get_success(self.store.set_destination_retry_timings("test", None, 0, 0))
+
+        self.federation_client.user_directory_search = AsyncMock()  # type: ignore[method-assign]
+
+        self.get_success(self.federation_client._sync_federated_user_directory())
+
+        self.federation_client.user_directory_search.assert_not_called()
+
+    def _run_sync_returning(self, results: list[dict]) -> None:
+        """Run a single sync where the remote returns the given results.
+
+        An empty list simulates a failed fetch, since our logic treats an
+        empty result as a failure and skips pruning.
+        """
+        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+            return_value={"results": results}
+        )
+        self.get_success(self.federation_client._sync_federated_user_directory())
+
+    def test_sync_prunes_users_absent_from_new_result(self) -> None:
+        """A user no longer returned by a successful sync is pruned."""
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        # First sync makes two remote users visible.
+        self._run_sync_returning(
+            [
+                {"user_id": "@bob:remote.example.com", "display_name": "Bob"},
+                {"user_id": "@carol:remote.example.com", "display_name": "Carol"},
+            ]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {
+                ("@bob:remote.example.com", "remote.example.com"),
+                ("@carol:remote.example.com", "remote.example.com"),
+            },
+        )
+
+        # Second successful sync only returns Bob -> Carol must be pruned.
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@bob:remote.example.com", profiles)
+        self.assertNotIn("@carol:remote.example.com", profiles)
+
+    def test_sync_empty_result_does_not_prune(self) -> None:
+        """An empty result is treated as a failed fetch and must not prune.
+
+        In our logic an empty ``results`` set is indistinguishable from a
+        failed request, so we deliberately keep previously visible users.
+        """
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+
+        # Empty result == treated as failure -> entries must be retained.
+        self._run_sync_returning([])
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )

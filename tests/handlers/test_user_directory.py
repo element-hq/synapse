@@ -31,7 +31,13 @@ from synapse.appservice import ApplicationService
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import JsonDict, UserID, UserProfile, create_requester
+from synapse.types import (
+    JsonDict,
+    RemoteUserDirectoryEntry,
+    UserID,
+    UserProfile,
+    create_requester,
+)
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1440,3 +1446,223 @@ class UserDirectoryRemoteProfileTestCase(unittest.HomeserverTestCase):
                     display_name="Sir Bruce Bruceson", avatar_url="mxc://remote/789"
                 ),
             )
+
+
+class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
+    """Tests for ingesting remote users into the user directory.
+
+    The handler is intentionally unaware of federation; it only persists
+    already-parsed `RemoteUserDirectoryEntry` objects.
+    """
+
+    servlets = [
+        login.register_servlets,
+        register.register_servlets,
+        user_directory.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        # Enable updating the user directory on this (main) process.
+        config["update_user_directory_from_worker"] = None
+        # Match production: these methods are only called by the federation
+        # sync while the experimental feature is enabled.
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+        }
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.handler = hs.get_user_directory_handler()
+        self.user_dir_helper = GetUserDirectoryTables(self.store)
+
+    def test_upsert_remote_users_persists_profiles_and_visibility(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@alice:remote.example.com",
+                        display_name="Alice Remote",
+                        avatar_url="mxc://remote.example.com/abc",
+                    )
+                ]
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertEqual(
+            profiles.get("@alice:remote.example.com"),
+            ProfileInfo(
+                display_name="Alice Remote",
+                avatar_url="mxc://remote.example.com/abc",
+            ),
+        )
+
+        federated_users = self.get_success(
+            self.user_dir_helper.get_users_in_federated_search()
+        )
+        self.assertIn(
+            (
+                "@alice:remote.example.com",
+                "remote.example.com",
+            ),
+            federated_users,
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_public_rooms()), set()
+        )
+
+    def test_upsert_remote_users_ignores_local_users(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@localuser:test",
+                        display_name="Local User",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertNotIn("@localuser:test", profiles)
+
+    def test_reconcile_remote_users_ignores_users_from_other_servers(self) -> None:
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@alice:remote.example.com",
+                        display_name="Alice Remote",
+                        avatar_url=None,
+                    ),
+                    RemoteUserDirectoryEntry(
+                        user_id="@mallory:third-party.example.com",
+                        display_name="Mallory",
+                        avatar_url=None,
+                    ),
+                    RemoteUserDirectoryEntry(
+                        user_id="not-a-valid-user-id",
+                        display_name="Malformed",
+                        avatar_url=None,
+                    ),
+                ],
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@alice:remote.example.com", profiles)
+        self.assertNotIn("@mallory:third-party.example.com", profiles)
+        self.assertNotIn("not-a-valid-user-id", profiles)
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@alice:remote.example.com", "remote.example.com")},
+        )
+
+    def test_search_users_returns_cached_remote_users(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@carol:remote.example.com",
+                        display_name="Carol Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        results = self.get_success(
+            self.handler.search_users("@searcher:test", "carol", 10)
+        )
+
+        self.assertIn(
+            "@carol:remote.example.com",
+            {user["user_id"] for user in results["results"]},
+        )
+
+    def test_remote_user_survives_leaving_last_real_room(self) -> None:
+        user_id = "@dave:remote.example.com"
+        room_id = "!real-room:test"
+
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id=user_id,
+                        display_name="Dave Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+        self.get_success(self.store.add_users_in_public_rooms(room_id, [user_id]))
+
+        self.get_success(self.handler._handle_remove_user(room_id, user_id))
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn(user_id, profiles)
+        self.assertIn(
+            (user_id, "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+        self.assertNotIn(
+            (user_id, room_id),
+            self.get_success(self.user_dir_helper.get_users_in_public_rooms()),
+        )
+
+    def test_remove_from_user_directory_clears_federated_visibility(self) -> None:
+        user_id = "@erin:remote.example.com"
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id=user_id,
+                        display_name="Erin Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        self.get_success(self.store.remove_from_user_dir(user_id))
+
+        self.assertNotIn(
+            user_id,
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+        )
+        self.assertNotIn(
+            (user_id, "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+
+    def test_delete_all_from_user_directory_clears_federated_visibility(self) -> None:
+        self.get_success(
+            self.handler.upsert_remote_users(
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@frank:remote.example.com",
+                        display_name="Frank Remote",
+                        avatar_url=None,
+                    )
+                ]
+            )
+        )
+
+        self.get_success(self.store.delete_all_from_user_dir())
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            set(),
+        )
