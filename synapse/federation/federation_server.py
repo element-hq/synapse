@@ -1155,6 +1155,7 @@ class FederationServer(FederationBase):
         earliest_events: list[str],
         latest_events: list[str],
         limit: int,
+        min_depth: int,
     ) -> dict[str, list]:
         async with self._server_linearizer.queue((origin, room_id)):
             origin_host, _ = parse_server_name(origin)
@@ -1162,14 +1163,15 @@ class FederationServer(FederationBase):
 
             logger.debug(
                 "on_get_missing_events: earliest_events: %r, latest_events: %r,"
-                " limit: %d",
+                " limit: %d, min_depth: %d",
                 earliest_events,
                 latest_events,
                 limit,
+                min_depth,
             )
 
             missing_events = await self.handler.on_get_missing_events(
-                origin, room_id, earliest_events, latest_events, limit
+                origin, room_id, earliest_events, latest_events, limit, min_depth
             )
 
             if len(missing_events) < 5:

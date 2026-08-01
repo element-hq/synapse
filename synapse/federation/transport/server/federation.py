@@ -636,6 +636,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
         room_id: str,
     ) -> tuple[int, JsonDict]:
         limit = int(content.get("limit", 10))
+        min_depth = int(content.get("min_depth", 0))
         earliest_events = content.get("earliest_events", [])
         latest_events = content.get("latest_events", [])
 
@@ -645,6 +646,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
             earliest_events=earliest_events,
             latest_events=latest_events,
             limit=limit,
+            min_depth=min_depth,
         )
 
         return 200, result

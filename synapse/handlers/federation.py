@@ -1437,6 +1437,7 @@ class FederationHandler:
         earliest_events: list[str],
         latest_events: list[str],
         limit: int,
+        min_depth: int,
     ) -> list[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
@@ -1450,6 +1451,7 @@ class FederationHandler:
             earliest_events=earliest_events,
             latest_events=latest_events,
             limit=limit,
+            min_depth=min_depth,
         )
 
         missing_events = await filter_events_for_server(

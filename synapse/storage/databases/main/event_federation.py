@@ -1982,6 +1982,7 @@ class EventFederationWorkerStore(
         earliest_events: list[str],
         latest_events: list[str],
         limit: int,
+        min_depth: int,
     ) -> list[EventBase]:
         ids = await self.db_pool.runInteraction(
             "get_missing_events",
@@ -1990,6 +1991,7 @@ class EventFederationWorkerStore(
             earliest_events,
             latest_events,
             limit,
+            min_depth,
         )
         return await self.get_events_as_list(ids)
 
@@ -2000,6 +2002,7 @@ class EventFederationWorkerStore(
         earliest_events: list[str],
         latest_events: list[str],
         limit: int,
+        min_depth: int,
     ) -> list[str]:
         seen_events = set(earliest_events)
         front = set(latest_events) - seen_events
@@ -2007,14 +2010,16 @@ class EventFederationWorkerStore(
 
         query = (
             "SELECT prev_event_id FROM event_edges "
-            "WHERE event_id = ? AND NOT is_state "
+            "LEFT JOIN events ON prev_event_id = events.event_id "
+            "WHERE event_edges.event_id = ? AND NOT is_state "
+            "AND (events.depth IS NULL OR events.depth >= ?) "
             "LIMIT ?"
         )
 
         while front and len(event_results) < limit:
             new_front = set()
             for event_id in front:
-                txn.execute(query, (event_id, limit - len(event_results)))
+                txn.execute(query, (event_id, min_depth, limit - len(event_results)))
                 new_results = {t[0] for t in txn} - seen_events
 
                 new_front |= new_results

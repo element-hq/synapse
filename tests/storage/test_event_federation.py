@@ -241,6 +241,66 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         for i in range(10):
             self.assertEqual("$event_%i:local" % (19 - i), r[i])
 
+    def test_get_missing_events_respects_min_depth(self) -> None:
+        room_id = "@ROOM:local"
+        event_depths = {
+            "$latest:local": 5,
+            "$mid:local": 4,
+            "$sibling:local": 3,
+            "$too_old:local": 2,
+            "$hidden:local": 3,
+        }
+        event_edges = {
+            "$latest:local": ["$mid:local", "$sibling:local"],
+            "$mid:local": ["$too_old:local"],
+            "$too_old:local": ["$hidden:local"],
+        }
+
+        def populate_db(txn: LoggingTransaction) -> None:
+            for stream_ordering, (event_id, depth) in enumerate(event_depths.items()):
+                txn.execute(
+                    (
+                        "INSERT INTO events ("
+                        "   room_id, event_id, type, depth, topological_ordering,"
+                        "   content, processed, outlier, stream_ordering) "
+                        "VALUES (?, ?, 'm.test', ?, ?, 'test', ?, ?, ?)"
+                    ),
+                    (room_id, event_id, depth, depth, True, False, stream_ordering),
+                )
+
+            for event_id, prev_event_ids in event_edges.items():
+                for prev_event_id in prev_event_ids:
+                    self.store.db_pool.simple_insert_txn(
+                        txn,
+                        table="event_edges",
+                        values={
+                            "event_id": event_id,
+                            "prev_event_id": prev_event_id,
+                            "room_id": room_id,
+                        },
+                    )
+
+        self.get_success(
+            self.store.db_pool.runInteraction(
+                "test_get_missing_events_respects_min_depth",
+                populate_db,
+            )
+        )
+
+        event_ids = self.get_success(
+            self.store.db_pool.runInteraction(
+                "get_missing_events",
+                self.store._get_missing_events,
+                room_id,
+                [],
+                ["$latest:local"],
+                10,
+                3,
+            )
+        )
+
+        self.assertCountEqual(event_ids, ["$mid:local", "$sibling:local"])
+
     def test_get_rooms_with_many_extremities(self) -> None:
         room1 = "#room1"
         room2 = "#room2"
