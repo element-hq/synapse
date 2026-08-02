@@ -21,6 +21,7 @@ import (
 	dockerClient "github.com/docker/docker/client"
 	"github.com/element-hq/synapse/tests/internal/dockerutil"
 	"github.com/matrix-org/complement"
+	"github.com/matrix-org/complement/b"
 	"github.com/matrix-org/complement/client"
 	"github.com/matrix-org/complement/match"
 	"github.com/matrix-org/complement/must"
@@ -51,8 +52,8 @@ oidc_providers:
 // Now instead of failing to start, Synapse will produce a 503 response on the
 // `/_matrix/client/v3/login/sso/redirect/oidc-test_provider` endpoint.
 func TestOIDCProviderUnavailable(t *testing.T) {
-	// Deploy a single homeserver
-	deployment := complement.Deploy(t, 1)
+	// Deploy a single clean homeserver, as this test modifies the container config.
+	deployment := complement.OldDeploy(t, b.BlueprintCleanHS)
 	defer deployment.Destroy(t)
 
 	// Get Docker client to manipulate container
