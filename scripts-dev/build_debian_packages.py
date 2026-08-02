@@ -32,6 +32,7 @@ DISTS = (
     "ubuntu:jammy",  # 22.04 LTS (EOL 2027-04) (our EOL forced by Python 3.10 is 2026-10-04)
     "ubuntu:noble",  # 24.04 LTS (EOL 2029-06)
     "ubuntu:questing",  # 25.10 (EOL 2026-07)
+    "ubuntu:resolute",  # 26.04 LTS (EOL 2031-06)
     "debian:trixie",  # (EOL not specified yet)
 )
 
