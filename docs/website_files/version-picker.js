@@ -53,10 +53,9 @@ function initializeVersionDropdown(dropdown, dropdownMenu) {
 function fetchVersions(dropdown, dropdownMenu) {
     return new Promise((resolve, reject) => {
         window.addEventListener("load", () => {
+            const cacheBust = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
 
-            fetch("https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages", {
-                cache: "force-cache",
-            }).then(res => 
+            fetch(`https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages?cache-bust=${cacheBust}`).then(res =>
                 res.json()
             ).then(resObject => {
                 const excluded = ['dev-docs', 'v1.91.0', 'v1.80.0', 'v1.69.0'];
