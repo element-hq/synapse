@@ -94,6 +94,24 @@ class ReportsHandler:
     async def report_room(
         self, requester: Requester, room_id: str, reason: str
     ) -> None:
+        """Files a report against a room from a user.
+
+        A rate limit is applied to the report. If the room being reported does
+        not exist, we return an error, unless MSC4277 is enabled, in which case
+        we hide the room's existence instead.
+
+        If the report is otherwise valid (for a room which exists on our
+        server), we append it to the database for later processing.
+
+        Args:
+            requester - The user filing the report.
+            room_id - The room being reported.
+            reason - The user-supplied reason the room is being reported.
+
+        Raises:
+            NotFoundError if the room does not exist and MSC4277 is disabled.
+        """
+
         await self._check_limits(requester)
 
         room = await self._store.get_room(room_id)
