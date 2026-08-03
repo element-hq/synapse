@@ -68,7 +68,7 @@ class ReportsHandler:
             SynapseError for BAD_REQUEST/BAD_JSON if the reason is too long.
         """
 
-        await self._check_limits(requester)
+        await self.check_limits(requester)
 
         if len(reason) > 1000:
             raise SynapseError(
@@ -91,7 +91,7 @@ class ReportsHandler:
             received_ts=self._clock.time_msec(),
         )
 
-    async def _check_limits(self, requester: Requester) -> None:
+    async def check_limits(self, requester: Requester) -> None:
         await self._reports_ratelimiter.ratelimit(
             requester,
             requester.user.to_string(),

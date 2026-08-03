@@ -1,0 +1,1 @@
+Apply the `rc_reports` rate limit to the [MSC4151](https://github.com/matrix-org/matrix-spec-proposals/pull/4151) room reporting endpoint, as required by the spec. Contributed by @barodeur.

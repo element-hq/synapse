@@ -133,6 +133,7 @@ class ReportRoomRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+        self.reports_handler = hs.get_reports_handler()
 
     class PostBody(RequestBodyModel):
         reason: StrictStr
@@ -142,6 +143,8 @@ class ReportRoomRestServlet(RestServlet):
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
+
+        await self.reports_handler.check_limits(requester)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
