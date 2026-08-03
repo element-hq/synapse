@@ -129,6 +129,7 @@ class ReportRoomRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
+        self.hs = hs
         self.auth = hs.get_auth()
         self.reports_handler = hs.get_reports_handler()
 
@@ -141,7 +142,13 @@ class ReportRoomRestServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
-        await self.reports_handler.report_room(requester, room_id, body.reason)
+        try:
+            await self.reports_handler.report_room(requester, room_id, body.reason)
+        except NotFoundError:
+            if not self.hs.config.experimental.msc4277_enabled:
+                raise
+            # Respond with 200 and no content regardless of whether the room
+            # exists to prevent enumeration attacks.
 
         return 200, {}
 
