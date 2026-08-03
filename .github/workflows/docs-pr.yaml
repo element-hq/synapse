@@ -8,6 +8,9 @@ on:
       - .github/workflows/docs-pr.yaml
       - scripts-dev/schema_versions.py
 
+permissions:
+  contents: read
+
 jobs:
   pages:
     name: GitHub Pages
@@ -15,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           # Fetch all history so that the schema_versions script works.
           fetch-depth: 0
 
@@ -51,6 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0

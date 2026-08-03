@@ -17,6 +17,9 @@ on:
     - cron: 0 7 * * *
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -35,7 +38,9 @@ jobs:
       should_run_workflow: ${{ steps.check_condition.outputs.should_run_workflow }}
     steps:
       - id: check_condition
-        run: echo "should_run_workflow=${{ github.repository == 'element-hq/synapse' }}" >> "$GITHUB_OUTPUT"
+        env:
+          SHOULD_RUN_WORKFLOW: ${{ github.repository == 'element-hq/synapse' }}
+        run: echo "should_run_workflow=$SHOULD_RUN_WORKFLOW" >> "$GITHUB_OUTPUT"
 
   mypy:
     needs: check_repo
@@ -43,8 +48,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -78,9 +85,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -88,11 +97,13 @@ jobs:
       - run: sudo apt-get -qq install xmlsec1
       - name: Set up PostgreSQL ${{ matrix.postgres-version }}
         if: ${{ matrix.postgres-version }}
+        env:
+          POSTGRES_VERSION: ${{ matrix.postgres-version }}
         run: |
           docker run -d -p 5432:5432 \
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
-            postgres:${{ matrix.postgres-version }}
+            "postgres:$POSTGRES_VERSION"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.x"
@@ -152,9 +163,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -198,10 +211,16 @@ jobs:
       - sytest
       - complement
 
+    permissions:
+      contents: read # needed to check out the issue template
+      issues: write # needed for opening/editing an issue upon build failure
+
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: JasonEtco/create-an-issue@1b14a70e4d8dc185e5cc76d3bec9eab20257b2c5 # v2.9.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

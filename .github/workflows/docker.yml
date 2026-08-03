@@ -10,12 +10,14 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write # needed for signing the images with GitHub OIDC Token
+
 jobs:
   build:
     name: Build and push image for ${{ matrix.platform }}
     runs-on: ${{ matrix.runs_on }}
+    permissions:
+      packages: write # needed to push the image to ghcr.io
+      id-token: write # needed for the vault and tailscale OIDC auth
     strategy:
       matrix:
         include:
@@ -32,6 +34,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Extract version from pyproject.toml
         # Note: explicitly requesting bash will mean bash is invoked with `-eo pipefail`, see
@@ -63,7 +67,7 @@ jobs:
       - name: Compute vault jwt role name
         id: vault-jwt-role
         run: |
-           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
+           echo "role_name=github_service_management_$( echo "$GITHUB_REPOSITORY" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
 
       - name: Get team registry token
         id: import-secrets
@@ -102,10 +106,11 @@ jobs:
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          mkdir -p ${{ runner.temp }}/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -118,6 +123,9 @@ jobs:
   merge:
     name: Push merged images to ${{ matrix.repository }}
     runs-on: ubuntu-latest
+    permissions:
+      packages: write # needed to push the image to ghcr.io
+      id-token: write # needed for signing the images with GitHub OIDC Token, and for the vault and tailscale OIDC auth
     strategy:
       matrix:
         repository:
@@ -160,7 +168,7 @@ jobs:
       - name: Compute vault jwt role name
         id: vault-jwt-role
         run: |
-           echo "role_name=github_service_management_$( echo "${{ github.repository }}" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
+           echo "role_name=github_service_management_$( echo "$GITHUB_REPOSITORY" | sed -r 's|[/-]|_|g')" | tee -a "$GITHUB_OUTPUT"
 
       - name: Get team registry token
         id: import-secrets

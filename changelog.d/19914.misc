@@ -1,0 +1,1 @@
+Harden the CI workflows and enforce this with a new zizmor lint workflow. Also fix a cache key calculation in one of the steps along the way. Contributed by Denis Kasak (@dkasak).

@@ -1,0 +1,11 @@
+# Configuration for the zizmor GitHub Actions security scanner.
+# See https://docs.zizmor.sh/configuration/
+
+rules:
+  cache-poisoning:
+    # The cache-poisoning findings in tests.yml are all false positives. The
+    # findings are produced because its `push` trigger *could* belong to a
+    # publishing workflow, but it publishes nothing. Its only artifacts are
+    # test logs.
+    ignore:
+      - tests.yml
