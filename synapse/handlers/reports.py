@@ -17,7 +17,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.types import (
     Requester,
@@ -68,7 +68,7 @@ class ReportsHandler:
             SynapseError for BAD_REQUEST/BAD_JSON if the reason is too long.
         """
 
-        await self.check_limits(requester)
+        await self._check_limits(requester)
 
         if len(reason) > 1000:
             raise SynapseError(
@@ -91,7 +91,27 @@ class ReportsHandler:
             received_ts=self._clock.time_msec(),
         )
 
-    async def check_limits(self, requester: Requester) -> None:
+    async def report_room(
+        self, requester: Requester, room_id: str, reason: str
+    ) -> None:
+        await self._check_limits(requester)
+
+        room = await self._store.get_room(room_id)
+        if room is None:
+            if self._hs.config.experimental.msc4277_enabled:
+                # Respond with 200 and no content regardless of whether the room
+                # exists to prevent enumeration attacks.
+                return
+            raise NotFoundError("Room does not exist")
+
+        await self._store.add_room_report(
+            room_id=room_id,
+            user_id=requester.user.to_string(),
+            reason=reason,
+            received_ts=self._clock.time_msec(),
+        )
+
+    async def _check_limits(self, requester: Requester) -> None:
         await self._reports_ratelimiter.ratelimit(
             requester,
             requester.user.to_string(),
