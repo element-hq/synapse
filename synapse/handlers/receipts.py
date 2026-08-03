@@ -326,15 +326,29 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
             A two-tuple containing the following:
                 * A list of json dictionaries derived from read receipts that the
                   appservice may be interested in.
-                * The current read receipt stream token.
+                * The read receipt stream token up to which receipts were actually
+                  fetched. This is earlier than `to_key` if the fetch was
+                  truncated; callers must call this method again from the returned
+                  token to fetch the remaining receipts.
         """
         if from_key == to_key:
             return [], to_key
 
-        # Fetch all read receipts for all rooms, up to a limit of 100. This is ordered
-        # by most recent.
-        rooms_to_events = await self.store.get_linearized_receipts_for_all_rooms(
-            from_key=from_key, to_key=to_key
+        # If we have no stored read receipt stream position for this application
+        # service yet (stream tokens start at 1, so a position of at most 1 means
+        # nothing has ever been handled), don't backfill the entire receipt
+        # history: just send the most recent receipts and fast-forward past
+        # everything older.
+        most_recent_first = from_key.stream <= 1
+
+        # Fetch read receipts for all rooms, in ascending stream order. The number
+        # of receipts fetched is capped, in which case `reached_token` tells us how
+        # far we actually got.
+        (
+            rooms_to_events,
+            reached_token,
+        ) = await self.store.get_linearized_receipts_for_all_rooms(
+            from_key=from_key, to_key=to_key, most_recent_first=most_recent_first
         )
 
         # Then filter down to rooms that the AS can read
@@ -345,7 +359,7 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
 
             events.append(event)
 
-        return events, to_key
+        return events, reached_token
 
     def get_current_key(self) -> MultiWriterStreamToken:
         return self.store.get_max_receipt_stream_id()
