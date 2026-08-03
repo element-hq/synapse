@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     from synapse.logging.scopecontextmanager import _LogContextScope
 
 DEBUG_LOGGER_NAME: str
-"""Name of the opt-in logger for logcontext switch tracing
+"""Name of the opt-in logger for debugging when the logcontext switches
 (`synapse.logging.context.debug`). Shared with the Rust `debug!` target so the
-names cannot drift."""
+names stay in sync."""
 
 class ContextResourceUsage:
     """Tracks the resources used by a log context."""
@@ -51,9 +51,8 @@ class LoggingContext:
           child to the parent
     """
 
-    # The context that was current when this one was created; None means the
-    # sentinel (the Rust storage cannot hold the pure-Python `SENTINEL_CONTEXT`
-    # object, so this is narrower than the pure-Python attribute used to be).
+    # The context that was current when this one was created. None means the
+    # sentinel.
     previous_context: Optional[LoggingContext]
     name: str
     server_name: str
@@ -136,9 +135,7 @@ class LoggingContext:
 def current_context() -> Optional[LoggingContext]:
     """Get the current logging context, or None for the sentinel.
 
-    Resolves the tokio task-local first (so logging emitted while a Rust task is
-    being polled is attributed to the context that was current when the task was
-    spawned), then this OS thread's slot. This is not the Python-facing API:
+    This is not the Python-facing API.
     `synapse.logging.context.current_context` wraps this and returns
     `SENTINEL_CONTEXT` instead of `None`.
     """
@@ -146,12 +143,10 @@ def current_context() -> Optional[LoggingContext]:
 def set_current_context(
     context: Optional[LoggingContext],
 ) -> Optional[LoggingContext]:
-    """Set the current logging context, returning the context that was previously
-    current. `None` means the sentinel, in both directions.
+    """Set the current logging context, returning the context that was
+    previously current. `None` means the sentinel, in both directions.
 
-    Reads the thread CPU usage once via `getrusage(RUSAGE_THREAD)` and does the
-    `stop`/`start` accounting natively. The annotated type is enforced: raises
-    `TypeError` unless `context` is a `LoggingContext` (or subclass) or `None`.
-    This is not the Python-facing API: `synapse.logging.context.set_current_context`
-    wraps this with the `SENTINEL_CONTEXT` <-> `None` mapping.
+    This is not the Python-facing API.
+    `synapse.logging.context.set_current_context` wraps this, converting between
+    `SENTINEL_CONTEXT` and `None`.
     """

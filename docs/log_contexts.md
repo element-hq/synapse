@@ -24,7 +24,7 @@ Asynchronous functions make the whole thing complicated, so this document descri
 how it all works, and how to write code which follows the rules.
 
 In this document, "awaitable" refers to any object which can be `await`ed. In the context of
-Synapse, that normally means either a coroutine or a Twisted 
+Synapse, that normally means either a coroutine or a Twisted
 [`Deferred`](https://twistedmatrix.com/documents/current/api/twisted.internet.defer.Deferred.html).
 
 ## Logcontexts without asynchronous code
@@ -274,7 +274,7 @@ async def main():
         await d
         # Good: This will be logged against the "main" logcontext
         logger.debug("phew")
-``` 
+```
 
 **Solution 2:** We could also fix this by surrounding the call to `d.callback` with a
 `PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
@@ -540,9 +540,9 @@ def reset_listener_queue():
 
 So, both ends of the awaitable chain have now dropped their references,
 and the awaitable chain is now orphaned, and will be garbage-collected at
-some point. Note that `await_something_interesting` is a coroutine, 
+some point. Note that `await_something_interesting` is a coroutine,
 which Python implements as a generator function.  When Python
-garbage-collects generator functions, it gives them a chance to 
+garbage-collects generator functions, it gives them a chance to
 clean up by making the `await` (or `yield`) raise a `GeneratorExit`
 exception. In our case, that means that the `__exit__` handler of
 `PreserveLoggingContext` will carefully restore the request context, but
@@ -558,26 +558,27 @@ lead to leaked logcontexts which are incredibly hard to track down.
 
 ## The Rust side
 
-The "current" logcontext is stored in the Rust extension rather than in a Python
-thread-local, so that it is visible from both worlds. `current_context()` and
-`set_current_context()` are imported from `synapse.logging.context` as usual —
-the Rust storage is an implementation detail that Python code does not need to
-care about.
+The "current" logcontext is stored in the Rust extension rather than in a
+Python thread-local, so that it is visible from both Python and Rust.
+`current_context()` and `set_current_context()` are imported from
+`synapse.logging.context` as usual — the Rust storage is an implementation
+detail that Python code does not need to care about.
 
-The switch itself (`set_current_context`) only ever runs on the reactor (or its
-thread pool) — the Python side — where it does the `getrusage` CPU accounting.
-It is never driven from a tokio worker thread.
+`set_current_context` only ever runs on a Python thread, i.e. the reactor or one
+of its thread pools, where it does the `getrusage` CPU accounting. It is never
+called from a tokio worker thread.
 
-What Rust code *does* need to be aware of: when you spawn a future onto the tokio
-runtime, the current logcontext must be captured and carried along so that log
-records emitted while the future is polled (including any `log::` records from
-dependencies, and any Python invoked back from Rust) are attributed correctly.
-Use the provided helper — `LogContextHandle::capture(py)` plus `LogContextHandle::scope` in
-`rust/src/logging/context.rs` — which captures the caller's logcontext at the FFI
-boundary and scopes it onto the spawned task (this is what `create_deferred`
-does), rather than a bare `tokio::spawn`. `current_context()` resolves the task's captured
-context first, so `LoggingContextFilter` — and therefore `pyo3-log` — resolves the
-right context on worker threads, with no per-log-record stamping.
+What Rust code *does* need to be aware of is that when spawning a future onto
+the tokio runtime, the current logcontext must be captured and carried along, so
+that log records emitted while the future is polled (including any `log::`
+records from dependencies, and any Python invoked back from Rust) are attributed
+correctly. Don't use a bare `tokio::spawn`. Instead use
+`LogContextHandle::capture(py)` plus `LogContextHandle::scope` (in
+`rust/src/logging/context.rs`), which capture the caller's logcontext from the
+Python side and record it on the spawned task; this is what `create_deferred`
+does. `current_context()` returns the task's captured context first, so
+`LoggingContextFilter` — and therefore `pyo3-log` — sees the right context on
+worker threads without any per-log-record work.
 
 ## Debugging logcontext issues
 

@@ -706,9 +706,12 @@ class LoggingContextTestCase(unittest.TestCase):
             self.assertEqual(nested_context.name, "foo-bar")
 
 
-# A stand-in rusage `(ru_utime, ru_stime)` for exercising the `start()`/`stop()`
-# code paths that only check whether an rusage is present, without depending on
-# `RUSAGE_THREAD` support or the real value of the thread's CPU clock.
+# A stand-in `(ru_utime, ru_stime)` value to pass to `start()`/`stop()`.
+#
+# The code under test only checks whether an rusage was supplied at all
+# (`None` means the platform doesn't track per-thread CPU); the values
+# themselves don't matter here. A constant also avoids depending on
+# `RUSAGE_THREAD` support on the platform running the tests.
 _TRUTHY_RUSAGE = (0.0, 0.0)
 
 
@@ -726,20 +729,21 @@ def _capture_logcontext_errors() -> Generator[list[str], None, None]:
 
 
 class LogContextErrorMessageTestCase(unittest.TestCase):
-    """Characterization tests pinning the exact `logcontext_error` message shapes
-    and the abuse-detection code paths.
+    """Tests asserting the exact messages passed to `logcontext_error`, and
+    the conditions that trigger each one.
 
-    These exist to guard against accidental drift in the switch machinery (which
-    lives in Rust: `rust/src/logging/context.rs`): downstream log scraping
-    depends on the wording, argument order and the conditions that trigger each
-    warning. Messages that interpolate a context via `%r` embed the object's
-    `repr()` (id/address), so we reconstruct the expected string from the *same*
-    live objects rather than hard-coding an address.
+    The implementation lives in Rust (`rust/src/logging/context.rs`).
+    Downstream log scraping depends on the wording and argument order of these
+    messages, so accidental changes must fail a test. Messages that
+    interpolate a context with `%r` include the object's `repr()`, and so its
+    memory address; the expected strings are therefore built from the same
+    live objects rather than hard-coded.
     """
 
     def setUp(self) -> None:
-        # These tests poke the switch primitives directly; make sure we always
-        # leave the slot back at the sentinel regardless of what a test does.
+        # These tests call `__enter__`/`__exit__`/`start`/`stop` by hand; make
+        # sure the current context ends up back at the sentinel regardless of
+        # what a test does.
         self.assertIs(current_context(), SENTINEL_CONTEXT)
         self.addCleanup(set_current_context, SENTINEL_CONTEXT)
 
@@ -859,10 +863,10 @@ class LogContextErrorMessageTestCase(unittest.TestCase):
 
 
 class LoggingContextFilterTestCase(unittest.TestCase):
-    """Characterization tests for `LoggingContextFilter`, the entire observable
-    surface for logging. Pins that it fills record attributes from a real
-    logcontext, and that under the sentinel it only sets defaults for attributes
-    that aren't already present (`safe_set`), which 3rd-party code relies on."""
+    """Tests for `LoggingContextFilter`, which is how logcontexts reach log
+    output. Checks that it fills record attributes from a real logcontext, and
+    that under the sentinel it only sets defaults for attributes that aren't
+    already present."""
 
     def setUp(self) -> None:
         self.assertIs(current_context(), SENTINEL_CONTEXT)

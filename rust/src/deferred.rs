@@ -93,11 +93,10 @@ where
     let deferred_callback = deferred.getattr("callback")?.unbind();
     let deferred_errback = deferred.getattr("errback")?.unbind();
 
-    // Capture the caller's logcontext at the boundary (GIL held, on the reactor
-    // thread) and scope it onto the spawned task, so that logging emitted while
-    // the future is polled — and any `run_python_awaitable` callbacks back into
-    // Python — are attributed to the context that was current when the caller
-    // invoked us. See `crate::logging::context`.
+    // Capture the caller's logcontext here (on the reactor thread) and record
+    // it in the spawned task. Log records emitted while the future is polled
+    // (on the tokio threads) are then attributed to the context that was
+    // current when the caller invoked us. See `crate::logging::context`.
     let logcontext = crate::logging::context::LogContextHandle::capture(py);
 
     let rt = runtime(reactor)?;
@@ -163,12 +162,13 @@ where
     // Shared between the success and error callbacks (only one ever fires).
     let sender = Arc::new(Mutex::new(Some(tx)));
 
-    // Capture the logcontext of the calling tokio task (if any). We restore it on
-    // the reactor thread before driving the awaitable, so Python code invoked from
-    // Rust (e.g. `DatabasePool.runInteraction`) runs in the same logcontext that was
-    // current when Python originally called into Rust — its logging and DB-metrics
-    // accounting are then attributed to the right request. `None` (called outside a
-    // scoped task) falls back to the sentinel.
+    // Capture the logcontext of the calling tokio task (if any). We restore it
+    // on the reactor thread before driving the awaitable, so Python code
+    // invoked from Rust (e.g. `DatabasePool.runInteraction`) runs in the same
+    // logcontext that was current when Python originally called into Rust. Its
+    // logging and DB-metrics accounting are then attributed to the right
+    // request. If we are not inside a scoped task, this is `None` and the
+    // awaitable runs in the sentinel.
     let logcontext = crate::logging::context::LogContextHandle::current();
 
     Python::attach(move |py| -> PyResult<()> {
@@ -239,18 +239,19 @@ where
             move |args, _kwargs| -> PyResult<Py<PyAny>> {
                 let py = args.py();
 
-                // Choose the logcontext to drive the awaitable in: the captured
-                // one, restored on the reactor thread — the one thread where the
-                // context's `main_thread` affinity check passes.
+                // Drive the awaitable in the captured logcontext. Restored here
+                // as we're on the reactor thread (the only thread where the
+                // context's `main_thread` check passes).
                 //
-                // Never re-start a context that has already finished: the request may
-                // have completed (or been cancelled — `create_deferred` does not
-                // propagate cancellation) while this task was still running. Restoring
-                // it would trip the "Re-starting finished log context" abuse check and
-                // account our work against a context whose metrics are already
-                // finalised, so such work runs in the sentinel instead. Both
-                // `__exit__` (which sets `finished`) and this check run on the
-                // reactor thread, so the check cannot race.
+                // Never re-start a context that has already finished. The
+                // request may have completed (or been cancelled;
+                // `create_deferred` does not propagate cancellation) while this
+                // task was still running. Restoring its context would log
+                // "Re-starting finished log context" and account our work
+                // against metrics that are already finalised, so such work runs
+                // in the sentinel instead. Both `__exit__` (which sets
+                // `finished`) and this check run on the reactor thread, so the
+                // check cannot race.
                 let context = match &logcontext {
                     Some(handle) => {
                         let finished = handle
@@ -280,11 +281,11 @@ where
                     None => None,
                 };
 
-                // Kick off the awaitable, fire-and-forget, via `run_in_background`:
-                // it calls the factory in the current logcontext and follows the
-                // logcontext rules from there — in particular, it arranges for the
-                // reactor to be back at the sentinel when the awaitable later
-                // completes.
+                // Kick off the awaitable, fire-and-forget, via
+                // `run_in_background`. It calls the factory in the current
+                // logcontext and follows the logcontext rules from there. In
+                // particular, it arranges for the reactor to be back at the
+                // sentinel when the awaitable later completes.
                 with_logcontext(py, context, || {
                     let deferred = run_in_background(py, awaitable_factory.bind(py))?;
                     deferred.call_method1(
@@ -336,9 +337,9 @@ fn failure_to_pyerr(failure: &Bound<'_, PyAny>) -> PyErr {
 /// A reference to `synapse.logging.context.run_in_background`.
 static RUN_IN_BACKGROUND: OnceCell<Py<PyAny>> = OnceCell::new();
 
-/// Call `synapse.logging.context.run_in_background(f)`: call `f` in the current
-/// logcontext and drive the awaitable it returns to completion, following the
-/// logcontext rules. Returns the resulting `Deferred`.
+/// Call `synapse.logging.context.run_in_background(f)`, which calls `f` in the
+/// current logcontext and drives the awaitable it returns to completion,
+/// following the logcontext rules. Returns the resulting `Deferred`.
 fn run_in_background<'py>(py: Python<'py>, f: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let run_in_background = RUN_IN_BACKGROUND.get_or_try_init(|| {
         logging_context_module(py)?

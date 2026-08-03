@@ -10,12 +10,12 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-"""Cross-language logcontext attribution for Rust.
+"""Tests for logcontext attribution across the Python/Rust boundary.
 
-The current logcontext lives in the Rust slot (`synapse.synapse_rust.logcontext`
-/ `rust/src/logging/context.rs`), visible from both Python (reactor/threadpool
-threads) and Rust (tokio tasks). These tests exercise the two guarantees that
-gives us, through real production code paths:
+The current logcontext is stored on the Rust side
+(`synapse.synapse_rust.logcontext` / `rust/src/logging/context.rs`), visible
+from both Python (reactor/threadpool threads) and Rust (tokio tasks). These
+tests exercise the two guarantees that gives us:
 
 1. Log records emitted from Rust while a task is being polled (e.g. reqwest
    connecting) are attributed to the logcontext that was current when Python
@@ -113,11 +113,12 @@ class RustLogContextTestCase(HomeserverTestCase):
     def _run_in_logcontext_and_pump(
         self, name: str, body: Callable[[dict[str, object]], None]
     ) -> dict[str, object]:
-        """Run `body` fired off inside a fresh `LoggingContext(name)`, pumping the
-        reactor (and yielding to the Tokio pool) until it sets `result["done"]`.
+        """Run `body` inside a fresh `LoggingContext(name)`, then pump the
+        reactor (yielding to the Tokio pool) until it sets `result["done"]`.
 
-        Returns the `result` dict `body` populated. Asserts the caller logcontext
-        is intact afterwards and that we end back in the sentinel.
+        Returns the `result` dict that `body` populated. Asserts that the
+        caller's logcontext is intact afterwards and that we end back in the
+        sentinel.
         """
         self._check_current_logcontext("sentinel")
         result: dict[str, object] = {}

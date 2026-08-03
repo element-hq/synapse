@@ -171,8 +171,8 @@ def current_context() -> LoggingContextOrSentinel:
     """Get the current logging context.
 
     The storage lives in the Rust extension (see `rust/src/logging/context.rs`),
-    which represents "no context" as `None` — mapped to `SENTINEL_CONTEXT` here
-    so callers never see `None`.
+    which represents "no context" as `None`. This wrapper maps that to
+    `SENTINEL_CONTEXT`, so callers never see `None`.
     """
     context = _rust_current_context()
     return SENTINEL_CONTEXT if context is None else context
@@ -182,10 +182,11 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
     """Set the current logging context, returning the context that was
     previously current.
 
-    The switch itself lives in the Rust extension: it reads the thread CPU usage
-    once (`getrusage(RUSAGE_THREAD)`) and does the `stop`/`start` accounting
-    natively. Rust represents the sentinel as `None`, converted in both
-    directions here so callers only ever see `LoggingContextOrSentinel`.
+    The implementation lives in the Rust extension: it reads the thread CPU
+    usage once (`getrusage(RUSAGE_THREAD)`) and does the `stop`/`start`
+    accounting in Rust. Rust represents the sentinel as `None`. This wrapper
+    converts in both directions, so callers only ever see
+    `LoggingContextOrSentinel`.
     """
     # everything blows up if we allow current_context to be set to None, so
     # sanity-check that now.
