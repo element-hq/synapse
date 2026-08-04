@@ -703,11 +703,6 @@ impl LoggingContext {
 }
 
 impl LoggingContext {
-    /// Whether `__exit__` has run.
-    pub(crate) fn is_finished(&self) -> bool {
-        self.finished
-    }
-
     /// The context name as an owned Rust string.
     ///
     /// This copies the string data, so it is for error/debug paths only.

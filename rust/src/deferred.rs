@@ -18,7 +18,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use log::{debug, log_enabled, Level};
 use once_cell::sync::OnceCell;
 use pyo3::{
     create_exception, exceptions::PyException, exceptions::PyRuntimeError, intern, prelude::*,
@@ -26,7 +25,7 @@ use pyo3::{
 };
 use tokio::sync::oneshot;
 
-use crate::logging::context::{with_logcontext, DEBUG_LOGGER_NAME};
+use crate::logging::context::with_logcontext;
 use crate::tokio_runtime::runtime;
 
 create_exception!(
@@ -242,42 +241,9 @@ where
                 // Drive the awaitable in the captured logcontext. Restored here
                 // as we're on the reactor thread (the only thread where the
                 // context's `main_thread` check passes).
-                //
-                // Never re-start a context that has already finished. The
-                // request may have completed (or been cancelled;
-                // `create_deferred` does not propagate cancellation) while this
-                // task was still running. Restoring its context would log
-                // "Re-starting finished log context" and account our work
-                // against metrics that are already finalised, so such work runs
-                // in the sentinel instead. Both `__exit__` (which sets
-                // `finished`) and this check run on the reactor thread, so the
-                // check cannot race.
                 let context = match &logcontext {
-                    Some(handle) => {
-                        let finished = handle
-                            .logging_context()
-                            .is_some_and(|ctx| ctx.borrow(py).is_finished());
-                        if finished {
-                            if log_enabled!(target: DEBUG_LOGGER_NAME, Level::Debug) {
-                                // Only a real context can be finished, so
-                                // `logging_context()` is `Some` here.
-                                if let Some(ctx) = handle.logging_context() {
-                                    debug!(
-                                        target: DEBUG_LOGGER_NAME,
-                                        "run_python_awaitable: captured logcontext {} has \
-                                         finished; running in the sentinel",
-                                        ctx.bind(py).str()?
-                                    );
-                                }
-                            }
-                            None
-                        } else {
-                            handle.logging_context().map(|ctx| ctx.clone_ref(py))
-                        }
-                    }
-                    // Called from outside any scoped task: the sentinel. (The
-                    // reactor thread is normally at the sentinel already, in which
-                    // case the switch below is a no-op.)
+                    Some(handle) => handle.logging_context().map(|ctx| ctx.clone_ref(py)),
+                    // Called from outside any scoped task: the sentinel.
                     None => None,
                 };
 
