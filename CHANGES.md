@@ -1,3 +1,16 @@
+# Synapse 1.158.0 (2026-08-04)
+
+## Deprecations and Removals
+
+- Remove package build targets for Ubuntu 25.10 'Questing Quokka' (end-of-life 2026-07-01). ([\#20039](https://github.com/element-hq/synapse/issues/20039))
+
+## Internal Changes
+
+- Add package build targets for Ubuntu 26.04 'Resolute Raccoon'. ([\#20039](https://github.com/element-hq/synapse/issues/20039))
+
+
+
+
 # Synapse 1.158.0rc1 (2026-07-30)
 
 ## Features
