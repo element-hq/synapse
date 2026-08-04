@@ -24,10 +24,11 @@ current values of the metrics visible on the dashboard.
          Grafana instance. Just increase it and try again.
  1. Grab the snapshot ID from the link generated in the last step or find it from the
     list of snapshots on https://localhost:3000/dashboard/snapshots
- 1. To export the JSON (update the snapshot ID in the command below):
-    ```
+ 1. To [export the JSON](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/api-legacy/snapshot/#get-snapshot-by-key)
+    (update the snapshot ID in the command below):
+    ```shell
     curl --request GET \
-      --header "Content-Type: application/json" \
+      --header 'Content-Type: application/json' \
       --output ~/Downloads/2026-08-16-synapse-myhomeserver.com.json \
       http://admin:admin@localhost:3000/api/snapshots/nerimdSEDz530rM6CiwkEFi09A1841yF
     ```
@@ -43,6 +44,6 @@ Example:
 cat ~/Downloads/2026-08-16-synapse-myhomeserver.com.json \
   | jq '. += {"name": "2026-08-16-synapse-myhomeserver.com"}' \
   | curl --request POST \
-      --header "Content-Type: application/json" \
+      --header 'Content-Type: application/json' \
       --data @- http://admin:admin@localhost:3000/api/snapshots
 ```
