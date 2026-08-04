@@ -19,9 +19,17 @@ current values of the metrics visible on the dashboard.
     snapshot only captures what's loaded on your page)
  1. Use the Grafana UI to capture the snapshot: **Share** (drop down arrow) -> **Share
     Snapshot** -> **Publish Snapshot**
-       - If you run into `413 Content Too Large` errors, you're probably just running
-         into the upload limit set on your nginx/apache reverse proxy in front of your
+       - If you run into `413` (`Content Too Large`) errors, you're probably just running
+         into the upload limit set on your reverse proxy (like nginx) in front of your
          Grafana instance. Just increase it and try again.
+       - You may also run into `400` (`Bad Request`) which appear as `bad request data`
+         in the Grafana UI if the snapshot is larger than 100 MB. Grafana introduced a
+         [100 MB
+         limit](https://github.com/grafana/grafana/blob/555d6dde60b0f49acd453c7293b1cd518fda3592/pkg/web/binding.go#L13-L14)
+         as part of their [2026 June security
+         releases](https://github.com/grafana/grafana/pull/125789). There is no
+         workaround on this app limit, so you will have to reduce the time window,
+         number of panels shown, etc.
  1. Grab the snapshot ID from the link generated in the last step or find it from the
     list of snapshots on https://localhost:3000/dashboard/snapshots
  1. To export the JSON, you have to use the [API for getting a
