@@ -117,6 +117,14 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.158.0
+
+## Drop support for Ubuntu 25.10 'Questing Quokka', add support for Ubuntu 26.04 'Resolute Raccoon'
+
+Ubuntu 25.10 'Questing Quokka' [is end-of-life as of
+2026-07-01](https://endoflife.date/ubuntu). This release drops support for Ubuntu 25.10,
+and in its place adds support for Ubuntu 26.04 'Resolute Raccoon'.
+
 # Upgrading to v1.157.0
 
 ## MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration
