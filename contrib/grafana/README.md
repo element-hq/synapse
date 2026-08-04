@@ -24,7 +24,8 @@ current values of the metrics visible on the dashboard.
          Grafana instance. Just increase it and try again.
  1. Grab the snapshot ID from the link generated in the last step or find it from the
     list of snapshots on https://localhost:3000/dashboard/snapshots
- 1. To [export the JSON](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/api-legacy/snapshot/#get-snapshot-by-key)
+ 1. To export the JSON, you have to use the [API for getting a
+    snapshot](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/api-legacy/snapshot/#get-snapshot-by-key)
     (update the snapshot ID in the command below):
     ```shell
     curl --request GET \
