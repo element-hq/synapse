@@ -41,6 +41,10 @@ current values of the metrics visible on the dashboard.
       --output ~/Downloads/2026-08-16-synapse-myhomeserver.com.json \
       http://admin:admin@localhost:3000/api/snapshots/nerimdSEDz530rM6CiwkEFi09A1841yF
     ```
+ 1. If you're trying to upload to GitHub, keep in mind that GitHub has a 25MB limit for
+    attachments on issues. As an alternative, you could create a [GitHub
+    Gist](https://gist.github.com/). If the snapshot is too big to upload via the GitHub
+    UI, you can create a blank/empty gist and add it via git (gists are git repos).
  1. Once you have the JSON file, you can delete the snapshot from your Grafana instance
     to free up space (from the snaphots page,
     https://localhost:3000/dashboard/snapshots). The JSON file will still be valid and
