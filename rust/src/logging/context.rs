@@ -98,7 +98,7 @@ impl LogContextHandle {
 
     /// Create a handle to the logcontext of the current tokio task, if we are
     /// running inside one that was spawned through [`LogContextHandle::scope`].
-    pub fn current() -> Option<LogContextHandle> {
+    pub fn task_current() -> Option<LogContextHandle> {
         TASK_LOCAL_CONTEXT.try_with(|c| c.clone()).ok()
     }
 
@@ -910,7 +910,7 @@ pub(crate) fn with_logcontext<R>(
 /// `SENTINEL_CONTEXT` instead of `None`.
 #[pyfunction]
 pub fn current_context(py: Python<'_>) -> Option<Py<LoggingContext>> {
-    if let Some(handle) = LogContextHandle::current() {
+    if let Some(handle) = LogContextHandle::task_current() {
         return handle.logging_context().map(|ctx| ctx.clone_ref(py));
     }
 
@@ -1046,7 +1046,7 @@ mod tests {
             // Outside any task, `current_context` reads the thread-local, which
             // here is `None` / the sentinel.
             assert!(current_context(py).is_none());
-            assert!(LogContextHandle::current().is_none());
+            assert!(LogContextHandle::task_current().is_none());
 
             let log_context = LogContextHandle {
                 context: Arc::new(Some(task_ctx.clone_ref(py))),
@@ -1061,7 +1061,7 @@ mod tests {
                 // `current_context` (what the log filter calls) return the
                 // task-local context, even though the thread-local is still
                 // unset.
-                assert!(LogContextHandle::current().is_some());
+                assert!(LogContextHandle::task_current().is_some());
                 Python::attach(|py| {
                     assert!(current_context(py)
                         .expect("expected a current context")
@@ -1071,7 +1071,7 @@ mod tests {
             }));
 
             // Once the scope ends, we fall back to the thread-local again.
-            assert!(LogContextHandle::current().is_none());
+            assert!(LogContextHandle::task_current().is_none());
             assert!(current_context(py).is_none());
         });
     }

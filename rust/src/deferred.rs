@@ -169,7 +169,7 @@ where
     // logging and DB-metrics accounting are then attributed to the right
     // request. If we are not inside a scoped task, this is `None` and the
     // awaitable runs in the sentinel.
-    let logcontext = crate::logging::context::LogContextHandle::current();
+    let logcontext = crate::logging::context::LogContextHandle::task_current();
 
     Python::attach(move |py| -> PyResult<()> {
         // Create some deferred success/error callback functions that we will use to get
