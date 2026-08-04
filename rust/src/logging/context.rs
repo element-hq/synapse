@@ -496,9 +496,9 @@ impl LoggingContext {
 
         let old_context = set_current_context(py, Some(slf.clone().unbind()))?;
 
-        if !slots_identical(&previous, &old_context) {
-            let previous_repr = slot_repr(py, &previous)?;
-            let old_repr = slot_repr(py, &old_context)?;
+        if !are_contexts_identical(&previous, &old_context) {
+            let previous_repr = context_repr(py, &previous)?;
+            let old_repr = context_repr(py, &old_context)?;
             logcontext_error(
                 py,
                 format!("Expected previous context {previous_repr}, found {old_repr}"),
@@ -804,11 +804,11 @@ enum SwitchDirection {
 /// a fast-path for the common case that it is a base [`LoggingContext`].
 fn switch_context(
     py: Python<'_>,
-    slot: Option<&Py<LoggingContext>>,
+    ctx: Option<&Py<LoggingContext>>,
     direction: SwitchDirection,
     rusage: Option<(f64, f64)>,
 ) -> PyResult<()> {
-    let Some(ctx) = slot else {
+    let Some(ctx) = ctx else {
         return Ok(());
     };
     let ctx = ctx.bind(py);
@@ -829,7 +829,7 @@ fn switch_context(
 
 /// Whether two stored values are the same context, or both the sentinel.
 /// `LoggingContext` has no `__eq__`, so contexts compare by identity.
-fn slots_identical(a: &Option<Py<LoggingContext>>, b: &Option<Py<LoggingContext>>) -> bool {
+fn are_contexts_identical(a: &Option<Py<LoggingContext>>, b: &Option<Py<LoggingContext>>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => a.is(b),
@@ -838,8 +838,8 @@ fn slots_identical(a: &Option<Py<LoggingContext>>, b: &Option<Py<LoggingContext>
 }
 
 /// `repr()` of a stored context, for error messages only. `None` renders as
-/// `"None"`, matching what the `previous_context` getter exposes to Python.
-fn slot_repr(py: Python<'_>, slot: &Option<Py<LoggingContext>>) -> PyResult<String> {
+/// `"None"`.
+fn context_repr(py: Python<'_>, slot: &Option<Py<LoggingContext>>) -> PyResult<String> {
     match slot {
         Some(ctx) => Ok(ctx.bind(py).repr()?.extract()?),
         None => Ok("None".to_owned()),
@@ -865,7 +865,7 @@ pub fn set_current_context(
 ) -> PyResult<Option<Py<LoggingContext>>> {
     let current = current_context(py);
 
-    if !slots_identical(&current, &context) {
+    if !are_contexts_identical(&current, &context) {
         let rusage = get_thread_rusage();
         switch_context(py, current.as_ref(), SwitchDirection::Stop, rusage)?;
         // We already hold `current`, so ignore the previous value the swap
