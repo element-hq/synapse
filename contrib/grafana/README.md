@@ -40,11 +40,12 @@ current values of the metrics visible on the dashboard.
 
 **To import the JSON snapshot into Grafana**, you have to use the [API for creating a snapshot](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/snapshot/#create-new-snapshot) (passing in the whole JSON).
 
-Example:
-```
-cat ~/Downloads/2026-08-16-synapse-myhomeserver.com.json \
-  | jq '. += {"name": "2026-08-16-synapse-myhomeserver.com"}' \
-  | curl --request POST \
-      --header 'Content-Type: application/json' \
-      --data @- http://admin:admin@localhost:3000/api/snapshots
-```
+ 1. Import example:
+    ```
+    cat ~/Downloads/2026-08-16-synapse-myhomeserver.com.json \
+      | jq '. += {"name": "2026-08-16-synapse-myhomeserver.com"}' \
+      | curl --request POST \
+          --header 'Content-Type: application/json' \
+          --data @- http://admin:admin@localhost:3000/api/snapshots
+    ```
+ 1. Then you can find the snapshot on https://localhost:3000/dashboard/snapshots to view it.
