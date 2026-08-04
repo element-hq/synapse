@@ -507,7 +507,7 @@ class RoomPermissionsTestCase(RoomBase):
             )
         )
         assert pl_event is not None
-        self.assertEqual(50, pl_event.content.get("m.call.invite"))
+        self.assertEqual(50, pl_event.content.get("events", {}).get("m.call.invite"))
 
         private_pl_event = self.get_success(
             self.store_controllers.state.get_current_state_event(
@@ -515,7 +515,9 @@ class RoomPermissionsTestCase(RoomBase):
             )
         )
         assert private_pl_event is not None
-        self.assertEqual(None, private_pl_event.content.get("m.call.invite"))
+        self.assertEqual(
+            None, private_pl_event.content.get("events", {}).get("m.call.invite")
+        )
 
 
 class RoomStateTestCase(RoomBase):
@@ -1930,7 +1932,8 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
     def test_default_power_levels_with_room_override(self) -> None:
         """
         Create a room, providing power level overrides.
-        Confirm that the room's power levels reflect the overrides.
+        When the `power_level_content_override` was provided, it should replace the
+        default power levels.
 
         See https://github.com/matrix-org/matrix-spec/issues/492
         - currently we overwrite each key of power_level_content_override
@@ -1959,9 +1962,9 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
     )
     def test_power_levels_with_server_override(self) -> None:
         """
-        With a server configured to modify the room-level defaults,
-        Create a room, without providing any extra power level overrides.
-        Confirm that the room's power levels reflect the server-level overrides.
+        With a server configured `default_power_level_content_override`, creating a room
+        without `power_level_content_override` should result in the server-level overrides
+        being applied.
 
         Similar to https://github.com/matrix-org/matrix-spec/issues/492,
         we overwrite each key of power_level_content_override completely.
