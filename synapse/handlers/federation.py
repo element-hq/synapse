@@ -41,10 +41,10 @@ from unpaddedbase64 import decode_base64
 
 from synapse import event_auth
 from synapse.api.constants import (
-    JoinRules,
     MAX_DEPTH,
     EventContentFields,
     EventTypes,
+    JoinRules,
     Membership,
 )
 from synapse.api.errors import (
@@ -1171,7 +1171,10 @@ class FederationHandler:
                 "You are not permitted to invite this user.",
                 errcode=Codes.INVITE_BLOCKED,
             )
-        elif rule == InviteRule.UNSTABLE_BLOCK_PUBLIC and self.config.experimental.msc4494_enabled:
+        elif (
+            rule == InviteRule.UNSTABLE_BLOCK_PUBLIC
+            and self.config.experimental.msc4494_enabled
+        ):
             mutual_rooms = await self.store.get_mutual_rooms_between_users(
                 frozenset((event.sender, event.state_key))
             )
