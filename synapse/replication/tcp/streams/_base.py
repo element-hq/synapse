@@ -429,9 +429,9 @@ class TypingStream(Stream):
         if hs.get_instance_name() in hs.config.worker.writers.typing:
             # On the writer, query the typing handler
             typing_writer_handler = hs.get_typing_writer_handler()
-            update_function: Callable[
-                [str, int, int, int], Awaitable[tuple[list[tuple[int, Any]], int, bool]]
-            ] = typing_writer_handler.get_all_typing_updates
+            update_function: UpdateFunction = (
+                typing_writer_handler.get_all_typing_updates
+            )
             self.current_token_function = typing_writer_handler.get_current_token
         else:
             # Query the typing writer process
