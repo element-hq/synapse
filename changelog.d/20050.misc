@@ -1,1 +1,1 @@
-Fix `public_chat` preset to use `events` field and introduce deepmerge for `power_level_content_override` so that previous events are not discarded. Contributed by @famedly @itsoyou
+Fix `public_chat` preset to use `events` field and introduce deepmerge for `power_level_content_override` so that previous events are not discarded. Contributed by @famedly @itsoyou.
