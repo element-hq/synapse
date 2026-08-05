@@ -889,7 +889,7 @@ class LoggingContextFilterTestCase(unittest.TestCase):
         )
         with LoggingContext(name="ctx", server_name="myserver", request=request):
             record = self._make_record()
-            self.assertIs(self.filter.filter(record), True)
+            self.assertTrue(self.filter.filter(record))
 
         # Read via `__dict__` since these attributes are only ever set
         # dynamically (they aren't declared on `logging.LogRecord`).
@@ -908,7 +908,7 @@ class LoggingContextFilterTestCase(unittest.TestCase):
 
     def test_sentinel_sets_defaults_when_absent(self) -> None:
         record = self._make_record()
-        self.assertIs(self.filter.filter(record), True)
+        self.assertTrue(self.filter.filter(record))
 
         self.assertEqual(
             record.__dict__["server_name"], "unknown_server_from_sentinel_context"
@@ -921,7 +921,7 @@ class LoggingContextFilterTestCase(unittest.TestCase):
         record = self._make_record(
             server_name="third-party-server", request="third-party-request"
         )
-        self.assertIs(self.filter.filter(record), True)
+        self.assertTrue(self.filter.filter(record))
 
         self.assertEqual(record.__dict__["server_name"], "third-party-server")
         self.assertEqual(record.__dict__["request"], "third-party-request")
