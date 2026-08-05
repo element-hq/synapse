@@ -40,7 +40,13 @@ from signedjson.sign import verify_signed_json
 from unpaddedbase64 import decode_base64
 
 from synapse import event_auth
-from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
+from synapse.api.constants import (
+    JoinRules,
+    MAX_DEPTH,
+    EventContentFields,
+    EventTypes,
+    Membership,
+)
 from synapse.api.errors import (
     AuthError,
     CodeMessageException,
@@ -1165,6 +1171,41 @@ class FederationHandler:
                 "You are not permitted to invite this user.",
                 errcode=Codes.INVITE_BLOCKED,
             )
+        elif rule == InviteRule.UNSTABLE_BLOCK_PUBLIC:
+            mutual_rooms = await self.store.get_mutual_rooms_between_users(
+                frozenset((event.sender, event.state_key))
+            )
+            private = False
+            for room_id in mutual_rooms:
+                join_rule = JoinRules.INVITE
+                state = await self._storage_controllers.state.get_current_state_ids(
+                    room_id,
+                    StateFilter.from_types([(EventTypes.JoinRules, "")]),
+                )
+                event_id = state.get((EventTypes.JoinRules, ""))
+                if event_id:
+                    join_rules_event = await self.store.get_event(
+                        event_id, allow_none=True
+                    )
+                    if join_rules_event:
+                        join_rule = join_rules_event.content.get(
+                            "join_rule", JoinRules.INVITE
+                        )
+                if join_rule != JoinRules.PUBLIC:
+                    private = True
+                    break
+            if not private:
+                logger.info(
+                    "Automatically rejecting invite from %s as they do not "
+                    "share a non-public room with %s",
+                    event.sender,
+                    event.state_key,
+                )
+                raise SynapseError(
+                    403,
+                    "You are not permitted to invite this user.",
+                    errcode=Codes.INVITE_BLOCKED,
+                )
         # InviteRule.IGNORE is handled at the sync layer
 
         # We retrieve the room member handler here as to not cause a cyclic dependency
