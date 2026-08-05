@@ -732,18 +732,15 @@ class LogContextErrorMessageTestCase(unittest.TestCase):
     """Tests asserting the exact messages passed to `logcontext_error`, and
     the conditions that trigger each one.
 
-    The implementation lives in Rust (`rust/src/logging/context.rs`).
-    Downstream log scraping depends on the wording and argument order of these
-    messages, so accidental changes must fail a test. Messages that
-    interpolate a context with `%r` include the object's `repr()`, and so its
-    memory address; the expected strings are therefore built from the same
-    live objects rather than hard-coded.
+    The implementation lives in Rust (`rust/src/logging/context.rs`). Downstream
+    log scraping depends on the wording and argument order of these messages, so
+    accidental changes must fail a test.
     """
 
     def setUp(self) -> None:
-        # These tests call `__enter__`/`__exit__`/`start`/`stop` by hand; make
-        # sure the current context ends up back at the sentinel regardless of
-        # what a test does.
+        # These tests call `__enter__`/`__exit__`/`start`/`stop` by hand. Let's
+        # make sure the current context ends up back at the sentinel regardless
+        # of what a test does.
         self.assertIs(current_context(), SENTINEL_CONTEXT)
         self.addCleanup(set_current_context, SENTINEL_CONTEXT)
 
