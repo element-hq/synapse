@@ -942,7 +942,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         "You are not permitted to invite this user.",
                         errcode=Codes.INVITE_BLOCKED,
                     )
-                elif rule == InviteRule.UNSTABLE_BLOCK_PUBLIC:
+                elif rule == InviteRule.UNSTABLE_BLOCK_PUBLIC and self.config.experimental.msc4494_enabled:
                     mutual_rooms = await self.store.get_mutual_rooms_between_users(
                         frozenset((requester.user.to_string(), target_id))
                     )
