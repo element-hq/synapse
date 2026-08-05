@@ -26,7 +26,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    TypeVar,
+    Sequence,
+    Union,
 )
 
 import attr
@@ -49,11 +50,33 @@ _STREAM_UPDATE_TARGET_ROW_COUNT = 100
 # A stream position token
 Token = int
 
+RdataSafeValue = Union[
+    str,
+    int,
+    bool,
+    float,
+    None,
+    # We could probably expand to support immutable types of these, but
+    # when they come off the wire they will deserialise to the mutable
+    # types again.
+    # Since nobody is using it right now, stick to `list` and `dict`
+    list["RdataSafeValue"],
+    dict[str, "RdataSafeValue"],
+]
+"""
+Safe types that can be used in RDATA commands and thus used as
+the wire format of stream rows.
+
+Prevents you from thinking you can push e.g. a `frozenset` over
+the wire and get it back on the other end.
+"""
+
 # The type of a stream update row, after JSON deserialisation, but before
 # parsing with Stream.parse_row (which turns it into a `ROW_TYPE`). Normally it's
 # just a row from a database query, though this is dependent on the stream in question.
 #
-StreamRow = TypeVar("StreamRow", bound=tuple)
+# NOTE: Prefer to use tuples, but since we have some streams still using list, support those for now.
+StreamRow = Union[tuple[RdataSafeValue, ...], list[RdataSafeValue]]
 
 # The type returned by the update_function of a stream, as well as get_updates(),
 # get_updates_since, etc.
@@ -63,7 +86,7 @@ StreamRow = TypeVar("StreamRow", bound=tuple)
 #   * `new_last_token` is the new position in stream.
 #   * `limited` is whether there are more updates to fetch.
 #
-StreamUpdateResult = tuple[list[tuple[Token, StreamRow]], Token, bool]
+StreamUpdateResult = tuple[Sequence[tuple[Token, StreamRow]], Token, bool]
 
 # The type of an update_function for a stream
 #
