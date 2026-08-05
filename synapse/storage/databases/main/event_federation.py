@@ -1312,15 +1312,6 @@ class EventFederationWorkerStore(
                     AND failed_backfill_attempt_info.event_id = backward_extrem.event_id
                 WHERE
                     backward_extrem.room_id = ?
-                    /* We only care about non-state edges because we used to use
-                     * `event_edges` for two different sorts of "edges" (the current
-                     * event DAG, but also a link to the previous state, for state
-                     * events). These legacy state event edges can be distinguished by
-                     * `is_state` and are removed from the codebase and schema but
-                     * because the schema change is in a background update, it's not
-                     * necessarily safe to assume that it will have been completed.
-                     */
-                    AND edge.is_state is FALSE
                     /**
                      * We only want backwards extremities that are older than or at
                      * the same position of the given `nearby_depth` (where older
@@ -1699,7 +1690,7 @@ class EventFederationWorkerStore(
             WHERE NOT events.outlier
 
             /* Look for an edge which matches the given event_id */
-            AND event_edges.event_id = ? AND NOT event_edges.is_state
+            AND event_edges.event_id = ?
 
             /* Because we can have many events at the same depth,
             * we want to also tie-break and sort on stream_ordering */
@@ -2046,7 +2037,6 @@ class EventFederationWorkerStore(
                     JOIN events ON events.event_id = ee.prev_event_id
                     WHERE ee.event_id = ?
                     AND events.room_id = ?
-                    AND NOT ee.is_state
                     LIMIT ?
                     """,
                     (event_id, room_id, limit - len(event_results)),
