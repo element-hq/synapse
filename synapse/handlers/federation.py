@@ -1179,10 +1179,10 @@ class FederationHandler:
                 frozenset((event.sender, event.state_key))
             )
             private = False
-            for room_id in mutual_rooms:
+            for mutual_room_id in mutual_rooms:
                 join_rule = JoinRules.INVITE
                 state = await self._storage_controllers.state.get_current_state_ids(
-                    room_id,
+                    mutual_room_id,
                     StateFilter.from_types([(EventTypes.JoinRules, "")]),
                 )
                 event_id = state.get((EventTypes.JoinRules, ""))

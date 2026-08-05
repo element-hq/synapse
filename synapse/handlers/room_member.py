@@ -950,11 +950,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         frozenset((requester.user.to_string(), target_id))
                     )
                     private = False
-                    for room_id in mutual_rooms:
+                    for mutual_room_id in mutual_rooms:
                         join_rule = JoinRules.INVITE
                         state = (
                             await self._storage_controllers.state.get_current_state_ids(
-                                room_id,
+                                mutual_room_id,
                                 StateFilter.from_types([(EventTypes.JoinRules, "")]),
                             )
                         )
