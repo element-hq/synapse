@@ -5,7 +5,7 @@ class RustRuntime:
 
     Holds the tokio thread pool (started lazily on first use, shut down by a
     reactor shutdown trigger) and a handle to the reactor. Rust classes that
-    need either take this as a constructor argument; get it from
+    need them take this as a constructor argument. Get it from
     `hs.get_rust_runtime()`.
     """
 

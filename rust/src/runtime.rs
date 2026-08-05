@@ -125,9 +125,8 @@ impl Drop for RustRuntimeInner {
 ///
 /// One instance is constructed per homeserver by
 /// `HomeServer.get_rust_runtime()`. Rust classes that need it take it as a
-/// constructor argument — pyo3 extracts a `#[pyclass]` that is `Clone` by
-/// cloning, which here is just an `Arc` refcount bump — and hold their own
-/// clone. Derefs to [`RustRuntimeInner`].
+/// constructor argument and store their own clone, which is just an `Arc`
+/// refcount bump. Derefs to [`RustRuntimeInner`].
 #[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct RustRuntime {
@@ -154,7 +153,7 @@ impl RustRuntime {
         });
 
         // Shut the tokio runtime down when the reactor does. The trigger
-        // holds only a `Weak` reference: Twisted keeping the hook alive must
+        // holds only a `Weak` reference. Twisted keeping the hook alive must
         // not keep the runtime (nor, via it, the reactor) alive, as that
         // would be a reference cycle passing through a Rust field that
         // Python's GC cannot see into.

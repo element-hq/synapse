@@ -1,1 +1,1 @@
-Refactor Rust code have a single place to store per-reactor state.
+Refactor the Rust code to have a single place to store per-homeserver state.
