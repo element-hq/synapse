@@ -564,18 +564,57 @@ impl LoggingContext {
 
     /// Record that this logcontext is currently running.
     ///
-    /// This should not be called directly, use `set_current_context`. `rusage` is
-    /// the thread CPU usage `(ru_utime, ru_stime)` at the point of switching to
-    /// this context (`None` if the platform doesn't track it).
-    fn start(slf: Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
-        Self::start_inner(&slf, rusage)
+    /// This should not be called directly from Python, use
+    /// `set_current_context`.
+    ///
+    /// `rusage` is the thread CPU usage `(ru_utime, ru_stime)` at the point of
+    /// switching to this context (`None` if the platform doesn't track it).
+    ///
+    /// Note that the this takes a `Bound<..>` rather than `&self` as it can
+    /// call into Python, which may re-enter the context and try mutable borrow
+    /// it.
+    fn start(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
+        let py = slf.py();
+        let main_thread = slf.borrow().main_thread;
+
+        if get_thread_id() != main_thread {
+            let name = slf.borrow().name_string(py);
+            logcontext_error(py, format!("Started logcontext {name} on different thread"))?;
+            return Ok(());
+        }
+
+        if slf.borrow().finished {
+            let name = slf.borrow().name_string(py);
+            logcontext_error(py, format!("Re-starting finished log context {name}"))?;
+        }
+
+        // If we haven't already started, record the thread resource usage so far.
+        if slf.borrow().usage_start.is_some() {
+            let name = slf.borrow().name_string(py);
+            logcontext_error(py, format!("Re-starting already-active log context {name}"))?;
+        } else {
+            slf.borrow_mut().usage_start = rusage;
+        }
+
+        Ok(())
     }
 
     /// Record that this logcontext is no longer running.
     ///
-    /// This should not be called directly: use `set_current_context`.
-    fn stop(slf: Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
-        Self::stop_inner(&slf, rusage)
+    /// This should not be called directly from Python: use
+    /// `set_current_context`.
+    ///
+    /// Note that the this takes a `Bound<..>` rather than `&self` as it can
+    /// call into Python, which may re-enter the context and try mutable borrow
+    /// it.
+    fn stop(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
+        // `usage_start` must be cleared even if `stop_inner` fails, so don't
+        // use `?` here.
+        let result = Self::stop_inner(slf, rusage);
+
+        slf.borrow_mut().usage_start = None;
+
+        result
     }
 
     /// Get a *copy* of the resources used by this logcontext so far.
@@ -711,75 +750,41 @@ impl LoggingContext {
         self.name.bind(py).to_string_lossy().into_owned()
     }
 
-    /// Rust body of the `start` pymethod. [`set_current_context`] calls this
-    /// directly for a base `LoggingContext` rather than dispatching through
-    /// Python.
+    /// Inner implemetnation of [`Self::stop`], which does not clear
+    /// `usage_start`.
     ///
-    /// This (like [`Self::stop_inner`]) runs on every context switch. The
-    /// error branches build the name string themselves so that the common
-    /// path does not allocate.
-    fn start_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
+    /// Note that the this takes a `Bound<..>` rather than `&self` as it can
+    /// call into Python, which may re-enter the context and try mutable borrow
+    /// it.
+    fn stop_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
         let py = slf.py();
         let main_thread = slf.borrow().main_thread;
 
         if get_thread_id() != main_thread {
             let name = slf.borrow().name_string(py);
-            logcontext_error(py, format!("Started logcontext {name} on different thread"))?;
+            logcontext_error(py, format!("Stopped logcontext {name} on different thread"))?;
             return Ok(());
         }
 
-        if slf.borrow().finished {
-            let name = slf.borrow().name_string(py);
-            logcontext_error(py, format!("Re-starting finished log context {name}"))?;
-        }
+        // No rusage means this platform doesn't track per-thread CPU, so
+        // there is nothing to account.
+        let Some(current) = rusage else {
+            return Ok(());
+        };
 
-        // If we haven't already started, record the thread resource usage so far.
-        if slf.borrow().usage_start.is_some() {
+        // Record the cpu used since we started.
+        let Some(start) = slf.borrow().usage_start else {
             let name = slf.borrow().name_string(py);
-            logcontext_error(py, format!("Re-starting already-active log context {name}"))?;
-        } else {
-            slf.borrow_mut().usage_start = rusage;
-        }
+            logcontext_error(
+                py,
+                format!("Called stop on logcontext {name} without recording a start rusage"),
+            )?;
+            return Ok(());
+        };
 
+        let (utime_delta, stime_delta) = cputime_delta(current, start);
+        slf.borrow().add_cputime(py, utime_delta, stime_delta)?;
         Ok(())
-    }
-
-    /// Rust body of the `stop` pymethod; see [`Self::start_inner`].
-    fn stop_inner(slf: &Bound<'_, Self>, rusage: Option<(f64, f64)>) -> PyResult<()> {
-        let py = slf.py();
-        let main_thread = slf.borrow().main_thread;
-
-        // `finally`-style: `usage_start` must be cleared however we exit.
-        let result = (|| -> PyResult<()> {
-            if get_thread_id() != main_thread {
-                let name = slf.borrow().name_string(py);
-                logcontext_error(py, format!("Stopped logcontext {name} on different thread"))?;
-                return Ok(());
-            }
-
-            // No rusage means this platform doesn't track per-thread CPU, so
-            // there is nothing to account.
-            let Some(current) = rusage else {
-                return Ok(());
-            };
-
-            // Record the cpu used since we started.
-            let Some(start) = slf.borrow().usage_start else {
-                let name = slf.borrow().name_string(py);
-                logcontext_error(
-                    py,
-                    format!("Called stop on logcontext {name} without recording a start rusage"),
-                )?;
-                return Ok(());
-            };
-
-            let (utime_delta, stime_delta) = cputime_delta(current, start);
-            slf.borrow().add_cputime(py, utime_delta, stime_delta)?;
-            Ok(())
-        })();
-
-        slf.borrow_mut().usage_start = None;
-        result
     }
 }
 
@@ -809,8 +814,8 @@ fn switch_context(
     let ctx = ctx.bind(py);
     if ctx.as_any().is_exact_instance_of::<LoggingContext>() {
         match direction {
-            SwitchDirection::Start => LoggingContext::start_inner(ctx, rusage),
-            SwitchDirection::Stop => LoggingContext::stop_inner(ctx, rusage),
+            SwitchDirection::Start => LoggingContext::start(ctx, rusage),
+            SwitchDirection::Stop => LoggingContext::stop(ctx, rusage),
         }
     } else {
         let method = match direction {
