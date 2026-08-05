@@ -19,7 +19,8 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, AbstractSet, Collection, cast
+from collections.abc import Set
+from typing import TYPE_CHECKING, Collection, cast
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -407,7 +408,7 @@ class ProfileWorkerStore(SQLBaseStore):
         *,
         from_id: int,
         to_id: int,
-        field_names: AbstractSet[str],
+        field_names: Set[str],
     ) -> list[ProfileUpdate]:
         """Get profile update markers for the given fields in a stream range.
 
@@ -499,7 +500,7 @@ class ProfileWorkerStore(SQLBaseStore):
         from_id: int,
         to_id: int,
         user_id: str,
-        field_names: AbstractSet[str],
+        field_names: Set[str],
         include_users: set[str] | None = None,
     ) -> list[ProfileUpdate]:
         """Get profile update markers for a user in a stream range.
