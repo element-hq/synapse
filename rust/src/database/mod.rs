@@ -1,4 +1,4 @@
-//! DBAPI2-shaped Connection / Cursor types implemented in Rust.
+//! Database access implemented in Rust.
 //!
 //! Currently this provides a single Postgres backend ([`tokio_postgres`]); see
 //! the [`postgres`] submodule.
@@ -17,8 +17,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
     m.add_submodule(&child)?;
 
-    // Mirror the convention used by other rust submodules so
-    // `from synapse.synapse_rust import database` works.
+    // We need to manually add the module to sys.modules to make `from
+    // synapse.synapse_rust import database` work.
     py.import("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.database", child)?;

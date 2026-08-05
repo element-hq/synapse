@@ -1,29 +1,21 @@
 //! [`tokio_postgres`]-backed Postgres backend for the Rust `database` module.
 //!
-//! This module will grow the Python-facing `Connection` / `Cursor` classes and
-//! the `connect` factory; for now it hosts the value-mapping layer ([`value`])
-//! that converts between Python objects and Postgres' binary wire format.
-//!
-//! The driver itself is async; the eventual `Connection` / `Cursor` types will
-//! drive it from sync Python methods via a shared multi-thread tokio runtime.
+//! The driver is async. [`helpers`] drives its futures to completion from
+//! synchronous Python code on the shared tokio runtime, and [`value`] converts
+//! between Python objects and Postgres' binary wire format.
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
-// `pub` (rather than private) so the not-yet-consumed public items in these
-// submodules are reachable from the crate root as public API. This is what
-// stops clippy's `dead_code` lint from firing on them before the
-// cursor/connection code (added in later changes) wires them up; the visibility
-// is tightened back to private once that happens.
+// `pub` so the items in these submodules count as public API even though
+// nothing consumes them yet, which keeps clippy's `dead_code` lint quiet.
+// Tighten to private once the connection/cursor code uses them.
 pub mod helpers;
 pub mod value;
 
-/// Register the `postgres` submodule under the parent `database` module.
-///
-/// The `Connection` / `Cursor` classes and the `connect` factory are added in
-/// later changes; for now this just creates the (otherwise empty) submodule so
-/// the module tree — and the `value` mapping layer hanging off it — exists.
+/// Register the (currently empty) `postgres` submodule under the parent
+/// `database` module.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let child = PyModule::new(py, "postgres")?;
 
