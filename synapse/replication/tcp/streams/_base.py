@@ -766,6 +766,16 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
         return rows, rows[-1][0], len(updates) == limit
 
 
+def _convert_affected_fields(
+    wire: list[str] | frozenset[str] | None,
+) -> frozenset[str] | None:
+    return (
+        frozenset(wire)
+        if wire is not None and not isinstance(wire, frozenset)
+        else None
+    )
+
+
 @attr.s(slots=True, auto_attribs=True)
 class ProfileUpdatesStreamRow:
     """Profile update stream row detailing what the profile update changes."""
@@ -776,7 +786,10 @@ class ProfileUpdatesStreamRow:
     """The action, either 'update' for a field update, 'left_room' if the user left
     a room or `joined_room` if the user joined a room, see ProfileUpdateAction enum.
     """
-    affected_fields: frozenset[str] | None
+    affected_fields: frozenset[str] | None = attr.ib(
+        # Convert list back to frozenset from wire format
+        converter=_convert_affected_fields
+    )
     """Names of the profile fields that were added, updated or removed, see https://spec.matrix.org/unstable/client-server-api/#profiles.
     This is None if `action` is not `update`.
     """
@@ -810,9 +823,15 @@ class ProfileUpdatesStream(_StreamFromIdGen):
             (
                 stream_id,
                 # These are the args to `ProfileUpdatesStreamRow`
-                (user_id, action, field_name),
+                (
+                    user_id,
+                    action,
+                    # Must convert `field_names` to a list for transport over the wire
+                    # It will be reconstructed as a frozenset on the other end
+                    list(field_names) if field_names is not None else None,
+                ),
             )
-            for stream_id, user_id, action, field_name in updates
+            for stream_id, user_id, action, field_names in updates
         ]
 
         if not rows:
