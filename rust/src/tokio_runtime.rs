@@ -51,10 +51,9 @@ impl PyTokioRuntime {
 impl PyTokioRuntime {
     /// Build the runtime if it hasn't been built yet.
     ///
-    /// Idempotent, so it is safe to call both from the reactor's
-    /// `callWhenRunning(start)` hook and from a caller that needs the runtime
-    /// before the reactor has run that hook (see [`runtime_handle`]): whichever
-    /// runs first builds it, the other is a no-op.
+    /// Both the reactor's `callWhenRunning(start)` hook and [`runtime_handle`]
+    /// call this, in either order. Whichever runs first builds the runtime;
+    /// for the other it is a no-op.
     fn ensure_started(&mut self) -> PyResult<()> {
         if self.runtime.is_some() {
             return Ok(());
@@ -92,11 +91,10 @@ pub fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRunt
 /// Get a clonable handle to the shared runtime, starting it on demand.
 ///
 /// Unlike [`runtime`], this does not require the reactor to have already run
-/// its `callWhenRunning(start)` hook: it starts the runtime if necessary. That
-/// lets callers that need the runtime before the reactor is up — the database
-/// backend's schema setup, `synapse_port_db`, and trial tests — still get a
-/// working handle. Once the reactor does run, its `start` hook finds the
-/// runtime already built and is a no-op, so there is still only one runtime.
+/// its `callWhenRunning(start)` hook; the runtime is started here if needed,
+/// so a caller that needs it before the reactor is up still gets a working
+/// handle. Once the reactor does run, its `start` hook finds the runtime
+/// already built and is a no-op, so there is still only one runtime.
 pub fn runtime_handle(reactor: &Bound<'_, PyAny>) -> PyResult<Handle> {
     let runtime = get_or_install(reactor)?;
     let mut runtime = runtime.borrow_mut();

@@ -14,7 +14,7 @@
  */
 
 //! Extension traits for driving [`tokio_postgres`] futures to completion from
-//! the synchronous, GIL-holding Python methods.
+//! synchronous, GIL-holding Python code.
 //!
 //! Both [`BlockingPostgres`] and [`BlockingPostgresStream`] release the GIL
 //! (`py.detach`) while blocking on the shared tokio runtime, so other Python
@@ -23,10 +23,9 @@
 //! the `detach` boundary.
 //!
 //! The stream helper is generic over the underlying stream type rather than
-//! hard-wired to [`tokio_postgres::RowStream`]. In production it is always used
-//! with a `RowStream`, but keeping it generic lets the cursor state machine
-//! (which uses these helpers) be unit-tested against an in-memory fake stream
-//! with no live database — see [`BlockingPostgresStream`]'s tests.
+//! hard-wired to [`tokio_postgres::RowStream`], so code built on it can be
+//! unit-tested against an in-memory stream with no live database — see
+//! [`BlockingPostgresStream`]'s tests.
 
 use std::{future::Future, pin::Pin};
 
@@ -52,8 +51,8 @@ where
     /// (see [`crate::tokio_runtime`]) entered first with
     /// [`Handle::enter`](tokio::runtime::Handle::enter); [`Handle::current`]
     /// panics otherwise. The blocking wait runs on the calling (Python) thread,
-    /// never on a runtime worker — see this module's docs for why that can't
-    /// deadlock.
+    /// never on a runtime worker, so it cannot starve the worker threads that
+    /// complete the future.
     fn block_on(self, py: Python<'_>) -> Self::Output {
         py.detach(|| Handle::current().block_on(self))
     }
@@ -91,16 +90,13 @@ where
 /// the shared runtime only when the next item isn't already buffered.
 ///
 /// Implemented for any pinned, fused stream (`Pin<&mut Fuse<S>>`) whose items
-/// can cross the GIL-release boundary. In production `S` is
-/// [`tokio_postgres::RowStream`]; the generic bound is what lets the cursor
-/// logic be tested against an in-memory fake.
+/// can cross the GIL-release boundary, so it can be tested against an
+/// in-memory stream as well as a [`tokio_postgres::RowStream`].
 ///
-/// The [`Fuse`] is *required* by the impl (the trait is implemented only for
-/// `Pin<&mut Fuse<S>>`), not merely assumed. This matters because
-/// [`Self::get_next_if_ready`] may poll the stream again after it has finished:
-/// a bare `Stream` is free to panic if polled past completion, whereas a fused
-/// stream simply keeps yielding `None`. So repeated `get_next_if_ready` /
-/// `block_on_next` calls after exhaustion are safe by construction.
+/// The [`Fuse`] bound matters because [`Self::get_next_if_ready`] may poll the
+/// stream again after it has finished. A bare `Stream` is allowed to panic if
+/// polled past completion; a fused stream keeps yielding `None`, so calls
+/// after exhaustion are safe.
 pub trait BlockingPostgresStream
 where
     Self: futures::Stream + Sized + Send + Ungil + Unpin,
@@ -134,9 +130,8 @@ where
     }
 }
 
-// Blanket impl over any pinned, fused stream. Requiring the helper bounds here
-// (rather than only for `RowStream`) is what makes the cursor logic testable
-// with a fake stream.
+// Blanket impl over any pinned, fused stream, not just `RowStream`, so the
+// tests can use an in-memory stream.
 impl<S> BlockingPostgresStream for Pin<&mut Fuse<S>>
 where
     Self: futures::Stream + Send + Ungil + Unpin,
@@ -156,11 +151,9 @@ mod tests {
 
     use super::*;
 
-    /// A throwaway runtime standing in for the shared one. Production code
-    /// enters `crate::tokio_runtime`'s runtime on each thread; the helpers only
-    /// need *some* runtime entered on the current thread (so [`Handle::current`]
-    /// resolves), and (as in production) the blocking wait runs on this test
-    /// thread rather than on a worker. Each test calls `rt.enter()` and holds
+    /// A throwaway runtime standing in for the shared one. The helpers only
+    /// need *some* runtime entered on the current thread, so that
+    /// [`Handle::current`] resolves. Each test calls `rt.enter()` and holds
     /// the guard for the duration.
     fn test_runtime() -> Runtime {
         tokio::runtime::Builder::new_multi_thread()
@@ -189,8 +182,8 @@ mod tests {
             let ok = async { Ok::<i32, tokio_postgres::Error>(5) };
             assert_eq!(ok.block_on_result(py).unwrap(), 5);
             // The error path (mapping a `tokio_postgres::Error` to a `PyErr`)
-            // can't be unit-tested here, as that error type can't be
-            // constructed by hand; it's exercised by the integration tests.
+            // isn't covered here, because that error type can't be constructed
+            // by hand. Exercising it needs a live server.
         });
     }
 
@@ -246,9 +239,8 @@ mod tests {
             assert_eq!(stream.as_mut().block_on_next(py), Some(Ok(7)));
             assert_eq!(stream.as_mut().block_on_next(py), None);
 
-            // And, on a fresh stream, `block_on_next` handles the pending first
-            // poll entirely on its own (no preceding `get_next_if_ready`),
-            // proving it doesn't rely on being "primed" by an earlier call.
+            // And, on a fresh stream, `block_on_next` handles a pending first
+            // poll on its own, with no preceding `get_next_if_ready`.
             let stream = stream::once(async {
                 tokio::task::yield_now().await;
                 Ok::<i32, ()>(8)

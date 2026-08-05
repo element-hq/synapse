@@ -1,12 +1,9 @@
 //! Conversions between Python values and the Postgres SQL value
 //! representations.
 //!
-//! Kept in its own module so the cursor code stays focused on the DBAPI shape
-//! rather than the type-mapping table.
-//!
-//! First cut: int / float / bool / str / bytes / None. Lists (for
-//! `ANY($1)`-style queries) and richer types — json, decimal, timestamps —
-//! are deferred to a follow-up.
+//! Supports int / float / bool / str / bytes / None. Lists (for
+//! `ANY($1)`-style queries) and richer types such as json, decimal and
+//! timestamps are not yet supported.
 //!
 //! The mapping is column-type-driven on the way *out* (a single Python `int`
 //! becomes `INT2`/`INT4`/`INT8` depending on the column it is bound to) and
@@ -52,14 +49,12 @@ impl PgValue {
     /// Classify a Python object into a [`PgValue`], or error if its type isn't
     /// one we know how to send to Postgres.
     ///
-    /// Two subtleties worth calling out:
     ///   * `bool` is classified as [`PgValue::Bool`], never [`PgValue::Int`],
     ///     even though Python's `bool` is a subclass of `int`.
     ///   * `int` must fit in an `i64`; a larger Python integer raises an
     ///     `OverflowError` here, since Postgres has no wider integer type in
     ///     this mapping.
-    ///
-    /// A type we don't recognise raises `TypeError`.
+    ///   * A type we don't recognise raises `TypeError`.
     pub fn from_py(obj: &Bound<PyAny>) -> PyResult<Self> {
         if obj.is_none() {
             return Ok(PgValue::Null);
@@ -88,8 +83,8 @@ impl PgValue {
     }
 }
 
-// Lets PyO3 extract a `PgValue` directly from a Python argument, e.g. when a
-// cursor method takes `Option<Vec<PgValue>>` for its parameters.
+// Lets PyO3 extract a `PgValue` directly from a Python argument, e.g. from a
+// method that takes `Option<Vec<PgValue>>` as its parameter list.
 impl<'a, 'py> FromPyObject<'a, 'py> for PgValue {
     type Error = PyErr;
 
@@ -135,13 +130,10 @@ impl ToSql for PgValue {
                 Ok(IsNull::No)
             }
             (&PgValue::Float(v), &Type::FLOAT4) => {
-                // The `as` cast here generates the closest f32 to the f64,
-                // with loss of precision. Since Python floats are variable
-                // precision anyway, this is the best we can do.
-                //
-                // (Crucially, there is no way of doing a "fallible" cast
-                // here, since unlike integers there is no notion of "out of
-                // range" for floats, just varying precision.)
+                // The `as` cast narrows to the nearest f32, losing precision.
+                // Unlike the integer arms there is no fallible conversion to
+                // use, since floats have no notion of "out of range", just
+                // varying precision.
                 float4_to_sql(v as f32, buf);
                 Ok(IsNull::No)
             }
@@ -359,8 +351,8 @@ mod tests {
 
     #[test]
     fn from_py_extracts_via_frompyobject() {
-        // The cursor binds parameters by extracting `PgValue` straight off the
-        // Python argument; check that `FromPyObject` path forwards to `from_py`.
+        // Check that extracting a `PgValue` from a Python object (the
+        // `FromPyObject` path) forwards to `from_py`.
         Python::initialize();
         Python::attach(|py| {
             let obj = 7i64.into_pyobject(py).unwrap().into_any();
@@ -376,7 +368,7 @@ mod tests {
             let list = pyo3::types::PyList::new(py, [1, 2, 3]).unwrap();
             let err = PgValue::from_py(&list.into_any()).unwrap_err();
             assert!(err.is_instance_of::<PyTypeError>(py));
-            // The message names the offending type, which is the useful part.
+            // The message should name the offending type.
             assert!(err.to_string().contains("list"), "got: {err}");
         });
     }
@@ -420,7 +412,7 @@ mod tests {
             encode(&PgValue::Float(value), &Type::FLOAT4).0,
             (value as f32).to_be_bytes()
         );
-        // And the result is provably narrower than the FLOAT8 encoding.
+        // And the bytes are not just a truncation of the f64 encoding.
         assert_ne!(
             encode(&PgValue::Float(value), &Type::FLOAT4).0,
             value.to_be_bytes()[..4].to_vec()
