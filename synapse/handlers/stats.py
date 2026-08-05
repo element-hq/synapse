@@ -114,6 +114,7 @@ class StatsHandler:
                 )
                 self.pos = room_max_stream_ordering
 
+        assert self.pos is not None
         refresh_room_metrics = initial_run
 
         # Loop round handling deltas until we're up to date
@@ -340,6 +341,8 @@ class StatsHandler:
 
     async def refresh_room_metrics(self) -> None:
         """Refresh the room count metrics"""
+        if not self.stats_enabled:
+            return
         known, locally_joined = await self.store.get_room_stats()
         known_rooms_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(known)
         locally_joined_rooms_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(

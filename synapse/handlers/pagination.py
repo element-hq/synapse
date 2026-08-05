@@ -429,7 +429,6 @@ class PaginationHandler:
             raise Exception("No room id passed to purge_room task")
         params = task.params if task.params else {}
         await self.purge_room(task.resource_id, params.get("force", False))
-        await self._stats_handler.refresh_room_metrics()
         return TaskStatus.COMPLETE, None, None
 
     async def purge_room(
@@ -466,6 +465,10 @@ class PaginationHandler:
             await self._storage_controllers.purge_events.purge_room(room_id)
 
         logger.info("purge complete for room_id %s", room_id)
+
+        # Room purge deletes rows from room_stats_current outside the stats
+        # delta stream, so refresh the room count metrics explicitly.
+        await self._stats_handler.refresh_room_metrics()
 
     @trace
     async def get_messages(
@@ -771,7 +774,6 @@ class PaginationHandler:
                 task.params.get("force_purge", False),
             )
 
-        await self._stats_handler.refresh_room_metrics()
         return (TaskStatus.COMPLETE, shutdown_result, None)
 
     async def start_shutdown_and_purge_room(

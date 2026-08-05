@@ -356,6 +356,10 @@ class StatsStore(StateDeltasStore):
     async def get_room_stats(self) -> tuple[int, int]:
         """
         Retrieve the total number of rooms and locally joined rooms.
+        This is a full-table count and can be slow on large servers. Callers
+        should only invoke it when room counts may have changed (e.g. after
+        processing m.room.create / m.room.member events, or after a room purge),
+        not on every event.
         """
 
         def _get_room_stats_txn(txn: LoggingTransaction) -> tuple[int, int]:

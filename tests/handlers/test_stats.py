@@ -690,3 +690,66 @@ class StatsRoomTests(unittest.HomeserverTestCase):
 
         self.assertEqual(r1stats["joined_members"], 1)
         self.assertEqual(r2stats["joined_members"], 0)
+
+    def test_room_metrics_after_purge(self) -> None:
+        """
+        Room count metrics are refreshed after a room is purged.
+        """
+        self._perform_background_initial_update()
+
+        u1 = self.register_user("u1", "pass")
+        u1token = self.login("u1", "pass")
+
+        r1 = self.helper.create_room_as(u1, tok=u1token)
+        r2 = self.helper.create_room_as(u1, tok=u1token)
+        self.helper.leave(r2, u1, tok=u1token)
+
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
+            ),
+            2,
+        )
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_locally_joined_rooms_total",
+                labels={"server_name": self.hs.hostname},
+            ),
+            1,
+        )
+
+        # Purge the room with no local members.
+        pagination_handler = self.hs.get_pagination_handler()
+        self.get_success(pagination_handler.purge_room(r2, force=False))
+
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
+            ),
+            1,
+        )
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_locally_joined_rooms_total",
+                labels={"server_name": self.hs.hostname},
+            ),
+            1,
+        )
+
+        # Leave and purge the remaining locally joined room.
+        self.helper.leave(r1, u1, tok=u1token)
+        self.get_success(pagination_handler.purge_room(r1, force=False))
+
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
+            ),
+            0,
+        )
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_locally_joined_rooms_total",
+                labels={"server_name": self.hs.hostname},
+            ),
+            0,
+        )
