@@ -145,6 +145,7 @@ class PaginationHandler:
         self._relations_handler = hs.get_relations_handler()
         self._worker_locks = hs.get_worker_locks_handler()
         self._task_scheduler = hs.get_task_scheduler()
+        self._stats_handler = hs.get_stats_handler()
 
         self.pagination_lock = ReadWriteLock()
         # IDs of rooms in which there currently an active purge *or delete* operation.
@@ -428,6 +429,7 @@ class PaginationHandler:
             raise Exception("No room id passed to purge_room task")
         params = task.params if task.params else {}
         await self.purge_room(task.resource_id, params.get("force", False))
+        await self._stats_handler.refresh_room_metrics()
         return TaskStatus.COMPLETE, None, None
 
     async def purge_room(
@@ -769,6 +771,7 @@ class PaginationHandler:
                 task.params.get("force_purge", False),
             )
 
+        await self._stats_handler.refresh_room_metrics()
         return (TaskStatus.COMPLETE, shutdown_result, None)
 
     async def start_shutdown_and_purge_room(

@@ -1,1 +1,1 @@
-Exposed `synapse_rooms_total` and `synapse_locally_joined_rooms_total` in metrics. Contributed by Famedly.
+Exposed `synapse_rooms_total` and `synapse_locally_joined_rooms_total` in metrics. Contributed by @famedly @itsoyou.
