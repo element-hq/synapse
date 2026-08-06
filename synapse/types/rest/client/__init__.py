@@ -529,9 +529,14 @@ class PaginatedSyncBody(RequestBodyModel):
             which has not previously been sent on this connection. Defaults to
             `limit`.
         required_state: Required state for each room returned, with the same
-            semantics as sliding sync's `required_state`. Applied to every room.
+            semantics as sliding sync's `required_state`. Applied to every
+            room. Must be identical on every request of a connection; the
+            server always uses the current request's value and never persists
+            or diffs it.
         extensions: Extensions API. A map of extension key to extension config,
-            shared with sliding sync.
+            shared with sliding sync. The per-extension `lists`/`rooms` scoping
+            fields are accepted but ignored: an enabled extension applies to
+            the rooms in the response.
     """
 
     conn_id: StrictStr | None = None

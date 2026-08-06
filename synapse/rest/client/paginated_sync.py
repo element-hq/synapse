@@ -140,6 +140,11 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
 
         response["pos"] = await result.next_pos.to_string(self.store)
         response["rooms"] = await self.encode_rooms(requester, result.rooms)
+        # `num_live` is derivable in this API (previously-sent rooms only ever
+        # receive live events; `initial` rooms are all-historical), so it is
+        # not part of the response.
+        for room in response["rooms"].values():
+            room.pop("num_live", None)
         response["extensions"] = await self.encode_extensions(
             requester, result.extensions, result.rooms
         )

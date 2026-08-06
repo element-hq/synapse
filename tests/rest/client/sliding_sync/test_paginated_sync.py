@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.rest.client import login, paginated_sync, room, sync
+from synapse.rest.client import login, paginated_sync, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -41,6 +41,7 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
+        receipts.register_servlets,
         room.register_servlets,
         sync.register_servlets,
         paginated_sync.register_servlets,
@@ -163,6 +164,8 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
         self.assertTrue(room_response["limited"])
         self.assertIn("prev_batch", room_response)
         self.assertNotIn("initial", room_response)
+        # `num_live` is derivable and not part of this API.
+        self.assertNotIn("num_live", room_response)
 
     def test_incremental_backlog_is_paged_and_never_lost(self) -> None:
         """When more rooms have updates than fit in `page_size`, the rest are
@@ -234,3 +237,59 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
         state_types = {event["type"] for event in room_response["required_state"]}
         self.assertIn("m.room.create", state_types)
         self.assertIn("m.room.member", state_types)
+
+    def test_unknown_pos_starts_afresh(self) -> None:
+        """There is no M_UNKNOWN_POS: a pos the server doesn't recognise is
+        treated as absent, and rooms come down as never-sent again."""
+        room_ids = self._create_rooms(3)
+
+        body = {"page_size": 10, "limit": 5, "history": 1}
+        response = self._sync(body)
+        self.assertEqual(len(response["rooms"]), 3)
+
+        # Corrupt the connection position (keep the stream token valid).
+        connection_position, stream_token = response["pos"].split("/", 1)
+        bogus_pos = f"{int(connection_position) + 999}/{stream_token}"
+
+        response = self._sync(body, pos=bogus_pos)
+
+        # Not an error: a fresh connection, with every room initial again.
+        self.assertEqual(set(response["rooms"].keys()), set(room_ids))
+        for room_id, room_response in response["rooms"].items():
+            self.assertTrue(room_response.get("initial"), room_id)
+
+    def test_extensions_apply_without_scoping(self) -> None:
+        """Extensions have no lists/rooms scoping: enabling one is enough for
+        it to apply to the rooms in the response."""
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+
+        user2 = self.register_user("bob", "password")
+        tok2 = self.login("bob", "password")
+        self.helper.join(room_id, user2, tok=tok2)
+
+        event_response = self.helper.send(room_id, body="hello", tok=self.tok)
+
+        body = {
+            "page_size": 10,
+            "limit": 5,
+            "history": 5,
+            "extensions": {"receipts": {"enabled": True}},
+        }
+        response = self._sync(body)
+        pos = response["pos"]
+
+        # Bob sends a message and reads the room.
+        self.helper.send(room_id, body="reply", tok=tok2)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/receipt/m.read/{event_response['event_id']}",
+            {},
+            access_token=tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        response = self._sync(body, pos=pos)
+
+        self.assertIn(room_id, response["rooms"])
+        receipts_response = response["extensions"]["receipts"]["rooms"]
+        self.assertIn(room_id, receipts_response, receipts_response)

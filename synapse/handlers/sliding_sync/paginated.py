@@ -31,7 +31,9 @@ extensions, the connection store and the notifier integration are shared.
 import logging
 from typing import TYPE_CHECKING
 
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.handlers.sliding_sync import SlidingSyncHandler
+from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.logging.opentracing import log_kv, set_tag, start_active_span, trace
 from synapse.types import Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.handlers.paginated_sync import (
@@ -40,6 +42,7 @@ from synapse.types.handlers.paginated_sync import (
 )
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
+    PerConnectionState,
     RoomSyncConfig,
     SlidingSyncResult,
 )
@@ -59,6 +62,21 @@ logger = logging.getLogger(__name__)
 AGING_LANE_FRACTION = 4
 
 
+class PaginatedSyncExtensionHandler(SlidingSyncExtensionHandler):
+    """The sliding sync extensions without the `lists`/`rooms` scoping: with no
+    lists and no subscriptions there is nothing to scope, so an enabled
+    extension simply applies to the rooms in the response."""
+
+    def find_relevant_room_ids_for_extension(
+        self,
+        requested_lists: object,
+        requested_room_ids: object,
+        actual_lists: object,
+        actual_room_ids: "set[str] | frozenset[str]",
+    ) -> set[str]:
+        return set(actual_room_ids)
+
+
 class PaginatedSyncHandler(SlidingSyncHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
@@ -66,6 +84,13 @@ class PaginatedSyncHandler(SlidingSyncHandler):
         # History is `/messages`'s job in paginated sync; never re-send
         # historical events because a room's effective limit grew.
         self.expanded_timeline_on_limit_increase = False
+
+        # `required_state` is immutable for the life of a connection, so there
+        # are no per-room request configs to remember or diff.
+        self.track_room_configs = False
+
+        # Extensions lose their scoping fields.
+        self.extensions = PaginatedSyncExtensionHandler(hs)
 
     async def wait_for_paginated_sync_for_user(
         self,
@@ -160,14 +185,23 @@ class PaginatedSyncHandler(SlidingSyncHandler):
         limit = sync_config.limit
         history = sync_config.history if sync_config.history is not None else limit
 
-        # Raises SlidingSyncUnknownPosition if the position is unrecognised
-        # (e.g. the server lost the connection state); the client then starts a
-        # fresh connection and rooms simply come down as never-sent again.
-        previous_connection_state = (
-            await self.connection_store.get_and_clear_connection_positions(
-                sync_config, from_token
+        # There is no M_UNKNOWN_POS in this API: a `pos` the server doesn't
+        # recognise (expired, forged, another device's) is treated as absent -
+        # nothing is trusted from the token, the connection starts afresh and
+        # rooms come down as never-sent. The client has no error path.
+        try:
+            previous_connection_state = (
+                await self.connection_store.get_and_clear_connection_positions(
+                    sync_config, from_token
+                )
             )
-        )
+        except SlidingSyncUnknownPosition:
+            logger.info(
+                "Unrecognised paginated sync pos for %s; starting the connection afresh",
+                user_id,
+            )
+            from_token = None
+            previous_connection_state = PerConnectionState(last_used_ts=None)
 
         # Reuse the sliding sync membership machinery wholesale: with no lists
         # and no subscriptions it assembles the full membership map (with

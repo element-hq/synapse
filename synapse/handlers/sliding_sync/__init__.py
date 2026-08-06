@@ -119,6 +119,14 @@ class SlidingSyncHandler:
         # effective limit varies between requests by design.
         self.expanded_timeline_on_limit_increase = True
 
+        # Whether to persist each room's request config (`timeline_limit` +
+        # `required_state`) in the per-connection state, in order to detect
+        # config changes between requests. Paginated sync turns this off: its
+        # `required_state` is immutable for the life of a connection and
+        # `timeline_limit` changes carry no special semantics, so there is
+        # nothing to diff against.
+        self.track_room_configs = True
+
     async def wait_for_sync_for_user(
         self,
         requester: Requester,
@@ -1487,7 +1495,7 @@ class SlidingSyncHandler:
                     required_state_map=room_sync_required_state_map_to_persist,
                 )
 
-        else:
+        elif self.track_room_configs:
             new_connection_state.room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=room_sync_config.timeline_limit,
                 required_state_map=room_sync_required_state_map_to_persist,
