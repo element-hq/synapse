@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 94  # remember to update the list below when updating
+SCHEMA_VERSION = 95  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -176,6 +176,14 @@ Changes in SCHEMA_VERSION = 94
     - Add `recheck` column (boolean, default true) to the `redactions` table.
     - MSC4242: Add state DAG tables.
     - MSC4429: Track updates to user profile fields via a new stream.
+
+Changes in SCHEMA_VERSION = 95
+    - The `state_events` (deprecated) and `auth_events` tables are now fully-populated
+      in the foreground.
+    - The `state_events` and `rejections` tables are no longer read from;
+      instead we now read from `events.state_key` and `events.rejection_reason`
+      which have now been fully populated in the foreground.
+      However, the tables are still written to for rollback compatibility.
 """
 
 
