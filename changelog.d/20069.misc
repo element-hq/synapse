@@ -1,0 +1,1 @@
+Stop reading from `event_edges.is_state` to prepare for dropping it. The column has been obsolete since Synapse 1.62.0.
