@@ -29,13 +29,14 @@ extensions, the connection store and the notifier integration are shared.
 """
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, AbstractSet
 
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.logging.opentracing import log_kv, set_tag, start_active_span, trace
-from synapse.types import Requester, SlidingSyncStreamToken, StreamToken
+from synapse.types import Requester, SlidingSyncStreamToken, StrCollection, StreamToken
 from synapse.types.handlers.paginated_sync import (
     PaginatedSyncConfig,
     PaginatedSyncResult,
@@ -69,10 +70,10 @@ class PaginatedSyncExtensionHandler(SlidingSyncExtensionHandler):
 
     def find_relevant_room_ids_for_extension(
         self,
-        requested_lists: object,
-        requested_room_ids: object,
-        actual_lists: object,
-        actual_room_ids: "set[str] | frozenset[str]",
+        requested_lists: StrCollection | None,
+        requested_room_ids: StrCollection | None,
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_room_ids: AbstractSet[str],
     ) -> set[str]:
         return set(actual_room_ids)
 
@@ -208,11 +209,13 @@ class PaginatedSyncHandler(SlidingSyncHandler):
         # rewinds, newly-left add-back and state-reset handling) and the
         # newly-joined/newly-left/DM sets, without computing any list windows.
         if await self.store.have_finished_sliding_sync_background_jobs():
-            interested_rooms = await self.room_lists._compute_interested_rooms_new_tables(
-                sync_config=sync_config,  # type: ignore[arg-type]
-                previous_connection_state=previous_connection_state,
-                from_token=from_token.stream_token if from_token else None,
-                to_token=to_token,
+            interested_rooms = (
+                await self.room_lists._compute_interested_rooms_new_tables(
+                    sync_config=sync_config,  # type: ignore[arg-type]
+                    previous_connection_state=previous_connection_state,
+                    from_token=from_token.stream_token if from_token else None,
+                    to_token=to_token,
+                )
             )
         else:
             interested_rooms = await self.room_lists._compute_interested_rooms_fallback(
