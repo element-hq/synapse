@@ -556,7 +556,7 @@ class EventsBackgroundUpdatesStore(
             # rejection status.
             txn.execute(
                 """SELECT prev_event_id, event_id, internal_metadata,
-                    rejections.event_id IS NOT NULL, events.outlier
+                    events.rejection_reason IS NOT NULL, events.outlier
                 FROM (
                     SELECT event_id AS prev_event_id
                     FROM _extremities_to_check
@@ -565,7 +565,6 @@ class EventsBackgroundUpdatesStore(
                 LEFT JOIN event_edges USING (prev_event_id)
                 LEFT JOIN events USING (event_id)
                 LEFT JOIN event_json USING (event_id)
-                LEFT JOIN rejections USING (event_id)
                 """,
                 (batch_size,),
             )
@@ -600,11 +599,10 @@ class EventsBackgroundUpdatesStore(
                 soft_failed_events_to_lookup = set(to_defer)
 
                 sql = """SELECT prev_event_id, event_id, internal_metadata,
-                    rejections.event_id IS NOT NULL
+                    events.rejection_reason IS NOT NULL
                     FROM event_edges
                     INNER JOIN events USING (event_id)
                     INNER JOIN event_json USING (event_id)
-                    LEFT JOIN rejections USING (event_id)
                     WHERE
                         NOT events.outlier
                         AND
@@ -1028,14 +1026,14 @@ class EventsBackgroundUpdatesStore(
 
         sql = """
             SELECT
-                event_id, state_events.type, state_events.state_key,
+                event_id, events.type, events.state_key,
                 topological_ordering, stream_ordering,
                 events.room_id
             FROM events
-            INNER JOIN state_events USING (event_id)
             LEFT JOIN event_auth_chains USING (event_id)
             LEFT JOIN event_auth_chain_to_calculate USING (event_id)
-            WHERE event_auth_chains.event_id IS NULL
+            WHERE events.state_key IS NOT NULL
+                AND event_auth_chains.event_id IS NULL
                 AND event_auth_chain_to_calculate.event_id IS NULL
                 AND %(tuple_cmp)s
                 %(extra)s

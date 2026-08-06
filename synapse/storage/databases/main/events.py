@@ -951,11 +951,10 @@ class PersistEventsStore:
             SELECT prev_event_id, internal_metadata
             FROM event_edges
                 INNER JOIN events USING (event_id)
-                LEFT JOIN rejections USING (event_id)
                 LEFT JOIN event_json USING (event_id)
             WHERE
                 NOT events.outlier
-                AND rejections.event_id IS NULL
+                AND events.rejection_reason IS NULL
                 AND
             """
 
@@ -1008,10 +1007,9 @@ class PersistEventsStore:
                 sql = """
                 SELECT
                     event_id, prev_event_id, internal_metadata,
-                    rejections.event_id IS NOT NULL
+                    events.rejection_reason IS NOT NULL
                 FROM event_edges
                     INNER JOIN events USING (event_id)
-                    LEFT JOIN rejections USING (event_id)
                     LEFT JOIN event_json USING (event_id)
                 WHERE
                     NOT events.outlier
@@ -1057,8 +1055,9 @@ class PersistEventsStore:
         """Insert some number of room events into the necessary database tables.
 
         Rejected events are only inserted into the events table, the events_json table,
-        and the rejections table. Things reading from those table will need to check
-        whether the event was rejected.
+        and the (deprecated) rejections table.
+        Things reading from those tables will need to check
+        `events.rejection_reason` to see whether the event was rejected.
 
         Assumes that we are only persisting events for one room at a time.
 
@@ -1353,11 +1352,10 @@ class PersistEventsStore:
         # fetch their auth event info.
         while missing_auth_chains:
             sql = """
-                SELECT event_id, events.type, se.state_key, chain_id, sequence_number
+                SELECT event_id, events.type, events.state_key, chain_id, sequence_number
                 FROM events
-                INNER JOIN state_events AS se USING (event_id)
                 LEFT JOIN event_auth_chains USING (event_id)
-                WHERE
+                WHERE events.state_key IS NOT NULL AND
             """
             clause, args = make_in_list_sql_clause(
                 txn.database_engine,
@@ -3070,9 +3068,8 @@ class PersistEventsStore:
             "SELECT "
             " e.event_id as event_id, "
             " r.redacts as redacts,"
-            " rej.event_id as rejects "
+            " e.rejection_reason IS NOT NULL as rejected "
             " FROM events as e"
-            " LEFT JOIN rejections as rej USING (event_id)"
             " LEFT JOIN redactions as r ON e.event_id = r.redacts"
             " WHERE "
         )
@@ -3082,9 +3079,9 @@ class PersistEventsStore:
         )
 
         txn.execute(sql + clause, args)
-        for event_id, redacts, rejects in txn:
+        for event_id, redacts, rejected in txn:
             event = ev_map[event_id]
-            if not rejects and not redacts:
+            if not rejected and not redacts:
                 to_prefill.append(EventCacheEntry(event=event, redacted_event=None))
 
         async def external_prefill() -> None:
