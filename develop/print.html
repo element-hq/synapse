@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7fd3c2af.js";
+            window.path_to_searchindex_js = "searchindex-23e84fac.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -4459,6 +4459,14 @@ shown.</p>
 <p><em>(boolean)</em> Use this option to prevent a user’s profile data from being retrieved and displayed in a room until they have joined it. By default, a user’s profile data is included in an invite event, regardless of the values of the above two settings, and whether or not the users share a server. Defaults to <code>true</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">include_profile_data_on_invite: false
+</code></pre>
+<hr>
+<h3 id="include_profile_updates_in_sync"><a class="header" href="#include_profile_updates_in_sync"><code>include_profile_updates_in_sync</code></a></h3>
+<p><em>(boolean)</em> Use this option to include updates of other users’ profiles in sync responses, for users who share rooms.
+Requires an <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4429">MSC4429</a> compatible client, and is currently limited to legacy sync and local users only.
+This feature is under development and should be used with caution on busy servers or servers which depend on <code>limit_profile_requests_to_users_who_share_rooms</code> for ensuring profile information doesn’t leak across rooms. Defaults to <code>false</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">include_profile_updates_in_sync: true
 </code></pre>
 <hr>
 <h3 id="allow_public_rooms_without_auth"><a class="header" href="#allow_public_rooms_without_auth"><code>allow_public_rooms_without_auth</code></a></h3>
