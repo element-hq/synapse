@@ -33,7 +33,8 @@ def run_make_full_schema(output_dir: Path) -> None:
         sys.exit(1)
 
     cmd: list[str] = [
-        "bash",
+        "poetry",
+        "run",
         str(MAKE_FULL_SCHEMA_SCRIPT),
         "-p",
         pg_user,
