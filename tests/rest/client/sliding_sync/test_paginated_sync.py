@@ -1,0 +1,236 @@
+#
+# This file is licensed under the Affero General Public License (AGPL) version 3.
+#
+# Copyright (C) 2026 New Vector, Ltd
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+
+"""Tests for the Paginated Sync endpoint (MSC TBD)."""
+
+import logging
+import urllib.parse
+from unittest.mock import AsyncMock
+
+from twisted.internet.testing import MemoryReactor
+
+import synapse.rest.admin
+from synapse.rest.client import login, paginated_sync, room, sync
+from synapse.server import HomeServer
+from synapse.types import JsonDict
+from synapse.util.clock import Clock
+
+from tests import unittest
+
+logger = logging.getLogger(__name__)
+
+
+class PaginatedSyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests for `POST /_matrix/client/unstable/org.matrix.paginated_sync/sync`:
+    paging on initial sync, per-room gapping on incremental sync, backlog
+    (`pending`) draining, and most-recent-first ordering.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        paginated_sync.register_servlets,
+    ]
+
+    sync_endpoint = "/_matrix/client/unstable/org.matrix.paginated_sync/sync"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"paginated_sync_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # Use the new sliding sync tables (c.f. SlidingSyncBase).
+        hs.get_datastores().main.have_finished_sliding_sync_background_jobs = AsyncMock(  # type: ignore[method-assign]
+            return_value=True
+        )
+
+        self.user = self.register_user("alice", "password")
+        self.tok = self.login("alice", "password")
+
+    def _sync(
+        self,
+        body: JsonDict,
+        *,
+        pos: str | None = None,
+    ) -> JsonDict:
+        path = self.sync_endpoint
+        query: dict[str, str] = {"timeout": "0"}
+        if pos is not None:
+            query["pos"] = pos
+        path += "?" + urllib.parse.urlencode(query)
+
+        channel = self.make_request(
+            method="POST", path=path, content=body, access_token=self.tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        return channel.json_body
+
+    def _create_rooms(self, count: int) -> list[str]:
+        room_ids = []
+        for i in range(count):
+            room_id = self.helper.create_room_as(self.user, tok=self.tok)
+            self.helper.send(room_id, body=f"message in room {i}", tok=self.tok)
+            room_ids.append(room_id)
+        return room_ids
+
+    def _drain(self, body: JsonDict, pos: str) -> tuple[dict[str, JsonDict], str]:
+        """Keep syncing until `pending` is 0; returns all rooms seen and the
+        final pos."""
+        all_rooms: dict[str, JsonDict] = {}
+        for _ in range(50):
+            response = self._sync(body, pos=pos)
+            all_rooms.update(response["rooms"])
+            pos = response["pos"]
+            if not response.get("pending"):
+                break
+        else:
+            self.fail("Backlog never drained")
+        return all_rooms, pos
+
+    def test_initial_sync_pages_through_all_rooms(self) -> None:
+        """An initial sync returns at most `page_size` rooms (most recently
+        active first), reports the backlog in `pending`, and subsequent
+        requests drain it without duplication or loss."""
+        room_ids = self._create_rooms(25)
+
+        body = {"page_size": 10, "limit": 5, "history": 1}
+        response = self._sync(body)
+
+        self.assertEqual(len(response["rooms"]), 10, response["rooms"].keys())
+        self.assertEqual(response["pending"], 15)
+        self.assertEqual(response["total_rooms"], 25)
+
+        # Most recently active first: the last 10 rooms created.
+        self.assertEqual(set(response["rooms"].keys()), set(room_ids[-10:]))
+
+        for room_id, room_response in response["rooms"].items():
+            self.assertTrue(room_response["initial"], room_id)
+            # `history: 1`: one timeline event per room, with a prev_batch to
+            # fetch more via /messages.
+            self.assertEqual(len(room_response["timeline"]), 1, room_id)
+            self.assertIn("prev_batch", room_response)
+
+        # Drain the rest.
+        seen_rooms, pos = self._drain(body, response["pos"])
+        seen_rooms.update(response["rooms"])
+
+        self.assertEqual(set(seen_rooms.keys()), set(room_ids))
+
+        # Fully caught up: an immediate re-sync returns nothing.
+        response = self._sync(body, pos=pos)
+        self.assertEqual(response["rooms"], {})
+        self.assertNotIn("pending", response)
+
+    def test_incremental_sync_gaps_busy_rooms(self) -> None:
+        """A room with more than `limit` new events comes down with the most
+        recent `limit` of them, `limited: true` and a `prev_batch` - the gap is
+        explicit and local to the room."""
+        room_ids = self._create_rooms(3)
+
+        body = {"page_size": 10, "limit": 5, "history": 1}
+        response = self._sync(body)
+        pos = response["pos"]
+
+        # 8 new events in one room; only the last 5 should come down.
+        event_ids = []
+        for i in range(8):
+            sent = self.helper.send(room_ids[0], body=f"burst {i}", tok=self.tok)
+            event_ids.append(sent["event_id"])
+
+        response = self._sync(body, pos=pos)
+
+        self.assertEqual(set(response["rooms"].keys()), {room_ids[0]})
+        room_response = response["rooms"][room_ids[0]]
+        self.assertEqual(
+            [event["event_id"] for event in room_response["timeline"]],
+            event_ids[-5:],
+        )
+        self.assertTrue(room_response["limited"])
+        self.assertIn("prev_batch", room_response)
+        self.assertNotIn("initial", room_response)
+
+    def test_incremental_backlog_is_paged_and_never_lost(self) -> None:
+        """When more rooms have updates than fit in `page_size`, the rest are
+        reported in `pending` and delivered (with their events) on subsequent
+        requests."""
+        room_ids = self._create_rooms(6)
+
+        body = {"page_size": 10, "limit": 5, "history": 1}
+        response = self._sync(body)
+        pos = response["pos"]
+
+        # One new event in every room.
+        expected_event_ids = {}
+        for i, room_id in enumerate(room_ids):
+            sent = self.helper.send(room_id, body=f"update {i}", tok=self.tok)
+            expected_event_ids[room_id] = sent["event_id"]
+
+        # Page through them two at a time.
+        small_page_body = {"page_size": 2, "limit": 5, "history": 1}
+        response = self._sync(small_page_body, pos=pos)
+        self.assertEqual(len(response["rooms"]), 2)
+        self.assertEqual(response["pending"], 4)
+
+        seen_rooms, _ = self._drain(small_page_body, response["pos"])
+        seen_rooms.update(response["rooms"])
+
+        self.assertEqual(set(seen_rooms.keys()), set(room_ids))
+        for room_id, room_response in seen_rooms.items():
+            self.assertEqual(
+                room_response["timeline"][-1]["event_id"],
+                expected_event_ids[room_id],
+                room_id,
+            )
+
+    def test_newly_joined_room_uses_history(self) -> None:
+        """A room that appears mid-session (never sent on the connection) comes
+        down `initial` with `history` events."""
+        self._create_rooms(2)
+
+        body = {"page_size": 10, "limit": 5, "history": 2}
+        response = self._sync(body)
+        pos = response["pos"]
+
+        new_room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        for i in range(4):
+            self.helper.send(new_room_id, body=f"new room message {i}", tok=self.tok)
+
+        response = self._sync(body, pos=pos)
+
+        self.assertIn(new_room_id, response["rooms"])
+        room_response = response["rooms"][new_room_id]
+        self.assertTrue(room_response.get("initial"), room_response)
+        self.assertEqual(len(room_response["timeline"]), 2)
+        self.assertIn("prev_batch", room_response)
+
+    def test_required_state_is_returned(self) -> None:
+        """The top-level `required_state` is applied to every room."""
+        self._create_rooms(1)
+
+        body = {
+            "page_size": 10,
+            "limit": 5,
+            "history": 1,
+            "required_state": [["m.room.create", ""], ["m.room.member", "$ME"]],
+        }
+        response = self._sync(body)
+
+        (room_response,) = response["rooms"].values()
+        state_types = {event["type"] for event in room_response["required_state"]}
+        self.assertIn("m.room.create", state_types)
+        self.assertIn("m.room.member", state_types)
