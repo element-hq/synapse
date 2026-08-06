@@ -31,8 +31,9 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, ProfileUpdateAction
 from synapse.replication.http.streams import ReplicationGetStreamUpdates
+from synapse.types import UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -757,6 +758,80 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
                 (user_id, room_id, event_id),
             )
             for stream_id, user_id, room_id, event_id in updates
+        ]
+
+        if not rows:
+            return [], to_token, False
+
+        return rows, rows[-1][0], len(updates) == limit
+
+
+def _convert_affected_fields(
+    wire: list[str] | frozenset[str] | None,
+) -> frozenset[str] | None:
+    return (
+        frozenset(wire)
+        if wire is not None and not isinstance(wire, frozenset)
+        else None
+    )
+
+
+@attr.s(slots=True, auto_attribs=True)
+class ProfileUpdatesStreamRow:
+    """Profile update stream row detailing what the profile update changes."""
+
+    user_id: UserID
+    """The full user ID with the profile update."""
+    action: ProfileUpdateAction
+    """The action, either 'update' for a field update, 'left_room' if the user left
+    a room or `joined_room` if the user joined a room, see ProfileUpdateAction enum.
+    """
+    affected_fields: frozenset[str] | None = attr.ib(
+        # Convert list back to frozenset from wire format
+        converter=_convert_affected_fields
+    )
+    """Names of the profile fields that were added, updated or removed, see https://spec.matrix.org/unstable/client-server-api/#profiles.
+    This is None if `action` is not `update`.
+    """
+
+
+class ProfileUpdatesStream(_StreamFromIdGen):
+    """Stream to inform users about profile updates."""
+
+    # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+    # for concerns around the current implementation of the profile
+    # updates stream.
+
+    NAME = "profile_updates"
+    ROW_TYPE = ProfileUpdatesStreamRow
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        super().__init__(
+            hs.get_instance_name(),
+            self._update_function,
+            self.store._profile_updates_id_gen,
+        )
+
+    async def _update_function(
+        self, instance_name: str, from_token: int, to_token: int, limit: int
+    ) -> StreamUpdateResult:
+        updates = await self.store.get_updated_profile_updates(
+            from_id=from_token, to_id=to_token, limit=limit
+        )
+        rows = [
+            (
+                stream_id,
+                # These are the args to `ProfileUpdatesStreamRow`
+                (
+                    user_id,
+                    action,
+                    # Must convert `field_names` to a list for transport over the wire
+                    # It will be reconstructed as a frozenset on the other end
+                    list(field_names) if field_names is not None else None,
+                ),
+            )
+            for stream_id, user_id, action, field_names in updates
         ]
 
         if not rows:
