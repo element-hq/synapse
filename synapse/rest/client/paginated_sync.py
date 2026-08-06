@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-"""The Paginated Sync endpoint (MSC TBD): a dialect of Simplified Sliding Sync
+"""The Paginated Sync endpoint (MSC4525): a dialect of Simplified Sliding Sync
 (MSC4186) without lists/ranges/subscriptions - see
 `synapse.handlers.sliding_sync.paginated` for the semantics.
 
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 class PaginatedSyncRestServlet(SlidingSyncRestServlet):
     """
-    API endpoint for MSC TBD Paginated Sync. `POST` with a JSON body of
+    API endpoint for MSC4525 Paginated Sync. `POST` with a JSON body of
     `page_size`/`limit`/`history`/`required_state`/`extensions`; responds with
     the changed rooms (most recently active first, at most `page_size` of
     them), a `pending` count of rooms that didn't fit, and `total_rooms`.
@@ -59,7 +59,7 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
     """
 
     PATTERNS = client_patterns(
-        "/org.matrix.paginated_sync/sync$", releases=[], v1=False, unstable=True
+        "/org.matrix.msc4525/sync$", releases=[], v1=False, unstable=True
     )
 
     def __init__(self, hs: "HomeServer"):
@@ -156,5 +156,5 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.paginated_sync_enabled:
+    if hs.config.experimental.msc4525_enabled:
         PaginatedSyncRestServlet(hs).register(http_server)

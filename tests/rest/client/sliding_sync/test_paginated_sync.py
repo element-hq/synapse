@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-"""Tests for the Paginated Sync endpoint (MSC TBD)."""
+"""Tests for the Paginated Sync endpoint (MSC4525)."""
 
 import logging
 import urllib.parse
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class PaginatedSyncTestCase(unittest.HomeserverTestCase):
     """
-    Tests for `POST /_matrix/client/unstable/org.matrix.paginated_sync/sync`:
+    Tests for `POST /_matrix/client/unstable/org.matrix.msc4525/sync`:
     paging on initial sync, per-room gapping on incremental sync, backlog
     (`pending`) draining, and most-recent-first ordering.
     """
@@ -47,11 +47,11 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
         paginated_sync.register_servlets,
     ]
 
-    sync_endpoint = "/_matrix/client/unstable/org.matrix.paginated_sync/sync"
+    sync_endpoint = "/_matrix/client/unstable/org.matrix.msc4525/sync"
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = {"paginated_sync_enabled": True}
+        config["experimental_features"] = {"msc4525_enabled": True}
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

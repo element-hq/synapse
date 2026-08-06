@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-"""Types for Paginated Sync (MSC TBD): a dialect of Simplified Sliding Sync
+"""Types for Paginated Sync (MSC4525): a dialect of Simplified Sliding Sync
 (MSC4186) without lists/ranges/subscriptions, where the server pages the client
 through changed rooms (most recently active first) with bounded responses.
 

@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-"""Paginated Sync (MSC TBD): a dialect of Simplified Sliding Sync (MSC4186)
+"""Paginated Sync (MSC4525): a dialect of Simplified Sliding Sync (MSC4186)
 without lists, ranges, subscriptions or expanding timelines.
 
 The server pages the client through whatever has changed, most recently active

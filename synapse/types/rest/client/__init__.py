@@ -513,7 +513,7 @@ class SlidingSyncBody(RequestBodyModel):
 
 class PaginatedSyncBody(RequestBodyModel):
     """
-    Paginated Sync API request body (MSC TBD, a dialect of MSC4186 without
+    Paginated Sync API request body (MSC4525, a dialect of MSC4186 without
     lists/ranges/subscriptions).
 
     Attributes:
