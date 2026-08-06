@@ -112,6 +112,13 @@ class SlidingSyncHandler:
         self.extensions = SlidingSyncExtensionHandler(hs)
         self.room_lists = SlidingSyncRoomLists(hs)
 
+        # Whether an increase in a room's `timeline_limit` between requests causes
+        # historical events to be re-sent with `unstable_expanded_timeline` (see
+        # "XXX: Odd behavior" in `get_room_sync_data`). Paginated sync turns this
+        # off: history is fetched via `/messages` instead, and its per-room
+        # effective limit varies between requests by design.
+        self.expanded_timeline_on_limit_increase = True
+
     async def wait_for_sync_for_user(
         self,
         requester: Requester,
@@ -683,7 +690,10 @@ class SlidingSyncHandler:
 
             log_kv({"sliding_sync.room_status": room_status})
 
-            if prev_room_sync_config is not None:
+            if (
+                prev_room_sync_config is not None
+                and self.expanded_timeline_on_limit_increase
+            ):
                 # Check if the timeline limit has increased, if so ignore the
                 # timeline bound and record the change (see "XXX: Odd behavior"
                 # above).

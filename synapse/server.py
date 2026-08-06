@@ -131,6 +131,7 @@ from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
 from synapse.handlers.set_password import SetPasswordHandler
 from synapse.handlers.sliding_sync import SlidingSyncHandler
+from synapse.handlers.sliding_sync.paginated import PaginatedSyncHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
@@ -858,6 +859,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_sliding_sync_handler(self) -> SlidingSyncHandler:
         return SlidingSyncHandler(self)
+
+    @cache_in_self
+    def get_paginated_sync_handler(self) -> PaginatedSyncHandler:
+        return PaginatedSyncHandler(self)
 
     @cache_in_self
     def get_room_list_handler(self) -> RoomListHandler:
