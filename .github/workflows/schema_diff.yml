@@ -42,8 +42,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install PostgreSQL client
-        run: sudo apt-get -qq install postgresql-client
+      - name: Install PostgreSQL client and faketime
+        run: sudo apt-get -qq install postgresql-client faketime
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
@@ -57,10 +57,13 @@ jobs:
           PGHOST: localhost
           PGUSER: postgres
           PGPASSWORD: postgres
+        # Freeze time using `faketime` as the insertion of `delete_old_otks_task`
+        # depends on the time the deltas are run
         run: |
-          poetry run python .ci/scripts/schema_diff.py \
-            --base origin/develop \
-            > "${{ runner.temp }}/schema_diff.md"
+          faketime -f '2001-05-25 12:42:42' \
+            poetry run python .ci/scripts/schema_diff.py \
+              --base origin/develop \
+              > "${{ runner.temp }}/schema_diff.md"
 
       # If the generation step failed, write an error message so the sticky
       # comment step still has a file to read.
