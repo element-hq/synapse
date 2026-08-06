@@ -517,6 +517,9 @@ def add_worker_roles_to_shared_config(
         "typing",
         "push_rules",
         "thread_subscriptions",
+        # We can't include `quarantined_media_changes` here
+        # because the worker type is actually called `media_repository`
+        # "quarantined_media_changes",
     }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple
@@ -526,6 +529,13 @@ def add_worker_roles_to_shared_config(
 
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
+
+    if "media_repository" in worker_types_set:
+        # Handle media_repository being the writer for quarantined_media_changes
+        # as a special-case
+        shared_config.setdefault("stream_writers", {}).setdefault(
+            "quarantined_media_changes", []
+        ).append(worker_name)
 
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
