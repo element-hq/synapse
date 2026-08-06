@@ -1,0 +1,1 @@
+Remove broken `DROP` statements for SQLite in `make_full_schema` script.
