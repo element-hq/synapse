@@ -257,6 +257,10 @@ sqlite3 "$SQLITE_STATE_DB"  ".dump --data-only --nosys" >> "$OUTPUT_DIR/state/fu
 cleanup_pg_schema() {
   # Cleanup as follows:
   # - Remove empty lines. pg_dump likes to output a lot of these.
+  # - Remove the `\restrict` and `\unrestrict` psql meta-commands.
+  #   We don't run the pg_dump output through psql so no meta-commands are
+  #   supported and so the security feature (which doesn't apply anyway
+  #   as we trust the source database) is not relevant.
   # - Remove comment-only lines. pg_dump also likes to output a lot of these to visually
   #   separate tables etc.
   # - Remove "public." prefix --- the schema name.
@@ -281,6 +285,8 @@ cleanup_pg_schema() {
   #   is `true` or omitted, this marks the given integer as having been consumed and
   #   will NOT appear as the nextval.
    sed -e '/^$/d' \
+   -e '/^\\restrict REMOVEME$/d' \
+   -e '/^\\unrestrict REMOVEME$/d' \
    -e '/^--/d' \
    -e 's/public\.//g' \
    -e '/^SET /d' \
@@ -289,12 +295,12 @@ cleanup_pg_schema() {
 
 echo "Dumping Postgres schema..."
 
-pg_dump --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema  > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema  > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema >> "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema  > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema >> "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema  > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema  > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema >> "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema  > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema >> "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
 
 if [[ "$OUTPUT_DIR" == *synapse/storage/schema ]]; then
   echo "Updating contrib/datagrip symlinks..."
