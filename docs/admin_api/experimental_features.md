@@ -6,6 +6,7 @@ basis. The currently supported features are:
 for another client
 - [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575): enable experimental sliding sync support
 - [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222): adding `state_after` to sync v2
+- [MSC4525](https://github.com/matrix-org/matrix-spec-proposals/pull/4525): enable experimental paginated sync support
 
 To use it, you will need to authenticate by providing an `access_token`
 for a server admin: see [Admin API](../usage/administration/admin_api/).
