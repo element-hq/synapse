@@ -123,8 +123,9 @@ class SlidingSyncHandler:
         # `required_state`) in the per-connection state, in order to detect
         # config changes between requests. Paginated sync turns this off: its
         # `required_state` is immutable for the life of a connection and
-        # `timeline_limit` changes carry no special semantics, so there is
-        # nothing to diff against.
+        # `timeline_limit` changes carry no special semantics, so the previous
+        # config is taken to be the current request's config instead of being
+        # persisted.
         self.track_room_configs = True
 
     async def wait_for_sync_for_user(
@@ -649,6 +650,15 @@ class SlidingSyncHandler:
             state_reset_out_of_room = True
 
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+        if not self.track_room_configs:
+            # Room configs are not tracked (MSC4525 paginated sync): the
+            # request config is immutable for the life of the connection, so
+            # the previous config is by definition the current one. With
+            # prev == current, `_required_state_changes` reduces to pure
+            # lazy-member accounting, which keeps `$LAZY` working on
+            # incremental sync (new-to-the-connection senders still have
+            # their membership pulled into `required_state`).
+            prev_room_sync_config = room_sync_config
 
         # Determine whether we should limit the timeline to the token range.
         #

@@ -238,6 +238,49 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
         self.assertIn("m.room.create", state_types)
         self.assertIn("m.room.member", state_types)
 
+    def test_lazy_members_on_incremental_sync(self) -> None:
+        """`$LAZY` member state: an incremental response must include the
+        membership of a timeline sender not previously sent on the connection,
+        even though their membership isn't in the state deltas."""
+        bob = self.register_user("bob", "password")
+        bob_tok = self.login("bob", "password")
+        charlie = self.register_user("charlie", "password")
+        charlie_tok = self.login("charlie", "password")
+
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.join(room_id, bob, tok=bob_tok)
+        self.helper.join(room_id, charlie, tok=charlie_tok)
+        # Charlie is the last speaker before the initial sync.
+        self.helper.send(room_id, body="hi from charlie", tok=charlie_tok)
+
+        body = {
+            "page_size": 10,
+            "limit": 5,
+            "history": 1,
+            "required_state": [["m.room.member", "$LAZY"]],
+        }
+        response = self._sync(body)
+        pos = response["pos"]
+        initial_members = {
+            event["state_key"]
+            for event in response["rooms"][room_id]["required_state"]
+            if event["type"] == "m.room.member"
+        }
+        # `history: 1` means only charlie's message was in the timeline, so
+        # bob's membership has not been sent on this connection.
+        self.assertNotIn(bob, initial_members)
+
+        # Bob speaks; his membership hasn't changed, so it isn't in the state
+        # deltas and must be lazy-loaded into `required_state`.
+        self.helper.send(room_id, body="hello from bob", tok=bob_tok)
+        response = self._sync(body, pos=pos)
+        incremental_members = {
+            event["state_key"]
+            for event in response["rooms"][room_id].get("required_state", [])
+            if event["type"] == "m.room.member"
+        }
+        self.assertIn(bob, incremental_members)
+
     def test_unknown_pos_starts_afresh(self) -> None:
         """There is no M_UNKNOWN_POS: a pos the server doesn't recognise is
         treated as absent, and rooms come down as never-sent again."""
