@@ -208,6 +208,36 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
                 room_id,
             )
 
+    def test_aging_lane_prevents_starvation(self) -> None:
+        """When more rooms have updates than fit in the page, part of the page
+        is reserved for the longest-deferred rooms, so busier rooms can't
+        starve a quiet room's update indefinitely."""
+        room_ids = self._create_rooms(4)
+        body = {"page_size": 10, "limit": 5, "history": 1}
+        response = self._sync(body)
+        pos = response["pos"]
+
+        # Three rooms update; a page of 2 defers the least recently active.
+        for room_id in room_ids[:3]:
+            self.helper.send(room_id, body="update", tok=self.tok)
+        small_body = {"page_size": 2, "limit": 5, "history": 1}
+        response = self._sync(small_body, pos=pos)
+        self.assertEqual(
+            set(response["rooms"]), {room_ids[1], room_ids[2]}, response["rooms"]
+        )
+        self.assertEqual(response["pending"], 1)
+        pos = response["pos"]
+
+        # The busier rooms re-earn their place at the top; the deferred room
+        # (room 0) stays the least recently active, but the aging lane
+        # guarantees it a slot in the page anyway.
+        for room_id in room_ids[1:]:
+            self.helper.send(room_id, body="busy", tok=self.tok)
+        response = self._sync(small_body, pos=pos)
+        self.assertIn(room_ids[0], response["rooms"], response["rooms"].keys())
+        self.assertEqual(len(response["rooms"]), 2)
+        self.assertEqual(response["pending"], 2)
+
     def test_newly_joined_room_uses_history(self) -> None:
         """A room that appears mid-session (never sent on the connection) comes
         down `initial` with `history` events."""

@@ -64,14 +64,16 @@ class PaginatedSyncResult:
             not fit into `page_size`. While non-zero the client should sync
             again immediately to drain the backlog.
         total_rooms: The total number of rooms in the user's account, for
-            cold-start progress reporting.
+            cold-start progress reporting. `None` (omitted from the response)
+            when the room set wasn't computed, e.g. the worker-catch-up
+            timeout path.
     """
 
     next_pos: SlidingSyncStreamToken
     rooms: dict[str, SlidingSyncResult.RoomResult]
     extensions: SlidingSyncResult.Extensions
     pending: int
-    total_rooms: int
+    total_rooms: int | None
 
     def __bool__(self) -> bool:
         """Whether there are any updates that should be returned immediately to
@@ -90,5 +92,5 @@ class PaginatedSyncResult:
             rooms={},
             extensions=SlidingSyncResult.Extensions(),
             pending=0,
-            total_rooms=0,
+            total_rooms=None,
         )

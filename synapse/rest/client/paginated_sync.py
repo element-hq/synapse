@@ -102,9 +102,12 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
         sync_config = PaginatedSyncConfig(
             user=user,
             requester=requester,
-            # Namespace the connection ID so a paginated sync connection can
-            # never collide with a sliding sync connection from the same device
-            # in the shared per-connection tables.
+            # Namespace the connection ID so a paginated sync connection
+            # doesn't collide with a sliding sync connection from the same
+            # device in the shared per-connection tables. (A sliding sync
+            # client that literally sends `conn_id: "paginated:foo"` would
+            # still collide - self-inflicted and same-device-only, so we
+            # accept it.)
             conn_id=f"paginated:{body.conn_id or ''}",
             page_size=body.page_size,
             limit=body.limit,
@@ -155,7 +158,8 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
         )
         if result.pending:
             response["pending"] = result.pending
-        response["total_rooms"] = result.total_rooms
+        if result.total_rooms is not None:
+            response["total_rooms"] = result.total_rooms
 
         return response
 

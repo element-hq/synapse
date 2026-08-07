@@ -204,11 +204,15 @@ class PaginatedSyncHandler(SlidingSyncHandler):
             from_token = None
             previous_connection_state = PerConnectionState(last_used_ts=None)
 
+        # Whether the new sliding sync tables are usable (c.f. SlidingSyncBase);
+        # needed both here and for update detection below.
+        use_new_tables = await self.store.have_finished_sliding_sync_background_jobs()
+
         # Reuse the sliding sync membership machinery wholesale: with no lists
         # and no subscriptions it assembles the full membership map (with
         # rewinds, newly-left add-back and state-reset handling) and the
         # newly-joined/newly-left/DM sets, without computing any list windows.
-        if await self.store.have_finished_sliding_sync_background_jobs():
+        if use_new_tables:
             interested_rooms = (
                 await self.room_lists._compute_interested_rooms_new_tables(
                     sync_config=sync_config,  # type: ignore[arg-type]
@@ -268,7 +272,7 @@ class PaginatedSyncHandler(SlidingSyncHandler):
                 else:
                     live_room_ids.append(room_id)
 
-            if await self.store.have_finished_sliding_sync_background_jobs():
+            if use_new_tables:
                 updated_room_ids = await (
                     self.store.get_rooms_that_have_updates_since_sliding_sync_table(
                         room_ids=live_room_ids,
@@ -361,7 +365,7 @@ class PaginatedSyncHandler(SlidingSyncHandler):
                     return room_status.last_token.stream
 
                 aged_room_ids = sorted(
-                    previously_room_ids & candidates, key=last_sent_stream_pos
+                    previously_room_ids, key=last_sent_stream_pos
                 )[:aging_lane_size]
 
             sorted_room_infos = await self.room_lists.sort_rooms(
