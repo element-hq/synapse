@@ -339,9 +339,17 @@ class MSC4525PaginatedSyncTestCase(unittest.HomeserverTestCase):
         for room_id, room_response in response["rooms"].items():
             self.assertTrue(room_response.get("initial"), room_id)
 
-        # An entirely unparsable pos is treated the same way, not a 400.
-        response = self._sync(body, pos="not a token at all")
-        self.assertEqual(set(response["rooms"].keys()), set(room_ids))
+        # A syntactically invalid pos, by contrast, is a plain 400: only
+        # well-formed-but-unrecognised positions restart the connection.
+        path = (
+            self.sync_endpoint
+            + "?"
+            + urllib.parse.urlencode({"timeout": "0", "pos": "not a token at all"})
+        )
+        channel = self.make_request(
+            method="POST", path=path, content=body, access_token=self.tok
+        )
+        self.assertEqual(channel.code, 400, channel.json_body)
 
     def test_cold_start_backlog_not_starved_by_live_traffic(self) -> None:
         """Rooms never sent on the connection get a reserved slice of every

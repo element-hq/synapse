@@ -23,7 +23,6 @@ sync servlet; only the request parsing and the top-level response differ.
 import logging
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     parse_and_validate_json_object_from_request,
@@ -81,18 +80,12 @@ class MSC4525PaginatedSyncRestServlet(SlidingSyncRestServlet):
 
         from_token = None
         if from_token_string is not None:
-            try:
-                from_token = await SlidingSyncStreamToken.from_string(
-                    self.store, from_token_string
-                )
-            except SynapseError:
-                # There is no client error path in this API: an unparsable
-                # `pos` is treated the same as an unrecognised one - as
-                # absent, so the connection starts afresh.
-                logger.info(
-                    "Unparsable paginated sync pos for %s; starting the connection afresh",
-                    user,
-                )
+            # A syntactically invalid pos is a plain 400, as elsewhere. Only a
+            # well-formed pos the server doesn't recognise restarts the
+            # connection (see the handler).
+            from_token = await SlidingSyncStreamToken.from_string(
+                self.store, from_token_string
+            )
 
         body = parse_and_validate_json_object_from_request(
             request, MSC4525PaginatedSyncBody
