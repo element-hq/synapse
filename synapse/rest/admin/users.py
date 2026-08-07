@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 import attr
 from pydantic import StrictBool, StrictInt, StrictStr
 
-from synapse.api.constants import Direction
+from synapse.api.constants import Direction, ProfileFields
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
     RestServlet,
@@ -366,8 +366,12 @@ class UserRestServletV2(UserRestServletV2Get):
 
         if user:  # modify user
             if "displayname" in body:
-                await self.profile_handler.set_displayname(
-                    target_user, requester, body["displayname"], by_admin=True
+                await self.profile_handler.dispatch_set_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=ProfileFields.DISPLAYNAME,
+                    new_value=body["displayname"],
+                    by_admin=True,
                 )
 
             if threepids is not None:
@@ -415,8 +419,12 @@ class UserRestServletV2(UserRestServletV2Get):
                     )
 
             if "avatar_url" in body:
-                await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], by_admin=True
+                await self.profile_handler.dispatch_set_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=ProfileFields.AVATAR_URL,
+                    new_value=body["avatar_url"],
+                    by_admin=True,
                 )
 
             if "admin" in body:
@@ -523,8 +531,12 @@ class UserRestServletV2(UserRestServletV2Get):
                     )
 
             if "avatar_url" in body and isinstance(body["avatar_url"], str):
-                await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], by_admin=True
+                await self.profile_handler.dispatch_set_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=ProfileFields.AVATAR_URL,
+                    new_value=body["avatar_url"],
+                    by_admin=True,
                 )
 
             user_info_dict = await self.admin_handler.get_user(target_user)
@@ -1371,7 +1383,7 @@ class RateLimitRestServlet(RestServlet):
 class AccountDataRestServlet(RestServlet):
     """Retrieve the given user's account data"""
 
-    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/accountdata")
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/accountdata$")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
@@ -1409,7 +1421,7 @@ class UserReplaceMasterCrossSigningKeyRestServlet(RestServlet):
     """
 
     PATTERNS = admin_patterns(
-        "/users/(?P<user_id>[^/]*)/_allow_cross_signing_replacement_without_uia"
+        "/users/(?P<user_id>[^/]*)/_allow_cross_signing_replacement_without_uia$"
     )
     REPLACEMENT_PERIOD_MS = 10 * 60 * 1000  # 10 minutes
 
@@ -1443,7 +1455,7 @@ class UserByExternalId(RestServlet):
     """Find a user based on an external ID from an auth provider"""
 
     PATTERNS = admin_patterns(
-        "/auth_providers/(?P<provider>[^/]*)/users/(?P<external_id>[^/]*)"
+        "/auth_providers/(?P<provider>[^/]*)/users/(?P<external_id>[^/]*)$"
     )
 
     def __init__(self, hs: "HomeServer"):
@@ -1469,7 +1481,7 @@ class UserByExternalId(RestServlet):
 class UserByThreePid(RestServlet):
     """Find a user based on 3PID of a particular medium"""
 
-    PATTERNS = admin_patterns("/threepid/(?P<medium>[^/]*)/users/(?P<address>[^/]*)")
+    PATTERNS = admin_patterns("/threepid/(?P<medium>[^/]*)/users/(?P<address>[^/]*)$")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
@@ -1503,7 +1515,7 @@ class RedactUser(RestServlet):
     If only one parameter is sent, then all messages before or after given time will be redacted.
     """
 
-    PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
+    PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact$")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
@@ -1614,7 +1626,7 @@ class UserInvitesCount(RestServlet):
     Return the count of invites that the user has sent after the given timestamp
     """
 
-    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/sent_invite_count")
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/sent_invite_count$")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
@@ -1639,7 +1651,7 @@ class UserJoinedRoomCount(RestServlet):
     if they have subsequently left/been banned from those rooms.
     """
 
-    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/cumulative_joined_room_count")
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/cumulative_joined_room_count$")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()

@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.157/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.158/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -275,6 +275,21 @@ properties:
     default: true
     examples:
       - false
+  include_profile_updates_in_sync:
+    type: boolean
+    description: >-
+      Use this option to include updates of other users' profiles in sync responses,
+      for users who share rooms.
+      
+      Requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429)
+      compatible client, and is currently limited to legacy sync and local users only.
+      
+      This feature is under development and should be used with caution on busy servers or
+      servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring
+      profile information doesn't leak across rooms.
+    default: false
+    examples:
+      - true
   allow_public_rooms_without_auth:
     type: boolean
     description:
@@ -2412,7 +2427,7 @@ properties:
       Enable the local on-disk media storage provider. When disabled, media is
       stored only in configured `media_storage_providers` and temporary files are
       used for processing.
-      
+
       **Warning:** If this option is set to `false` and no `media_storage_providers`
       are configured, all media requests will return 404 errors as there will be
       no storage backend available.
@@ -2505,20 +2520,42 @@ properties:
       module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
-      time_period:
-        type: "#/$defs/duration"
-        description: >-
-          The time period over which the limit applies. Required.
-      max_size:
-        type: "#/$defs/bytes"
-        description: >-
-          Amount of data that can be uploaded in the time period by the user.
-          Required.
+      type: object
+      required:
+        - time_period
+        - max_size
+      properties:
+        time_period:
+          $ref: "#/$defs/duration"
+          description: >-
+            The time period over which the limit applies. Required.
+        max_size:
+          $ref: "#/$defs/bytes"
+          description: >-
+            Amount of data that can be uploaded in the time period by the user.
+            Required.
+        info_uri:
+          type: string
+          description: >-
+            URI returned to the client for where the user can find information
+            about the upload limit and how users can reduce their upload usage
+            or request an upload limit increase. Optional.
+            If not set, Synapse serves a built-in page (customisable via the
+            `media_upload_limit_exceeded.html` template) and uses its URL
+            instead.
+        can_upgrade:
+          type: boolean
+          description: >-
+            Value returned to the client for whether the limit can be increased.
+          default: false
     examples:
       - - time_period: 1h
           max_size: 100M
+          info_uri: https://example.com/quota#hour
         - time_period: 1w
           max_size: 500M
+          info_uri: https://example.com/quota
+          can_upgrade: true
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.
@@ -2966,7 +3003,7 @@ properties:
     examples:
       - false
   matrix_rtc:
-    type: object 
+    type: object
     description: >-
       Options related to MatrixRTC.
     properties:
@@ -2986,14 +3023,13 @@ properties:
               description: >-
                 The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
               example: https://matrix-rtc.example.com/livekit/jwt
-        description:
-          A list of transport types and arguments to use for MatrixRTC connections.
+        description: A list of transport types and arguments to use for MatrixRTC connections.
         default: []
     default: {}
     examples:
       - transports:
-        - type: livekit
-          livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
+          - type: livekit
+            livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
   enable_registration:
     type: boolean
     description: >-
@@ -4668,10 +4704,10 @@ properties:
         type: boolean
         description: >-
           Use this setting to keep a user's profile fields in sync with
-          information from the identity provider. Fields are checked on every 
-          SSO login, and are updated if necessary. Note that enabling this 
-          option will override user profile information, regardless of whether 
-          users have opted-out of syncing that information when first signing 
+          information from the identity provider. Fields are checked on every
+          SSO login, and are updated if necessary. Note that enabling this
+          option will override user profile information, regardless of whether
+          users have opted-out of syncing that information when first signing
           in.
           Fields that will be synced:
             * displayname
@@ -4883,6 +4919,45 @@ properties:
         include_content: false
         group_unread_count_by_room: false
         jitter_delay: 10s
+  push_rules:
+    type: object
+    description: Options for push rules
+    properties:
+      limits:
+        type: object
+        description: Limits on the size of push rules that users can have
+        properties:
+          rule_count:
+            type: integer
+            default: 10000
+            description: >-
+              This is the total number of push rules that each user can have.
+              Power users may expect to have one push rule per room.
+          rule_id_length:
+            type: integer
+            default: 300
+            description: >-
+              This is the maximum length of a push rule ID, in bytes.
+              Push rule IDs need to be allowed to be at least as long
+              as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))
+
+              It's recommended to leave this option as it is.
+              We expect to remove this option if/when the specification standardises on
+              a limit.
+          rule_size:
+            type: integer
+            default: 1024
+            description: >-
+              This is the maximum size of a push rule's body, in bytes.
+
+              The exact mechanism for calculating this size is currently an implementation
+              detail, subject to change.
+              This limit should be treated as a coarse sanity limit rather than something
+              to fine-tune.
+
+              It's recommended to leave this option as it is.
+              We expect to remove this option if/when the specification standardises on
+              a limit and a mechanism for calculating it.
   encryption_enabled_by_default_for_room_type:
     type: string
     description: >-
