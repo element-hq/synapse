@@ -31,6 +31,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.sync import SlidingSyncRestServlet
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken
@@ -67,7 +68,11 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
         self.paginated_sync_handler = hs.get_paginated_sync_handler()
 
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        # Disabled by default; enabled either globally (`msc4525_enabled`) or
+        # per user via the admin experimental-features API. 404s otherwise.
+        requester = await self.auth.get_user_by_req_experimental_feature(
+            request, allow_guest=True, feature=ExperimentalFeature.MSC4525
+        )
         user = requester.user
 
         timeout = parse_integer(request, "timeout", default=0)
@@ -156,5 +161,6 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc4525_enabled:
-        PaginatedSyncRestServlet(hs).register(http_server)
+    # Always registered; access is gated per user (or globally) via
+    # `ExperimentalFeature.MSC4525` in `on_POST`.
+    PaginatedSyncRestServlet(hs).register(http_server)

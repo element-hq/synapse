@@ -408,3 +408,53 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
         response = self._sync(body, pos=pos)
         account_data_response = response["extensions"]["account_data"]["rooms"]
         self.assertIn(room_id, account_data_response, response)
+
+
+class PaginatedSyncPerUserEnablementTestCase(unittest.HomeserverTestCase):
+    """The endpoint is disabled by default and enablable per user via the
+    admin experimental-features API (`ExperimentalFeature.MSC4525`)."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        paginated_sync.register_servlets,
+    ]
+
+    sync_endpoint = "/_matrix/client/unstable/org.matrix.msc4525/sync?timeout=0"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user = self.register_user("alice", "password")
+        self.tok = self.login("alice", "password")
+        self.admin_tok = self.login(
+            self.register_user("admin", "password", admin=True), "password"
+        )
+
+    def test_disabled_by_default_and_enablable_per_user(self) -> None:
+        body = {"page_size": 10, "limit": 5}
+
+        channel = self.make_request(
+            "POST", self.sync_endpoint, body, access_token=self.tok
+        )
+        self.assertEqual(channel.code, 404, channel.json_body)
+
+        # Enable the feature for alice only.
+        channel = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/experimental_features/{self.user}",
+            {"features": {"msc4525": True}},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        channel = self.make_request(
+            "POST", self.sync_endpoint, body, access_token=self.tok
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Other users remain gated.
+        bob_tok = self.login(self.register_user("bob", "password"), "password")
+        channel = self.make_request(
+            "POST", self.sync_endpoint, body, access_token=bob_tok
+        )
+        self.assertEqual(channel.code, 404, channel.json_body)
