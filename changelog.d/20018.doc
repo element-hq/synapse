@@ -1,1 +1,1 @@
-Correct the documentation for the `on_media_upload_limit_exceeded` module callback with regards to where it is  called from.
+Correct the documentation for the `on_media_upload_limit_exceeded` module callback with regards to where it is called from.
