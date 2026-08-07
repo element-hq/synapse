@@ -38,8 +38,8 @@ from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.logging.opentracing import log_kv, set_tag, start_active_span, trace
 from synapse.types import Requester, SlidingSyncStreamToken, StrCollection, StreamToken
 from synapse.types.handlers.paginated_sync import (
-    PaginatedSyncConfig,
-    PaginatedSyncResult,
+    MSC4525PaginatedSyncConfig,
+    MSC4525PaginatedSyncResult,
 )
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 AGING_LANE_FRACTION = 4
 
 
-class PaginatedSyncExtensionHandler(SlidingSyncExtensionHandler):
+class MSC4525PaginatedSyncExtensionHandler(SlidingSyncExtensionHandler):
     """The sliding sync extensions without the `lists`/`rooms` scoping: with no
     lists and no subscriptions there is nothing to scope, so an enabled
     extension simply applies to the rooms in the response."""
@@ -78,7 +78,7 @@ class PaginatedSyncExtensionHandler(SlidingSyncExtensionHandler):
         return set(actual_room_ids)
 
 
-class PaginatedSyncHandler(SlidingSyncHandler):
+class MSC4525PaginatedSyncHandler(SlidingSyncHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
@@ -91,22 +91,22 @@ class PaginatedSyncHandler(SlidingSyncHandler):
         self.track_room_configs = False
 
         # Extensions lose their scoping fields.
-        self.extensions = PaginatedSyncExtensionHandler(hs)
+        self.extensions = MSC4525PaginatedSyncExtensionHandler(hs)
 
     async def wait_for_paginated_sync_for_user(
         self,
         requester: Requester,
-        sync_config: PaginatedSyncConfig,
+        sync_config: MSC4525PaginatedSyncConfig,
         from_token: SlidingSyncStreamToken | None = None,
         timeout_ms: int = 0,
-    ) -> tuple[PaginatedSyncResult, bool]:
+    ) -> tuple[MSC4525PaginatedSyncResult, bool]:
         """
         Get the paginated sync for a client if we have new data for it now,
         otherwise wait for new data to arrive on the server (mirrors
         `SlidingSyncHandler.wait_for_sync_for_user`).
 
         Returns:
-            The `PaginatedSyncResult` and whether we waited for new activity
+            The `MSC4525PaginatedSyncResult` and whether we waited for new activity
             before responding.
         """
         did_wait = False
@@ -127,7 +127,7 @@ class PaginatedSyncHandler(SlidingSyncHandler):
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
-                return PaginatedSyncResult.empty(from_token), did_wait
+                return MSC4525PaginatedSyncResult.empty(from_token), did_wait
 
             after_wait_ts = self.clock.time_msec()
             if after_wait_ts - before_wait_ts > 1_000:
@@ -149,7 +149,7 @@ class PaginatedSyncHandler(SlidingSyncHandler):
 
         async def current_sync_callback(
             before_token: StreamToken, after_token: StreamToken
-        ) -> PaginatedSyncResult:
+        ) -> MSC4525PaginatedSyncResult:
             return await self.current_paginated_sync_for_user(
                 sync_config,
                 from_token=from_token,
@@ -169,10 +169,10 @@ class PaginatedSyncHandler(SlidingSyncHandler):
     @trace
     async def current_paginated_sync_for_user(
         self,
-        sync_config: PaginatedSyncConfig,
+        sync_config: MSC4525PaginatedSyncConfig,
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None = None,
-    ) -> PaginatedSyncResult:
+    ) -> MSC4525PaginatedSyncResult:
         """
         Generate a paginated sync response for the token range (> `from_token`
         and <= `to_token`).
@@ -364,9 +364,9 @@ class PaginatedSyncHandler(SlidingSyncHandler):
                     assert room_status.last_token is not None
                     return room_status.last_token.stream
 
-                aged_room_ids = sorted(
-                    previously_room_ids, key=last_sent_stream_pos
-                )[:aging_lane_size]
+                aged_room_ids = sorted(previously_room_ids, key=last_sent_stream_pos)[
+                    :aging_lane_size
+                ]
 
             sorted_room_infos = await self.room_lists.sort_rooms(
                 {room_id: sync_room_map[room_id] for room_id in candidates},
@@ -461,7 +461,7 @@ class PaginatedSyncHandler(SlidingSyncHandler):
             new_connection_state=new_connection_state,
         )
 
-        result = PaginatedSyncResult(
+        result = MSC4525PaginatedSyncResult(
             next_pos=SlidingSyncStreamToken(to_token, connection_position),
             rooms=rooms,
             extensions=extensions,

@@ -36,10 +36,10 @@ from synapse.rest.client._base import client_patterns
 from synapse.rest.client.sync import SlidingSyncRestServlet
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken
 from synapse.types.handlers.paginated_sync import (
-    PaginatedSyncConfig,
-    PaginatedSyncResult,
+    MSC4525PaginatedSyncConfig,
+    MSC4525PaginatedSyncResult,
 )
-from synapse.types.rest.client import PaginatedSyncBody
+from synapse.types.rest.client import MSC4525PaginatedSyncBody
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PaginatedSyncRestServlet(SlidingSyncRestServlet):
+class MSC4525PaginatedSyncRestServlet(SlidingSyncRestServlet):
     """
     API endpoint for MSC4525 Paginated Sync. `POST` with a JSON body of
     `page_size`/`limit`/`history`/`required_state`/`extensions`; responds with
@@ -84,7 +84,9 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
                 self.store, from_token_string
             )
 
-        body = parse_and_validate_json_object_from_request(request, PaginatedSyncBody)
+        body = parse_and_validate_json_object_from_request(
+            request, MSC4525PaginatedSyncBody
+        )
 
         set_tag(
             "paginated_sync.sync_type",
@@ -99,7 +101,7 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
             }
         )
 
-        sync_config = PaginatedSyncConfig(
+        sync_config = MSC4525PaginatedSyncConfig(
             user=user,
             requester=requester,
             # Namespace the connection ID so a paginated sync connection
@@ -142,7 +144,7 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
     async def encode_paginated_response(
         self,
         requester: Requester,
-        result: PaginatedSyncResult,
+        result: MSC4525PaginatedSyncResult,
     ) -> JsonDict:
         response: JsonDict = {}
 
@@ -167,4 +169,4 @@ class PaginatedSyncRestServlet(SlidingSyncRestServlet):
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     # Always registered; access is gated per user (or globally) via
     # `ExperimentalFeature.MSC4525` in `on_POST`.
-    PaginatedSyncRestServlet(hs).register(http_server)
+    MSC4525PaginatedSyncRestServlet(hs).register(http_server)

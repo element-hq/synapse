@@ -511,7 +511,7 @@ class SlidingSyncBody(RequestBodyModel):
         return value
 
 
-class PaginatedSyncBody(RequestBodyModel):
+class MSC4525PaginatedSyncBody(RequestBodyModel):
     """
     Paginated Sync API request body (MSC4525, a dialect of MSC4186 without
     lists/ranges/subscriptions).

@@ -38,7 +38,7 @@ from tests import unittest
 logger = logging.getLogger(__name__)
 
 
-class PaginatedSyncTestCase(unittest.HomeserverTestCase):
+class MSC4525PaginatedSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests for `POST /_matrix/client/unstable/org.matrix.msc4525/sync`:
     paging on initial sync, per-room gapping on incremental sync, backlog
@@ -440,7 +440,7 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
         self.assertIn(room_id, account_data_response, response)
 
 
-class PaginatedSyncPerUserEnablementTestCase(unittest.HomeserverTestCase):
+class MSC4525PaginatedSyncPerUserEnablementTestCase(unittest.HomeserverTestCase):
     """The endpoint is disabled by default and enablable per user via the
     admin experimental-features API (`ExperimentalFeature.MSC4525`)."""
 

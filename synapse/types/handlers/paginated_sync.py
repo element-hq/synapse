@@ -25,12 +25,12 @@ from pydantic import ConfigDict
 
 from synapse.types import Requester, SlidingSyncStreamToken, UserID
 from synapse.types.handlers.sliding_sync import SlidingSyncResult
-from synapse.types.rest.client import PaginatedSyncBody
+from synapse.types.rest.client import MSC4525PaginatedSyncBody
 
 
-class PaginatedSyncConfig(PaginatedSyncBody):
+class MSC4525PaginatedSyncConfig(MSC4525PaginatedSyncBody):
     """
-    Inherit from `PaginatedSyncBody` since we need all of the same fields and add a few
+    Inherit from `MSC4525PaginatedSyncBody` since we need all of the same fields and add a few
     extra fields that we need in the handler
     """
 
@@ -52,7 +52,7 @@ class PaginatedSyncConfig(PaginatedSyncBody):
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class PaginatedSyncResult:
+class MSC4525PaginatedSyncResult:
     """
     The response body for a paginated sync request.
 
@@ -85,9 +85,9 @@ class PaginatedSyncResult:
         return bool(self.rooms or self.extensions or self.pending)
 
     @staticmethod
-    def empty(next_pos: SlidingSyncStreamToken) -> "PaginatedSyncResult":
+    def empty(next_pos: SlidingSyncStreamToken) -> "MSC4525PaginatedSyncResult":
         "Return a new empty result"
-        return PaginatedSyncResult(
+        return MSC4525PaginatedSyncResult(
             next_pos=next_pos,
             rooms={},
             extensions=SlidingSyncResult.Extensions(),

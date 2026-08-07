@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class SlidingSyncConnectionConfig(Protocol):
     """The subset of a sync config the connection store needs: who the
     connection belongs to and its client-chosen ID. Satisfied by both
-    `SlidingSyncConfig` and `PaginatedSyncConfig` (MSC4525), which share the
+    `SlidingSyncConfig` and `MSC4525PaginatedSyncConfig` (MSC4525), which share the
     per-connection room-tracking machinery."""
 
     @property
