@@ -289,6 +289,61 @@ class PaginatedSyncHandler(SlidingSyncHandler):
             candidates.update(newly_joined_rooms & sync_room_map.keys())
             candidates.update(newly_left_rooms & sync_room_map.keys())
 
+            # Rooms with undelivered receipt or room account data changes must
+            # also wake into the page, else a read receipt in an otherwise
+            # quiet room is deferred until someone speaks. The room comes down
+            # as an (often empty, filtered-out) entry and the extension
+            # delivers the data. Only streams the client has enabled can have
+            # anything to deliver.
+            extensions_body = sync_config.extensions
+            if (
+                extensions_body is not None
+                and extensions_body.receipts is not None
+                and extensions_body.receipts.enabled
+            ):
+                # Rooms already recorded as having undelivered receipts, plus
+                # rooms with new receipt activity in the token range.
+                candidates.update(
+                    room_id
+                    for room_id, receipt_status in previous_connection_state.receipts._statuses.items()
+                    if receipt_status.status == HaveSentRoomFlag.PREVIOUSLY
+                    and room_id in sync_room_map
+                )
+                candidates.update(
+                    await self.store.get_rooms_with_receipts_between(
+                        [
+                            room_id
+                            for room_id in sync_room_map
+                            if room_id not in candidates
+                        ],
+                        from_key=from_token.stream_token.receipt_key,
+                        to_key=to_token.receipt_key,
+                    )
+                )
+            if (
+                extensions_body is not None
+                and extensions_body.account_data is not None
+                and extensions_body.account_data.enabled
+            ):
+                candidates.update(
+                    room_id
+                    for room_id, account_data_status in previous_connection_state.account_data._statuses.items()
+                    if account_data_status.status == HaveSentRoomFlag.PREVIOUSLY
+                    and room_id in sync_room_map
+                )
+                updated_account_data = (
+                    await self.store.get_updated_room_account_data_for_user(
+                        user_id, from_token.stream_token.account_data_key
+                    )
+                )
+                updated_tags = await self.store.get_updated_tags(
+                    user_id, from_token.stream_token.account_data_key
+                )
+                candidates.update(
+                    (updated_account_data.keys() | updated_tags.keys())
+                    & sync_room_map.keys()
+                )
+
         # Page: most recently active rooms first. When the page overflows, a
         # slice of it is reserved for the longest-deferred rooms so that
         # nothing is starved by busier rooms perpetually sorting first.

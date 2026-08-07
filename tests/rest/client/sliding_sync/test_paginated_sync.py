@@ -21,7 +21,14 @@ from unittest.mock import AsyncMock
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.rest.client import login, paginated_sync, receipts, room, sync
+from synapse.rest.client import (
+    account_data,
+    login,
+    paginated_sync,
+    receipts,
+    room,
+    sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -40,6 +47,7 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
 
     servlets = [
         synapse.rest.admin.register_servlets,
+        account_data.register_servlets,
         login.register_servlets,
         receipts.register_servlets,
         room.register_servlets,
@@ -336,3 +344,67 @@ class PaginatedSyncTestCase(unittest.HomeserverTestCase):
         self.assertIn(room_id, response["rooms"])
         receipts_response = response["extensions"]["receipts"]["rooms"]
         self.assertIn(room_id, receipts_response, receipts_response)
+
+    def test_receipt_in_quiet_room_wakes_room(self) -> None:
+        """A read receipt in a room with no new events must still be
+        delivered: the room is woken into the page and the receipts extension
+        carries the receipt (the room entry itself stays empty and is
+        filtered out)."""
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        user2 = self.register_user("bob", "password")
+        tok2 = self.login("bob", "password")
+        self.helper.join(room_id, user2, tok=tok2)
+        event_response = self.helper.send(room_id, body="hello", tok=self.tok)
+
+        body = {
+            "page_size": 10,
+            "limit": 5,
+            "history": 5,
+            "extensions": {"receipts": {"enabled": True}},
+        }
+        response = self._sync(body)
+        pos = response["pos"]
+
+        # Bob reads the room; no events are sent anywhere.
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/receipt/m.read/{event_response['event_id']}",
+            {},
+            access_token=tok2,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        response = self._sync(body, pos=pos)
+        receipts_response = response["extensions"]["receipts"]["rooms"]
+        self.assertIn(room_id, receipts_response, response)
+        # The room itself had nothing to say.
+        self.assertNotIn(room_id, response["rooms"])
+
+    def test_account_data_in_quiet_room_wakes_room(self) -> None:
+        """Room account data (e.g. read-state set from another device) in a
+        room with no new events must still be delivered via the account_data
+        extension."""
+        room_id = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.send(room_id, body="hello", tok=self.tok)
+
+        body = {
+            "page_size": 10,
+            "limit": 5,
+            "history": 5,
+            "extensions": {"account_data": {"enabled": True}},
+        }
+        response = self._sync(body)
+        pos = response["pos"]
+
+        # "Another device" updates the room's account data; no events anywhere.
+        channel = self.make_request(
+            "PUT",
+            f"/user/{self.user}/rooms/{room_id}/account_data/org.example.read_state",
+            {"event_id": "$dummy"},
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        response = self._sync(body, pos=pos)
+        account_data_response = response["extensions"]["account_data"]["rooms"]
+        self.assertIn(room_id, account_data_response, response)
