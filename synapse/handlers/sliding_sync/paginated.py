@@ -230,6 +230,9 @@ class MSC4525PaginatedSyncHandler(SlidingSyncHandler):
             )
 
         sync_room_map = dict(interested_rooms.room_membership_for_user_map)
+        # For `total_rooms` (cold-start progress): the account's room count,
+        # before any partial-state filtering below.
+        total_rooms = len(sync_room_map)
         newly_joined_rooms = interested_rooms.newly_joined_rooms
         newly_left_rooms = interested_rooms.newly_left_rooms
         dm_room_ids = interested_rooms.dm_room_ids
@@ -350,23 +353,46 @@ class MSC4525PaginatedSyncHandler(SlidingSyncHandler):
 
         # Page: most recently active rooms first. When the page overflows, a
         # slice of it is reserved for the longest-deferred rooms so that
-        # nothing is starved by busier rooms perpetually sorting first.
+        # nothing - neither a deferred update nor the never-sent cold-start
+        # backlog - is starved by busier rooms perpetually sorting first.
         page_room_ids: list[str] = []
         if candidates:
             aged_room_ids: list[str] = []
-            if len(candidates) > page_size and previously_room_ids:
+            if (
+                from_token is not None
+                and len(candidates) > page_size
+                and (previously_room_ids or never_room_ids)
+            ):
                 aging_lane_size = max(1, page_size // AGING_LANE_FRACTION)
 
-                def last_sent_stream_pos(room_id: str) -> int:
-                    room_status = previous_connection_state.rooms.have_sent_room(
-                        room_id
+                # Never-sent rooms first (deferred since the connection
+                # started, and invisible to the client until delivered), most
+                # recently active first to match the page's ordering; then the
+                # longest-deferred previously-sent rooms.
+                if never_room_ids:
+                    never_room_infos = await self.room_lists.sort_rooms(
+                        {room_id: sync_room_map[room_id] for room_id in never_room_ids},
+                        to_token,
+                        limit=aging_lane_size,
                     )
-                    assert room_status.last_token is not None
-                    return room_status.last_token.stream
+                    aged_room_ids.extend(
+                        room_info.room_id for room_info in never_room_infos
+                    )
 
-                aged_room_ids = sorted(previously_room_ids, key=last_sent_stream_pos)[
-                    :aging_lane_size
-                ]
+                if len(aged_room_ids) < aging_lane_size and previously_room_ids:
+
+                    def last_sent_stream_pos(room_id: str) -> int:
+                        room_status = previous_connection_state.rooms.have_sent_room(
+                            room_id
+                        )
+                        assert room_status.last_token is not None
+                        return room_status.last_token.stream
+
+                    aged_room_ids.extend(
+                        sorted(previously_room_ids, key=last_sent_stream_pos)[
+                            : aging_lane_size - len(aged_room_ids)
+                        ]
+                    )
 
             sorted_room_infos = await self.room_lists.sort_rooms(
                 {room_id: sync_room_map[room_id] for room_id in candidates},
@@ -466,7 +492,7 @@ class MSC4525PaginatedSyncHandler(SlidingSyncHandler):
             rooms=rooms,
             extensions=extensions,
             pending=pending,
-            total_rooms=len(sync_room_map),
+            total_rooms=total_rooms,
         )
 
         set_tag("paginated_sync.result", bool(result))

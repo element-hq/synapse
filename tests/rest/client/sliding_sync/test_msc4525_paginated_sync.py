@@ -339,6 +339,35 @@ class MSC4525PaginatedSyncTestCase(unittest.HomeserverTestCase):
         for room_id, room_response in response["rooms"].items():
             self.assertTrue(room_response.get("initial"), room_id)
 
+        # An entirely unparsable pos is treated the same way, not a 400.
+        response = self._sync(body, pos="not a token at all")
+        self.assertEqual(set(response["rooms"].keys()), set(room_ids))
+
+    def test_cold_start_backlog_not_starved_by_live_traffic(self) -> None:
+        """Rooms never sent on the connection get a reserved slice of every
+        page, so continuous traffic in already-sent rooms can't stall the
+        initial drain indefinitely."""
+        room_ids = self._create_rooms(6)
+
+        body = {"page_size": 2, "limit": 5, "history": 1}
+        response = self._sync(body)
+        seen_rooms = dict(response["rooms"])
+        pos = response["pos"]
+        self.assertEqual(len(seen_rooms), 2)
+
+        # Keep the already-delivered rooms busy while draining: without the
+        # aging lane every page would fill with the busy (most recently
+        # active) rooms and the never-sent backlog would starve.
+        for _ in range(20):
+            if not response.get("pending"):
+                break
+            for room_id in seen_rooms:
+                self.helper.send(room_id, body="chatter", tok=self.tok)
+            response = self._sync(body, pos=pos)
+            seen_rooms.update(response["rooms"])
+            pos = response["pos"]
+        self.assertEqual(set(seen_rooms.keys()), set(room_ids))
+
     def test_extensions_apply_without_scoping(self) -> None:
         """Extensions have no lists/rooms scoping: enabling one is enough for
         it to apply to the rooms in the response."""
