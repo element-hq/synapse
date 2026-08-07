@@ -397,7 +397,7 @@ class PaginatedSyncHandler(SlidingSyncHandler):
         new_connection_state.rooms.record_sent_rooms(relevant_rooms_to_send_map.keys())
 
         connection_position = await self.connection_store.record_new_state(
-            sync_config=sync_config,  # type: ignore[arg-type]
+            sync_config=sync_config,
             from_token=from_token,
             new_connection_state=new_connection_state,
         )
