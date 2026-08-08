@@ -410,6 +410,57 @@ class ProfileFields:
     AVATAR_URL: Final = "avatar_url"
 
 
+class ProfileUpdateAction(str, enum.Enum):
+    """
+    Enum representing the action of a row in the profile updates stream tables.
+    The action determines whether a profile field update has occurred, or whether
+    something else has happened that the sync code should know about, for example
+    a user joining or leaving a room.
+    """
+
+    JOINED_ROOM = "joined_room"
+    """
+    This profile update row action represents a user joining a room.
+
+    When gathering an incremental sync non-lazy response for profile updates,
+    we always include the full profile of users who have joined a room the syncing
+    user is a member of, where full profile means all the current profile values the
+    client asked for, regardless of whether they have changed recently. This ensures
+    that clients have profiles re-populated for any users who have recently left
+    shared rooms.
+
+    A scenario example would be as follows:
+
+        * Alice leaves a room with Bob
+        * Bob's client clears all profile fields from Alice
+        * Alice joins a room with Bob
+        * Bob's client does an incremental non-lazy sync
+
+    At the end of the flow Bob should receive all the profile fields the client
+    is interested in, not just the potential diff, which non-lazy incremental sync
+    normally includes. This update action currently has no meaning for sync responses
+    that are not incremental and non-lazy.
+    """
+    LEFT_ROOM = "left_room"
+    """
+    This profile update row action represents a user leaving a room.
+
+    Clients will want to know when they no longer share rooms with a user. This
+    profile action row allows the sync code to deliver a `null` response for those
+    profiles, so clients can clear their cache containing the users profile data
+    they are no longer interested in.
+    """
+    UPDATE = "update"
+    """
+    This profile update row action represents a user updating a profile field.
+
+    Depending on the type of sync (initial/incremental, lazy/non-lazy), either the
+    diff of profile field updates or all the current profile fields are included
+    in the sync response. In the latter case the profile update action row signifies
+    a change, but the client may still get fields that have not changed.
+    """
+
+
 class StickyEventField(TypedDict):
     """
     Dict content of the `sticky` part of an event.

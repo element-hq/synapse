@@ -117,6 +117,47 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+
+# Upgrading to v1.159.0
+
+## Change of signing key expiry date for the Debian/Ubuntu package repository (2026)
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`,
+please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+but this change must be imported into your keyring.
+
+If you have the `matrix-org-archive-keyring` package installed and it updates before the current key expires, this should
+happen automatically.
+
+Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
+will need to get a fresh copy of the keys. You can do so with:
+
+```sh
+sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+```
+
+The old version of the key will expire on `2027-03-15`.
+
+# Upgrading to v1.158.0
+
+## Drop support for Ubuntu 25.10 'Questing Quokka', add support for Ubuntu 26.04 'Resolute Raccoon'
+
+Ubuntu 25.10 'Questing Quokka' [is end-of-life as of
+2026-07-01](https://endoflife.date/ubuntu). This release drops support for Ubuntu 25.10,
+and in its place adds support for Ubuntu 26.04 'Resolute Raccoon'.
+
+# Upgrading to v1.157.0
+
+## MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration
+
+Support for the deprecated MSC3861 Auth Delegation (`experimental_features.msc3861`)
+has been dropped in this version, in favour of the stable Matrix Authentication Service
+integration.
+
+See [the previous upgrade notes](#stable-integration-with-matrix-authentication-service)
+and the [`matrix_authentication_service` section in the Configuration Manual](usage/configuration/config_documentation.md#matrix_authentication_service)
+for more information.
+
 # Upgrading to v1.152.0
 
 ## Workers which quarantine media must be stream writers
@@ -327,7 +368,8 @@ using these metrics.
 Support for [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service) is now stable, with a simplified configuration.
 This stable integration requires MAS 0.20.0 or later.
 
-The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.137.0.
+The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.157.0.
+(*Note*: this previously read v1.137.0 but the removal date was missed.)
 
 Synapse deployments already using MAS should now use the new configuration options:
 

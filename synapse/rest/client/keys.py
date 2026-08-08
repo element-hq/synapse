@@ -536,7 +536,7 @@ class SigningKeyUploadServlet(RestServlet):
         # If yes, then we need to authenticate the change.
         # MSC4190 can skip UIA for replacing cross-signing keys as well.
         if is_cross_signing_setup and not requester.app_service_id:
-            # With MSC3861, UIA is not possible. Instead, the auth service has to
+            # With auth delegation, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
             if self.hs.config.mas.enabled:
                 if not master_key_updatable_without_uia:
@@ -569,47 +569,8 @@ class SigningKeyUploadServlet(RestServlet):
                         },
                     )
 
-            elif self.hs.config.experimental.msc3861.enabled:
-                if not master_key_updatable_without_uia:
-                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
-                    # We import lazily here because of the authlib requirement
-                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-                    assert isinstance(self.auth, MSC3861DelegatedAuth)
-
-                    uri = await self.auth.account_management_url()
-                    if uri is not None:
-                        url = f"{uri}?action=org.matrix.cross_signing_reset"
-                    else:
-                        url = await self.auth.issuer()
-
-                    # We use a dummy session ID as this isn't really a UIA flow, but we
-                    # reuse the same API shape for better client compatibility.
-                    raise InteractiveAuthIncompleteError(
-                        "dummy",
-                        {
-                            "session": "dummy",
-                            "flows": [
-                                {"stages": ["m.oauth"]},
-                                # The unstable name from MSC4312 should be supported until enough clients have adopted the stable (`m.oauth`) name:
-                                {"stages": ["org.matrix.cross_signing_reset"]},
-                            ],
-                            "params": {
-                                "m.oauth": {
-                                    "url": url,
-                                },
-                                "org.matrix.cross_signing_reset": {
-                                    "url": url,
-                                },
-                            },
-                            "msg": "To reset your end-to-end encryption cross-signing "
-                            f"identity, you first need to approve it at {url} and "
-                            "then try again.",
-                        },
-                    )
-
             else:
-                # Without MSC3861, we require UIA.
+                # Without auth delegation, we require UIA.
                 await self.auth_handler.validate_user_via_ui_auth(
                     requester,
                     request,

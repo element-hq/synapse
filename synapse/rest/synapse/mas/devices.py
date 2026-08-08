@@ -196,6 +196,16 @@ class MasSyncDevicesResource(MasBaseResource):
         current_devices_list = set(current_devices.keys())
         target_device_list = set(body.devices)
 
+        # Exclude the dehydrated device (MSC3814): it has no MAS session, so MAS
+        # never lists it in the target set and the reconciliation below would
+        # otherwise treat it as extra and delete it. This mirrors the admin
+        # devices API and MAS's own legacy device-sync path, which both skip it.
+        dehydrated_device = await self.device_handler.get_dehydrated_device(
+            user_id=str(user_id)
+        )
+        if dehydrated_device is not None:
+            current_devices_list.discard(dehydrated_device[0])
+
         to_add = target_device_list - current_devices_list
         to_delete = current_devices_list - target_device_list
 

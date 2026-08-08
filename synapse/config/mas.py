@@ -102,13 +102,6 @@ class MasConfig(Config):
         if not self.enabled:
             return
 
-        if root.experimental.msc3861.enabled:
-            raise ConfigError(
-                "Experimental MSC3861 was replaced by Matrix Authentication Service."
-                "Please disable MSC3861 or disable Matrix Authentication Service.",
-                ("experimental", "msc3861"),
-            )
-
         if (
             root.auth.password_enabled_for_reauth
             or root.auth.password_enabled_for_login

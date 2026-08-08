@@ -64,7 +64,6 @@ from synapse.events.snapshot import (
 )
 from synapse.events.utils import (
     FilteredEvent,
-    SerializeEventConfig,
     maybe_upsert_event_field,
 )
 from synapse.events.validator import EventValidator
@@ -269,7 +268,7 @@ class MessageHandler:
         events = await self._event_serializer.serialize_events(
             [FilteredEvent.state(e) for e in room_state.values()],
             self.clock.time_msec(),
-            config=SerializeEventConfig(requester=requester),
+            config=await self._event_serializer.create_config(requester=requester),
         )
         return events
 

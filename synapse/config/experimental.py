@@ -20,337 +20,21 @@
 #
 #
 
-import enum
 from functools import cache
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any
 
 import attr
-import attr.validators
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
-from synapse.config._base import Config, RootConfig, read_file
+from synapse.config._base import Config, read_file
 from synapse.types import JsonDict, StrSequence
-
-# Determine whether authlib is installed.
-try:
-    import authlib  # noqa: F401
-
-    HAS_AUTHLIB = True
-except ImportError:
-    HAS_AUTHLIB = False
-
-if TYPE_CHECKING:
-    # Only import this if we're type checking, as it might not be installed at runtime.
-    from authlib.jose.rfc7517 import JsonWebKey
 
 
 @cache
 def read_secret_from_file_once(file_path: Any, config_path: StrSequence) -> str:
     """Returns the memoized secret read from file."""
     return read_file(file_path, config_path).strip()
-
-
-class ClientAuthMethod(enum.Enum):
-    """List of supported client auth methods."""
-
-    CLIENT_SECRET_POST = "client_secret_post"
-    CLIENT_SECRET_BASIC = "client_secret_basic"
-    CLIENT_SECRET_JWT = "client_secret_jwt"
-    PRIVATE_KEY_JWT = "private_key_jwt"
-
-
-def _parse_jwks(jwks: JsonDict | None) -> Optional["JsonWebKey"]:
-    """A helper function to parse a JWK dict into a JsonWebKey."""
-
-    if jwks is None:
-        return None
-
-    from authlib.jose.rfc7517 import JsonWebKey
-
-    return JsonWebKey.import_key(jwks)
-
-
-def _check_client_secret(
-    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
-) -> None:
-    if instance._client_secret and instance._client_secret_path:
-        raise ConfigError(
-            (
-                "You have configured both "
-                "`experimental_features.msc3861.client_secret` and "
-                "`experimental_features.msc3861.client_secret_path`. "
-                "These are mutually incompatible."
-            ),
-            ("experimental", "msc3861", "client_secret"),
-        )
-    # Check client secret can be retrieved
-    instance.client_secret()
-
-
-def _check_admin_token(
-    instance: "MSC3861", _attribute: attr.Attribute, _value: str | None
-) -> None:
-    if instance._admin_token and instance._admin_token_path:
-        raise ConfigError(
-            (
-                "You have configured both "
-                "`experimental_features.msc3861.admin_token` and "
-                "`experimental_features.msc3861.admin_token_path`. "
-                "These are mutually incompatible."
-            ),
-            ("experimental", "msc3861", "admin_token"),
-        )
-    # Check client secret can be retrieved
-    instance.admin_token()
-
-
-@attr.s(slots=True, frozen=True)
-class MSC3861:
-    """Configuration for MSC3861: Matrix architecture change to delegate authentication via OIDC"""
-
-    enabled: bool = attr.ib(default=False, validator=attr.validators.instance_of(bool))
-    """Whether to enable MSC3861 auth delegation."""
-
-    @enabled.validator
-    def _check_enabled(self, attribute: attr.Attribute, value: bool) -> None:
-        # Only allow enabling MSC3861 if authlib is installed
-        if value and not HAS_AUTHLIB:
-            raise ConfigError(
-                "MSC3861 is enabled but authlib is not installed. "
-                "Please install authlib to use MSC3861.",
-                ("experimental", "msc3861", "enabled"),
-            )
-
-    issuer: str = attr.ib(default="", validator=attr.validators.instance_of(str))
-    """The URL of the OIDC Provider."""
-
-    issuer_metadata: JsonDict | None = attr.ib(default=None)
-    """The issuer metadata to use, otherwise discovered from /.well-known/openid-configuration as per MSC2965."""
-
-    client_id: str = attr.ib(
-        default="",
-        validator=attr.validators.instance_of(str),
-    )
-    """The client ID to use when calling the introspection endpoint."""
-
-    client_auth_method: ClientAuthMethod = attr.ib(
-        default=ClientAuthMethod.CLIENT_SECRET_POST, converter=ClientAuthMethod
-    )
-    """The auth method used when calling the introspection endpoint."""
-
-    _client_secret: str | None = attr.ib(
-        default=None,
-        validator=[
-            attr.validators.optional(attr.validators.instance_of(str)),
-            _check_client_secret,
-        ],
-    )
-    """
-    The client secret to use when calling the introspection endpoint,
-    when using any of the client_secret_* client auth methods.
-    """
-
-    _client_secret_path: str | None = attr.ib(
-        default=None,
-        validator=[
-            attr.validators.optional(attr.validators.instance_of(str)),
-            _check_client_secret,
-        ],
-    )
-    """
-    Alternative to `client_secret`: allows the secret to be specified in an
-    external file.
-    """
-
-    jwk: Optional["JsonWebKey"] = attr.ib(default=None, converter=_parse_jwks)
-    """
-    The JWKS to use when calling the introspection endpoint,
-    when using the private_key_jwt client auth method.
-    """
-
-    @client_auth_method.validator
-    def _check_client_auth_method(
-        self, attribute: attr.Attribute, value: ClientAuthMethod
-    ) -> None:
-        # Check that the right client credentials are provided for the client auth method.
-        if not self.enabled:
-            return
-
-        if value == ClientAuthMethod.PRIVATE_KEY_JWT and self.jwk is None:
-            raise ConfigError(
-                "A JWKS must be provided when using the private_key_jwt client auth method",
-                ("experimental", "msc3861", "client_auth_method"),
-            )
-
-        if (
-            value
-            in (
-                ClientAuthMethod.CLIENT_SECRET_POST,
-                ClientAuthMethod.CLIENT_SECRET_BASIC,
-                ClientAuthMethod.CLIENT_SECRET_JWT,
-            )
-            and self.client_secret() is None
-        ):
-            raise ConfigError(
-                f"A client secret must be provided when using the {value} client auth method",
-                ("experimental", "msc3861", "client_auth_method"),
-            )
-
-    introspection_endpoint: str | None = attr.ib(
-        default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
-    )
-    """The URL of the introspection endpoint used to validate access tokens."""
-
-    account_management_url: str | None = attr.ib(
-        default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
-    )
-    """The URL of the My Account page on the OIDC Provider as per MSC2965."""
-
-    _admin_token: str | None = attr.ib(
-        default=None,
-        validator=[
-            attr.validators.optional(attr.validators.instance_of(str)),
-            _check_admin_token,
-        ],
-    )
-    """
-    A token that should be considered as an admin token.
-    This is used by the OIDC provider, to make admin calls to Synapse.
-    """
-
-    _admin_token_path: str | None = attr.ib(
-        default=None,
-        validator=[
-            attr.validators.optional(attr.validators.instance_of(str)),
-            _check_admin_token,
-        ],
-    )
-    """
-    Alternative to `admin_token`: allows the secret to be specified in an
-    external file.
-    """
-
-    def client_secret(self) -> str | None:
-        """Returns the secret given via `client_secret` or `client_secret_path`."""
-        if self._client_secret_path:
-            return read_secret_from_file_once(
-                self._client_secret_path,
-                ("experimental_features", "msc3861", "client_secret_path"),
-            )
-        return self._client_secret
-
-    def admin_token(self) -> str | None:
-        """Returns the admin token given via `admin_token` or `admin_token_path`."""
-        if self._admin_token_path:
-            return read_secret_from_file_once(
-                self._admin_token_path,
-                ("experimental_features", "msc3861", "admin_token_path"),
-            )
-        return self._admin_token
-
-    def check_config_conflicts(
-        self, root: RootConfig, allow_secrets_in_config: bool
-    ) -> None:
-        """Checks for any configuration conflicts with other parts of Synapse.
-
-        Raises:
-            ConfigError: If there are any configuration conflicts.
-        """
-
-        if not self.enabled:
-            return
-
-        if self._client_secret and not allow_secrets_in_config:
-            raise ConfigError(
-                "Config options that expect an in-line secret as value are disabled",
-                ("experimental", "msc3861", "client_secret"),
-            )
-
-        if self.jwk and not allow_secrets_in_config:
-            raise ConfigError(
-                "Config options that expect an in-line secret as value are disabled",
-                ("experimental", "msc3861", "jwk"),
-            )
-
-        if self._admin_token and not allow_secrets_in_config:
-            raise ConfigError(
-                "Config options that expect an in-line secret as value are disabled",
-                ("experimental", "msc3861", "admin_token"),
-            )
-
-        if (
-            root.auth.password_enabled_for_reauth
-            or root.auth.password_enabled_for_login
-        ):
-            raise ConfigError(
-                "Password auth cannot be enabled when OAuth delegation is enabled",
-                ("password_config", "enabled"),
-            )
-
-        if root.registration.enable_registration:
-            raise ConfigError(
-                "Registration cannot be enabled when OAuth delegation is enabled",
-                ("enable_registration",),
-            )
-
-        # We only need to test the user consent version, as if it must be set if the user_consent section was present in the config
-        if root.consent.user_consent_version is not None:
-            raise ConfigError(
-                "User consent cannot be enabled when OAuth delegation is enabled",
-                ("user_consent",),
-            )
-
-        if (
-            root.oidc.oidc_enabled
-            or root.saml2.saml2_enabled
-            or root.cas.cas_enabled
-            or root.jwt.jwt_enabled
-        ):
-            raise ConfigError("SSO cannot be enabled when OAuth delegation is enabled")
-
-        if bool(root.authproviders.password_providers):
-            raise ConfigError(
-                "Password auth providers cannot be enabled when OAuth delegation is enabled"
-            )
-
-        if root.captcha.enable_registration_captcha:
-            raise ConfigError(
-                "CAPTCHA cannot be enabled when OAuth delegation is enabled",
-                ("captcha", "enable_registration_captcha"),
-            )
-
-        if root.auth.login_via_existing_enabled:
-            raise ConfigError(
-                "Login via existing session cannot be enabled when OAuth delegation is enabled",
-                ("login_via_existing_session", "enabled"),
-            )
-
-        if root.registration.refresh_token_lifetime:
-            raise ConfigError(
-                "refresh_token_lifetime cannot be set when OAuth delegation is enabled",
-                ("refresh_token_lifetime",),
-            )
-
-        if root.registration.nonrefreshable_access_token_lifetime:
-            raise ConfigError(
-                "nonrefreshable_access_token_lifetime cannot be set when OAuth delegation is enabled",
-                ("nonrefreshable_access_token_lifetime",),
-            )
-
-        if root.registration.session_lifetime:
-            raise ConfigError(
-                "session_lifetime cannot be set when OAuth delegation is enabled",
-                ("session_lifetime",),
-            )
-
-        if root.registration.enable_3pid_changes:
-            raise ConfigError(
-                "enable_3pid_changes cannot be enabled when OAuth delegation is enabled",
-                ("enable_3pid_changes",),
-            )
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
@@ -490,18 +174,14 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
-        # MSC3861: Matrix architecture change to delegate authentication via OIDC
-        try:
-            self.msc3861 = MSC3861(**experimental.get("msc3861", {}))
-        except ValueError as exc:
+        # MSC3861 was replaced by the stable Matrix Authentication Service integration.
+        msc3861_config = experimental.get("msc3861", {})
+        if msc3861_config:  # non-empty dict
             raise ConfigError(
-                "Invalid MSC3861 configuration", ("experimental", "msc3861")
-            ) from exc
-
-        # Check that none of the other config options conflict with MSC3861 when enabled
-        self.msc3861.check_config_conflicts(
-            self.root, allow_secrets_in_config=allow_secrets_in_config
-        )
+                "experimental_features.msc3861 was removed. "
+                "Use the matrix_authentication_service configuration instead.",
+                ("experimental", "msc3861"),
+            )
 
         self.msc4028_push_encrypted_events = experimental.get(
             "msc4028_push_encrypted_events", False
@@ -523,15 +203,15 @@ class ExperimentalConfig(Config):
         # See https://github.com/element-hq/synapse/issues/19524
         self.msc4370_enabled = experimental.get("msc4370_enabled", False)
 
-        auth_delegated = self.msc3861.enabled or (
-            config.get("matrix_authentication_service") or {}
-        ).get("enabled", False)
+        auth_delegated = (config.get("matrix_authentication_service") or {}).get(
+            "enabled", False
+        )
 
         if (
             self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
         ) and not auth_delegated:
             raise ConfigError(
-                "MSC4108 requires MSC3861 or matrix_authentication_service to be enabled",
+                "MSC4108 requires matrix_authentication_service to be enabled",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
@@ -606,6 +286,10 @@ class ExperimentalConfig(Config):
         # MSC4306: Thread Subscriptions
         # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
+
+        # MSC4446: Allow moving the fully read marker backwards.
+        # Tracked in: https://github.com/element-hq/synapse/issues/19940
+        self.msc4446_enabled: bool = experimental.get("msc4446_enabled", False)
 
         # MSC4354: Sticky Events
         # Tracked in: https://github.com/element-hq/synapse/issues/19409

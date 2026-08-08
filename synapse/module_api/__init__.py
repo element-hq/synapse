@@ -90,6 +90,9 @@ from synapse.module_api.callbacks.account_validity_callbacks import (
     ON_USER_LOGIN_CALLBACK,
     ON_USER_REGISTRATION_CALLBACK,
 )
+from synapse.module_api.callbacks.federation import (
+    ON_EVENT_DELIVERED_OVER_FEDERATION_CALLBACK,
+)
 from synapse.module_api.callbacks.media_repository_callbacks import (
     GET_MEDIA_CONFIG_FOR_USER_CALLBACK,
     GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK,
@@ -354,9 +357,7 @@ class ModuleApi:
         self._device_handler = hs.get_device_handler()
         self.custom_template_dir = hs.config.server.custom_template_directory
         self._callbacks = hs.get_module_api_callbacks()
-        self._auth_delegation_enabled = (
-            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
-        )
+        self._auth_delegation_enabled = hs.config.mas.enabled
         self._event_serializer = hs.get_event_client_serializer()
 
         try:
@@ -631,6 +632,20 @@ class ModuleApi:
         if add_field_to_unsigned_callback is not None:
             self._event_serializer.register_add_extra_fields_to_unsigned_client_event_callback(
                 add_field_to_unsigned_callback
+            )
+
+    def register_federation_callbacks(
+        self,
+        *,
+        on_event_delivered_over_federation: ON_EVENT_DELIVERED_OVER_FEDERATION_CALLBACK
+        | None = None,
+    ) -> None:
+        """Registers callbacks for federation.
+
+        Added in Synapse v1.158.0."""
+        if on_event_delivered_over_federation is not None:
+            self._callbacks.federation.register_callbacks(
+                on_event_delivered_over_federation=on_event_delivered_over_federation
             )
 
     #########################################################################
@@ -2027,10 +2042,11 @@ class ModuleApi:
                 deactivation,
             )
 
-        await self._hs.get_profile_handler().set_displayname(
+        await self._hs.get_profile_handler().dispatch_set_profile_field(
             target_user=user_id,
             requester=requester,
-            new_displayname=new_displayname,
+            field_name=ProfileFields.DISPLAYNAME,
+            new_value=new_displayname,
             by_admin=True,
         )
 

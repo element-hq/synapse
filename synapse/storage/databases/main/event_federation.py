@@ -1983,6 +1983,13 @@ class EventFederationWorkerStore(
         latest_events: list[str],
         limit: int,
     ) -> list[EventBase]:
+        """
+        Walk backwards in the DAG of events,
+        starting at `latest_events` and stopping at `earliest_events` (or when having reached `limit` events).
+
+        This function will check that `latest_events` and `earliest_events` are in the correct
+        room (`room_id`), appropriately ignoring any that aren't.
+        """
         ids = await self.db_pool.runInteraction(
             "get_missing_events",
             self._get_missing_events,
@@ -2001,20 +2008,49 @@ class EventFederationWorkerStore(
         latest_events: list[str],
         limit: int,
     ) -> list[str]:
+        # It's OK that this has not been filtered by correct-room,
+        # because we will only compare based on event ID from the events
+        # we happen to run into.
         seen_events = set(earliest_events)
-        front = set(latest_events) - seen_events
-        event_results: list[str] = []
 
-        query = (
-            "SELECT prev_event_id FROM event_edges "
-            "WHERE event_id = ? AND NOT is_state "
-            "LIMIT ?"
+        # Pre-filter the `latest_events` to only include those
+        # that are in this room (and that we know about)
+        # This makes events in the wrong room get treated the same as unknown events.
+        events_clause, events_args = make_in_list_sql_clause(
+            self.database_engine,
+            "event_id",
+            # Don't waste time looking at events that the requester told us
+            # they already know about.
+            # (They probably shouldn't send this in the first place)
+            set(latest_events) - seen_events,
         )
+        txn.execute(
+            f"""
+            SELECT event_id
+            FROM events
+            WHERE {events_clause} AND room_id = ?
+            """,
+            (*events_args, room_id),
+        )
+        # Start walking back from the legitimate and known `latest_events`
+        front = {latest_event_id for (latest_event_id,) in txn}
+
+        event_results: list[str] = []
 
         while front and len(event_results) < limit:
             new_front = set()
             for event_id in front:
-                txn.execute(query, (event_id, limit - len(event_results)))
+                txn.execute(
+                    """
+                    SELECT ee.prev_event_id FROM event_edges AS ee
+                    JOIN events ON events.event_id = ee.prev_event_id
+                    WHERE ee.event_id = ?
+                    AND events.room_id = ?
+                    AND NOT ee.is_state
+                    LIMIT ?
+                    """,
+                    (event_id, room_id, limit - len(event_results)),
+                )
                 new_results = {t[0] for t in txn} - seen_events
 
                 new_front |= new_results
