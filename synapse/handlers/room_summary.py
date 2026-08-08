@@ -51,7 +51,7 @@ from synapse.storage.databases.main.state import RoomHierarchyState
 from synapse.types import JsonDict, JsonMapping, Requester, StateMap, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
-from synapse.util.async_helpers import gather_results, yieldable_gather_results
+from synapse.util.async_helpers import concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
@@ -71,6 +71,10 @@ MAX_SERVERS_PER_SPACE = 3
 # number of upcoming rooms whose summaries (local DB reads or remote federation
 # requests) are fetched concurrently, ahead of the strictly-ordered traversal.
 PREFETCH_SUMMARIES = 10
+
+# how many of a space's children are summarised at once when responding to a
+# federation hierarchy request.
+CHILD_SUMMARY_CONCURRENCY = 10
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -331,8 +335,17 @@ class RoomSummaryHandler:
         # Iterate through the queue until we reach the limit or run out of
         # rooms to include.
         while room_queue and len(rooms_result) < limit:
-            # Kick off summary fetches for the next few rooms in traversal order.
-            for upcoming in room_queue[-PREFETCH_SUMMARIES:]:
+            # Kick off summary fetches for the next few rooms in traversal
+            # order, but never for more rooms than are still needed to fill the
+            # page: each one may be a federation request, and any we do not
+            # consume is wasted (and would be re-issued for the next page).
+            window = min(PREFETCH_SUMMARIES, limit - len(rooms_result))
+            # NB reversed(): the queue is a stack, so the LAST entries are
+            # processed first. The same room can appear in the queue more than
+            # once (a room linked from two spaces; the queue is only deduped at
+            # pop time), and the entry carries the via/depth used to summarise
+            # it — so the entry registered here must be the one popped first.
+            for upcoming in reversed(room_queue[-window:]):
                 if (
                     upcoming.room_id not in processed_rooms
                     and upcoming.room_id not in prefetched
@@ -518,19 +531,31 @@ class RoomSummaryHandler:
             assert isinstance(room_id, str)
             child_ids.append(room_id)
 
-        async def summarize_child(
-            room_id: str,
-        ) -> tuple[str, Optional["_RoomEntry"]] | None:
+        summaries: list[tuple[str, Optional["_RoomEntry"]] | None] = [None] * len(
+            child_ids
+        )
+
+        async def summarize_child(indexed_room_id: tuple[int, str]) -> None:
+            index, room_id = indexed_room_id
             # If the room is unknown, skip it.
             if not await self._store.is_host_joined(room_id, self._server_name):
-                return None
-            return room_id, await self._summarize_local_room(
-                None, origin, room_id, suggested_only, include_children=False
+                return
+            summaries[index] = (
+                room_id,
+                await self._summarize_local_room(
+                    None, origin, room_id, suggested_only, include_children=False
+                ),
             )
 
         # Summarise each child (but not its children) concurrently, adding them
-        # to the response in their original order.
-        for result in await yieldable_gather_results(summarize_child, child_ids):
+        # to the response in their original order. This endpoint is reachable by
+        # any federating server and each summary itself fans out, so cap how
+        # many run at once rather than issuing all MAX_ROOMS_PER_SPACE at once.
+        await concurrently_execute(
+            summarize_child, list(enumerate(child_ids)), CHILD_SUMMARY_CONCURRENCY
+        )
+
+        for result in summaries:
             if result is None:
                 continue
             room_id, room_entry = result
@@ -600,7 +625,7 @@ class RoomSummaryHandler:
             except (NotFoundError, UnsupportedRoomVersionError):
                 pass
 
-        is_partial_state, hierarchy_state, _, _ = await make_deferred_yieldable(
+        is_partial_state, hierarchy_state, stats, _ = await make_deferred_yieldable(
             gather_results(
                 (
                     # NB lambdas as run_in_background's typing rejects @cached methods.
@@ -631,6 +656,12 @@ class RoomSummaryHandler:
                 include_children,
                 admin_skip_room_visibility_check,
             )
+
+        if stats is None:
+            # We have state for the room but no row in the rooms table, so there
+            # is nothing to summarise. _build_room_entry would assert.
+            logger.info("room %s has no room entry, omitting from summary", room_id)
+            return None
 
         if (
             not admin_skip_room_visibility_check

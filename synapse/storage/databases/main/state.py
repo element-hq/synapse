@@ -611,7 +611,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             "get_filtered_current_state_ids", _get_filtered_current_state_ids_txn
         )
 
-    @cached(max_entries=50000)
+    # NB max_entries is lower than the sibling state caches: each value holds
+    # every m.space.child event of the room, so entries are not uniformly small.
+    @cached(max_entries=10000)
     async def get_room_hierarchy_state(
         self, room_id: str
     ) -> Optional["RoomHierarchyState"]:

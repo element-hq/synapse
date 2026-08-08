@@ -404,6 +404,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             logger.error("store_room with room_id=%s failed: %s", room_id, e)
             raise StoreError(500, "Problem creating room.")
 
+        # The room may have been looked up before we had a row for it (e.g. a
+        # remote server asking us to summarise it), caching a None; the stats
+        # writer only invalidates once it catches up.
+        await self.invalidate_cache_and_stream("get_room_with_stats", (room_id,))
+
     async def get_room(self, room_id: str) -> tuple[bool, bool] | None:
         """Retrieve a room.
 
@@ -2489,6 +2494,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 "has_auth_chain_index": has_auth_chain_index,
             },
         )
+        # As in store_room: drop any negative entry cached before the room row
+        # existed.
+        await self.invalidate_cache_and_stream("get_room_with_stats", (room_id,))
 
 
 class _BackgroundUpdates:
@@ -2996,6 +3004,10 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "has_auth_chain_index": has_auth_chain_index,
             },
         )
+        # The room may have been looked up before we had a row for it (e.g. a
+        # remote server asking us to summarise it), caching a None; the stats
+        # writer only invalidates once it catches up.
+        await self.invalidate_cache_and_stream("get_room_with_stats", (room_id,))
 
     async def store_partial_state_room(
         self,
