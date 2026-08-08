@@ -1351,7 +1351,7 @@ def _child_events_comparison_key(
 
     1. The 'order' key, if it is valid.
     2. The 'origin_server_ts' of the 'm.space.child' event.
-    3. The 'room_id'.
+    3. The child room ID (the event's state key).
 
     Args:
         child: The event for generating a comparison key.
@@ -1361,7 +1361,7 @@ def _child_events_comparison_key(
             False if the ordering is valid.
             The 'order' field or None if it is not given or invalid.
             The 'origin_server_ts' field.
-            The room ID.
+            The child room ID.
     """
     order = child.content.get("order")
     # If order is not a string or doesn't meet the requirements, ignore it.
@@ -1371,4 +1371,8 @@ def _child_events_comparison_key(
         order = None
 
     # Items without an order come last.
-    return order is None, order, child.origin_server_ts, child.room_id
+    #
+    # NB the final tie-break is the CHILD room id (the state key), not the room
+    # the event lives in — that is the same for every child of a space, so it
+    # never actually broke a tie.
+    return order is None, order, child.origin_server_ts, child.state_key

@@ -51,8 +51,14 @@ from tests.unittest import override_config
 def _create_event(
     room_id: str, order: Any | None = None, origin_server_ts: int = 0
 ) -> mock.Mock:
+    """Build a fake m.space.child event pointing at `room_id`.
+
+    The child room id is the event's state key (the event itself lives in the
+    parent space).
+    """
     result = mock.Mock(name=room_id)
-    result.room_id = room_id
+    result.state_key = room_id
+    result.room_id = "!parent:test"
     result.content = {}
     result.origin_server_ts = origin_server_ts
     if order is not None:
