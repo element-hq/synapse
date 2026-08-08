@@ -50,7 +50,8 @@ from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.storage.databases.main.state import RoomHierarchyState
 from synapse.types import JsonDict, JsonMapping, Requester, StateMap, StrCollection
 from synapse.types.state import StateFilter
-from synapse.util.async_helpers import yieldable_gather_results
+from synapse.util import unwrapFirstError
+from synapse.util.async_helpers import gather_results, yieldable_gather_results
 from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
@@ -581,15 +582,46 @@ class RoomSummaryHandler:
         Returns:
             A room entry if the room should be returned. None, otherwise.
         """
+
         # Fast path: serve the entry entirely from the cached room hierarchy
         # state + room stats (both invalidated when the underlying data
         # changes), so a warm request does no DB work at all. Partial-state
         # rooms fall back to the uncached path, as their cached current state
         # may be incomplete; unknown rooms fall back for the pending-invite
         # handling.
-        hierarchy_state = None
-        if not await self._store.is_partial_state_room(room_id):
-            hierarchy_state = await self._store.get_room_hierarchy_state(room_id)
+        #
+        # The per-room lookups are independent, so run them (including warming
+        # the room-stats / room-version caches read later in this path)
+        # concurrently: on a cold cache a serial chain here would otherwise
+        # undo the traversal-level parallelism on latency-bound deployments.
+        async def prime_room_version() -> None:
+            try:
+                await self._store.get_room_version(room_id)
+            except (NotFoundError, UnsupportedRoomVersionError):
+                pass
+
+        is_partial_state, hierarchy_state, _, _ = await make_deferred_yieldable(
+            gather_results(
+                (
+                    # NB lambdas as run_in_background's typing rejects @cached methods.
+                    run_in_background(
+                        lambda: self._store.is_partial_state_room(room_id)
+                    ),
+                    run_in_background(
+                        lambda: self._store.get_room_hierarchy_state(room_id)
+                    ),
+                    run_in_background(lambda: self._store.get_room_with_stats(room_id)),
+                    run_in_background(prime_room_version),
+                ),
+                consumeErrors=True,
+            )
+        ).addErrback(unwrapFirstError)
+        if is_partial_state:
+            # The value cached just now may have been computed from partial
+            # state: drop it and use the uncached path (which resolves state
+            # via the storage controllers).
+            self._store.get_room_hierarchy_state.invalidate((room_id,))
+            hierarchy_state = None
         if hierarchy_state is None:
             return await self._summarize_local_room_uncached(
                 requester,

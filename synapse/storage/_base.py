@@ -139,6 +139,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_room_hierarchy_state", (room_id,))
         self._attempt_to_invalidate_cache(
             "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
         )
@@ -171,6 +172,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_room_hierarchy_state", (room_id,))
         self._attempt_to_invalidate_cache(
             "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
         )
