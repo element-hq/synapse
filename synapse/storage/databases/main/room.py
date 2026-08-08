@@ -404,10 +404,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             logger.error("store_room with room_id=%s failed: %s", room_id, e)
             raise StoreError(500, "Problem creating room.")
 
-        # The room may have been looked up before we had a row for it (e.g. a
-        # remote server asking us to summarise it), caching a None; the stats
-        # writer only invalidates once it catches up.
-        await self.invalidate_cache_and_stream("get_room_with_stats", (room_id,))
+        # NB no get_room_with_stats invalidation here, unlike the paths that
+        # store a room we learn about over federation: this is only reached for
+        # a room we are creating ourselves, whose (freshly generated) id nothing
+        # can have looked up yet, so there is no negative cache entry to clear.
 
     async def get_room(self, room_id: str) -> tuple[bool, bool] | None:
         """Retrieve a room.
