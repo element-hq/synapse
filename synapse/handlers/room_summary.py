@@ -312,7 +312,14 @@ class RoomSummaryHandler:
         # traversal order. Values are ("ok", result) / ("err", exception) so that a
         # prefetch which is never consumed (page limit hit first) cannot produce an
         # unhandled error.
-        prefetched: dict[str, "Deferred"] = {}
+        #
+        # The queue entry a summary was computed for is kept alongside it: the
+        # same room can be queued more than once (linked from two spaces; the
+        # queue is only deduplicated when popped), each entry carrying the
+        # via/depth to summarise that edge with, and an entry queued later can
+        # be popped first. A prefetch is therefore only usable by the very entry
+        # it was started for.
+        prefetched: dict[str, tuple[_RoomQueueEntry, "Deferred"]] = {}
 
         async def prefetch(
             entry: _RoomQueueEntry,
@@ -341,16 +348,18 @@ class RoomSummaryHandler:
             # consume is wasted (and would be re-issued for the next page).
             window = min(PREFETCH_SUMMARIES, limit - len(rooms_result))
             # NB reversed(): the queue is a stack, so the LAST entries are
-            # processed first. The same room can appear in the queue more than
-            # once (a room linked from two spaces; the queue is only deduped at
-            # pop time), and the entry carries the via/depth used to summarise
-            # it — so the entry registered here must be the one popped first.
+            # processed first, and prefetching them in that order means the
+            # entry that is popped next is the one whose summary is furthest
+            # along.
             for upcoming in reversed(room_queue[-window:]):
                 if (
                     upcoming.room_id not in processed_rooms
                     and upcoming.room_id not in prefetched
                 ):
-                    prefetched[upcoming.room_id] = run_in_background(prefetch, upcoming)
+                    prefetched[upcoming.room_id] = (
+                        upcoming,
+                        run_in_background(prefetch, upcoming),
+                    )
 
             queue_entry = room_queue.pop()
             room_id = queue_entry.room_id
@@ -361,8 +370,12 @@ class RoomSummaryHandler:
 
             logger.debug("Processing room %s", room_id)
 
-            deferred = prefetched.pop(room_id, None)
-            if deferred is None:
+            # Only use a prefetch that was started for THIS entry: another
+            # entry for the same room carries a different via/depth, and would
+            # summarise a different edge. Any other prefetch is discarded (its
+            # errors are already captured in its result tuple).
+            prefetch_entry, deferred = prefetched.pop(room_id, (None, None))
+            if prefetch_entry is not queue_entry or deferred is None:
                 deferred = run_in_background(prefetch, queue_entry)
             status, value = await make_deferred_yieldable(deferred)
             if status == "err":
