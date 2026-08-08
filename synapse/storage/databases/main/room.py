@@ -430,8 +430,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             return row
         return bool(row[0]), bool(row[1])
 
+    @cached(max_entries=10000)
     async def get_room_with_stats(self, room_id: str) -> RoomStats | None:
         """Retrieve room with statistics.
+
+        Cached; invalidated when the room's stats rows are written
+        (`update_room_state` / `_update_stats_delta_txn`), when the room's
+        directory visibility changes, and on room purge.
 
         Args:
             room_id: The ID of the room to retrieve.
@@ -2371,12 +2376,16 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         return True
 
     async def set_room_is_public(self, room_id: str, is_public: bool) -> None:
-        await self.db_pool.simple_update_one(
-            table="rooms",
-            keyvalues={"room_id": room_id},
-            updatevalues={"is_public": is_public},
-            desc="set_room_is_public",
-        )
+        def set_room_is_public_txn(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn,
+                table="rooms",
+                keyvalues={"room_id": room_id},
+                updatevalues={"is_public": is_public},
+            )
+            self._invalidate_cache_and_stream(txn, self.get_room_with_stats, (room_id,))
+
+        await self.db_pool.runInteraction("set_room_is_public", set_room_is_public_txn)
 
     async def set_room_is_public_appservice(
         self, room_id: str, appservice_id: str, network_id: str, is_public: bool

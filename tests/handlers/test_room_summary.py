@@ -273,6 +273,53 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         result["rooms"] += result2["rooms"]
         self._assert_hierarchy(result, expected)
 
+    def test_cache_invalidation(self) -> None:
+        """Repeated requests are served from the cached room summaries, which
+        must reflect changes to the underlying data immediately.
+        """
+        requester = create_requester(self.user)
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self._assert_hierarchy(result, [(self.space, [self.room]), (self.room, ())])
+
+        # Adding a child must be reflected on the next request.
+        room2 = self.helper.create_room_as(self.user, tok=self.token)
+        self._add_child(self.space, room2, self.token, order="a")
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self._assert_hierarchy(
+            result,
+            [(self.space, [room2, self.room]), (room2, ()), (self.room, ())],
+        )
+
+        # Removing a child (clearing its via) likewise.
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.SpaceChild,
+            body={},
+            tok=self.token,
+            state_key=room2,
+        )
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self._assert_hierarchy(result, [(self.space, [self.room]), (self.room, ())])
+
+        # A room name change flows through the room stats tables; their write
+        # must also invalidate the cached summary.
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.Name,
+            body={"name": "new name"},
+            tok=self.token,
+        )
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self.assertEqual(result["rooms"][0]["name"], "new name")
+
     def test_visibility(self) -> None:
         """A user not in a space cannot inspect it."""
         user2 = self.register_user("user2", "pass")

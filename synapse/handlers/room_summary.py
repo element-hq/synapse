@@ -47,7 +47,8 @@ from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.events import EventBase
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.types import JsonDict, Requester, StateMap, StrCollection
+from synapse.storage.databases.main.state import RoomHierarchyState
+from synapse.types import JsonDict, JsonMapping, Requester, StateMap, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.caches.response_cache import ResponseCache
@@ -580,6 +581,63 @@ class RoomSummaryHandler:
         Returns:
             A room entry if the room should be returned. None, otherwise.
         """
+        # Fast path: serve the entry entirely from the cached room hierarchy
+        # state + room stats (both invalidated when the underlying data
+        # changes), so a warm request does no DB work at all. Partial-state
+        # rooms fall back to the uncached path, as their cached current state
+        # may be incomplete; unknown rooms fall back for the pending-invite
+        # handling.
+        hierarchy_state = None
+        if not await self._store.is_partial_state_room(room_id):
+            hierarchy_state = await self._store.get_room_hierarchy_state(room_id)
+        if hierarchy_state is None:
+            return await self._summarize_local_room_uncached(
+                requester,
+                origin,
+                room_id,
+                suggested_only,
+                include_children,
+                admin_skip_room_visibility_check,
+            )
+
+        if (
+            not admin_skip_room_visibility_check
+            and not await self._is_local_room_accessible_from_summary(
+                room_id, hierarchy_state, requester, origin
+            )
+        ):
+            return None
+
+        room_entry = await self._build_room_entry(
+            room_id, hierarchy_state.join_rules_state_ids
+        )
+
+        # If the room is not a space return just the room information.
+        if room_entry.get("room_type") != RoomTypes.SPACE or not include_children:
+            return _RoomEntry(room_id, room_entry)
+
+        child_events = sorted(
+            filter(_stripped_child_has_valid_via, hierarchy_state.children),
+            key=_stripped_child_comparison_key,
+        )
+        if suggested_only:
+            child_events = [
+                e for e in child_events if e["content"].get("suggested") is True
+            ]
+        return _RoomEntry(room_id, room_entry, child_events)
+
+    async def _summarize_local_room_uncached(
+        self,
+        requester: str | None,
+        origin: str | None,
+        room_id: str,
+        suggested_only: bool,
+        include_children: bool = True,
+        admin_skip_room_visibility_check: bool = False,
+    ) -> Optional["_RoomEntry"]:
+        """The uncached path of `_summarize_local_room` (see its docstring):
+        used for partial-state rooms and rooms with no local state.
+        """
         # A single filtered current-state fetch covers the accessibility check,
         # the restricted-join-rules lookup in _build_room_entry AND the
         # space-child edges, instead of three separate (and, for the child
@@ -805,6 +863,93 @@ class RoomSummaryHandler:
             ):
                 allowed_rooms = (
                     await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
+                )
+                for space_id in allowed_rooms:
+                    if await self._event_auth_handler.is_host_in_room(space_id, origin):
+                        return True
+
+        logger.info(
+            "room %s is unpeekable and requester %s is not a member / not allowed to join, omitting from summary",
+            room_id,
+            requester or origin,
+        )
+        return False
+
+    async def _is_local_room_accessible_from_summary(
+        self,
+        room_id: str,
+        hierarchy_state: RoomHierarchyState,
+        requester: str | None,
+        origin: str | None = None,
+    ) -> bool:
+        """The cached-path equivalent of `_is_local_room_accessible` (same
+        semantics, see its docstring): decides access from the cached
+        authoritative join rule / history visibility plus per-user (or
+        per-server) cached membership lookups, without fetching room state.
+        """
+        try:
+            room_version = await self._store.get_room_version(room_id)
+        except UnsupportedRoomVersionError:
+            # If a room with an unsupported room version is encountered, ignore
+            # it to avoid breaking the entire summary response.
+            return False
+
+        # Include the room if it has join rules of public or knock.
+        join_rule = hierarchy_state.join_rule
+        if (
+            join_rule == JoinRules.PUBLIC
+            or (room_version.knock_join_rule and join_rule == JoinRules.KNOCK)
+            or (
+                room_version.knock_restricted_join_rule
+                and join_rule == JoinRules.KNOCK_RESTRICTED
+            )
+        ):
+            return True
+
+        # Include the room if it is peekable.
+        if hierarchy_state.history_visibility == HistoryVisibility.WORLD_READABLE:
+            return True
+
+        # Otherwise we need to check information specific to the user or server.
+        if requester:
+            # If they're in the room (or invited) they can see info on it.
+            if room_id in await self._store.get_rooms_for_user(requester):
+                return True
+            if await self._store.get_invite_for_local_user_in_room(requester, room_id):
+                return True
+
+            # Otherwise, check if they should be allowed access via membership in a space.
+            if await self._event_auth_handler.has_restricted_join_rules(
+                hierarchy_state.join_rules_state_ids, room_version
+            ):
+                allowed_rooms = (
+                    await self._event_auth_handler.get_rooms_that_allow_join(
+                        hierarchy_state.join_rules_state_ids
+                    )
+                )
+                if await self._event_auth_handler.is_user_in_rooms(
+                    allowed_rooms, requester
+                ):
+                    return True
+
+        # If this is a request over federation, check if the host is in the room or
+        # has a user who could join the room.
+        elif origin:
+            if await self._event_auth_handler.is_host_in_room(
+                room_id, origin
+            ) or await self._store.is_host_invited(room_id, origin):
+                return True
+
+            # Alternately, if the host has a user in any of the spaces specified
+            # for access, then the host can see this room (and should do filtering
+            # if the requester cannot see it).
+            if await self._event_auth_handler.has_restricted_join_rules(
+                hierarchy_state.join_rules_state_ids, room_version
+            ):
+                allowed_rooms = (
+                    await self._event_auth_handler.get_rooms_that_allow_join(
+                        hierarchy_state.join_rules_state_ids
+                    )
                 )
                 for space_id in allowed_rooms:
                     if await self._event_auth_handler.is_host_in_room(space_id, origin):
@@ -1092,7 +1237,7 @@ class _RoomEntry:
     # An iterable of the sorted, stripped children events for children of this room.
     #
     # This may not include all children.
-    children_state_events: Sequence[JsonDict] = ()
+    children_state_events: Sequence[JsonMapping] = ()
 
     def as_json(self, for_client: bool = False) -> JsonDict:
         """
@@ -1115,6 +1260,30 @@ class _RoomEntry:
 
         result["children_state"] = self.children_state_events
         return result
+
+
+def _stripped_child_has_valid_via(e: JsonMapping) -> bool:
+    """`_has_valid_via` for the stripped child dicts of a cached RoomHierarchyState."""
+    via = e["content"].get("via")
+    if not via or not isinstance(via, list):
+        return False
+    return all(isinstance(v, str) for v in via)
+
+
+def _stripped_child_comparison_key(
+    child: JsonMapping,
+) -> tuple[bool, str | None, int, str]:
+    """`_child_events_comparison_key` for the stripped child dicts of a cached
+    RoomHierarchyState. Ties beyond origin_server_ts break on the child room id
+    (the state key), per MSC2946.
+    """
+    order = child["content"].get("order")
+    if not isinstance(order, str):
+        order = None
+    elif len(order) > 50 or _INVALID_ORDER_CHARS_RE.search(order):
+        order = None
+
+    return order is None, order, child["origin_server_ts"], child["state_key"]
 
 
 def _has_valid_via(e: EventBase) -> bool:
