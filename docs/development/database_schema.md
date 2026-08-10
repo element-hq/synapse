@@ -84,11 +84,11 @@ reference only.
 If you want to recreate these schemas, they need to be made from a database that
 has had all background updates run.
 
-To do so, use `scripts-dev/make_full_schema.sh`. This will produce new
+To do so, use the `make_full_schema.sh` script. This will produce new
 `full.sql.postgres` and `full.sql.sqlite` files, after having applied ALL
 schema deltas and background updates.
 
-Run `make_full_schema.sh -h` for usage instructions.
+Run `poetry run make_full_schema.sh -h` for usage instructions.
 
 ## Delta files
 
