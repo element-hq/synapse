@@ -72,7 +72,6 @@ from .push_rule import PushRulesWorkerStore
 from .pusher import PusherStore
 from .receipts import ReceiptsStore
 from .registration import RegistrationStore
-from .rejections import RejectionsStore
 from .relations import RelationsStore
 from .room import RoomStore
 from .roommember import RoomMemberStore
@@ -132,7 +131,6 @@ class DataStore(
     PurgeEventsStore,
     EventFederationStore,
     MediaRepositoryStore,
-    RejectionsStore,
     FilteringWorkerStore,
     PusherStore,
     ApplicationServiceTransactionStore,
