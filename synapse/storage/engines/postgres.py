@@ -66,7 +66,7 @@ class PostgresEngine(
             "statement_timeout", Duration(minutes=10).as_millis()
         )
 
-        # Abort transactions that sits idle for too long.
+        # Abort transactions that sit idle for too long.
         #
         # Idle transactions can block maintenance tasks server-side like
         # vacuums, which can lead to bloat and performance issues.
