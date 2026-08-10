@@ -96,4 +96,3 @@ jobs:
         with:
           header: schema-diff
           path: ${{ runner.temp }}/schema_diff.md
-          ignore_empty: true
