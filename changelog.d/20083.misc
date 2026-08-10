@@ -1,0 +1,1 @@
+Stop reading from the legacy `state_events` and `rejections` tables.
