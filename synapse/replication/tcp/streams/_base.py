@@ -69,6 +69,9 @@ the wire format of stream rows.
 
 Prevents you from thinking you can push e.g. a `frozenset` over
 the wire and get it back on the other end.
+
+At the moment, to be safe, a type has to roundtrip correctly with our JSON codec.
+Consult the RdataCommand `from_line` and `to_line` for information.
 """
 
 # The type of a stream update row, after JSON deserialisation, but before
