@@ -1,1 +1,0 @@
-Stop reading from the unused `event_edges.is_state` column, in preparation for dropping it.
