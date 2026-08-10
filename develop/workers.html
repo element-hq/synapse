@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fc069fa3.js";
+            window.path_to_searchindex_js = "searchindex-b96362db.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -714,9 +714,14 @@ configured as stream writer for the <code>device_lists</code> stream:</p>
 </code></pre>
 <h5 id="the-quarantined_media_changes-stream"><a class="header" href="#the-quarantined_media_changes-stream">The <code>quarantined_media_changes</code> stream</a></h5>
 <p>The <code>quarantined_media_changes</code> stream supports multiple writers. The following endpoints
-can be handled by any worker, but should be routed directly to one of the workers
-configured as stream writer for the <code>quarantined_media_changes</code> stream:</p>
+must be routed directly to one of the workers configured as stream writer for the
+<code>quarantined_media_changes</code> stream (which must also be able to run the media
+repository, as these endpoints are only registered on media-capable workers):</p>
 <pre><code>^/_synapse/admin/v1/quarantine_media/.*$
+^/_synapse/admin/v1/room/.*/media/quarantine$
+^/_synapse/admin/v1/user/.*/media/quarantine$
+^/_synapse/admin/v1/media/quarantine/.*$
+^/_synapse/admin/v1/media/unquarantine/.*$
 </code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
 <p>The

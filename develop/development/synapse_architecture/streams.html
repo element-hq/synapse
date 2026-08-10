@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-fc069fa3.js";
+            window.path_to_searchindex_js = "../../searchindex-b96362db.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -340,6 +340,7 @@ necessary registration and event handling.</p>
 <li>if adding new writer configuration, add Docker-worker configuration, which lets us configure the writer worker in Complement tests: <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L331">[1]</a>, <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L440">[2]</a></li>
 </ul>
 </li>
+<li>Ensure that it’s been correctly added to <code>synapse/replication/tcp/handler.py</code> and it’s <code>streams_to_replicate</code> attribute to ensure that changes are actually replicated.</li>
 </ul>
 </li>
 </ul>
