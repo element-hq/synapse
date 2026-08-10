@@ -1,0 +1,1 @@
+Fix leave event missing from `state_after` (MSC4222) on incremental `/sync` when the leaving user is the last local user in the room, causing the server to clear `current_state_events`.
