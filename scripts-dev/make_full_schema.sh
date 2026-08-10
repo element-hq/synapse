@@ -232,20 +232,10 @@ psql "$POSTGRES_MAIN_DB_NAME" -w <<< "$DROP_COMMON_TABLES"
 psql "$POSTGRES_STATE_DB_NAME" -w <<< "$DROP_COMMON_TABLES"
 
 # For Reasons(TM), SQLite's `.schema` also dumps out "shadow tables", the implementation
-# details behind full text search tables. Omit these from the dumps.
-
-sqlite3 "$SQLITE_MAIN_DB" <<< "
-DROP TABLE event_search_content;
-DROP TABLE event_search_segments;
-DROP TABLE event_search_segdir;
-DROP TABLE event_search_docsize;
-DROP TABLE event_search_stat;
-DROP TABLE user_directory_search_content;
-DROP TABLE user_directory_search_segments;
-DROP TABLE user_directory_search_segdir;
-DROP TABLE user_directory_search_docsize;
-DROP TABLE user_directory_search_stat;
-"
+# details behind full text search tables.
+# Previously we omitted these from the dumps by dropping them beforehand,
+# but nowadays it seems to be forbidden to drop those.
+# The emitted dump adds `IF NOT EXISTS` text for them, so it's harmless.
 
 echo "Dumping SQLite3 schema..."
 

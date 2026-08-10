@@ -123,6 +123,7 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
@@ -350,6 +351,15 @@ class SyncRestServlet(RestServlet):
 
         if sync_result.to_device:
             response["to_device"] = {"events": sync_result.to_device}
+
+        if self._msc4429_enabled and sync_result.profile_updates:
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
+            response["org.matrix.msc4429.users"] = {
+                user_id: {"profile_updates": updates}
+                for user_id, updates in sync_result.profile_updates.items()
+            }
 
         if sync_result.device_lists.changed:
             response["device_lists"]["changed"] = list(sync_result.device_lists.changed)
