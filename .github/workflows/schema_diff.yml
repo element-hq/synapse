@@ -16,6 +16,9 @@ permissions:
 
 jobs:
   # Posts a GitHub PR comment that shows what the effective change to the schema is.
+  # Provides an excuse to run the `make_full_schema.sh` script in CI (so we keep it working)
+  # and can act as a review aid for schema changes, letting you easily see the diff of the
+  # end result, even when background updates or complex schema deltas are present.
   show-schema-diff:
     name: Show schema diff
     runs-on: ubuntu-latest
