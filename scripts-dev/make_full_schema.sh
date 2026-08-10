@@ -14,6 +14,7 @@ REQUIRED_DEPS=("synapse" "sqlite3" "psycopg2")
 usage() {
   echo
   echo "Usage: $0 -p <postgres_username> -o <path> [-c] [-n <schema number>] [-h]"
+  echo "It is the caller's responsibility to be in the correct Python environment (e.g. using \`poetry run\`)."
   echo
   echo "-p <postgres_username>"
   echo "  Username to connect to local postgres instance. The password will be requested"
