@@ -375,6 +375,7 @@ class WorkerConfig(Config):
             "push_rules",
             "device_lists",
             "thread_subscriptions",
+            "quarantined_media_changes",
         ):
             instances = _instance_to_list_converter(getattr(self.writers, stream))
             for instance in instances:
@@ -428,6 +429,11 @@ class WorkerConfig(Config):
         if len(self.writers.thread_subscriptions) == 0:
             raise ConfigError(
                 "Must specify at least one instance to handle `thread_subscriptions` messages."
+            )
+
+        if len(self.writers.quarantined_media_changes) == 0:
+            raise ConfigError(
+                "Must specify at least one instance to handle `quarantined_media_changes` messages."
             )
 
         self.events_shard_config = RoutableShardedWorkerHandlingConfig(
