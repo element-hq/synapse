@@ -1255,8 +1255,6 @@ def setup_test_homeserver(
                 server_name=server_name,
             )
 
-            database = DatabaseConnectionConfig("master", database_config)
-            config.database.databases = [database]
             prepare_database(
                 prepped_conn,
                 create_engine(database_config),
