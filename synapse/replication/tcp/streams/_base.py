@@ -845,7 +845,7 @@ class ProfileUpdatesStream(_StreamFromIdGen):
         updates = await self.store.get_updated_profile_updates(
             from_id=from_token, to_id=to_token, limit=limit
         )
-        rows = [
+        rows: list[tuple[int, tuple[RdataSafeValue, ...]]] = [
             (
                 stream_id,
                 # These are the args to `ProfileUpdatesStreamRow`
