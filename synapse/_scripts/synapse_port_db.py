@@ -917,6 +917,10 @@ class Porter:
                 "quarantined_media_id_seq",
                 [("quarantined_media_changes", "stream_id")],
             )
+            await self._setup_sequence(
+                "profile_updates_sequence",
+                [("profile_updates", "stream_id")],
+            )
 
             # Step 3. Get tables.
             self.progress.set_state("Fetching tables")
