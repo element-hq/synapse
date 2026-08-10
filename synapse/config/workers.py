@@ -127,9 +127,10 @@ class WriterLocations:
     """Specifies the instances that write various streams.
 
     Attributes:
-        events: The instances that write to the event, backfill and `sticky_events` streams.
-            (`sticky_events` is written to during event persistence so must be handled by the
-            same stream writers.)
+        events: The instances that write to the `event`, `backfill`, `sticky_events` and
+            `profile_updates` streams.
+            (`sticky_events` and `profile_updates` are written to during event
+            persistence so must be handled by the same stream writers.)
         typing: The instances that write to the typing stream. Currently
             can only be a single instance.
         to_device: The instances that write to the to_device stream. Currently
@@ -142,6 +143,8 @@ class WriterLocations:
         push_rules: The instances that write to the push stream. Currently
             can only be a single instance.
         device_lists: The instances that write to the device list stream.
+        thread_subscriptions: The instances that write to the thread subscriptions
+            stream.
         quarantined_media_changes: The instances that write to the quarantined media
              changes stream.
     """
@@ -179,7 +182,7 @@ class WriterLocations:
         converter=_instance_to_list_converter,
     )
     thread_subscriptions: list[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     quarantined_media_changes: list[str] = attr.ib(
@@ -361,8 +364,7 @@ class WorkerConfig(Config):
         writers = config.get("stream_writers") or {}
         self.writers = WriterLocations(**writers)
 
-        # Check that the configured writers for events and typing also appears in
-        # `instance_map`.
+        # Check that the configured writers also appear in `instance_map`.
         for stream in (
             "events",
             "typing",
@@ -371,6 +373,8 @@ class WorkerConfig(Config):
             "receipts",
             "presence",
             "push_rules",
+            "device_lists",
+            "thread_subscriptions",
         ):
             instances = _instance_to_list_converter(getattr(self.writers, stream))
             for instance in instances:
@@ -419,6 +423,11 @@ class WorkerConfig(Config):
         if len(self.writers.device_lists) == 0:
             raise ConfigError(
                 "Must specify at least one instance to handle `device_lists` messages."
+            )
+
+        if len(self.writers.thread_subscriptions) == 0:
+            raise ConfigError(
+                "Must specify at least one instance to handle `thread_subscriptions` messages."
             )
 
         self.events_shard_config = RoutableShardedWorkerHandlingConfig(

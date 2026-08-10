@@ -175,6 +175,7 @@ Changes in SCHEMA_VERSION = 93
 Changes in SCHEMA_VERSION = 94
     - Add `recheck` column (boolean, default true) to the `redactions` table.
     - MSC4242: Add state DAG tables.
+    - MSC4429: Track updates to user profile fields via a new stream.
 
 Changes in SCHEMA_VERSION = 95
     - `event_edges.is_state` is no longer read from (it has not been written to since SCHEMA_VERSION 72).
