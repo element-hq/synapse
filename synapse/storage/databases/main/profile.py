@@ -536,25 +536,25 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_profile_updates_for_user_and_fields_txn(
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
-            # TODO merge conflict, handle
-            # https://github.com/element-hq/synapse/pull/20003/commits/88f1990a39c05eb8833057a63e432c5815dc15f6
-            # ie optional fields
-            wanted_field_in_elems_clause, wanted_field_in_elems_args = (
-                make_in_list_sql_clause(
+            if field_names_empty_means_all_fields and not field_names:
+                field_clause = "pu.affected_fields IS NOT NULL"
+                field_args: list[str] = []
+            else:
+                wanted_field_in_elems_clause, field_args = make_in_list_sql_clause(
                     txn.database_engine, "field_names.value", field_names
                 )
-            )
 
-            if isinstance(txn.database_engine, PostgresEngine):
-                # Note that if we had a GIN index on `affected_fields`, this would defeat it.
-                # If we decide we want one, we should consider using the `?|` operator or its
-                # clearer-named `jsonb_exists_any` equivalent.
-                all_field_names_table_expression = "jsonb_array_elements_text(pu.affected_fields) AS field_names(value)"
-            else:
-                # json_each is a table-valued function that gives `value` as one of its column names
-                all_field_names_table_expression = (
-                    "json_each(pu.affected_fields) AS field_names"
-                )
+                if isinstance(txn.database_engine, PostgresEngine):
+                    # Note that if we had a GIN index on `affected_fields`, this would defeat it.
+                    # If we decide we want one, we should consider using the `?|` operator or its
+                    # clearer-named `jsonb_exists_any` equivalent.
+                    all_field_names_table_expression = "jsonb_array_elements_text(pu.affected_fields) AS field_names(value)"
+                else:
+                    # json_each is a table-valued function that gives `value` as one of its column names
+                    all_field_names_table_expression = (
+                        "json_each(pu.affected_fields) AS field_names"
+                    )
+                field_clause = f"(EXISTS (SELECT 1 FROM {all_field_names_table_expression} WHERE {wanted_field_in_elems_clause}))"
 
             user_clause = ""
             user_args: list[str] = []
@@ -579,7 +579,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     AND puf.user_id = ?
                     {user_clause}
                     AND (
-                        (EXISTS (SELECT 1 FROM {all_field_names_table_expression} WHERE {wanted_field_in_elems_clause}))
+                        {field_clause}
                         OR pu.action != ?
                     )
                 ORDER BY pu.stream_id ASC
@@ -589,7 +589,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     to_id,
                     user_id,
                     *user_args,
-                    *wanted_field_in_elems_args,
+                    *field_args,
                     ProfileUpdateAction.UPDATE.value,
                 ),
             )
@@ -597,18 +597,24 @@ class ProfileWorkerStore(SQLBaseStore):
 
             updates: list[ProfileUpdate] = []
             for stream_id, updated_user_id, action, affected_fields_dbjson in rows:
+                if affected_fields_dbjson is not None:
+                    # Get the field names that were affected by this update
+                    if field_names_empty_means_all_fields and not field_names:
+                        affected_fields = frozenset(db_to_json(affected_fields_dbjson))
+                    else:
+                        # Only include those that intersect with the field names
+                        # we care about
+                        affected_fields = (
+                            frozenset(db_to_json(affected_fields_dbjson)) & field_names
+                        )
+                else:
+                    affected_fields = None
                 updates.append(
                     ProfileUpdate(
                         stream_id=stream_id,
                         user_id=updated_user_id,
                         action=action,
-                        affected_fields=(
-                            # Get the field names that were affected by this update
-                            # and intersect with the field names we care about
-                            frozenset(db_to_json(affected_fields_dbjson)) & field_names
-                        )
-                        if affected_fields_dbjson is not None
-                        else None,
+                        affected_fields=affected_fields,
                     )
                 )
 
