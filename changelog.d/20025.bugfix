@@ -1,0 +1,1 @@
+Fix thumbnail generation failing for MPO images. Animations that cannot be decoded now fall back to a static thumbnail.
