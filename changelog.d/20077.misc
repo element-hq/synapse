@@ -1,0 +1,1 @@
+Set `idle_in_transaction_session_timeout` (default 30 minutes) on new PostgreSQL connections, so that wedged connections don't hold locks or block vacuum indefinitely.
