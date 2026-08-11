@@ -604,7 +604,8 @@ def _wait_for_actions(gh_token: str | None) -> None:
     # to check over and over when we know it won't be finished yet)
     time.sleep(10 * 60)
     while True:
-        # Then check once every minute
+        # Then check once every minute (arbitrarily short enough to not have to wait
+        # around too long while not spamming the GitHub API)
         time.sleep(1 * 60)
         response = urllib.request.urlopen(req)
         resp = json.loads(response.read())
