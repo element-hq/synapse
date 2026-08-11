@@ -12,7 +12,7 @@
 
 ## Updates to the Docker image
 
-- Run with `PYTHONUNBUFFERED=1` so to ensure can always see log output when things go wrong. ([\#20075](https://github.com/element-hq/synapse/issues/20075))
+- Run with `PYTHONUNBUFFERED=1` to ensure that we can always see log output when things go wrong. ([\#20075](https://github.com/element-hq/synapse/issues/20075))
 
 ## Improved Documentation
 
