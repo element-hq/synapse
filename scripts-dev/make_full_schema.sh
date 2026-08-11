@@ -248,7 +248,11 @@ psql "$POSTGRES_STATE_DB_NAME" -w <<< "$DROP_COMMON_TABLES"
 echo "Dumping SQLite3 schema..."
 
 mkdir -p "$OUTPUT_DIR/"{common,main,state}"/full_schemas/$SCHEMA_NUMBER"
-# `--nosys` prevents emitting `sqlite_sequence`
+# `--nosys` prevents emitting (some) SQLite internal tables like `sqlite_sequence` that
+# aren't managed by the Synapse application and don't need to be part of our full schema.
+#
+# (SQLite creates `sqlite_sequence` automatically when the database contains at least one
+# table with an AUTOINCREMENT column.)
 sqlite3 "$SQLITE_COMMON_DB" ".schema --nosys"            > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_COMMON_DB" ".dump --data-only --nosys" >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_MAIN_DB"   ".schema --nosys"            > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
