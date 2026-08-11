@@ -1,0 +1,1 @@
+Dust off `make_full_schema` and add CI using it to show schema diffs.
