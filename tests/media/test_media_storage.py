@@ -1469,11 +1469,12 @@ class ThumbnailerAnimatedTestCase(unittest.TestCase):
             f.write(_make_stale_mpo())
 
     def assert_is_first_frame(self, output: BytesIO) -> None:
-        """The first frame of every source here is red; WebP is lossy, so
-        allow some slop."""
+        """Raises an `AssertionError` unless the given image is red."""
         pixel = Image.open(output).convert("RGB").getpixel((16, 16))
         assert isinstance(pixel, tuple)
         red, green, blue = pixel
+        # The first frame of every source here is red.
+        # WebP is lossy, so allow *some* green/blue to be present.
         self.assertGreater(red, 200)
         self.assertLess(max(green, blue), 50)
 
@@ -1511,7 +1512,7 @@ class ThumbnailerAnimatedTestCase(unittest.TestCase):
 
     @parameterized.expand([("GIF", "gif"), ("PNG", "apng"), ("WEBP", "webp")])
     def test_animated_formats(self, fmt: str, ext: str) -> None:
-        """Every animated format we accept keeps its animation."""
+        """Every animated format we accept produces an animated thumbnail."""
         frames = [
             Image.new("RGBA", (64, 64), color)
             for color in ((255, 0, 0, 255), (0, 0, 255, 255))
@@ -1541,7 +1542,7 @@ class ThumbnailerAnimatedTestCase(unittest.TestCase):
 
     @parameterized.expand(["scale", "crop"])
     def test_mpo_is_not_animated(self, method: str) -> None:
-        """An MPO packs several stills into one JPEG, not an animation."""
+        """An MPO packs several stills into one JPEG; not an animation."""
         with Thumbnailer(self.mpo_path) as thumbnailer:
             self.assertFalse(thumbnailer.is_animated)
             out = getattr(thumbnailer, method)(

@@ -90,6 +90,10 @@ class Thumbnailer:
     def __init__(self, input_path: str):
         # Have we closed the image?
         self._closed = False
+        # Whether attempting to thumbnail the image failed for some reason. The
+        # thumbnailing code should fallback to treating the image as static in
+        # this case.
+        #
         # Cached so a broken animation isn't re-decoded for every thumbnail size.
         self._animation_broken = False
 
