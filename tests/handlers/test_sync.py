@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import Collection, ContextManager
+from typing import Collection, ContextManager, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -33,6 +33,7 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sync import (
+    LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE,
     SyncConfig,
     SyncRequestKey,
     SyncResult,
@@ -43,6 +44,7 @@ from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import (
     JsonDict,
+    JsonValue,
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
@@ -55,6 +57,8 @@ from synapse.util.duration import Duration
 import tests.unittest
 import tests.utils
 from tests.test_utils.event_builders import make_test_pdu_event
+from tests.test_utils.event_injection import inject_member_event
+from tests.unittest import override_config
 
 _request_key = 0
 
@@ -1150,6 +1154,1543 @@ def generate_sync_config(
         device_id=device_id,
         use_state_after=use_state_after,
     )
+
+
+class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
+    """Tests Sync Handler for profile updates."""
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.sync_handler = self.hs.get_sync_handler()
+        self.profile_handler = self.hs.get_profile_handler()
+        self.store = self.hs.get_datastores().main
+        self.user = self.register_user("user", "password")
+        self.tok = self.login("user", "password")
+        self.other_user = self.register_user("other_user", "password")
+        self.other_tok = self.login("other_user", "password")
+        self.joined_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=UserID.from_string(self.user),
+                field_name="m.status",
+                new_value={"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
+            )
+        )
+        self.helper.join(
+            room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
+
+    def test_initial_sync_no_profile_updates_if_not_enabled(self) -> None:
+        """Test that without MSC4429 enabled the initial sync response does not
+        contain any profile updates."""
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    self.user,
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(initial_result.profile_updates, {})
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_initial_sync_no_profile_updates_if_not_filtered_for(self) -> None:
+        """Test that with MSC4429 enabled the initial sync response does not
+        contain any profile updates, if fields are not filtered for."""
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            initial_result.profile_updates,
+            {},
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_initial_sync_responds_with_tracked_profile_updates(self) -> None:
+        """Test that with MSC4429 enabled the initial sync response does
+        contain profile updates for users who share rooms, for the fields the
+        client requests. This response should include our syncing user."""
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+        # Also set a field the client doesn't want
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="displayname",
+                new_value="New displayname",
+            )
+        )
+
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {"ids": ["m.status"]}
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        assert initial_result.profile_updates[self.user] is not None
+        assert initial_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            initial_result.profile_updates["@other_user:test"]["m.status"],
+            {"text": "On holiday", "emoji": "🏖"},
+        )
+        self.assertFalse(
+            "displayname" in initial_result.profile_updates["@other_user:test"].keys(),
+        )
+        self.assertCountEqual(
+            initial_result.profile_updates.keys(),
+            [
+                self.user,
+                "@other_user:test",
+            ],
+        )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_initial_sync_does_not_include_untracked_users_profile_updates(
+        self, is_lazy: bool
+    ) -> None:
+        """Test that with MSC4429 enabled the initial sync response does not
+        contain profile updates for users who do not share rooms."""
+        third_user = self.register_user("third_user", "password")
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+
+        requester = create_requester(self.user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {
+                "ids": ["m.status", "displayname", "avatar_url"]
+            }
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertIsNone(initial_result.profile_updates.get(third_user))
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_initial_sync_lazy_loading_responds_with_only_profiles_with_events(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the initial sync lazy loading response does
+        contain profile updates for events in the timeline.
+
+        This test ensures lazy loading sync only returns profiles that we also have
+        events for in the sync response. The second room in this test has the most
+        recent events from "third_user" and thus we don't get the profile of
+        "other_user" down the line, who is in the the same rooms as the syncer,
+        but not in the second room.
+        """
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+
+        requester = create_requester(self.user)
+
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+        # Check that lazy-loading filters out profile updates as well on initial sync.
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value={"text": "On fire", "emoji": "🔥"},
+            )
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=1, tok=self.other_tok
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=10, tok=third_tok
+        )
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Only third_user is returned, as lazy loading filters out the events from
+        # the other users
+        self.assertCountEqual(
+            initial_result.profile_updates.keys(),
+            [
+                "@third_user:test",
+            ],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_profile_update_diffs(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response does
+        contain profile update diffs."""
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+        # Set a field the client didn't ask for
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="uninterestingfield",
+                new_value="Content",
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["m.status"],
+            {"text": "On holiday", "emoji": "🏖"},
+        )
+        # We only send diffs in incremental sync for profile field updates
+        self.assertFalse(
+            "displayname"
+            in incremental_result.profile_updates["@other_user:test"].keys(),
+        )
+        # The client didn't ask for this field
+        self.assertFalse(
+            "uninterestingfield"
+            in incremental_result.profile_updates["@other_user:test"].keys(),
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_does_not_filter_profile_updates_when_lazy_loading(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync lazy loading response
+        does contain profile updates even if the user would be filtered out by lazy
+        loading.
+        """
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value={"text": "On fire", "emoji": "🔥"},
+            )
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=1, tok=self.other_tok
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=10, tok=third_tok
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="uninterestingfield",
+                new_value="Content",
+            )
+        )
+        # Join a federated user to the room
+        self.get_success(
+            inject_member_event(
+                self.hs,
+                self.joined_room,
+                "@federateduser:federatedhs",
+                "join",
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Ensure our federated user is filtered out, even though they have an
+        # event in the joined room timeline
+        self.assertFalse(
+            "@federateduser:federatedhs" in incremental_result.profile_updates.keys()
+        )
+
+        # Lazy loading only filters initial sync profile updates. Incremental syncs
+        # should include all tracked profile updates for the syncing user.
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [
+                "@other_user:test",
+                "@third_user:test",
+            ],
+        )
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+
+        # This is a field update, so should be here
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["m.status"],
+            {"text": "On holiday", "emoji": "🏖"},
+        )
+
+        # We don't have events for this user in this response, so their full profile
+        # is not included
+        self.assertFalse(
+            "displayname"
+            in incremental_result.profile_updates["@other_user:test"].keys(),
+        )
+        assert incremental_result.profile_updates["@third_user:test"] is not None
+
+        # This user has events in the timeline, thus the fields the client asked for
+        # are included
+        self.assertEqual(
+            incremental_result.profile_updates["@third_user:test"]["m.status"],
+            {"text": "On fire", "emoji": "🔥"},
+        )
+        self.assertFalse(
+            "uninterestingfield"
+            in incremental_result.profile_updates["@third_user:test"].keys(),
+        )
+        self.assertEqual(
+            incremental_result.profile_updates["@third_user:test"]["displayname"],
+            "third_user",
+        )
+
+    @parameterized.expand(
+        [
+            [True, True],
+            [False, False],
+            [True, False],
+            [False, True],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_sync_filters_out_profile_updates_from_federated_users(
+        self,
+        is_initial: bool,
+        is_lazy: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled any sync response
+        doesn't contain federated users even if there are timeline events from them.
+        """
+        # Join a federated user to the room, causing a membership event into
+        # the joined rooms sync response
+        self.get_success(
+            inject_member_event(
+                self.hs,
+                self.joined_room,
+                "@federateduser1:federatedhs",
+                "join",
+            )
+        )
+        requester = create_requester(self.user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {
+                "ids": ["m.status", "displayname", "avatar_url"]
+            },
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Ensure our federated user is filtered out, even though they have an
+        # event in the joined room timeline
+        self.assertFalse(
+            "@federateduser1:federatedhs" in initial_result.profile_updates.keys()
+        )
+        if not is_initial:
+            # Join another federated user to the room, causing a membership event into
+            # the joined rooms sync response
+            self.get_success(
+                inject_member_event(
+                    self.hs,
+                    self.joined_room,
+                    "@federateduser2:federatedhs",
+                    "join",
+                )
+            )
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=initial_result.next_batch,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+
+            # Ensure our federated user is filtered out, even though they have an
+            # event in the joined room timeline
+            self.assertFalse(
+                "@federateduser2:federatedhs"
+                in incremental_result.profile_updates.keys()
+            )
+
+    @parameterized.expand(
+        [
+            [True, True],
+            [False, False],
+            [True, False],
+            [False, True],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_sync_response_always_includes_the_user_themselves(
+        self,
+        is_initial: bool,
+        is_lazy: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled any sync response always contains the users
+        own updates.
+
+        This test is made with a user that is not in any rooms, to prove our code
+        to collect interested users from the profile updates always collect the user.
+        """
+        third_user = self.register_user("third_user", "password")
+        requester = create_requester(third_user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        if is_initial:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(third_user),
+                    requester=create_requester(third_user),
+                    field_name="field",
+                    new_value="Content",
+                )
+            )
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=third_user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        if is_initial:
+            assert initial_result.profile_updates["@third_user:test"] is not None
+            self.assertEqual(
+                initial_result.profile_updates["@third_user:test"]["field"],
+                "Content",
+            )
+        else:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(third_user),
+                    requester=create_requester(third_user),
+                    field_name="field",
+                    new_value="Content",
+                )
+            )
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=initial_result.next_batch,
+                    sync_config=generate_sync_config(
+                        user_id=third_user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            assert incremental_result.profile_updates["@third_user:test"] is not None
+            self.assertEqual(
+                incremental_result.profile_updates["@third_user:test"]["field"],
+                "Content",
+            )
+
+    @parameterized.expand(
+        [
+            [True, True],
+            [False, False],
+            [True, False],
+            [False, True],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_sync_profile_updates_works_correctly_with_falsey_values(
+        self,
+        is_initial: bool,
+        is_lazy: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled a sync response correctly includes falsey
+        profile field values.
+        """
+        requester = create_requester(self.user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["falseyvaluefield"]},
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        for value in [False, 0, "", [], {}, None]:
+            if is_initial:
+                self.get_success(
+                    self.profile_handler.set_field(
+                        target_user=UserID.from_string(self.other_user),
+                        requester=create_requester(self.other_user),
+                        field_name="falseyvaluefield",
+                        new_value=cast(JsonValue | dict[str, JsonValue], value),
+                    )
+                )
+            initial_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            if is_initial:
+                assert initial_result.profile_updates["@other_user:test"] is not None
+                self.assertEqual(
+                    initial_result.profile_updates["@other_user:test"][
+                        "falseyvaluefield"
+                    ],
+                    value,
+                )
+            else:
+                self.get_success(
+                    self.profile_handler.set_field(
+                        target_user=UserID.from_string(self.other_user),
+                        requester=create_requester(self.other_user),
+                        field_name="falseyvaluefield",
+                        new_value=cast(JsonValue | dict[str, JsonValue], value),
+                    )
+                )
+                incremental_result = self.get_success(
+                    self.sync_handler.wait_for_sync_for_user(
+                        requester,
+                        since_token=initial_result.next_batch,
+                        sync_config=generate_sync_config(
+                            user_id=self.user,
+                            filter_collection=FilterCollection(
+                                hs=self.hs,
+                                filter_json=filter_json,
+                            ),
+                        ),
+                        request_key=generate_request_key(),
+                    )
+                )
+                assert (
+                    incremental_result.profile_updates["@other_user:test"] is not None
+                )
+                self.assertEqual(
+                    incremental_result.profile_updates["@other_user:test"][
+                        "falseyvaluefield"
+                    ],
+                    value,
+                )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_lazy_loading_cache_filters_recently_sent_profiles_and_fields(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync lazy loading response
+        filters out unchanged profiles or fields we have recently sent to the client.
+        """
+        requester = create_requester(self.user)
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="sooninterestingfield",
+                new_value="Content",
+            )
+        )
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.helper.send_messages(
+            room_id=self.joined_room,
+            num_events=1,
+            tok=self.other_tok,
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Lazy loading incremental sync should include profiles from events
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [
+                "@other_user:test",
+            ],
+        )
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            set(incremental_result.profile_updates["@other_user:test"].keys()),
+            {"avatar_url", "displayname"},
+        )
+
+        # If we have more events from the other_user, and do another lazy sync,
+        # we don't expect the full profile to be sent again due to our cache.
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=1, tok=self.other_tok
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [],
+        )
+        # However, if we again add an event, we do expect any fields the client didn't
+        # previously ask for to be there.
+        self.helper.send_messages(
+            room_id=self.joined_room, num_events=1, tok=self.other_tok
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": [
+                                    "m.status",
+                                    "displayname",
+                                    "avatar_url",
+                                    "sooninterestingfield",
+                                ]
+                            },
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [
+                "@other_user:test",
+            ],
+        )
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            set(incremental_result.profile_updates["@other_user:test"].keys()),
+            {"sooninterestingfield"},
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_null_profile_if_user_no_longer_sharing_rooms(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response
+        includes a 'null' for users who are no longer sharing rooms.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.helper.leave(
+            room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertIsNone(
+            incremental_result.profile_updates["@other_user:test"],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_all_requested_fields_for_users_who_have_joined(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response
+        includes all the requested fields of a user who has joined a room with the
+        syncing user.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        # Set a status field we don't except to see in sync
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value={"text": "On fire", "emoji": "🔥"},
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        assert incremental_result.profile_updates["@third_user:test"] is not None
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [third_user],
+        )
+        self.assertEqual(
+            incremental_result.profile_updates["@third_user:test"]["displayname"],
+            "third_user",
+        )
+        self.assertIsNone(
+            incremental_result.profile_updates["@third_user:test"]["avatar_url"],
+        )
+        self.assertFalse(
+            "m.status" in incremental_result.profile_updates["@third_user:test"].keys(),
+        )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_includes_own_profile_updates(self, is_lazy: bool) -> None:
+        """Test that with MSC4429 enabled the incremental sync response includes
+        ones own profile updates."""
+        requester = create_requester(self.user)
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["m.status", "avatar_url"]}
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.user),
+                requester=requester,
+                field_name="m.status",
+                new_value={"text": "On holiday", "emoji": "🏖"},
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        assert incremental_result.profile_updates["@user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@user:test"]["m.status"],
+            {"text": "On holiday", "emoji": "🏖"},
+        )
+        # We didn't ask for displayname
+        self.assertFalse(
+            "displayname" in incremental_result.profile_updates["@user:test"].keys(),
+        )
+
+    @parameterized.expand([[True, False], [True, True], [False, False], [False, True]])
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_join_leave_join_leave_includes_user_joining_and_leaving(
+        self,
+        eager_sync: bool,
+        is_lazy: bool,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response
+        correctly handles multiple join / leave / join / leave in a row.
+
+        In the first variant we sync and check after each iteration of join/leave.
+        In the second variant we only sync at the end of all the join/leaves.
+        We do both of these as lazy and not-lazy variants.
+
+        This test checks that for a syncing user that is joining and leaving, a member
+        of the room gets the right profile information down the line.
+        """
+        # Use third_user for this test as other_user is already joined
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+
+        filter_json: dict[str, dict] = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["displayname", "avatar_url"]}
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Join the room
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        next_token = initial_result.next_batch
+        if eager_sync:
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=next_token,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            # We expect there to be the users profile
+            self.assertIsNotNone(
+                incremental_result.profile_updates["@third_user:test"],
+            )
+            next_token = incremental_result.next_batch
+        # Leave the room
+        self.helper.leave(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        if eager_sync:
+            # Ensure we don't get caught by the cache
+            self.reactor.advance((LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE / 1000) + 1)
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=next_token,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            # We expect there to be a null profile
+            self.assertIsNone(
+                incremental_result.profile_updates["@third_user:test"],
+            )
+            next_token = incremental_result.next_batch
+        # Join the room
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        if eager_sync:
+            # Ensure we don't get caught by the cache
+            self.reactor.advance((LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE / 1000) + 1)
+            incremental_result = self.get_success(
+                self.sync_handler.wait_for_sync_for_user(
+                    requester,
+                    since_token=next_token,
+                    sync_config=generate_sync_config(
+                        user_id=self.user,
+                        filter_collection=FilterCollection(
+                            hs=self.hs,
+                            filter_json=filter_json,
+                        ),
+                    ),
+                    request_key=generate_request_key(),
+                )
+            )
+            # We expect there to be the users profile
+            self.assertIsNotNone(
+                incremental_result.profile_updates["@third_user:test"],
+            )
+            next_token = incremental_result.next_batch
+        # Leave the room
+        self.helper.leave(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        # Ensure we don't get caught by the cache
+        self.reactor.advance((LAZY_LOADED_PROFILE_FIELDS_CACHE_MAX_AGE / 1000) + 1)
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=next_token,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # The end result should be null profile
+        self.assertIsNone(
+            incremental_result.profile_updates["@third_user:test"],
+        )
+
+    @parameterized.expand(
+        [
+            ["string value", "new string value"],
+            [True, False],
+            [None, "not None"],
+            [[], ["with item"]],
+            [{}, {"key": "value"}],
+            [{"foo": "bar"}, {"bar": "foo"}],
+            [42, 42.24],
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_profile_updates_dont_get_silenced_by_cache(
+        self,
+        value: str | bool | list | dict | int | float | None,
+        new_value: str | bool | list | dict | int | float | None,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental lazy sync response
+        includes all the profile update changes for the user, even if the profile
+        field has been recently sent and is in our lazy loading cache.
+
+        Parameterize across different types of potential value types that profile
+        field updates could have to ensure robustness.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertFalse(
+            "@other_user:test" in initial_result.profile_updates,
+        )
+
+        # Update the field
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value=cast(JsonValue | dict[str, JsonValue], value),
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # We should have the field change in our sync response.
+        # It will also be added to the lazy loading cache, so the same field value
+        # isn't sent again immediately.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            value,
+        )
+
+        # Update the field again, busting our cache
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value=cast(JsonValue | dict[str, JsonValue], new_value),
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+                            "room": {
+                                "state": {
+                                    "lazy_load_members": True,
+                                },
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Even though the field was added to the lazy loading members cache,
+        # it should come through as an update, as the field value changed.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            new_value,
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_cache_and_multiple_updates_to_the_same_field(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental lazy sync response
+        includes an update to a field, even when the value changes back to a
+        value set and cached previously.
+        """
+        requester = create_requester(self.user)
+        filter_json = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["field"]},
+            "room": {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            },
+        }
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertFalse(
+            "@other_user:test" in initial_result.profile_updates,
+        )
+
+        # Update the field
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # We should have the field change in our sync response.
+        # It will also be added to the lazy loading cache, so the same field value
+        # isn't sent again immediately.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            "value",
+        )
+
+        # Update the field again, busting our cache
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="new value",
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Even though the field was added to the lazy loading members cache,
+        # it should come through as an update, as the field value changed.
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            "new value",
+        )
+
+        # Update the field again, but to the previous value
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        # Also send an event
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        # Sync
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json=filter_json,
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        # Even though we've quite recently sent down this value, we should still
+        # see it again as it is a change
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["field"],
+            "value",
+        )
 
 
 class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
