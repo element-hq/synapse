@@ -74,6 +74,8 @@ def diff_schemas(
     parts: list[str] = [
         "## Schema Diff",
         "",
+        "Please check that this looks as expected!",
+        "",
     ]
 
     for db in ["common", "main", "state"]:
