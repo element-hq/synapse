@@ -1193,7 +1193,7 @@ class SlidingSyncExtensionHandler:
             to_id=to_token.profile_updates_key,
             user_id=user_id,
             field_names=fields,
-            field_names_empty_means_all_fields=False if fields else True,
+            field_names_empty_means_all_fields=True,
         )
         profile_user_ids = set()
         left_room_user_ids = {
@@ -1220,16 +1220,16 @@ class SlidingSyncExtensionHandler:
         updated_user_fields: dict[str, set[str]] = {}
         # Set fields from updates
         for update in updates:
-            # Skip the update if there is no field update (a joined or left room
-            # action), the client didn't ask for this field, or we're not
-            # interested in this user.
-            if (
-                not update.field_name
-                or (update.field_name not in fields and fields)
-                or update.user_id not in profile_user_ids
-            ):
+            if not update.affected_fields:
                 continue
-            updated_user_fields.setdefault(update.user_id, set()).add(update.field_name)
+            for field_name in update.affected_fields:
+                # Skip the update if the client didn't ask for this field, or we're not
+                # interested in this user.
+                if (
+                    field_name not in fields and fields
+                ) or update.user_id not in profile_user_ids:
+                    continue
+                updated_user_fields.setdefault(update.user_id, set()).add(field_name)
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
             profile_user_ids
