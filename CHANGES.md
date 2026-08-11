@@ -24,10 +24,6 @@ as we have recently updated the expiry date on the repository's GPG signing key.
 - Add upgrade notes to point out updated Debian package signing key. ([\#20066](https://github.com/element-hq/synapse/issues/20066))
 - Update stream cheatsheet docs to re-link `synapse/config/workers.py` which has more references. ([\#20086](https://github.com/element-hq/synapse/issues/20086))
 
-## Deprecations and Removals
-
-- Remove package build targets for Ubuntu 25.10 'Questing Quokka' (end-of-life 2026-07-01). ([\#20039](https://github.com/element-hq/synapse/issues/20039))
-
 ## Internal Changes
 
 - Fix tests that use `homeserver_to_use=GenericWorkerServer` not being able to be run standalone. ([\#20017](https://github.com/element-hq/synapse/issues/20017))
@@ -35,7 +31,6 @@ as we have recently updated the expiry date on the repository's GPG signing key.
 - Fix release script announcement to link to correct release branch of changelog. ([\#20023](https://github.com/element-hq/synapse/issues/20023))
 - Dust off `make_full_schema` and add CI using it to show schema diffs. ([\#20027](https://github.com/element-hq/synapse/issues/20027))
 - Remove broken `DROP` statements for SQLite in `make_full_schema` script. ([\#20028](https://github.com/element-hq/synapse/issues/20028))
-- Add package build targets for Ubuntu 26.04 'Resolute Raccoon'. ([\#20039](https://github.com/element-hq/synapse/issues/20039))
 - Document how to capture a JSON snapshot of a Grafana dashboard to aid in debugging. ([\#20048](https://github.com/element-hq/synapse/issues/20048))
 - Routinely purge old cancelled tasks from the database. ([\#20068](https://github.com/element-hq/synapse/issues/20068))
 - Introduce an `RdataSafeValue` type and correct some minor type annotation mistakes. ([\#20071](https://github.com/element-hq/synapse/issues/20071))
