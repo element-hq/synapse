@@ -19,6 +19,7 @@
 #
 #
 
+import json
 from unittest.case import SkipTest
 
 from twisted.internet.testing import MemoryReactor
@@ -201,6 +202,90 @@ class EventSearchInsertionTest(HomeserverTestCase):
             ),
         )
         self.assertCountEqual(values, ["hi", "2"])
+
+    def _rebuild_search_index(self) -> None:
+        """Simulate a full search-index rebuild: wipe `event_search` so nothing
+        is indexed, then schedule and run the `event_search` background reindex,
+        which exercises `_background_reindex_search`.
+        """
+        store = self.hs.get_datastores().main
+
+        self.get_success(
+            store.db_pool.runInteraction(
+                "clear_event_search",
+                lambda txn: txn.execute("DELETE FROM event_search"),
+            )
+        )
+
+        max_stream_id = store.get_room_max_stream_ordering()
+        store.db_pool.updates._all_done = False
+        self.get_success(
+            store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": store.EVENT_SEARCH_UPDATE_NAME,
+                    "progress_json": json.dumps(
+                        {
+                            "target_min_stream_id_inclusive": 0,
+                            "max_stream_id_exclusive": max_stream_id + 1,
+                            "rows_inserted": 0,
+                        }
+                    ),
+                },
+            )
+        )
+        self.wait_for_background_updates()
+
+    def test_reindex_search(self) -> None:
+        """The `event_search` background reindex must index all searchable event
+        types: `m.room.message`, `m.room.name` and `m.room.topic`.
+        """
+        store = self.hs.get_datastores().main
+
+        # Create a room and set a searchable topic, name and message through the
+        # normal client API so the events land in `events`/`event_json`.
+        self.register_user("alice", "password")
+        access_token = self.login("alice", "password")
+        room_id = self.helper.create_room_as("alice", tok=access_token)
+
+        self.helper.send_state(
+            room_id,
+            "m.room.topic",
+            {"topic": "searchable topic keyword"},
+            tok=access_token,
+        )
+        self.helper.send_state(
+            room_id,
+            "m.room.name",
+            {"name": "searchable name keyword"},
+            tok=access_token,
+        )
+        self.helper.send(room_id, "searchable message keyword", tok=access_token)
+
+        self._rebuild_search_index()
+
+        message_results = self.get_success(
+            store.search_msgs(
+                [room_id], "searchable message keyword", ["content.body"]
+            )
+        )
+        self.assertEqual(message_results["count"], 1, "message was not reindexed")
+
+        name_results = self.get_success(
+            store.search_msgs([room_id], "searchable name keyword", ["content.name"])
+        )
+        self.assertEqual(name_results["count"], 1, "name was not reindexed")
+
+        topic_results = self.get_success(
+            store.search_msgs(
+                [room_id], "searchable topic keyword", ["content.topic"]
+            )
+        )
+        self.assertEqual(
+            topic_results["count"],
+            1,
+            "room topic was not indexed by the search reindex",
+        )
 
 
 class MessageSearchTest(HomeserverTestCase):
