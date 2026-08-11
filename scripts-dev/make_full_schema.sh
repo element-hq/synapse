@@ -14,7 +14,7 @@ REQUIRED_DEPS=("synapse" "sqlite3" "psycopg2")
 usage() {
   echo
   echo "Usage: $0 -p <postgres_username> -o <path> [-c] [-n <schema number>] [-h]"
-  echo "It is the caller's responsibility to be in the correct Python environment (e.g. using \`poetry run\`)."
+  echo "It is the caller's responsibility to be in the correct Python environment (e.g. using \`poetry run scripts-dev/make_full_schema.sh\`)."
   echo
   echo "-p <postgres_username>"
   echo "  Username to connect to local postgres instance. The password will be requested"
@@ -301,7 +301,7 @@ cleanup_pg_schema() {
 
 echo "Dumping Postgres schema..."
 
-# --restrict-key: set the \restrict key to a static value for easy replacement
+# --restrict-key: set the \restrict key to a static value (normally a random string) for easy find/replacement in the code above.
 pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema  > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
 pg_dump --restrict-key=REMOVEME --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
 pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema  > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"

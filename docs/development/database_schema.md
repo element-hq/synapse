@@ -88,7 +88,7 @@ To do so, use the `make_full_schema.sh` script. This will produce new
 `full.sql.postgres` and `full.sql.sqlite` files, after having applied ALL
 schema deltas and background updates.
 
-Run `poetry run make_full_schema.sh -h` for usage instructions.
+Run `poetry run scripts-dev/make_full_schema.sh -h` for usage instructions.
 
 ## Delta files
 
