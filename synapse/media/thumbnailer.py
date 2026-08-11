@@ -79,6 +79,10 @@ class Thumbnailer:
     # format in this list becomes part of our trusted computing base.
     PILLOW_FORMATS = ("jpeg", "png", "webp", "gif")
 
+    # Pillow reports MPO (a JPEG holding a stereo pair) as multi-frame, so
+    # frame count alone doesn't tell us whether something is an animation.
+    ANIMATED_FORMATS = frozenset({"GIF", "PNG", "WEBP"})
+
     @staticmethod
     def set_limits(max_image_pixels: int) -> None:
         Image.MAX_IMAGE_PIXELS = max_image_pixels
@@ -86,6 +90,12 @@ class Thumbnailer:
     def __init__(self, input_path: str):
         # Have we closed the image?
         self._closed = False
+        # Whether attempting to thumbnail the image failed for some reason. The
+        # thumbnailing code should fallback to treating the image as static in
+        # this case.
+        #
+        # Cached so a broken animation isn't re-decoded for every thumbnail size.
+        self._animation_broken = False
 
         try:
             self.image = Image.open(input_path, formats=self.PILLOW_FORMATS)
@@ -166,30 +176,52 @@ class Thumbnailer:
 
     @property
     def is_animated(self) -> bool:
+        if self._animation_broken:
+            return False
+        if self.image.format not in self.ANIMATED_FORMATS:
+            return False
         return getattr(self.image, "is_animated", False)
 
     def _encode_animated_from(
         self, transform: Callable[[Image.Image], Image.Image]
-    ) -> BytesIO:
+    ) -> BytesIO | None:
         """Apply `transform` to every frame of the source image and encode the
-        result as an animated thumbnail."""
+        result as an animated thumbnail, or None if the source could not be
+        decoded as an animation and the caller should fall back to a static one.
+        """
         frames = []
         durations = []
         loop = self.image.info.get("loop", 0)
-        for frame in ImageSequence.Iterator(self.image):
-            # Copy the frame to avoid referencing the original image memory.
-            f = frame.copy()
-            if f.mode != "RGBA":
-                f = f.convert("RGBA")
-            frames.append(transform(f))
-            # A duration of 0 is valid (interpretation is implementation-defined,
-            # see RFC 9649 section 2.7.1.1), so only fall back when unset. The
-            # 100ms default matches libwebp's animation tools.
-            duration = frame.info.get("duration")
-            if duration is None:
-                duration = self.image.info.get("duration", 100)
-            durations.append(duration)
-        return self._encode_animated(frames, durations, loop)
+        try:
+            for frame in ImageSequence.Iterator(self.image):
+                # Copy the frame to avoid referencing the original image memory.
+                f = frame.copy()
+                if f.mode != "RGBA":
+                    f = f.convert("RGBA")
+                frames.append(transform(f))
+                # A duration of 0 is valid (interpretation is implementation-defined,
+                # see RFC 9649 section 2.7.1.1), so only fall back when unset. The
+                # 100ms default matches libwebp's animation tools.
+                duration = frame.info.get("duration")
+                if duration is None:
+                    duration = self.image.info.get("duration", 100)
+                durations.append(duration)
+            return self._encode_animated(frames, durations, loop)
+        except Exception as e:
+            logger.warning(
+                "Failed to generate an animated thumbnail, falling back to a "
+                "static one: %s",
+                e,
+            )
+            self._animation_broken = True
+
+        try:
+            # Leave the source on its first frame for the static fallback.
+            self.image.seek(0)
+        except Exception as e:
+            logger.warning("Failed to rewind image to its first frame: %s", e)
+
+        return None
 
     @trace
     def scale(
@@ -204,9 +236,11 @@ class Thumbnailer:
             The bytes of the encoded image ready to be written to disk
         """
         if animated and self.is_animated:
-            return self._encode_animated_from(
+            output = self._encode_animated_from(
                 lambda f: self._resize_image(f, width, height)
             )
+            if output is not None:
+                return output
 
         with self._resize_image(self.image, width, height) as scaled:
             return self._encode_image(scaled, output_type)
@@ -242,9 +276,11 @@ class Thumbnailer:
             crop = (crop_left, 0, crop_right, height)
 
         if animated and self.is_animated:
-            return self._encode_animated_from(
+            output = self._encode_animated_from(
                 lambda f: self._resize_image(f, scaled_width, scaled_height).crop(crop)
             )
+            if output is not None:
+                return output
 
         with self._resize_image(
             self.image, scaled_width, scaled_height

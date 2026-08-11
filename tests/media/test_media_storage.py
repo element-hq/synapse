@@ -1428,6 +1428,22 @@ def _make_animated_gif() -> bytes:
     return out.getvalue()
 
 
+def _make_mpo() -> bytes:
+    """Build a two-image MPO: a JPEG holding a stereo pair, not an animation."""
+    frames = [Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))]
+    out = BytesIO()
+    frames[0].save(out, format="MPO", save_all=True, append_images=frames[1:])
+    return out.getvalue()
+
+
+def _make_stale_mpo() -> bytes:
+    """Build an MPO whose trailing image is stripped but still advertised."""
+    data = _make_mpo()
+    with Image.open(BytesIO(data)) as image:
+        primary_size = image.mpinfo[0xB002][0]["Size"]  # type: ignore[attr-defined]
+    return data[:primary_size]
+
+
 class ThumbnailerAnimatedTestCase(unittest.TestCase):
     """Tests that the thumbnailer only animates when explicitly asked to."""
 
@@ -1443,6 +1459,24 @@ class ThumbnailerAnimatedTestCase(unittest.TestCase):
         self.png_path = os.path.join(self.tempdir, "static.png")
         with open(self.png_path, "wb") as f:
             f.write(SMALL_PNG)
+
+        self.mpo_path = os.path.join(self.tempdir, "stereo.jpg")
+        with open(self.mpo_path, "wb") as f:
+            f.write(_make_mpo())
+
+        self.stale_mpo_path = os.path.join(self.tempdir, "stale.jpg")
+        with open(self.stale_mpo_path, "wb") as f:
+            f.write(_make_stale_mpo())
+
+    def assert_is_first_frame(self, output: BytesIO) -> None:
+        """Raises an `AssertionError` unless the given image is red."""
+        pixel = Image.open(output).convert("RGB").getpixel((16, 16))
+        assert isinstance(pixel, tuple)
+        red, green, blue = pixel
+        # The first frame of every source here is red.
+        # WebP is lossy, so allow *some* green/blue to be present.
+        self.assertGreater(red, 200)
+        self.assertLess(max(green, blue), 50)
 
     def test_scale_static_by_default(self) -> None:
         """An animated source produces a static thumbnail unless animated=True."""
@@ -1475,3 +1509,83 @@ class ThumbnailerAnimatedTestCase(unittest.TestCase):
             out = thumbnailer.scale(1, 1, ANIMATED_THUMBNAIL_TYPE, animated=True)
         result = Image.open(out)
         self.assertFalse(getattr(result, "is_animated", False))
+
+    @parameterized.expand([("GIF", "gif"), ("PNG", "apng"), ("WEBP", "webp")])
+    def test_animated_formats(self, fmt: str, ext: str) -> None:
+        """Every animated format we accept produces an animated thumbnail."""
+        frames = [
+            Image.new("RGBA", (64, 64), color)
+            for color in ((255, 0, 0, 255), (0, 0, 255, 255))
+        ]
+        out = BytesIO()
+        frames[0].save(
+            out,
+            format=fmt,
+            save_all=True,
+            append_images=frames[1:],
+            duration=100,
+            loop=0,
+        )
+        path = os.path.join(self.tempdir, f"animated.{ext}")
+        with open(path, "wb") as f:
+            f.write(out.getvalue())
+
+        with Thumbnailer(path) as thumbnailer:
+            self.assertTrue(thumbnailer.is_animated)
+            thumbnail = thumbnailer.scale(
+                32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+            )
+        result = Image.open(thumbnail)
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(getattr(result, "n_frames", 1), 2)
+
+    @parameterized.expand(["scale", "crop"])
+    def test_mpo_is_not_animated(self, method: str) -> None:
+        """An MPO packs several stills into one JPEG; not an animation."""
+        with Thumbnailer(self.mpo_path) as thumbnailer:
+            self.assertFalse(thumbnailer.is_animated)
+            out = getattr(thumbnailer, method)(
+                32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+            )
+        self.assertFalse(getattr(Image.open(out), "is_animated", False))
+        self.assert_is_first_frame(out)
+
+    @parameterized.expand(["scale", "crop"])
+    def test_stale_mpo_index_does_not_raise(self, method: str) -> None:
+        """An MPO advertising frames that are not in the file still thumbnails.
+
+        Regression test for https://github.com/element-hq/synapse/issues/20024.
+        """
+        with Thumbnailer(self.stale_mpo_path) as thumbnailer:
+            out = getattr(thumbnailer, method)(
+                32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+            )
+        self.assertEqual(Image.open(out).format, "WEBP")
+        self.assert_is_first_frame(out)
+
+    def test_fallback_thumbnails_the_first_frame(self) -> None:
+        """Failing after the frames are read leaves the source parked on the
+        last one, so the fallback has to rewind."""
+        with patch.object(Thumbnailer, "_encode_animated", side_effect=ValueError):
+            with Thumbnailer(self.gif_path) as thumbnailer:
+                out = thumbnailer.scale(32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True)
+        self.assert_is_first_frame(out)
+
+    @parameterized.expand(["scale", "crop"])
+    def test_undecodable_animation_falls_back_to_static(self, method: str) -> None:
+        """If the frames can't be decoded we still serve a static thumbnail of
+        the first frame rather than failing the request."""
+        # Force the stale MPO down the animated path so decoding it fails.
+        with patch.object(Thumbnailer, "ANIMATED_FORMATS", frozenset({"MPO"})):
+            with Thumbnailer(self.stale_mpo_path) as thumbnailer:
+                self.assertTrue(thumbnailer.is_animated)
+                out = getattr(thumbnailer, method)(
+                    32, 32, ANIMATED_THUMBNAIL_TYPE, animated=True
+                )
+                # A broken source isn't retried for every other thumbnail size.
+                self.assertFalse(thumbnailer.is_animated)
+
+        self.assertEqual(Image.open(out).format, "WEBP")
+        self.assertFalse(getattr(Image.open(out), "is_animated", False))
+        self.assert_is_first_frame(out)
