@@ -1,5 +1,9 @@
 # Synapse 1.159.0rc1 (2026-08-11)
 
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
+[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.159/docs/upgrade.md#upgrading-to-v11590)
+as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2027-03-15`.
+
 ## Features
 
 - Add optional support for [MSC4429: Profile Updates for Legacy Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4429).
