@@ -462,6 +462,17 @@ class LoggingTransaction:
         )
 
     def execute(self, sql: str, parameters: SQLQueryParameters = ()) -> None:
+        if not parameters:
+            # Don't hand an empty parameter collection to the driver.
+            #
+            # psycopg2 performs `%`-substitution on the SQL whenever it is given
+            # *any* parameters, including an empty collection, so a statement
+            # containing a literal `%` (e.g. `LIKE 'foo%'`) fails with
+            # `IndexError: tuple index out of range`. Omitting the parameters
+            # altogether disables the substitution.
+            self._do_execute(self.txn.execute, sql)
+            return
+
         self._do_execute(self.txn.execute, sql, parameters)
 
     def executemany(self, sql: str, *args: Any) -> None:
