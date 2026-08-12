@@ -83,6 +83,10 @@ BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES = "remove_dup_outbound_pokes"
 # `device_lists_changes_in_room.inserted_ts`.
 BG_UPDATE_ADD_INSERTED_TS_INDEX = "device_lists_changes_in_room_inserted_ts_idx"
 
+# Background update name for adding an index on unconverted rows in
+# `device_lists_changes_in_room`.
+BG_UPDATE_ADD_UNCONVERTED_IDX = "device_lists_changes_in_room_unconverted_idx"
+
 
 # Prunes entries out of the `device_lists_changes_in_room` table that are more
 # than this old.
@@ -2204,7 +2208,22 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         converted_upto_stream_id: int,
     ) -> None:
         """If we've calculated the outbound pokes for a given room/device list
-        update, mark any subsequent changes as already converted"""
+        update, mark any subsequent changes as already converted.
+
+        This is an optimization only. Skipping it is always safe, and just
+        means the subsequent changes get converted individually.
+        """
+
+        # Without the index added by `BG_UPDATE_ADD_UNCONVERTED_IDX`, the
+        # UPDATE below scans the unconverted backlog on every call, getting
+        # slower the further behind we are. Skip it until the index exists.
+        unconverted_idx_ready = (
+            await self.db_pool.updates.has_completed_background_update(
+                BG_UPDATE_ADD_UNCONVERTED_IDX
+            )
+        )
+        if not unconverted_idx_ready:
+            return
 
         sql = """
             UPDATE device_lists_changes_in_room
@@ -2457,6 +2476,42 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
         return cast(tuple[int, str], min(rows))
 
+    async def get_oldest_unconverted_device_list_change_ts(self) -> int | None:
+        """Get the timestamp of the oldest row in `device_lists_changes_in_room`
+        that has yet to be converted to `device_lists_outbound_pokes`, i.e. how
+        far behind the conversion loop is.
+
+        Returns:
+            The timestamp (ms) at which the oldest unconverted change was
+            inserted. None if there is nothing to convert, or if the oldest
+            row predates the `inserted_ts` column.
+        """
+
+        stream_id, room_id = await self.get_device_change_last_converted_pos()
+
+        # Rows for one device list update share a `stream_id` (and insertion
+        # time), so ordering by `stream_id` alone is fine.
+        sql = """
+            SELECT inserted_ts FROM device_lists_changes_in_room
+            WHERE
+                (stream_id, room_id) > (?, ?) AND
+                NOT converted_to_destinations
+            ORDER BY stream_id ASC
+            LIMIT 1
+        """
+
+        def get_oldest_unconverted_device_list_change_ts_txn(
+            txn: LoggingTransaction,
+        ) -> int | None:
+            txn.execute(sql, (stream_id, room_id))
+            row = txn.fetchone()
+            return row[0] if row else None
+
+        return await self.db_pool.runInteraction(
+            "get_oldest_unconverted_device_list_change_ts",
+            get_oldest_unconverted_device_list_change_ts_txn,
+        )
+
     async def set_device_change_last_converted_pos(
         self,
         stream_id: int,
@@ -2697,6 +2752,15 @@ class DeviceBackgroundUpdateStore(SQLBaseStore):
             table="device_lists_changes_in_room",
             columns=["inserted_ts"],
             where_clause="inserted_ts IS NOT NULL",
+        )
+
+        # Add an index to speed up `mark_redundant_device_lists_pokes`.
+        self.db_pool.updates.register_background_index_update(
+            BG_UPDATE_ADD_UNCONVERTED_IDX,
+            index_name="device_lists_changes_in_room_unconverted_idx",
+            table="device_lists_changes_in_room",
+            columns=["user_id", "device_id", "room_id", "stream_id"],
+            where_clause="NOT converted_to_destinations",
         )
 
     async def _drop_device_list_streams_non_unique_indexes(
