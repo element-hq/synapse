@@ -710,7 +710,26 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # We limit like this as we might have multiple rows per stream_id, and
             # we want to make sure we always get all entries for any stream_id
             # we return.
-            upto_token = min(current_id, last_id + limit)
+            if limit <= 0:
+                return [], last_id, True
+
+            sql = (
+                "SELECT stream_id FROM ("
+                " SELECT stream_id FROM device_inbox"
+                " WHERE ? < stream_id AND stream_id <= ?"
+                " UNION"
+                " SELECT stream_id FROM device_federation_outbox"
+                " WHERE ? < stream_id AND stream_id <= ?"
+                ") AS stream_ids"
+                " ORDER BY stream_id ASC"
+                " LIMIT ?"
+            )
+            txn.execute(sql, (last_id, current_id, last_id, current_id, limit))
+            stream_ids = [row[0] for row in txn]
+            if not stream_ids:
+                return [], current_id, False
+
+            upto_token = stream_ids[-1]
             sql = (
                 "SELECT max(stream_id), user_id"
                 " FROM device_inbox"

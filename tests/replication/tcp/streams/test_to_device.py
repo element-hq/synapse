@@ -110,3 +110,68 @@ class ToDeviceStreamTestCase(BaseStreamTestCase):
         )
         self.assertEqual(received_to_device_rows[0][2].entity, user1)
         self.assertEqual(received_to_device_rows[1][2].entity, user2)
+
+    def test_to_device_stream_handles_sparse_stream_ids(self) -> None:
+        store = self.hs.get_datastores().main
+
+        users = []
+        for i in range(_STREAM_UPDATE_TARGET_ROW_COUNT + 1):
+            user = self.register_user(f"user{i}", "pass")
+            self.login(user, "pass", "device")
+            users.append(user)
+
+        # connect to pull the updates related to users creation/login
+        self.reconnect()
+        self.replicate()
+        self.test_handler.received_rdata_rows.clear()
+        # disconnect so we can accumulate the updates without pulling them
+        self.disconnect()
+
+        async def allocate_unused_to_device_ids() -> None:
+            for _ in range(_STREAM_UPDATE_TARGET_ROW_COUNT):
+                async with store.get_to_device_id_generator().get_next():
+                    pass
+
+        self.get_success(allocate_unused_to_device_ids())
+
+        messages = {
+            user: {
+                "device": {
+                    "sender": "@sender:example.org",
+                    "type": "m.new_device",
+                    "content": {"device": {}},
+                }
+            }
+            for user in users
+        }
+        self.get_success(
+            store.add_messages_from_remote_to_device_inbox(
+                "example.org",
+                "message_id",
+                messages,
+            )
+        )
+
+        # replication is disconnected so we shouldn't get any updates yet
+        received_to_device_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ToDeviceStream.NAME
+        ]
+        self.assertEqual([], received_to_device_rows)
+
+        # now reconnect to pull the updates
+        self.reconnect()
+        self.replicate()
+
+        received_to_device_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ToDeviceStream.NAME
+        ]
+        self.assertEqual(
+            len(received_to_device_rows),
+            len(users),
+            "Expected one row per user in the to_device stream",
+        )
+        self.assertEqual({row[2].entity for row in received_to_device_rows}, set(users))
