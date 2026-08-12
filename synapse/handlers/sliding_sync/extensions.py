@@ -216,6 +216,7 @@ class SlidingSyncExtensionHandler:
                 all_interested_room_ids=all_interested_room_ids,
                 to_token=to_token,
                 from_token=from_token,
+                actual_room_response_map=actual_room_response_map,
             )
 
         (
@@ -1082,12 +1083,90 @@ class SlidingSyncExtensionHandler:
             ),
         )
 
+    async def _get_profile_ids_for_profiles_extension(
+        self,
+        user_id: str,
+        rooms: set[str],
+        sync_config: SlidingSyncConfig,
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+    ) -> tuple[set[str], set[str]]:
+        """
+        Calculate target user profiles as candiates to include in the profile
+        extension sync response.
+
+        This function looks at both the sync config and the already calculated
+        rooms response, and pieces together the full set of user ID's to include
+        profiles for, based on sync config rooms being lazy loading or not.
+
+        For rooms with lazy loading, only profiles for those users who have sent events
+        into the timeline will be included, unless they would be included otherwise.
+        For other rooms, all members of the room will be included as candidates.
+
+        Args:
+            user_id: The full user ID syncing.
+            rooms: A set of rooms that was already calculated as relevant for this
+                sync response.
+            sync_config: The Sliding Sync config object.
+            actual_room_response_map: A calculated map of responses per room.
+
+        Returns:
+            Set of user ID's.
+        """
+        users_in_timeline = set()
+        non_lazy_profile_user_ids = set()
+        if rooms:
+            # Separate rooms into lazy and non-lazy based on sync config.
+            lazy_rooms = (
+                {
+                    room_id
+                    for room_id, room_config in sync_config.room_subscriptions.items()
+                    if ("m.room.member", "$LAZY") in room_config.required_state
+                }
+                if sync_config.room_subscriptions
+                else set()
+            )
+
+            if lazy_rooms:
+                # For rooms configured as lazy, include users based on timeline events.
+                for room_id, room_data in actual_room_response_map.items():
+                    if room_id not in lazy_rooms:
+                        continue
+                    for timeline_event in room_data.timeline_events:
+                        users_in_timeline.add(timeline_event.event.sender)
+
+            non_lazy_rooms = rooms.difference(lazy_rooms)
+            # If we still have non-lazy rooms, get their members.
+            if non_lazy_rooms:
+                non_lazy_profile_user_ids = (
+                    await self.store.get_local_users_who_share_room_with_user(
+                        user_id,
+                        limit_to_rooms=non_lazy_rooms,
+                    )
+                )
+        else:
+            # Get all members of all rooms the sync response is dealing with.
+            non_lazy_profile_user_ids = (
+                await self.store.get_local_users_who_share_room_with_user(
+                    user_id,
+                )
+            )
+
+        # Unify the two lists
+        profile_user_ids = users_in_timeline.union(non_lazy_profile_user_ids)
+
+        # Return a tuple containing the full list of user ID's and the lazy subset.
+        return (
+            profile_user_ids,
+            users_in_timeline,
+        )
+
     async def _get_profiles_extension_initial_sync_response(
         self,
         user_id: UserID,
         fields: set[str],
         rooms: set[str],
         new_connection_state: MutablePerConnectionState,
+        profile_user_ids: set[str],
     ) -> dict[str, JsonDict | None]:
         """
         Build an initial sync response for the profiles extension.
@@ -1097,18 +1176,15 @@ class SlidingSyncExtensionHandler:
             fields: A set of fields to include in the response.
             rooms: A set of rooms to limit the user profiles for.
             new_connection_state: The new connection state to be modified.
+            profile_user_ids: Set of user profile ID's related to this sync response.
 
         Returns:
             A dictionary containing the profile updates in an `updated` dictionary.
         """
         response: dict[str, JsonDict | None] = {}
 
-        profile_user_ids = await self.store.get_local_users_who_share_room_with_user(
-            user_id.to_string(),
-            limit_to_rooms=rooms,
-        )
         # Ensure we're in the list even if we don't belong to any rooms
-        profile_user_ids.add(user_id.to_string())
+        profile_user_ids = profile_user_ids.union({user_id.to_string()})
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
             profile_user_ids
@@ -1151,6 +1227,7 @@ class SlidingSyncExtensionHandler:
         all_interested_room_ids: set[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
     ) -> SlidingSyncResult.Extensions.ProfilesExtension | None:
         """
         Generate a response for the profiles extension.
@@ -1163,6 +1240,7 @@ class SlidingSyncExtensionHandler:
             all_interested_room_ids: Set of rooms the sync request is interested in.
             to_token: The stream token to generate a response until.
             from_token: The stream token to generate a response from.
+            actual_room_response_map: A calculated map of responses per room.
 
         Returns:
             A SlidingSyncResult.Extensions.ProfilesExtension object containing
@@ -1176,6 +1254,16 @@ class SlidingSyncExtensionHandler:
 
         response: dict[str, JsonDict | None] = {}
 
+        (
+            profile_user_ids,
+            lazy_profile_user_ids,
+        ) = await self._get_profile_ids_for_profiles_extension(
+            user_id=user_id,
+            rooms=all_interested_room_ids,
+            sync_config=sync_config,
+            actual_room_response_map=actual_room_response_map,
+        )
+
         if from_token is None:
             # Initial sync
             return SlidingSyncResult.Extensions.ProfilesExtension(
@@ -1184,6 +1272,7 @@ class SlidingSyncExtensionHandler:
                     fields=fields,
                     rooms=all_interested_room_ids,
                     new_connection_state=new_connection_state,
+                    profile_user_ids=profile_user_ids,
                 ),
             )
 
@@ -1195,7 +1284,6 @@ class SlidingSyncExtensionHandler:
             field_names=fields,
             field_names_empty_means_all_fields=True,
         )
-        profile_user_ids = set()
         left_room_user_ids = {
             update.user_id
             for update in updates
@@ -1235,9 +1323,6 @@ class SlidingSyncExtensionHandler:
             profile_user_ids
         )
 
-        # TODO lazy loading
-        is_lazy = False
-
         # Serialise the profile updates into the sync response format.
         for profile_user_id in profile_user_ids:
             profile_data = profile_data_by_user.get(profile_user_id)
@@ -1254,36 +1339,31 @@ class SlidingSyncExtensionHandler:
                 user_fields = set(profile_data.keys()).intersection(fields)
             else:
                 user_fields = set(profile_data.keys())
-            if is_lazy:
-                # TODO lazy cache
-                for field_name in user_fields:
-                    per_user_updates[field_name] = profile_data.get(field_name)
-            else:
-                # Include only the diff, unless the user recently joined,
-                # then send all the fields the client asked for.
-                # We don't use a cache here as for non-lazy sync we always
-                # send changes and/or fields the client asked for, if relevant
-                # as above joined condition.
-                updated_fields: set[str] = updated_user_fields.get(
-                    profile_user_id, set()
-                )
-                user_fields = (
-                    user_fields
-                    if profile_user_id in joined_room_user_ids
-                    else updated_fields.intersection(profile_data.keys())
-                )
-                for field_name in user_fields:
-                    # Ensure we don't send the field unnecessarely to the client, if
-                    # we've sent it down in this connection before, and it hasn't been
-                    # updated.
-                    if (
-                        field_name in updated_fields
-                        or previous_connection_state.profile_updates.have_sent_field(
-                            profile_user_id, field_name
-                        ).status
-                        != HaveSentFlag.LIVE
-                    ):
-                        per_user_updates[field_name] = profile_data[field_name]
+
+            # TODO lazy cache
+
+            # Include only the diff, unless the user recently joined,
+            # or the user is in a room that was lazy loaded,
+            # then send all the fields the client asked for.
+            updated_fields: set[str] = updated_user_fields.get(profile_user_id, set())
+            user_fields = (
+                user_fields
+                if profile_user_id in joined_room_user_ids
+                or profile_user_id in lazy_profile_user_ids
+                else updated_fields.intersection(profile_data.keys())
+            )
+            for field_name in user_fields:
+                # Ensure we don't send the field unnecessarely to the client, if
+                # we've sent it down in this connection before, and it hasn't been
+                # updated.
+                if (
+                    field_name in updated_fields
+                    or previous_connection_state.profile_updates.have_sent_field(
+                        profile_user_id, field_name
+                    ).status
+                    != HaveSentFlag.LIVE
+                ):
+                    per_user_updates[field_name] = profile_data[field_name]
 
             if per_user_updates:
                 # Record sending these fields to this connection and add to the response
