@@ -336,12 +336,23 @@ server.use-ipv6 = "disable"
 ssl.pemfile = "/etc/lighttpd/cert+privkey.pem"
 ssl.ca-file = "/etc/lighttpd/fullchain.pem"
 
-$SERVER["socket"] == "0.0.0.0:80" { }
+# redirect HTTP traffic to HTTPS, same for IPv6 below
+$SERVER["socket"] == "0.0.0.0:80" {
+    url.redirect = (
+        "" => "https://${url.authority.noport}${url.path}${qsa}"
+    )
+}
 $SERVER["socket"] == "0.0.0.0:443" { ssl.engine = "enable" }
 $SERVER["socket"] == "0.0.0.0:8448" { ssl.engine = "enable" }
-$SERVER["socket"] == "[::]:80" { }
+$SERVER["socket"] == "[::]:80" {
+    url.redirect = (
+        "" => "https://${url.authority.noport}${url.path}${qsa}"
+    )
+}
 $SERVER["socket"] == "[::]:443" { ssl.engine = "enable" }
 $SERVER["socket"] == "[::]:8448" {  ssl.engine = "enable" }
+
+
 
 # both lighttpd and synapse need permissions for socket r/w
 $HTTP["url"] =~ "(/_matrix|_synapse/admin|/_synapse/client)" {
