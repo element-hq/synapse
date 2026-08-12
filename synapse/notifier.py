@@ -82,6 +82,14 @@ users_woken_by_stream_counter = Counter(
     labelnames=["stream", SERVER_NAME_LABEL],
 )
 
+wait_for_stream_token_timeout_counter = Counter(
+    "synapse_notifier_wait_for_stream_token_timeouts",
+    "Number of times we gave up waiting to catch up to a stream token, counted "
+    "once per lagging stream. `stream_key` is a `StreamToken` field name, which "
+    "is not always the replication stream name",
+    labelnames=["stream_key", SERVER_NAME_LABEL],
+)
+
 
 notifier_listeners_gauge = LaterGauge(
     name="synapse_notifier_listeners",
@@ -101,6 +109,22 @@ notifier_users_gauge = LaterGauge(
 )
 
 T = TypeVar("T")
+
+
+def _describe_lagging_streams(
+    target_token: StreamToken,
+    current_token: StreamToken,
+    lagging_stream_keys: Collection[StreamKeyType],
+) -> str:
+    """Describe how far each lagging stream has to go, for logging.
+
+    e.g. `quarantined_media_key (at 4, waiting for 6)`
+    """
+    return ", ".join(
+        f"{key.value} (at {current_token.get_field(key)}, "
+        f"waiting for {target_token.get_field(key)})"
+        for key in lagging_stream_keys
+    )
 
 
 # TODO(paul): Should be shared somewhere
@@ -880,20 +904,34 @@ class Notifier:
         logged = False
         while True:
             current_token = self.event_sources.get_current_token()
-            if stream_token.is_before_or_eq(current_token):
+            lagging_stream_keys = stream_token.fields_behind(current_token)
+            if not lagging_stream_keys:
                 return True
 
             now = self.clock.time_msec()
 
             # Timed out
             if now - start > 10_000:
+                for stream_key in lagging_stream_keys:
+                    wait_for_stream_token_timeout_counter.labels(
+                        stream_key=stream_key.value,
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
+
+                logger.warning(
+                    "Timed out waiting for current token to catch up on %s",
+                    _describe_lagging_streams(
+                        stream_token, current_token, lagging_stream_keys
+                    ),
+                )
                 return False
 
             if not logged:
                 logger.info(
-                    "Waiting for current token to reach %s; currently at %s",
-                    stream_token,
-                    current_token,
+                    "Waiting for current token to catch up on %s",
+                    _describe_lagging_streams(
+                        stream_token, current_token, lagging_stream_keys
+                    ),
                 )
                 logged = True
 

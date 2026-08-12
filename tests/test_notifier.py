@@ -11,10 +11,13 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 import logging
+from collections import Counter
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.metrics import SERVER_NAME_LABEL
+from synapse.notifier import wait_for_stream_token_timeout_counter
 from synapse.server import HomeServer
 from synapse.types import MultiWriterStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
@@ -114,6 +117,8 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         )
         token = StreamToken.START.copy_and_advance(StreamKeyType.RECEIPT, receipt_token)
 
+        counts_before = self._get_timeout_counts()
+
         # Function under test
         wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
         # Advance time a little bit to make the
@@ -134,3 +139,62 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         # Make sure we gave up waiting and not caught-up (False)
         wait_result = self.get_success(wait_d)
         self.assertEqual(wait_result, False)
+
+        # Receipts was the only lagging stream, so it should be the only one counted.
+        self.assertEqual(
+            self._get_timeout_counts() - counts_before,
+            Counter({StreamKeyType.RECEIPT.value: 1}),
+        )
+
+    def test_wait_for_stream_token_timeout_counts_each_lagging_stream(self) -> None:
+        """
+        Test that a timeout while lagging on more than one stream is counted against
+        each of them.
+        """
+
+        lagging_stream_keys = [StreamKeyType.RECEIPT, StreamKeyType.DEVICE_LIST]
+
+        # Create a new token with the stream IDs artificially advanced far into
+        # the future.
+        token = StreamToken.START
+        token = token.copy_and_advance(
+            StreamKeyType.RECEIPT, MultiWriterStreamToken(stream=1000000000)
+        )
+        token = token.copy_and_advance(
+            StreamKeyType.DEVICE_LIST, MultiWriterStreamToken(stream=10000000000)
+        )
+
+        counts_before = self._get_timeout_counts()
+
+        wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
+
+        # Advance time to make the `wait_for_stream_token(...)` sleep loop
+        # iterate enough times to hit the  the timeout.
+        for _ in range(11):
+            self.reactor.advance(Duration(seconds=1).as_secs())
+
+        # Make sure we gave up waiting and not caught-up (False)
+        self.assertEqual(self.get_success(wait_d), False)
+
+        self.assertEqual(
+            self._get_timeout_counts() - counts_before,
+            Counter({stream_key.value: 1 for stream_key in lagging_stream_keys}),
+        )
+
+    def _get_timeout_counts(self) -> "Counter[str]":
+        """The `wait_for_stream_token` timeout counts for this server, keyed by the
+        `stream_key` label.
+
+        The counter is process-wide, and so shared between tests. Compare against a
+        count taken before the code under test ran.
+        """
+        counts: Counter[str] = Counter()
+        for metric in wait_for_stream_token_timeout_counter.collect():
+            for sample in metric.samples:
+                if (
+                    sample.name.endswith("_total")
+                    and sample.labels[SERVER_NAME_LABEL] == self.hs.hostname
+                ):
+                    counts[sample.labels["stream_key"]] += int(sample.value)
+
+        return counts
