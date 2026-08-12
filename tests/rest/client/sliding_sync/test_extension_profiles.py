@@ -705,16 +705,220 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > updates will then include changes to this field.
         """
 
-    """
-    Sliding Sync offers the lazy_members boolean flag on a per-room basis, which when true
-    will only send down membership information for a user if:
-    """
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_lazy_loading_sends_down_full_profile_if_events_in_timeline(
+        self,
+        is_initial: bool,
+    ) -> None:
+        """
+        Test that when lazy loading, only those members who have events in
+        the timeline get their profiles sent down in the sync response, for
+        rooms configured with lazy loading.
+
+        Rooms without lazy loading should include all the members in initial sync,
+        none in incremental.
+        """
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        fourth_user = self.register_user("fourth_user", "password")
+        fourth_tok = self.login("fourth_user", "password")
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        new_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.join(
+            room=new_room,
+            user=fourth_user,
+            tok=fourth_tok,
+        )
+        if is_initial:
+            self.helper.send_messages(
+                room_id=self.joined_room, num_events=1, tok=self.other_tok
+            )
+            self.helper.send_messages(
+                room_id=self.joined_room, num_events=10, tok=third_tok
+            )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body: dict[str, dict] = {
+            "lists": {},
+            "room_subscriptions": {
+                self.joined_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+                new_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+            },
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                },
+            },
+        }
+        if is_initial:
+            sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
+                ["m.room.member", "$LAZY"],
+                ["*", "*"],
+            ]
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        if is_initial:
+            self.assertIsNotNone(
+                response_body["extensions"].get("org.matrix.msc4262.profiles")
+            )
+            # Other user should be filtered out.
+            self.assertIsNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@other_user:test"
+                )
+            )
+            # Third user has events in the timeline, so should be here.
+            self.assertIsNotNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@third_user:test"
+                )
+            )
+            # Initial sync always includes ourselves
+            self.assertIsNotNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@user:test"
+                )
+            )
+            # Fourth user is a member of a non-lazy configured room, so should be here.
+            self.assertIsNotNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@fourth_user:test"
+                )
+            )
+
+        if not is_initial:
+            # Clear up the sliding sync connection profile updates tracking rows
+            # as otherwise we won't re-send these unchanged fields in this connection.
+            self.get_success(
+                self.store.db_pool.simple_delete_many(
+                    "sliding_sync_connection_profile_updates",
+                    column="user_id",
+                    iterable=[
+                        "@user:test",
+                        "@other_user:test",
+                        "@third_user:test",
+                        "@fourth_user:test",
+                    ],
+                    keyvalues={},
+                    desc="clear_old_sliding_sync_connection_profile_updates",
+                )
+            )
+
+            self.helper.send_messages(
+                room_id=self.joined_room, num_events=1, tok=self.other_tok
+            )
+            self.helper.send_messages(
+                room_id=self.joined_room, num_events=10, tok=third_tok
+            )
+            sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
+                ["m.room.member", "$LAZY"],
+                ["*", "*"],
+            ]
+            # Make an incremental Sliding Sync request
+            response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+            self.assertIsNotNone(
+                response_body["extensions"].get("org.matrix.msc4262.profiles")
+            )
+            # Other user should be filtered out.
+            self.assertIsNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@other_user:test"
+                )
+            )
+            # Third user has events in the timeline, so should be here.
+            self.assertIsNotNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@third_user:test"
+                )
+            )
+            # We are not included ourselves in incremental sync without updates.
+            self.assertIsNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@user:test"
+                )
+            )
+            # Fourth user is a member of a non-lazy configured room, but had no updates,
+            # so shouldn't be here.
+            self.assertIsNone(
+                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                    "@fourth_user:test"
+                )
+            )
 
     @override_config({"include_profile_updates_in_sync": True})
-    def test_lazy_loading_sends_down_full_profile_if_events_in_timeline(self) -> None:
+    def test_lazy_loading_sends_full_profile_even_if_no_events_if_otherwise_included(
+        self,
+    ) -> None:
         """
-        > the user is one of the senders of a timeline event included in the response
+        Test that when lazy loading, if a user is in both a lazy loading room
+        and a non-lazy configured room, even if there are no events in the timeline,
+        their profile is sent down.
+
+        This test only makes sense for initial sync, as for incremental we would
+        not expect to see users without timeline events if they had no profile updates.
         """
+        new_room = self.helper.create_room_as(self.user, tok=self.tok)
+        self.helper.join(
+            room=new_room,
+            user=self.other_user,
+            tok=self.other_tok,
+        )
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        sync_body: dict[str, dict] = {
+            "lists": {},
+            "room_subscriptions": {
+                self.joined_room: {
+                    "required_state": [
+                        ["m.room.member", "$LAZY"],
+                        ["*", "*"],
+                    ],
+                    # Force zero timeline events in the response, otherwise
+                    # this test wont work, as the timeline_events in the room
+                    # response will contain all the create/join etc events too.
+                    "timeline_limit": 0,
+                },
+                new_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+            },
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                },
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+        self.assertIsNotNone(
+            response_body["extensions"].get("org.matrix.msc4262.profiles")
+        )
+        # Other user should be included as they are in a non-lazy room too,
+        # even though the lazy configured room had no events.
+        self.assertIsNotNone(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                "@other_user:test"
+            )
+        )
+        # Initial sync always includes ourselves
+        self.assertIsNotNone(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
+                "@user:test"
+            )
+        )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_down_full_profile_if_membership_events_that_are_returned(
