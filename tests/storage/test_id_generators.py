@@ -21,6 +21,7 @@
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.server import HomeServer
 from synapse.storage.database import (
     DatabasePool,
@@ -28,7 +29,10 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.types import Cursor
-from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.storage.util.id_generators import (
+    MultiWriterIdGenerator,
+    stream_current_position_gauge,
+)
 from synapse.storage.util.sequence import (
     LocalSequenceGenerator,
     PostgresSequenceGenerator,
@@ -104,6 +108,24 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
             self.db_pool.runWithConnection(_create)
         )
         return self.instances[instance_name]
+
+    def _get_reported_position(self, instance_name: str) -> int:
+        """The position the metric reports for the test stream on the given
+        process.
+
+        The gauge outlives each test, so it still holds the label sets of ID
+        generators from earlier tests.
+        """
+        for metric in stream_current_position_gauge.collect():
+            for sample in metric.samples:
+                if (
+                    sample.labels["stream_name"] == "test_stream"
+                    and sample.labels["instance_name"] == instance_name
+                    and sample.labels[SERVER_NAME_LABEL] == self.hs.hostname
+                ):
+                    return int(sample.value)
+
+        raise AssertionError(f"No position reported for {instance_name}")
 
     def _replicate(self, instance_name: str) -> None:
         """Similate a replication event for the given instance."""
@@ -224,6 +246,24 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         self.assertEqual(id_gen.get_positions(), {"master": 8})
         self.assertEqual(id_gen.get_current_token_for_writer("master"), 8)
+
+    def test_current_position_metric(self) -> None:
+        """The reported position follows `get_current_token`."""
+
+        self._insert_rows("master", 7)
+
+        id_gen = self._create_id_generator()
+
+        self.assertEqual(self._get_reported_position("master"), 7)
+
+        async def _get_next_async() -> None:
+            async with id_gen.get_next():
+                pass
+
+        self.get_success(_get_next_async())
+
+        self.assertEqual(id_gen.get_current_token(), 8)
+        self.assertEqual(self._get_reported_position("master"), 8)
 
     def test_out_of_order_finish(self) -> None:
         """Test that IDs persisted out of order are correctly handled"""
@@ -416,6 +456,21 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         id_gen.advance("first", 11)
         id_gen.advance("second", 15)
         self.assertEqual(id_gen.get_persisted_upto_position(), 11)
+
+    def test_current_position_metric_diverges_when_not_replicated(self) -> None:
+        """A process that stops being told about a stream reports a position that
+        falls behind a process that is still being told about it.
+        """
+        self._insert_row_with_id("writer", 3)
+
+        # Two processes' view of a stream that a third process writes.
+        told = self._create_id_generator("told", writers=["writer"])
+        self._create_id_generator("not_told", writers=["writer"])
+
+        told.advance("writer", 5)
+
+        self.assertEqual(self._get_reported_position("told"), 5)
+        self.assertEqual(self._get_reported_position("not_told"), 3)
 
     def test_get_persisted_upto_position_get_next(self) -> None:
         """Test that `get_persisted_upto_position` correctly tracks updates to

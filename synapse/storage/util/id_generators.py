@@ -36,9 +36,11 @@ from typing import (
 )
 
 import attr
+from prometheus_client import Gauge
 from sortedcontainers import SortedList, SortedSet
 
 from synapse.logging import issue9533_logger
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.database import (
     DatabasePool,
@@ -54,6 +56,13 @@ if TYPE_CHECKING:
     from synapse.notifier import ReplicationNotifier
 
 logger = logging.getLogger(__name__)
+
+stream_current_position_gauge = Gauge(
+    "synapse_storage_stream_current_position",
+    "The stream's current position as this process sees it, i.e. what "
+    "`get_current_token` returns. Streams that count downwards report negative IDs",
+    labelnames=["stream_name", "instance_name", SERVER_NAME_LABEL],
+)
 
 
 T = TypeVar("T")
@@ -232,6 +241,15 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self._writers = writers
         self._return_factor = 1 if positive else -1
 
+        # The `instance_name` label is what separates one process's series from
+        # another's. In production the scrape labels would do that too, but tests
+        # run several homeservers in one process.
+        self._current_position_gauge = stream_current_position_gauge.labels(
+            stream_name=stream_name,
+            instance_name=instance_name,
+            **{SERVER_NAME_LABEL: server_name},
+        )
+
         # We lock as some functions may be called from DB threads.
         self._lock = threading.Lock()
 
@@ -339,6 +357,18 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             # write to the stream. In which case, let's pre-seed our own
             # position with the current minimum.
             self._current_positions[self._instance_name] = self._persisted_upto_position
+
+        with self._lock:
+            self._report_current_position()
+
+    def _report_current_position(self) -> None:
+        """Report the current position as a metric.
+
+        Must be called with `_lock` held.
+        """
+        self._current_position_gauge.set(
+            self._return_factor * self._persisted_upto_position
+        )
 
     def _load_current_ids(
         self,
@@ -827,6 +857,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # There was a gap in seen positions, so there is nothing more to
                 # do.
                 break
+
+        self._report_current_position()
 
         # Hacky debug logging to attempt to trace https://github.com/element-hq/synapse/issues/19795.
         # If this is the to-device stream, and we are a writer for that stream, log some stats

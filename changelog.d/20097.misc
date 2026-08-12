@@ -1,0 +1,1 @@
+Add a `synapse_storage_stream_current_position` metric, reporting each stream's current position as each process sees it.
