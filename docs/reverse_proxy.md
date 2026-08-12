@@ -329,8 +329,9 @@ server.modules = (
 server.username      = "lighttpd"
 server.groupname     = "lighttpd"
 
-# leave commented out for proper IPv6 see below IPv4 0.0.0.0 & IPv6 [::]
-#server.use-ipv6 = "enable"
+# disable for wildcard IPv6 on all, enable for specific IPv6 addresses
+# see below IPv4 0.0.0.0 & IPv6 [::]
+server.use-ipv6 = "disable"
 
 ssl.pemfile = "/etc/lighttpd/cert+privkey.pem"
 ssl.ca-file = "/etc/lighttpd/fullchain.pem"
