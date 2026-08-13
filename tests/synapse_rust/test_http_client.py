@@ -86,18 +86,13 @@ class StubServer(HTTPServer):
 
 
 class HttpClientTestCase(HomeserverTestCase):
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        hs = self.setup_test_homeserver()
-
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self._http_client = hs.get_proxied_http_client()
         self._rust_http_client = HttpClient(
             runtime=hs.get_rust_runtime(),
             user_agent=self._http_client.user_agent.decode("utf8"),
         )
 
-        return hs
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.server = StubServer()
 
     def tearDown(self) -> None:
