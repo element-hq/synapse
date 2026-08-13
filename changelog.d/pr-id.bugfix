@@ -1,0 +1,1 @@
+Fix a regression where `client_secret` request parameters were not validated against the character set required by the spec on Pydantic-validated endpoints, regressed in Synapse 1.66.0 (originally fixed for https://github.com/matrix-org/synapse/issues/6766).

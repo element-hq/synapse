@@ -61,7 +61,7 @@ class AuthenticationData(RequestBodyModel):
 ClientSecretStr = Annotated[
     str,
     StringConstraints(
-        pattern="[0-9a-zA-Z.=_-]",
+        pattern="^[0-9a-zA-Z.=_-]+$",
         min_length=1,
         max_length=255,
         strict=True,
