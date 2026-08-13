@@ -19,10 +19,8 @@ use pyo3::{call::PyCallArgs, intern, prelude::*};
 
 /// The Twisted reactor, as seen from Rust.
 ///
-/// A typed facade over a foreign Python object. It does no validation of the
-/// object it wraps (the Python side is type-checked by mypy), but it is the
-/// single place that names the Twisted API surface that Rust code depends
-/// on.
+/// This is a wrapper around a foreign Python object. No validation is
+/// performed, on the assumption the Python side is correctly typed.
 pub struct Reactor(Py<PyAny>);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Reactor {

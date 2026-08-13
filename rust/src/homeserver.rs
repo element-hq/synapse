@@ -22,10 +22,9 @@ use crate::runtime::RustRuntime;
 
 /// The Python `HomeServer`, as seen from Rust.
 ///
-/// Like [`crate::reactor::Reactor`], this is a typed facade over a foreign
-/// Python object. It does no validation of the object it wraps (the Python
-/// side is type-checked by mypy), but it is the single place that names the
-/// `HomeServer` API surface that Rust code depends on.
+/// Like [`crate::reactor::Reactor`], this is a wrapper around a foreign Python
+/// object. No validation is performed, on the assumption the Python side is
+/// correctly typed.
 pub struct HomeServer(Py<PyAny>);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for HomeServer {
