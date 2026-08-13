@@ -98,7 +98,13 @@ device_list_conversion_lag_gauge = Gauge(
     labelnames=[SERVER_NAME_LABEL],
 )
 
-# How often to update `device_list_conversion_lag_gauge`.
+device_list_conversion_stream_lag_gauge = Gauge(
+    "synapse_device_lists_changes_conversion_stream_lag",
+    "Number of stream IDs between the current device lists stream position and the position converted to outbound federation pokes",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+# How often to update the device list conversion lag gauges.
 DEVICE_LIST_CONVERSION_LAG_INTERVAL = Duration(seconds=30)
 
 
@@ -1067,6 +1073,17 @@ class DeviceWriterHandler(DeviceHandler):
         device_list_conversion_lag_gauge.labels(
             **{SERVER_NAME_LABEL: self.server_name}
         ).set(device_list_conversion_lag_ms / 1000.0)  # convert to seconds
+
+        # The stream ID lag is only an approximation of the conversion
+        # backlog: the converted position only advances when the conversion
+        # loop runs, and stream IDs in the gap may not have rows needing
+        # conversion at all.
+        converted_pos, _ = await self.store.get_device_change_last_converted_pos()
+        current_pos = self.store.get_device_stream_token().stream
+
+        device_list_conversion_stream_lag_gauge.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(max(0, current_pos - converted_pos))
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
