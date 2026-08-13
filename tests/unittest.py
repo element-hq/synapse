@@ -28,6 +28,7 @@ import logging
 import secrets
 import time
 from typing import (
+    TYPE_CHECKING,
     AbstractSet,
     Any,
     Awaitable,
@@ -73,6 +74,7 @@ from synapse.logging.context import (
     current_context,
     set_current_context,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
@@ -91,6 +93,9 @@ from tests.server import (
 from tests.test_utils import event_injection, setup_awaitable_errors
 from tests.test_utils.logging_setup import setup_logging
 from tests.utils import checked_cast, default_config, setupdb
+
+if TYPE_CHECKING:
+    from prometheus_client.registry import Collector
 
 setupdb()
 setup_logging()
@@ -1093,6 +1098,32 @@ class HomeserverTestCase(TestCase):
         self.get_success(
             event_injection.inject_member_event(self.hs, room, user, membership)
         )
+
+    def get_metric(self, metric: "Collector", **labels: Any) -> int:
+        """Get the value of a prometheus metric with the given labels.
+
+        Note that the metrics outlives each individual test, so it may hold
+        values from previous tests.
+
+        Automatically includes SERVER_NAME_LABEL.
+        """
+
+        labels = dict(labels)
+        labels[SERVER_NAME_LABEL] = self.hs.hostname
+
+        for collected in metric.collect():
+            for sample in collected.samples:
+                # Check that all the labels match. If any label doesn't match,
+                # we skip this sample.
+                for label, value in labels.items():
+                    if sample.labels.get(label) != value:
+                        break
+                else:
+                    # We didn't break, so all the labels matched. Return this
+                    # sample's value.
+                    return int(sample.value)
+
+        raise AssertionError(f"No metric found for {metric} with labels {labels}")
 
 
 class FederatingHomeserverTestCase(HomeserverTestCase):

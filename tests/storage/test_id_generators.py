@@ -21,7 +21,6 @@
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.server import HomeServer
 from synapse.storage.database import (
     DatabasePool,
@@ -116,16 +115,12 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         The gauge outlives each test, so it still holds the label sets of ID
         generators from earlier tests.
         """
-        for metric in stream_current_position_gauge.collect():
-            for sample in metric.samples:
-                if (
-                    sample.labels["stream_name"] == "test_stream"
-                    and sample.labels["instance_name"] == instance_name
-                    and sample.labels[SERVER_NAME_LABEL] == self.hs.hostname
-                ):
-                    return int(sample.value)
 
-        raise AssertionError(f"No position reported for {instance_name}")
+        return self.get_metric(
+            stream_current_position_gauge,
+            instance_name=instance_name,
+            stream_name="test_stream",
+        )
 
     def _replicate(self, instance_name: str) -> None:
         """Similate a replication event for the given instance."""
