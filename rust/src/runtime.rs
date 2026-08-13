@@ -93,11 +93,11 @@ impl RustRuntimeInner {
             .tokio
             .lock()
             .map_err(|_| PyRuntimeError::new_err("tokio runtime lock poisoned"))?;
-        let previous = std::mem::replace(&mut *state, TokioState::Shutdown);
+        let previous_state = std::mem::replace(&mut *state, TokioState::Shutdown);
         // Don't hold the lock while blocking on the shutdown below.
         drop(state);
 
-        if let TokioState::Running(runtime) = previous {
+        if let TokioState::Running(runtime) = previous_state {
             py.detach(|| runtime.shutdown_timeout(SHUTDOWN_TIMEOUT));
         }
 
