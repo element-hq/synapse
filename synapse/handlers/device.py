@@ -1063,7 +1063,7 @@ class DeviceWriterHandler(DeviceHandler):
         """Report how far behind we are at converting rows in
         `device_lists_changes_in_room` to `device_lists_outbound_pokes`.
         """
-        oldest_ts = await self.store.get_oldest_unconverted_device_list_change_ts()
+        oldest_ts, converted_pos = await self.store.get_device_list_conversion_lag()
 
         if oldest_ts is None:
             device_list_conversion_lag_ms = 0
@@ -1078,7 +1078,6 @@ class DeviceWriterHandler(DeviceHandler):
         # backlog: the converted position only advances when the conversion
         # loop runs, and stream IDs in the gap may not have rows needing
         # conversion at all.
-        converted_pos, _ = await self.store.get_device_change_last_converted_pos()
         current_pos = self.store.get_device_stream_token().stream
 
         device_list_conversion_stream_lag_gauge.labels(

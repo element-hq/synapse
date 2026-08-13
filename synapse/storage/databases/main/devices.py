@@ -2476,18 +2476,17 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
         return cast(tuple[int, str], min(rows))
 
-    async def get_oldest_unconverted_device_list_change_ts(self) -> int | None:
-        """Get the timestamp of the oldest row in `device_lists_changes_in_room`
-        that has yet to be converted to `device_lists_outbound_pokes`, i.e. how
-        far behind the conversion loop is.
+    async def get_device_list_conversion_lag(self) -> tuple[int | None, int]:
+        """Get how far behind we are at converting rows in
+        `device_lists_changes_in_room` to `device_lists_outbound_pokes`.
 
         Returns:
-            The timestamp (ms) at which the oldest unconverted change was
-            inserted. None if there is nothing to convert, or if the oldest
-            row predates the `inserted_ts` column.
+            A tuple of:
+                1. the timestamp (ms) at which the oldest unconverted change
+                   was inserted. None if there is nothing to convert, or if
+                   the oldest row predates the `inserted_ts` column.
+                2. the stream ID of the last converted position.
         """
-
-        stream_id, room_id = await self.get_device_change_last_converted_pos()
 
         # Rows for one device list update share a `stream_id` (and insertion
         # time), so ordering by `stream_id` alone is fine.
@@ -2500,16 +2499,26 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             LIMIT 1
         """
 
-        def get_oldest_unconverted_device_list_change_ts_txn(
+        def get_device_list_conversion_lag_txn(
             txn: LoggingTransaction,
-        ) -> int | None:
+        ) -> tuple[int | None, int]:
+            # As in `get_device_change_last_converted_pos`, take the minimum
+            # of all rows in case there is more than one.
+            pos_rows = self.db_pool.simple_select_list_txn(
+                txn,
+                table="device_lists_changes_converted_stream_position",
+                keyvalues={},
+                retcols=["stream_id", "room_id"],
+            )
+            stream_id, room_id = cast(tuple[int, str], min(pos_rows))
+
             txn.execute(sql, (stream_id, room_id))
             row = txn.fetchone()
-            return row[0] if row else None
+            return row[0] if row else None, stream_id
 
         return await self.db_pool.runInteraction(
-            "get_oldest_unconverted_device_list_change_ts",
-            get_oldest_unconverted_device_list_change_ts_txn,
+            "get_device_list_conversion_lag",
+            get_device_list_conversion_lag_txn,
         )
 
     async def set_device_change_last_converted_pos(
