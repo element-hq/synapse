@@ -922,7 +922,7 @@ class Notifier:
                     ).inc()
 
                 logger.warning(
-                    "Timed out waiting for current token to catch up on %s",
+                    "Timed out this worker's streams to advance to given token: %s",
                     _describe_lagging_streams(
                         stream_token, current_token, lagging_stream_keys
                     ),
@@ -931,7 +931,7 @@ class Notifier:
 
             if not logged:
                 logger.info(
-                    "Waiting for current token to catch up on %s",
+                    "Waiting for this worker's streams to advance to given token: %s",
                     _describe_lagging_streams(
                         stream_token, current_token, lagging_stream_keys
                     ),
