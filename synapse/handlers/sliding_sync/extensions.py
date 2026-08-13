@@ -28,6 +28,7 @@ from typing_extensions import TypeAlias, assert_never
 from synapse.api.constants import (
     AccountDataTypes,
     EduTypes,
+    EventTypes,
     ProfileUpdateAction,
     StickyEvent,
 )
@@ -1110,9 +1111,10 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A calculated map of responses per room.
 
         Returns:
-            Set of user ID's.
+            Tuple containing two sets, first including all found user ID's,
+            second containing user ID's calculated via lazy configured rooms.
         """
-        users_in_timeline = set()
+        lazy_profile_user_ids = set()
         non_lazy_profile_user_ids = set()
         if rooms:
             # Separate rooms into lazy and non-lazy based on sync config.
@@ -1127,12 +1129,21 @@ class SlidingSyncExtensionHandler:
             )
 
             if lazy_rooms:
-                # For rooms configured as lazy, include users based on timeline events.
+                # For rooms configured as lazy, include users based on room response.
                 for room_id, room_data in actual_room_response_map.items():
                     if room_id not in lazy_rooms:
                         continue
+                    # Include users from timeline events
                     for timeline_event in room_data.timeline_events:
-                        users_in_timeline.add(timeline_event.event.sender)
+                        lazy_profile_user_ids.add(timeline_event.event.sender)
+                    # Include users from required state
+                    for state_event in room_data.required_state:
+                        if state_event.type == EventTypes.Member:
+                            lazy_profile_user_ids.add(state_event.state_key)
+                    # Include heroes
+                    if room_data.heroes:
+                        for hero in room_data.heroes:
+                            lazy_profile_user_ids.add(hero.user_id)
 
             non_lazy_rooms = rooms.difference(lazy_rooms)
             # If we still have non-lazy rooms, get their members.
@@ -1152,12 +1163,12 @@ class SlidingSyncExtensionHandler:
             )
 
         # Unify the two lists
-        profile_user_ids = users_in_timeline.union(non_lazy_profile_user_ids)
+        profile_user_ids = lazy_profile_user_ids.union(non_lazy_profile_user_ids)
 
         # Return a tuple containing the full list of user ID's and the lazy subset.
         return (
             profile_user_ids,
-            users_in_timeline,
+            lazy_profile_user_ids,
         )
 
     async def _get_profiles_extension_initial_sync_response(
