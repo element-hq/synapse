@@ -924,6 +924,12 @@ class _MultiWriterCtxManager:
                 db_autocommit=True,
             )
         except BaseException:
+            # We catch `BaseException` rather than `Exception`,
+            # because request cancellation surfaces here as exceptions that are
+            # not `Exception` subclasses: `asyncio.CancelledError`
+            # and `GeneratorExit` (raised when a paused coroutine is garbage
+            # collected).
+            #
             # If we're interrupted (e.g. the enclosing request was cancelled)
             # after the transaction allocated the IDs but before we returned,
             # then `__aexit__` will never run, because Python only invokes it

@@ -305,10 +305,11 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         # On the buggy code the token is still stuck at 7 (ID 8 is leaked in
         # `_unfinished_ids`, blocking everything behind it). Once the leak is
-        # fixed, the token advances.
-        self.assertGreater(
+        # fixed, the token advances to 9: ID 8 was allocated (and abandoned) by
+        # the cancelled write, so the successful write above takes ID 9.
+        self.assertEqual(
             id_gen.get_current_token_for_writer("master"),
-            7,
+            9,
             "presence stream position is wedged by the cancelled allocation",
         )
 
