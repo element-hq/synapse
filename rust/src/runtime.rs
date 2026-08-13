@@ -34,7 +34,7 @@ use crate::reactor::Reactor;
 
 /// How long to wait for in-flight tokio tasks when shutting down with the
 /// reactor.
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// State of the lazily-started tokio runtime.
 enum TokioState {
@@ -98,6 +98,8 @@ impl RustRuntimeInner {
         drop(state);
 
         if let TokioState::Running(runtime) = previous_state {
+            // Shutdown the runtime, waiting for a small grace period for
+            // in-flight tasks to finish (mimicking Twisted's behaviour).
             py.detach(|| runtime.shutdown_timeout(SHUTDOWN_TIMEOUT));
         }
 
