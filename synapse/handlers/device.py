@@ -105,7 +105,7 @@ device_list_conversion_stream_lag_gauge = Gauge(
 )
 
 # How often to update the device list conversion lag gauges.
-DEVICE_LIST_CONVERSION_LAG_INTERVAL = Duration(seconds=30)
+DEVICE_LIST_CONVERSION_LAG_GAUGE_METRIC_UPDATE_INTERVAL = Duration(seconds=30)
 
 
 def _check_device_name_length(name: str | None) -> None:
@@ -982,7 +982,7 @@ class DeviceWriterHandler(DeviceHandler):
             # into outbound pokes.
             self.clock.looping_call(
                 self._report_device_list_conversion_lag,
-                DEVICE_LIST_CONVERSION_LAG_INTERVAL,
+                DEVICE_LIST_CONVERSION_LAG_GAUGE_METRIC_UPDATE_INTERVAL,
             )
 
     @trace
