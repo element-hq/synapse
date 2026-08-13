@@ -30,6 +30,7 @@ jobs:
       - name: Start postgres with a faked clock
         background: true
         id: postgres
+        # Use faketime here for schema deltas that are wall-clock sensitive under Postgres
         run: |
           # Build a docker image with faketime
           mkdir /tmp/postgres-faketime
@@ -58,8 +59,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install PostgreSQL client
-        run: sudo apt-get -qq install postgresql-client
+      - name: Install PostgreSQL client and faketime
+        run: sudo apt-get -qq install postgresql-client faketime
 
       - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
@@ -77,8 +78,10 @@ jobs:
           PGHOST: localhost
           PGUSER: postgres
           PGPASSWORD: postgres
+        # Use faketime here for schema deltas that are wall-clock sensitive under SQLite
         run: |
-          poetry run python .ci/scripts/schema_diff.py \
+          faketime -f "2001-05-25 12:42:42" \
+            poetry run python .ci/scripts/schema_diff.py \
             --base origin/develop \
             > "${{ runner.temp }}/schema_diff.md"
 
