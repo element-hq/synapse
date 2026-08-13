@@ -1273,6 +1273,74 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         result = self.get_success(self.handler.get_room_summary(self.user, self.room))
         self.assertNotIn("allowed_room_ids", result)
 
+    def _stub_stats_join_rules(self, room_id: str, join_rules: str | None) -> None:
+        """Overwrite the (asynchronously updated) room statistics for a room.
+
+        This stands in for the statistics not having caught up with the room's
+        current state yet, which is otherwise hard to arrange in tests.
+        """
+        self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_upsert(
+                table="room_stats_state",
+                keyvalues={"room_id": room_id},
+                values={"join_rules": join_rules},
+                desc="_stub_stats_join_rules",
+            )
+        )
+
+    def test_join_rule_from_current_state(self) -> None:
+        """The join rule is returned from current state, not the room statistics."""
+        # The statistics are updated by a background process, so they can be
+        # missing or stale; neither should be reflected in the summary.
+        self._stub_stats_join_rules(self.room, None)
+        result = self.get_success(self.handler.get_room_summary(self.user, self.room))
+        self.assertEqual(result.get("join_rule"), JoinRules.INVITE)
+
+        self._stub_stats_join_rules(self.room, JoinRules.PUBLIC)
+        result = self.get_success(self.handler.get_room_summary(self.user, self.room))
+        self.assertEqual(result.get("join_rule"), JoinRules.INVITE)
+
+    def test_join_rule_and_allowed_room_ids_are_consistent(self) -> None:
+        """The join rule and allowed_room_ids are both returned for a restricted room.
+
+        Regression test for the two disagreeing when the room statistics lag
+        behind the current state.
+        """
+        space = self.helper.create_room_as(
+            self.user,
+            tok=self.token,
+            extra_content={"creation_content": {"type": RoomTypes.SPACE}},
+        )
+        restricted_room = self.helper.create_room_as(
+            self.user,
+            room_version=RoomVersions.V8.identifier,
+            tok=self.token,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.JoinRules,
+                        "state_key": "",
+                        "content": {
+                            "join_rule": JoinRules.RESTRICTED,
+                            "allow": [
+                                {
+                                    "type": RestrictedJoinRuleTypes.ROOM_MEMBERSHIP,
+                                    "room_id": space,
+                                }
+                            ],
+                        },
+                    }
+                ]
+            },
+        )
+        self._stub_stats_join_rules(restricted_room, None)
+
+        result = self.get_success(
+            self.handler.get_room_summary(self.user, restricted_room)
+        )
+        self.assertEqual(result.get("join_rule"), JoinRules.RESTRICTED)
+        self.assertEqual(result.get("allowed_room_ids"), [space])
+
     def test_fed(self) -> None:
         """
         Return data over federation and ensure that it is handled properly.
