@@ -59,8 +59,8 @@ logger = logging.getLogger(__name__)
 
 stream_current_position_gauge = Gauge(
     "synapse_storage_stream_current_position",
-    "The stream's current position as this process sees it, i.e. what "
-    "`get_current_token` returns. Streams that count downwards report negative IDs",
+    "The stream's current position as this process sees it."
+    "Note, these are always positive, even for negative streams.",
     labelnames=["stream_name", "instance_name", SERVER_NAME_LABEL],
 )
 
@@ -368,9 +368,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         """
         assert self._lock.locked()
 
-        self._current_position_gauge.set(
-            self._return_factor * self._persisted_upto_position
-        )
+        self._current_position_gauge.set(self._persisted_upto_position)
 
     def _load_current_ids(
         self,
