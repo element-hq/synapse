@@ -108,7 +108,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         )
         return self.instances[instance_name]
 
-    def _get_reported_position(self, instance_name: str) -> int:
+    def _get_reported_metric_position(self, instance_name: str) -> int:
         """The position the metric reports for the test stream on the given
         process.
 
@@ -249,7 +249,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         id_gen = self._create_id_generator()
 
-        self.assertEqual(self._get_reported_position("master"), 7)
+        self.assertEqual(self._get_reported_metric_position("master"), 7)
 
         async def _get_next_async() -> None:
             async with id_gen.get_next():
@@ -258,7 +258,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.get_success(_get_next_async())
 
         self.assertEqual(id_gen.get_current_token(), 8)
-        self.assertEqual(self._get_reported_position("master"), 8)
+        self.assertEqual(self._get_reported_metric_position("master"), 8)
 
     def test_out_of_order_finish(self) -> None:
         """Test that IDs persisted out of order are correctly handled"""
@@ -464,8 +464,8 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         told.advance("writer", 5)
 
-        self.assertEqual(self._get_reported_position("told"), 5)
-        self.assertEqual(self._get_reported_position("not_told"), 3)
+        self.assertEqual(self._get_reported_metric_position("told"), 5)
+        self.assertEqual(self._get_reported_metric_position("not_told"), 3)
 
     def test_get_persisted_upto_position_get_next(self) -> None:
         """Test that `get_persisted_upto_position` correctly tracks updates to
