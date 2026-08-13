@@ -903,6 +903,9 @@ class Notifier:
         start = self.clock.time_msec()
         logged = False
         while True:
+            # Check if we are caught up to the stream token, if so return early.
+            # Equivalent to `is_before_or_eq`, except we can get the lagging
+            # stream keys for logging.
             current_token = self.event_sources.get_current_token()
             lagging_stream_keys = stream_token.fields_behind(current_token)
             if not lagging_stream_keys:
