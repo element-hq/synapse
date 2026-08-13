@@ -28,7 +28,7 @@ from synapse.events import make_event_from_dict
 from synapse.module_api import EventBase
 from synapse.rest import admin, login, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
-from synapse.types import Codes, JsonDict
+from synapse.types import Codes, JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -53,7 +53,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         self.user_id = self.register_user("user", "password")
         self.token = self.login("user", "password")
 
-    def create_room(self, content: JsonDict) -> FakeChannel:
+    def create_room(self, content: LaxJsonDict) -> FakeChannel:
         channel = self.make_request(
             "POST",
             "/_matrix/client/r0/createRoom",
@@ -69,7 +69,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         """
 
         async def user_may_create_room(
-            user_id: str, room_config: JsonDict
+            user_id: str, room_config: LaxJsonDict
         ) -> Literal["NOT_SPAM"] | Codes:
             self.last_room_config = room_config
             self.last_user_id = user_id

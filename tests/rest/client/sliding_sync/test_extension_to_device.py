@@ -20,7 +20,7 @@ from twisted.internet.testing import MemoryReactor
 import synapse.rest.admin
 from synapse.rest.client import login, sendtodevice, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, StreamKeyType
+from synapse.types import JsonDict, LaxJsonDict, StreamKeyType
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -58,7 +58,7 @@ class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
         super().prepare(reactor, clock, hs)
 
     def _assert_to_device_response(
-        self, response_body: JsonDict, expected_messages: list[JsonDict]
+        self, response_body: LaxJsonDict, expected_messages: list[JsonDict]
     ) -> str:
         """Assert the sliding sync response was successful and has the expected
         to-device messages.

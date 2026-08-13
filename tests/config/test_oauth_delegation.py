@@ -27,7 +27,7 @@ from unittest.mock import Mock
 from synapse.config import ConfigError
 from synapse.config.homeserver import HomeServerConfig
 from synapse.module_api import ModuleApi
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 
 from tests.server import get_clock, setup_test_homeserver
 from tests.unittest import TestCase, skip_unless
@@ -58,7 +58,7 @@ class MasAuthDelegation(TestCase):
     """Test that the Homeserver fails to initialize if the config is invalid."""
 
     def setUp(self) -> None:
-        self.config_dict: JsonDict = {
+        self.config_dict: LaxJsonDict = {
             **default_config(server_name="test"),
             "public_baseurl": BASE_URL,
             "enable_registration": False,

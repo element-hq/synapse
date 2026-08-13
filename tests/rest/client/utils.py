@@ -47,7 +47,7 @@ from twisted.web.server import Site
 from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.duration import Duration
 
 from tests.server import FakeChannel, make_request
@@ -171,7 +171,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         tok: str | None = None,
         extra_data: dict | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         return self.change_membership(
             room=room,
             src=src,
@@ -191,7 +191,7 @@ class RestHelper:
         appservice_user_id: str | None = None,
         expect_errcode: Codes | None = None,
         expect_additional_fields: dict | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         return self.change_membership(
             room=room,
             src=user,
@@ -244,7 +244,7 @@ class RestHelper:
         user: str | None = None,
         expect_code: int = HTTPStatus.OK,
         tok: str | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         return self.change_membership(
             room=room,
             src=user,
@@ -261,7 +261,7 @@ class RestHelper:
         targ: str,
         expect_code: int = HTTPStatus.OK,
         tok: str | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """A convenience helper: `change_membership` with `membership` preset to "ban"."""
         return self.change_membership(
             room=room,
@@ -284,7 +284,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         expect_errcode: str | None = None,
         expect_additional_fields: dict | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """
         Send a membership state event into a room.
 
@@ -378,7 +378,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
         type: str = "m.room.message",
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         if body is None:
             body = "body_text_here"
 
@@ -429,7 +429,7 @@ class RestHelper:
         tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         if txn_id is None:
             txn_id = "m%s" % (str(time.time()))
 
@@ -465,7 +465,7 @@ class RestHelper:
         tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
         custom_headers: Iterable[tuple[AnyStr, AnyStr]] | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """
         Send an event that has a sticky duration according to MSC4354.
         """
@@ -498,7 +498,7 @@ class RestHelper:
         event_id: str,
         tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """Request a specific event from the server.
 
         Args:
@@ -538,7 +538,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
         method: str = "GET",
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """Read or write some state from a given room
 
         Args:
@@ -587,7 +587,7 @@ class RestHelper:
         tok: str,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """Gets some state from a room
 
         Args:
@@ -615,7 +615,7 @@ class RestHelper:
         tok: str | None = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """Set some state in a room
 
         Args:
@@ -642,7 +642,7 @@ class RestHelper:
         tok: str,
         filename: str = "test.png",
         expect_code: int = HTTPStatus.OK,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """Upload a piece of test media to the media repo
         Args:
             resource: The resource that will handle the upload request
@@ -718,7 +718,7 @@ class RestHelper:
         with_sid: bool = False,
         idp_id: str | None = None,
         expected_status: int = 200,
-    ) -> tuple[JsonDict, FakeAuthorizationGrant]:
+    ) -> tuple[LaxJsonDict, FakeAuthorizationGrant]:
         """Log in (as a new user) via OIDC
 
         Returns the result of the final token login and the fake authorization grant.
@@ -786,7 +786,7 @@ class RestHelper:
     def auth_via_oidc(
         self,
         fake_server: FakeOidcServer,
-        user_info_dict: JsonDict,
+        user_info_dict: LaxJsonDict,
         client_redirect_url: str | None = None,
         ui_auth_session_id: str | None = None,
         with_sid: bool = False,

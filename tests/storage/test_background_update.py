@@ -36,7 +36,7 @@ from synapse.storage.background_updates import (
 )
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -58,7 +58,7 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
         )
         self.store = self.hs.get_datastores().main
 
-    async def update(self, progress: JsonDict, count: int) -> int:
+    async def update(self, progress: LaxJsonDict, count: int) -> int:
         fake_work_duration = Duration(seconds=1)
         await self.clock.sleep(fake_work_duration)
         progress = {"my_key": progress["my_key"] + 1}
@@ -321,7 +321,7 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
         )
 
         # Run the update with the long-running update item
-        async def update_long(progress: JsonDict, count: int) -> int:
+        async def update_long(progress: LaxJsonDict, count: int) -> int:
             very_long_fake_work_duration = Duration(seconds=5)
             await self.clock.sleep(very_long_fake_work_duration)
             progress = {"my_key": progress["my_key"] + 1}

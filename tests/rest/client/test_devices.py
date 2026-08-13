@@ -26,7 +26,7 @@ from synapse.appservice import ApplicationService
 from synapse.rest import admin, devices, sync
 from synapse.rest.client import keys, login, register
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import LaxJsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -87,7 +87,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
     def test_dehydrate_msc3814(self) -> None:
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")
-        content: JsonDict = {
+        content: LaxJsonDict = {
             "device_data": {
                 "algorithm": "m.dehydration.v1.olm",
             },
@@ -290,7 +290,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
 
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")
-        content: JsonDict = {
+        content: LaxJsonDict = {
             "device_data": {
                 "algorithm": "m.dehydration.v1.olm",
             },
@@ -487,7 +487,7 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
     def test_msc3814_dehydrated_device_delete_works(self) -> None:
         user = self.register_user("mikey", "pass")
         token = self.login(user, "pass", device_id="device1")
-        content: JsonDict = {
+        content: LaxJsonDict = {
             "device_data": {
                 "algorithm": "m.dehydration.v1.olm",
             },

@@ -43,8 +43,8 @@ from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import (
-    JsonDict,
     JsonValue,
+    LaxJsonDict,
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
@@ -837,7 +837,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         ]
 
         # And now, Bob resyncs.
-        filter_dict: JsonDict = {"room": {"include_leave": True}}
+        filter_dict: LaxJsonDict = {"room": {"include_leave": True}}
         if empty_timeline:
             filter_dict["room"]["timeline"] = {"limit": 0}
         sync_room_result = self.get_success(

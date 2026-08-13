@@ -27,7 +27,7 @@ from twisted.internet import defer, reactor as _reactor
 
 from synapse.logging.context import SENTINEL_CONTEXT, LoggingContext, current_context
 from synapse.rest.client.transactions import CLEANUP_PERIOD, HttpTransactionCache
-from synapse.types import ISynapseReactor, JsonDict
+from synapse.types import ISynapseReactor, JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -122,7 +122,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         """
         called = [False]
 
-        def cb() -> "defer.Deferred[tuple[int, JsonDict]]":
+        def cb() -> "defer.Deferred[tuple[int, LaxJsonDict]]":
             if called[0]:
                 # return a valid result the second time
                 return defer.succeed(self.mock_http_response)
@@ -154,7 +154,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         """
         called = [False]
 
-        def cb() -> "defer.Deferred[tuple[int, JsonDict]]":
+        def cb() -> "defer.Deferred[tuple[int, LaxJsonDict]]":
             if called[0]:
                 # return a valid result the second time
                 return defer.succeed(self.mock_http_response)

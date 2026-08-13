@@ -27,7 +27,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.roommember import RoomsForUser
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
@@ -729,7 +729,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
 
         return invited_rooms
 
-    def _sync_and_get_messages(self, room_id: str, token: str) -> list[JsonDict]:
+    def _sync_and_get_messages(self, room_id: str, token: str) -> list[LaxJsonDict]:
         """
         Do a sync and get messages of a room.
 

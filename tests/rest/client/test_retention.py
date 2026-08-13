@@ -28,7 +28,7 @@ from synapse.events.utils import FilteredEvent
 from synapse.rest import admin
 from synapse.rest.client import login, retention, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, create_requester
+from synapse.types import LaxJsonDict, create_requester
 from synapse.util.clock import Clock
 from synapse.visibility import filter_and_transform_events_for_client
 
@@ -247,7 +247,7 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         # has been purged.
         self.get_event(room_id, bool(create_event))
 
-    def get_event(self, event_id: str, expect_none: bool = False) -> JsonDict:
+    def get_event(self, event_id: str, expect_none: bool = False) -> LaxJsonDict:
         event = self.get_success(self.store.get_event(event_id, allow_none=True))
 
         if expect_none:
@@ -387,7 +387,7 @@ class RetentionNoDefaultPolicyTestCase(unittest.HomeserverTestCase):
 
     def get_event(
         self, room_id: str, event_id: str, expected_code: int = 200
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         url = "/_matrix/client/r0/rooms/%s/event/%s" % (room_id, event_id)
 
         channel = self.make_request("GET", url, access_token=self.token)

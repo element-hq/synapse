@@ -48,7 +48,7 @@ from synapse.logging.context import (
     LoggingContext,
     make_deferred_yieldable,
 )
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 
 from tests.server import FakeChannel, make_request
 from tests.unittest import logcontext_clean
@@ -144,7 +144,7 @@ def make_request_with_cancellation_test(
     site: Site,
     method: str,
     path: str,
-    content: bytes | str | JsonDict = b"",
+    content: bytes | str | LaxJsonDict = b"",
     *,
     token: str | None = None,
 ) -> FakeChannel:

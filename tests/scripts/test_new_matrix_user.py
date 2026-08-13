@@ -21,7 +21,7 @@
 from unittest.mock import Mock, patch
 
 from synapse._scripts.register_new_matrix_user import request_registration
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 
 from tests.unittest import TestCase
 
@@ -40,7 +40,7 @@ class RegisterTestCase(TestCase):
             return r
 
         def post(
-            url: str, json: JsonDict | None = None, verify: bool | None = None
+            url: str, json: LaxJsonDict | None = None, verify: bool | None = None
         ) -> Mock:
             # Make sure we are sent the correct info
             assert json is not None
@@ -129,7 +129,7 @@ class RegisterTestCase(TestCase):
             return r
 
         def post(
-            url: str, json: JsonDict | None = None, verify: bool | None = None
+            url: str, json: LaxJsonDict | None = None, verify: bool | None = None
         ) -> Mock:
             # Make sure we are sent the correct info
             assert json is not None

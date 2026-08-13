@@ -34,7 +34,7 @@ from synapse.logging._terse_json import (
     TerseJsonFormatter,
 )
 from synapse.logging.context import LoggingContext, LoggingContextFilter
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 
 from tests.logging import LoggerCleanupMixin
 from tests.server import FakeChannel, get_clock
@@ -46,7 +46,7 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         self.output = StringIO()
         self.reactor, _ = get_clock()
 
-    def get_log_line(self) -> JsonDict:
+    def get_log_line(self) -> LaxJsonDict:
         # One log message, with a single trailing newline.
         data = self.output.getvalue()
         logs = data.splitlines()
@@ -261,7 +261,7 @@ class GcpJsonFormatterTestCase(LoggerCleanupMixin, TestCase):
     def setUp(self) -> None:
         self.output = StringIO()
 
-    def get_log_line(self) -> JsonDict:
+    def get_log_line(self) -> LaxJsonDict:
         data = self.output.getvalue()
         logs = data.splitlines()
         self.assertEqual(len(logs), 1)

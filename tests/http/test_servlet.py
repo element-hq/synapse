@@ -32,7 +32,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.cancellation import cancellable
 from synapse.util.duration import Duration
 
@@ -40,7 +40,7 @@ from tests import unittest
 from tests.http.server._base import disconnect_and_assert
 
 
-def make_request(content: bytes | JsonDict) -> Mock:
+def make_request(content: bytes | LaxJsonDict) -> Mock:
     """Make an object that acts enough like a request."""
     request = Mock(spec=["method", "uri", "content"])
 

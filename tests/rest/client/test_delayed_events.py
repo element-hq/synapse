@@ -25,7 +25,7 @@ from synapse.rest import admin
 from synapse.rest.client import delayed_events, login, room, sync, versions
 from synapse.server import HomeServer
 from synapse.synapse_rust.http_client import HttpClient
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -686,7 +686,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         return events
 
-    def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
+    def _get_delayed_event_content(self, event: LaxJsonDict) -> JsonDict:
         key = "content"
         self.assertIn(key, event)
 

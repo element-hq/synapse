@@ -22,17 +22,17 @@ from synapse.api.room_versions import (
 )
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.federation_base import event_from_pdu_json
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 
 
-def default_event_fields(room_version: RoomVersion) -> JsonDict:
+def default_event_fields(room_version: RoomVersion) -> LaxJsonDict:
     """Return default values for every field required by `room_version`."""
 
     # We need to include entries for every required field for the room version.
     # Note that they don't necessarily have to be valid values, just enough to
     # allow us to construct the event class. (Ideally we'd build a fully valid
     # event, but this is fine for now.)
-    defaults: JsonDict = {
+    defaults: LaxJsonDict = {
         "type": "m.test",
         "sender": "@test:test",
         "content": {},
@@ -57,9 +57,9 @@ def default_event_fields(room_version: RoomVersion) -> JsonDict:
 
 
 def make_test_event(
-    event_dict: JsonDict | None = None,
+    event_dict: LaxJsonDict | None = None,
     room_version: RoomVersion = RoomVersions.V1,
-    internal_metadata_dict: JsonDict | None = None,
+    internal_metadata_dict: LaxJsonDict | None = None,
     rejected_reason: str | None = None,
     **fields: Unpack["_EventFields"],
 ) -> EventBase:
@@ -71,7 +71,7 @@ def make_test_event(
     `**fields` wins over `event_dict` so call sites can override a
     shared base dict with one-off tweaks.
     """
-    merged: JsonDict = {
+    merged: LaxJsonDict = {
         **default_event_fields(room_version),
         **(event_dict or {}),
         **fields,
@@ -99,7 +99,7 @@ def make_test_event(
 
 
 def make_test_pdu_event(
-    pdu: JsonDict,
+    pdu: LaxJsonDict,
     room_version: RoomVersion,
     received_time: int | None = None,
 ) -> EventBase:
@@ -121,7 +121,7 @@ class _EventFields(TypedDict):
     event_id: NotRequired[str]
     type: NotRequired[str]
     sender: NotRequired[str]
-    content: NotRequired[JsonDict]
+    content: NotRequired[LaxJsonDict]
     depth: NotRequired[int]
     origin_server_ts: NotRequired[int]
     hashes: NotRequired[dict[str, str]]

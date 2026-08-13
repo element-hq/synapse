@@ -21,7 +21,7 @@ import synapse.rest.client.account_data
 from synapse.api.constants import EventTypes, EventUnsignedContentFields
 from synapse.rest.client import account_data, login, register, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, StreamKeyType
+from synapse.types import JsonDict, LaxJsonDict, StreamKeyType
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -88,7 +88,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
 
     def _assert_sticky_events_response(
         self,
-        response_body: JsonDict,
+        response_body: LaxJsonDict,
         expected_events_by_room: dict[str, list[str]] | None,
     ) -> str | None:
         """Assert the sliding sync response was successful and has the expected
@@ -182,7 +182,7 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         )["event_id"]
 
         # Initial sync should return the sticky event
-        sync_body: JsonDict = {
+        sync_body: LaxJsonDict = {
             "lists": DUMMY_LISTS,
             "extensions": {
                 "org.matrix.msc4354.sticky_events": {

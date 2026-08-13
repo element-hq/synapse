@@ -27,7 +27,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import StrippedStateEvent
 from synapse.rest.client import login, room, sync, tags
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -1320,7 +1320,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
 
         # Get a token before we create any rooms
-        sync_body: JsonDict = {
+        sync_body: LaxJsonDict = {
             "lists": {},
         }
         response_body, before_rooms_token = self.do_sync(sync_body, tok=user1_tok)
@@ -1402,7 +1402,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         _user2_tok = self.login(user2_id, "pass")
 
         # Get a token before we create any rooms
-        sync_body: JsonDict = {
+        sync_body: LaxJsonDict = {
             "lists": {},
         }
         response_body, before_rooms_token = self.do_sync(sync_body, tok=user1_tok)

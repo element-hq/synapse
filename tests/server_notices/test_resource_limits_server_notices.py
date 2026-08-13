@@ -30,7 +30,7 @@ from synapse.server_notices.resource_limits_server_notices import (
     ResourceLimitsServerNotices,
 )
 from synapse.server_notices.server_notices_sender import ServerNoticesSender
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -39,7 +39,7 @@ from tests.utils import default_config
 
 
 class TestResourceLimitsServerNotices(unittest.HomeserverTestCase):
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         config = default_config(server_name="test")
 
         config.update(

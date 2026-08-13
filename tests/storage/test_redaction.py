@@ -30,7 +30,7 @@ from synapse.events import EventBase, make_event_from_dict
 from synapse.events.builder import EventBuilder
 from synapse.server import HomeServer
 from synapse.synapse_rust.events import EventInternalMetadata
-from synapse.types import JsonDict, RoomID, UserID
+from synapse.types import JsonDict, LaxJsonDict, RoomID, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -67,7 +67,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
         room: RoomID,
         user: UserID,
         membership: str,
-        extra_content: JsonDict | None = None,
+        extra_content: LaxJsonDict | None = None,
     ) -> EventBase:
         content = {"membership": membership}
         content.update(extra_content or {})

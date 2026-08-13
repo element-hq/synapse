@@ -46,7 +46,7 @@ from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.types import Cursor
 from synapse.synapse_rust.events import EventInternalMetadata
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.json import json_encoder
 
@@ -1064,7 +1064,7 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # The rest are events in the room but not backfilled tet.
         our_server_events = {"5", "4", "B", "3", "A"}
 
-        complete_event_dict_map: dict[str, JsonDict] = {}
+        complete_event_dict_map: dict[str, LaxJsonDict] = {}
         stream_ordering = 0
         for event_id, prev_event_ids in event_graph.items():
             depth = depth_map[event_id]

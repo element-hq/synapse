@@ -23,7 +23,7 @@
 from unittest.mock import Mock, patch
 
 from synapse.metrics.jemalloc import JemallocStats
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 from synapse.util.caches.lrucache import LruCache, setup_expire_lru_cache_entries
 from synapse.util.caches.treecache import TreeCache
 
@@ -338,7 +338,7 @@ class LruCacheSizedTestCase(unittest.HomeserverTestCase):
 class TimeEvictionTestCase(unittest.HomeserverTestCase):
     """Test that time based eviction works correctly."""
 
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         config = super().default_config()
 
         config.setdefault("caches", {})["expiry_time"] = "30m"

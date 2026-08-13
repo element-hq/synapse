@@ -38,7 +38,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.controllers.state import server_acl_evaluator_from_event
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, LaxJsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -135,7 +135,7 @@ class GetMissingEventsRoomCheckTests(unittest.FederatingHomeserverTestCase):
             self.room_blocked, num_events=5, tok=self.local_user_token
         )
 
-    def _extract_returned_event_ids(self, json_body: JsonDict) -> set[str]:
+    def _extract_returned_event_ids(self, json_body: LaxJsonDict) -> set[str]:
         """
         Given the response body of `/get_missing_events`, return the event IDs
         of the events that were returned in the response.
@@ -951,7 +951,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         tok2 = self.login("fozzie", "bear")
         self.helper.join(self._room_id, second_member_user_id, tok=tok2)
 
-    def _make_join(self, user_id: str) -> JsonDict:
+    def _make_join(self, user_id: str) -> LaxJsonDict:
         channel = self.make_signed_federation_request(
             "GET",
             f"/_matrix/federation/v1/make_join/{self._room_id}/{user_id}"

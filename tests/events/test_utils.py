@@ -37,7 +37,7 @@ from synapse.events.utils import (
     maybe_upsert_event_field,
     prune_event,
 )
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.frozenutils import freeze
 
 from tests.test_utils.event_builders import make_test_event
@@ -92,7 +92,9 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
         "prev_events": [],
     }
 
-    def run_test(self, evdict: JsonDict, matchdict: JsonDict, **kwargs: Any) -> None:
+    def run_test(
+        self, evdict: LaxJsonDict, matchdict: LaxJsonDict, **kwargs: Any
+    ) -> None:
         """
         Asserts that a new event constructed with `evdict` will look like
         `matchdict` when it is redacted.

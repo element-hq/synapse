@@ -99,7 +99,7 @@ from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
-from synapse.types import ISynapseReactor, JsonDict
+from synapse.types import ISynapseReactor, LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
@@ -164,13 +164,13 @@ class FakeChannel:
         self._request = request
 
     @property
-    def json_body(self) -> JsonDict:
+    def json_body(self) -> LaxJsonDict:
         body = json.loads(self.text_body)
         assert isinstance(body, dict)
         return body
 
     @property
-    def json_list(self) -> list[JsonDict]:
+    def json_list(self) -> list[LaxJsonDict]:
         body = json.loads(self.text_body)
         assert isinstance(body, list)
         return body
@@ -449,7 +449,7 @@ def make_request(
     site: Site | FakeSite,
     method: bytes | str,
     path: bytes | str,
-    content: bytes | str | JsonDict = b"",
+    content: bytes | str | LaxJsonDict = b"",
     access_token: str | None = None,
     request: type[Request] = SynapseRequest,
     shorthand: bool = True,
@@ -1212,7 +1212,7 @@ def setup_test_homeserver(
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
 
-        database_config: JsonDict = {
+        database_config: LaxJsonDict = {
             "name": "psycopg2",
             "args": {
                 "dbname": test_db,

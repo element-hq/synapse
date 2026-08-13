@@ -64,7 +64,7 @@ from synapse.rest.synapse.client.media_upload_limit_exceeded import (
     MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, LaxJsonDict, UserID
 from synapse.util.clock import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -294,7 +294,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         self.reactor.nameResolver = Resolver()  # type: ignore[assignment]
 
-    def _assert_small_png(self, json_body: JsonDict) -> None:
+    def _assert_small_png(self, json_body: LaxJsonDict) -> None:
         """Assert properties from the SMALL_PNG test image."""
         self.assertTrue(json_body["og:image"].startswith("mxc://"))
         self.assertEqual(json_body["og:image:height"], 1)

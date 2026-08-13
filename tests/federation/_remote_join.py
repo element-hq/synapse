@@ -28,7 +28,7 @@ from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.matrixfederationclient import ByteParser
 from synapse.http.types import QueryParams
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 
 from tests.test_utils.event_builders import make_test_event, make_test_pdu_event
 from tests.unittest import FederatingHomeserverTestCase
@@ -307,7 +307,7 @@ class RemoteJoinHelper:
             destination: str,
             path: str,
             args: QueryParams | None = None,
-            data: JsonDict | None = None,
+            data: LaxJsonDict | None = None,
             json_data_callback: Callable[[], JsonDict] | None = None,
             long_retries: bool = False,
             timeout: int | None = None,
