@@ -1407,6 +1407,9 @@ class StreamToken:
 
         for _, key in StreamKeyType.__members__.items():
             if key == StreamKeyType.TYPING:
+                # The typing key is never yielded. That stream is allowed to
+                # "reset", and so comparisons don't really make sense as is.
+                # TODO: Figure out a better way of tracking resets.
                 continue
 
             self_value = self.get_field(key)
