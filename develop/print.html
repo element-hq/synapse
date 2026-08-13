@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-60bdc141.js";
+            window.path_to_searchindex_js = "searchindex-7c305fa1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -988,8 +988,10 @@ has already occurred, and such duplicate rows will need to be manually removed.<
 <a href="https://nginx.org/en/docs/http/ngx_http_proxy_module.html">nginx</a>,
 <a href="https://httpd.apache.org/docs/current/mod/mod_proxy_http.html">Apache</a>,
 <a href="https://caddyserver.com/docs/quick-starts/reverse-proxy">Caddy</a>,
-<a href="https://www.haproxy.org/">HAProxy</a> or
-<a href="https://man.openbsd.org/relayd.8">relayd</a> in front of Synapse.
+<a href="https://www.haproxy.org/">HAProxy</a>,
+<a href="https://man.openbsd.org/relayd.8">relayd</a> or
+<a href="https://www.lighttpd.net/">lighttpd</a>
+in front of Synapse.
 This has the advantage of being able to expose the default HTTPS port (443) to Matrix
 clients without requiring Synapse to bind to a privileged port (port numbers less than
 1024), avoiding the need for <code>CAP_NET_BIND_SERVICE</code> or running as root.</p>
@@ -1252,6 +1254,81 @@ relay "matrix_federation" {
     listen on egress port 8448 tls
     protocol "matrix"
     forward to &lt;matrixserver&gt; port 8008 check tcp
+}
+</code></pre>
+<h3 id="lighttpd"><a class="header" href="#lighttpd">lighttpd</a></h3>
+<pre><code class="language-conf">server.modules = (
+    "mod_rewrite",
+    "mod_redirect",
+    "mod_access",
+    "mod_setenv",
+    "mod_openssl",
+    "mod_proxy",
+    "mod_accesslog"
+)
+
+server.username      = "lighttpd"
+server.groupname     = "lighttpd"
+
+# disable for wildcard IPv6 on all, enable for specific IPv6 addresses
+# see below IPv4 0.0.0.0 &amp; IPv6 [::]
+server.use-ipv6 = "disable"
+
+ssl.pemfile = "/etc/lighttpd/cert+privkey.pem"
+ssl.ca-file = "/etc/lighttpd/fullchain.pem"
+
+# redirect HTTP traffic to HTTPS, same for IPv6 below
+$SERVER["socket"] == "0.0.0.0:80" {
+    url.redirect = (
+        "" =&gt; "https://${url.authority.noport}${url.path}${qsa}"
+    )
+}
+$SERVER["socket"] == "0.0.0.0:443" { ssl.engine = "enable" }
+$SERVER["socket"] == "0.0.0.0:8448" { ssl.engine = "enable" }
+$SERVER["socket"] == "[::]:80" {
+    url.redirect = (
+        "" =&gt; "https://${url.authority.noport}${url.path}${qsa}"
+    )
+}
+$SERVER["socket"] == "[::]:443" { ssl.engine = "enable" }
+$SERVER["socket"] == "[::]:8448" {  ssl.engine = "enable" }
+
+
+
+# both lighttpd and synapse need permissions for socket r/w
+$HTTP["url"] =~ "(/_matrix|_synapse/admin|/_synapse/client)" {
+    proxy.balance = "hash"
+    proxy.server = ( 
+        "" =&gt; ( 
+            "backend-socket" =&gt; (
+                "host" =&gt; "/var/lib/synapse/main_public.sock",
+                "port" =&gt; 0
+            )
+        )
+    )
+    proxy.forwarded = (
+        "for" =&gt; 1,
+        "proto" =&gt; 1,
+        "host" =&gt; 1,
+    )
+}
+# protect admin access IPv6 ULA only
+$HTTP["remoteip"] !="fd00::/8" {
+    $HTTP["url"] =~ "^/_synapse/admin/" {
+        url.access-deny = ( "" )
+    }
+}
+</code></pre>
+<p><a href="#delegation-of-incoming-federation-traffic">Delegation</a> example:</p>
+<pre><code class="language-conf">url.rewrite-once = (
+    "^/\.well-known/matrix/client$" =&gt; "/.well-known/matrix/client.json",
+    "^/\.well-known/matrix/server$" =&gt; "/.well-known/matrix/server.json"
+)
+
+# This condition intentionally matches the post-rewrite URLs.
+$HTTP["url"] =~ "^/\.well-known/matrix/(client|server)\.json$" {
+    mimetype.assign = ( ".json" =&gt; "application/json" )
+    setenv.set-response-header = ( "Access-Control-Allow-Origin" =&gt; "*" )
 }
 </code></pre>
 <h2 id="health-check-endpoint"><a class="header" href="#health-check-endpoint">Health check endpoint</a></h2>
