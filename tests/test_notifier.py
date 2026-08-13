@@ -117,7 +117,7 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         )
         token = StreamToken.START.copy_and_advance(StreamKeyType.RECEIPT, receipt_token)
 
-        counts_before = self._get_timeout_counts()
+        counts_before = self._get_timeout_counts_from_metric()
 
         # Function under test
         wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
@@ -142,7 +142,7 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
 
         # Receipts was the only lagging stream, so it should be the only one counted.
         self.assertEqual(
-            self._get_timeout_counts() - counts_before,
+            self._get_timeout_counts_from_metric() - counts_before,
             Counter({StreamKeyType.RECEIPT.value: 1}),
         )
 
@@ -164,7 +164,7 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
             StreamKeyType.DEVICE_LIST, MultiWriterStreamToken(stream=10000000000)
         )
 
-        counts_before = self._get_timeout_counts()
+        counts_before = self._get_timeout_counts_from_metric()
 
         wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
 
@@ -177,11 +177,11 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(self.get_success(wait_d), False)
 
         self.assertEqual(
-            self._get_timeout_counts() - counts_before,
+            self._get_timeout_counts_from_metric() - counts_before,
             Counter({stream_key.value: 1 for stream_key in lagging_stream_keys}),
         )
 
-    def _get_timeout_counts(self) -> "Counter[str]":
+    def _get_timeout_counts_from_metric(self) -> "Counter[str]":
         """The `wait_for_stream_token` timeout counts for this server, keyed by the
         `stream_key` label.
 
