@@ -67,6 +67,29 @@ echo_if_github() {
   fi
 }
 
+# Filter a list of Complement test packages (given as arguments) down to those
+# whose directory exists in the Complement checkout, warning loudly about any
+# that are skipped. This keeps `go test` from hard-failing the whole run when
+# this branch of Synapse expects Complement tests that haven't been merged
+# upstream yet. Sets the `filtered_test_packages` array; fails if nothing
+# remains.
+filter_existing_test_packages() {
+  local pkg
+  filtered_test_packages=()
+  for pkg in "$@"; do
+    if [[ -d "${pkg%/...}" ]]; then
+      filtered_test_packages+=("$pkg")
+    else
+      echo_if_github "::warning title=Complement test package missing::Skipping $pkg: not present in the Complement checkout"
+      echo "WARNING: skipping test package $pkg: not present in the Complement checkout" >&2
+    fi
+  done
+  if [ "${#filtered_test_packages[@]}" -eq 0 ]; then
+    echo "ERROR: no Complement test packages left to run" >&2
+    return 1
+  fi
+}
+
 # Helper to print out the usage instructions
 usage() {
     cat >&2 <<EOF
@@ -290,7 +313,8 @@ main() {
   )
 
   # Export the list of test packages as a space-separated environment variable, so other
-  # scripts can use it.
+  # scripts can use it. (This is the *supported* set; packages missing from the actual
+  # Complement checkout are filtered out just before running.)
   export SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES="${default_complement_test_packages[@]}"
 
   # Default set of Complement tests to run when using the in-repo test suite. Most
@@ -388,13 +412,15 @@ main() {
   set -x
   
   if [ -n "$use_in_repo_tests" ]; then
-    # Run the suite of Complement tests in the `./complement` directory in this repo
+    # Run the suite of Complement tests in the `./complement` directory in this repo.
+    # No package filtering needed here: the in-repo package list always exists.
     cd "./complement"
     go test "${test_args[@]}" "$@" "${default_in_repo_complement_test_packages[@]}"
   else
     # Run the tests (from the Complement repo)!
     cd "$COMPLEMENT_DIR"
-    go test "${test_args[@]}" "$@" "${default_complement_test_packages[@]}"
+    filter_existing_test_packages "${default_complement_test_packages[@]}" || return 1
+    go test "${test_args[@]}" "$@" "${filtered_test_packages[@]}"
   fi
 
   # We don't need to print out executed commands anymore

@@ -1,0 +1,1 @@
+Surface Complement package build failures in CI logs instead of crashing the log formatter.
