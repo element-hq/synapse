@@ -366,6 +366,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         Must be called with `_lock` held.
         """
+        assert self._lock.locked()
+
         self._current_position_gauge.set(
             self._return_factor * self._persisted_upto_position
         )
