@@ -329,8 +329,11 @@ server.modules = (
 server.username      = "lighttpd"
 server.groupname     = "lighttpd"
 
-# disable for wildcard IPv6 on all, enable for specific IPv6 addresses
-# see below IPv4 0.0.0.0 & IPv6 [::]
+# We set this to "disable" and use IPv6 `[::]` explicitly below,
+# in order to listen on all incoming IPv6 addresses.
+#
+# If you only want to listen on specific IPv6 addresses, set this
+# to "enable" and specify said addresses below.
 server.use-ipv6 = "disable"
 
 ssl.pemfile = "/etc/lighttpd/cert+privkey.pem"
