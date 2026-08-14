@@ -374,10 +374,6 @@ class ApplicationServicesHandler:
                         # follow the base stream position.
                         new_token = MultiWriterStreamToken(stream=new_token.stream)
 
-                        # The number of receipts fetched from the database in one
-                        # go is capped, so page through them until we've caught up
-                        # with `new_token`, only ever persisting a stream token
-                        # that we have actually handled all receipts up to.
                         while True:
                             events, reached_token = await self._handle_receipts(
                                 service, new_token
