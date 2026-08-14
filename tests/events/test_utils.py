@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from synapse.api.constants import EventContentFields
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase
+from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.utils import (
     FilteredEvent,
     PowerLevelsContent,
@@ -35,6 +35,7 @@ from synapse.events.utils import (
     format_event_for_client_v2_without_room_id,
     format_event_raw,
     maybe_upsert_event_field,
+    parse_stripped_state_event,
     prune_event,
 )
 from synapse.types import JsonDict
@@ -1001,6 +1002,120 @@ class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
     def test_invalid_nesting_raises_type_error(self) -> None:
         with self.assertRaises(TypeError):
             copy_and_fixup_power_levels_contents({"a": {"b": {"c": 1}}})  # type: ignore[dict-item]
+
+
+class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
+    def test_valid_dict(self) -> None:
+        """A valid dict should be parsed into a StrippedStateEvent."""
+        raw = {
+            "type": "m.room.member",
+            "state_key": "@alice:example.com",
+            "sender": "@alice:example.com",
+            "content": {"membership": "join"},
+        }
+        result = parse_stripped_state_event(raw)
+        self.assertEqual(
+            result,
+            StrippedStateEvent(
+                type="m.room.member",
+                state_key="@alice:example.com",
+                sender="@alice:example.com",
+                content={"membership": "join"},
+            ),
+        )
+
+    def test_invalid_type(self) -> None:
+        """Non-dict inputs should return None."""
+        self.assertIsNone(parse_stripped_state_event("string"))
+        self.assertIsNone(parse_stripped_state_event(123))
+        self.assertIsNone(parse_stripped_state_event([]))
+        self.assertIsNone(parse_stripped_state_event(None))
+
+    def test_missing_fields(self) -> None:
+        """Dicts with missing required fields should return None."""
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "type": "m.room.member",
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                }
+            )
+        )
+
+    def test_invalid_field_types(self) -> None:
+        """Dicts with invalid field types should return None."""
+        # Type must be string
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "type": 123,
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        # State key must be string
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "type": "m.room.member",
+                    "state_key": 123,
+                    "sender": "@alice:example.com",
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        # Sender must be string
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "sender": 123,
+                    "content": {"membership": "join"},
+                }
+            )
+        )
+        # Content must be dict
+        self.assertIsNone(
+            parse_stripped_state_event(
+                {
+                    "type": "m.room.member",
+                    "state_key": "@alice:example.com",
+                    "sender": "@alice:example.com",
+                    "content": "membership_join",
+                }
+            )
+        )
 
 
 class FormatEventForClientTestCase(stdlib_unittest.TestCase):
