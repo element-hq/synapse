@@ -1295,11 +1295,6 @@ class SlidingSyncExtensionHandler:
             field_names=fields,
             field_names_empty_means_all_fields=True,
         )
-        left_room_user_ids = {
-            update.user_id
-            for update in updates
-            if update.action == ProfileUpdateAction.UPDATE.value
-        }
 
         # Add any newly joined users to our list of users to get updates for later
         joined_room_user_ids = {
@@ -1316,19 +1311,22 @@ class SlidingSyncExtensionHandler:
             if update.action == ProfileUpdateAction.LEFT_ROOM.value
         }
 
-        # Collect deletes
-        deletes: list[tuple[str, str]] = [
-            # For typing checks, cast field_name to str, since the schema has
-            # `str | None` which is not true for `action: DELETE`
-            (update.user_id, cast(str, update.field_name))
+        # Collect users who deleted fields
+        delete_field_user_ids = {
+            update.user_id
             for update in updates
             if update.action == ProfileUpdateAction.DELETE.value
-        ]
+        }
+
+        # Process left rooms
+        for other_user_id in left_room_user_ids:
+            # Return a null response to the client
+            response[other_user_id] = None
 
         updated_user_fields: dict[str, set[str]] = {}
         # Set fields from updates
         for update in updates:
-            if not update.affected_fields:
+            if not update.affected_fields or update.user_id in left_room_user_ids:
                 continue
             for field_name in update.affected_fields:
                 # Skip the update if the client didn't ask for this field, or we're not
@@ -1341,11 +1339,13 @@ class SlidingSyncExtensionHandler:
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
             # Get profiles for both updates and deletes in one go
-            profile_user_ids.union({delete[0] for delete in deletes}),
+            profile_user_ids.union(delete_field_user_ids),
         )
 
         # Serialise the profile updates into the sync response format.
         for profile_user_id in profile_user_ids:
+            if profile_user_id in left_room_user_ids:
+                continue
             profile_data = profile_data_by_user.get(profile_user_id)
             if profile_data is None:
                 # No profile data for this user, just return a blank dictionary
@@ -1396,30 +1396,30 @@ class SlidingSyncExtensionHandler:
                     "updated": per_user_updates,
                 }
 
-        # Process left rooms
-        for other_user_id in left_room_user_ids:
-            # Return a null response to the client
-            response[other_user_id] = None
-
         # Process deleted fields
-        for profile_user_id, field_name in deletes:
-            profile_data = profile_data_by_user.get(profile_user_id)
+        for update in updates:
+            if (
+                update.action != ProfileUpdateAction.DELETE.value
+                or not update.affected_fields
+                or update.user_id in left_room_user_ids
+            ):
+                continue
+            profile_data = profile_data_by_user.get(update.user_id)
             if not profile_data:
                 # No profile data for this user, just return a blank dictionary
                 # telling the clients to remove all profile information for this user.
-                response[profile_user_id] = None
+                response[update.user_id] = None
                 continue
-            if field_name in profile_data.keys():
-                # This field has re-appeared to the profile, skip
-                continue
-            if not response.get(profile_user_id):
-                response[profile_user_id] = {"removed": []}
-            # Ensure we only add the field once
-            # FIXME: ignore typing for now as the response type is being a pain
-            if field_name in response[profile_user_id]["removed"]:  # type: ignore
-                continue
-            # FIXME: ignore typing for now as the response type is being a pain
-            response[profile_user_id]["removed"].append(field_name)  # type: ignore
+            for field_name in update.affected_fields:
+                if field_name in profile_data.keys():
+                    # This field has re-appeared to the profile, skip
+                    continue
+                if response.get(update.user_id) is None:
+                    response[update.user_id] = {"removed": []}
+                # Ensure we only add the field once
+                if field_name in response[update.user_id]["removed"]:
+                    continue
+                response[update.user_id]["removed"].append(field_name)
 
         return SlidingSyncResult.Extensions.ProfilesExtension(
             users=response,
