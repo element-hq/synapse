@@ -4010,6 +4010,11 @@ Possible options are "all", "invite", and "off". They are defined as:
 
 Note that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.
 
+If a client supplies its own `m.room.encryption` event in the `initial_state` of its
+`/createRoom` request, that event takes precedence and this option will not overwrite it.
+This means a client may, for example, choose a different encryption algorithm, or disable
+encryption for the room by sending an empty `m.room.encryption` event.
+
 Defaults to `"off"`.
 
 Example configuration:

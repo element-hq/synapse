@@ -110,6 +110,79 @@ class EncryptedByDefaultTestCase(unittest.HomeserverTestCase):
             expect_code=404,
         )
 
+    @override_config({"encryption_enabled_by_default_for_room_type": "all"})
+    def test_user_supplied_encryption_event_is_not_overwritten(self) -> None:
+        """Tests that an m.room.encryption event supplied by the user in the
+        initial state takes precedence over the one that would otherwise be forced
+        by encryption_enabled_by_default_for_room_type, rather than a duplicate
+        default event being sent.
+        """
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room, supplying our own encryption event with a non-default
+        # algorithm in the initial state.
+        custom_content = {"algorithm": "some.custom.invalid.algorithm"}
+        room_id = self.helper.create_room_as(
+            user,
+            is_public=False,
+            tok=user_token,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomEncryption,
+                        "state_key": "",
+                        "content": custom_content,
+                    }
+                ]
+            },
+        )
+
+        # Check that the room's encryption event is the one we supplied, not the
+        # default that the config option would otherwise force.
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomEncryption,
+            tok=user_token,
+        )
+        self.assertEqual(event_content, custom_content)
+
+    @override_config({"encryption_enabled_by_default_for_room_type": "all"})
+    def test_user_can_disable_encryption_via_initial_state(self) -> None:
+        """Tests that a user can disable encryption for a room by supplying an
+        empty m.room.encryption event in the initial state, even when
+        encryption_enabled_by_default_for_room_type would otherwise force it on.
+        """
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room, supplying an empty encryption event in the initial state.
+        room_id = self.helper.create_room_as(
+            user,
+            is_public=False,
+            tok=user_token,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomEncryption,
+                        "state_key": "",
+                        "content": {},
+                    }
+                ]
+            },
+        )
+
+        # Check that the room's encryption event is empty, i.e. the default was
+        # not forced on top of it.
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomEncryption,
+            tok=user_token,
+        )
+        self.assertEqual(event_content, {})
+
 
 class RoomIDCollisionTestCase(unittest.HomeserverTestCase):
     servlets = [

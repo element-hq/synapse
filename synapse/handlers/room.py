@@ -1786,7 +1786,11 @@ class RoomCreationHandler:
             )
             events_to_send.append((event, context))
 
-        if preset_config["encrypted"] and not ignore_forced_encryption:
+        if (
+            preset_config["encrypted"]
+            and not ignore_forced_encryption
+            and (EventTypes.RoomEncryption, "") not in initial_state
+        ):
             encryption_event, encryption_context = await create_event(
                 EventTypes.RoomEncryption,
                 {"algorithm": RoomEncryptionAlgorithms.DEFAULT},
