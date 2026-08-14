@@ -70,7 +70,8 @@ class ClientSecretStrTestCase(stdlib_unittest.TestCase):
             "foo bar",
             "secret!",
             "café",
-            "a'; DROP TABLE users;--",
+            # Little bobby tables
+            "Robert'; DROP TABLE students;--",
         ):
             with self.subTest(client_secret=client_secret):
                 with self.assertRaises(ValidationError):
