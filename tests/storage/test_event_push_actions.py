@@ -472,6 +472,52 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         self.get_success(self.store._rotate_notifs())
         _assert_badge(1)
 
+    def test_count_aggregation_no_receipt_summary_survives_pruning(self) -> None:
+        """
+        Regression test: a room the user has never sent a read receipt in must keep
+        its badge count once the push actions behind it have been deleted.
+
+        Note that the interesting engine here is Postgres. The badge query trusts a
+        summary row with a NULL `last_receipt_stream_ordering` when its
+        `stream_ordering` is past the user's latest receipt, but with no receipts at
+        all `GREATEST(NULL, NULL)` is NULL, so the comparison was unknown and the row
+        was rejected -- leaving the count to come from `event_push_actions`, which
+        has nothing left to offer. SQLite already COALESCEd to 0 and so was fine.
+        """
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={"msgtype": "m.text", "body": "msg"},
+            tok=other_token,
+        )
+        self.get_success(self.store._rotate_notifs())
+
+        # Delete the (rotated, and now more than a day old) push actions, so that the
+        # summary row is the only remaining record of the notification.
+        self.pump(60 * 60 * 24)
+        self.get_success(self.store._remove_old_push_actions_that_have_rotated())
+        self.assertEqual(
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    table="event_push_actions",
+                    keyvalues=None,
+                    retcols=("event_id",),
+                )
+            ),
+            [],
+        )
+
+        counts = self.get_success(
+            self.store.db_pool.runInteraction(
+                "get-aggregate-unread-counts",
+                self.store._get_unread_counts_by_room_for_user_txn,
+                user_id,
+            )
+        )
+        self.assertEqual(counts.get(room_id, 0), 1)
+
     def test_count_aggregation_threads(self) -> None:
         """
         This is essentially the same test as test_count_aggregation, but adds

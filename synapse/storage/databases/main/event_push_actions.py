@@ -407,15 +407,16 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         # stream ordering of both threaded & unthreaded receipts to compare against the
         # summary table.
         #
-        # PostgreSQL and SQLite differ in comparing scalar numerics.
+        # PostgreSQL and SQLite differ in comparing scalar numerics. Both COALESCE to
+        # 0 first so that a user with no receipts at all in the room compares against
+        # 0 (rather than NULL, which would make every comparison below unknown) on
+        # both engines.
         if isinstance(self.database_engine, PostgresEngine):
-            # GREATEST ignores NULLs.
             max_clause = """GREATEST(
-                threaded_receipt_stream_ordering,
-                unthreaded_receipt_stream_ordering
+                COALESCE(threaded_receipt_stream_ordering, 0),
+                COALESCE(unthreaded_receipt_stream_ordering, 0)
             )"""
         else:
-            # MAX returns NULL if any are NULL, so COALESCE to 0 first.
             max_clause = """MAX(
                 COALESCE(threaded_receipt_stream_ordering, 0),
                 COALESCE(unthreaded_receipt_stream_ordering, 0)

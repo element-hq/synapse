@@ -1,0 +1,1 @@
+Fix push badge counts on PostgreSQL for rooms where the user has no read receipt.
