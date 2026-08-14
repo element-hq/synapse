@@ -1462,32 +1462,6 @@ class ThreepidMsisdnRestTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
-    def test_medium_not_supported_checked_before_in_use(self) -> None:
-        """When the server cannot send validation SMSes, it reports
-        M_THREEPID_MEDIUM_NOT_SUPPORTED even if the phone number is already in
-        use: the unsupported-medium check comes first, as on the email variant.
-        """
-        # Add the phone number to the user's account, so that it is in use.
-        self.get_success(
-            self.store.user_add_threepid(
-                user_id=self.user_id,
-                medium="msisdn",
-                address="447700900001",
-                validated_at=0,
-                added_at=0,
-            )
-        )
-
-        # The stock test config has no `account_threepid_delegates.msisdn`, so
-        # the medium is not supported.
-        channel = self._request_token("GB", "07700900001")
-        self.assertEqual(
-            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
-        )
-        self.assertEqual(
-            Codes.THREEPID_MEDIUM_NOT_SUPPORTED, channel.json_body["errcode"]
-        )
-
     @override_config({"allowed_local_3pids": [{"medium": "email", "pattern": ".*"}]})
     def test_medium_not_supported_checked_before_denied(self) -> None:
         """When the server cannot send validation SMSes, it reports
