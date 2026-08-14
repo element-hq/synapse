@@ -400,10 +400,10 @@ class TaskScheduler:
         """Clean old complete or failed jobs to avoid clutter the DB."""
         now = self._clock.time_msec()
         for task in await self._store.get_scheduled_tasks(
-            statuses=[TaskStatus.FAILED, TaskStatus.COMPLETE],
+            statuses=[TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.COMPLETE],
             max_timestamp=now - TaskScheduler.KEEP_TASKS_FOR_MS,
         ):
-            # FAILED and COMPLETE tasks should never be running
+            # FAILED, CANCELLED and COMPLETE tasks should never be running
             assert task.id not in self._running_tasks
             await self._store.delete_scheduled_task(task.id)
 
