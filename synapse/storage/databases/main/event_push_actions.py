@@ -1648,9 +1648,10 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         """
 
         # Calculate the new counts that should be upserted into event_push_summary
-        sql = """
+        def _sql(count_column: str, action_column: str) -> str:
+            return f"""
             SELECT user_id, room_id, thread_id,
-                coalesce(old.%s, 0) + upd.cnt,
+                coalesce(old.{count_column}, 0) + upd.cnt,
                 upd.stream_ordering
             FROM (
                 SELECT user_id, room_id, thread_id, count(*) as cnt,
@@ -1662,17 +1663,16 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                         old.last_receipt_stream_ordering IS NULL
                         OR old.last_receipt_stream_ordering < ea.stream_ordering
                     )
-                    AND %s = 1
+                    AND {action_column} = 1
                 GROUP BY user_id, room_id, thread_id
             ) AS upd
             LEFT JOIN event_push_summary AS old USING (user_id, room_id, thread_id)
         """
 
+        args = (old_rotate_stream_ordering, rotate_to_stream_ordering)
+
         # First get the count of unread messages.
-        txn.execute(
-            sql % ("unread_count", "unread"),
-            (old_rotate_stream_ordering, rotate_to_stream_ordering),
-        )
+        txn.execute(_sql("unread_count", "unread"), args)
 
         # We need to merge results from the two requests (the one that retrieves the
         # unread count and the one that retrieves the notifications count) into a single
@@ -1688,10 +1688,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             )
 
         # Then get the count of notifications.
-        txn.execute(
-            sql % ("notif_count", "notif"),
-            (old_rotate_stream_ordering, rotate_to_stream_ordering),
-        )
+        txn.execute(_sql("notif_count", "notif"), args)
 
         for row in txn:
             if (row[0], row[1], row[2]) in summaries:
