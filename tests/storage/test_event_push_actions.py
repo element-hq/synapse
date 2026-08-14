@@ -537,6 +537,123 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         self.assertEqual(counts.main_timeline, NotifCounts(notify_count=2))
         self.assertEqual(counts.threads, {"zzz-thread": NotifCounts(notify_count=1)})
 
+    def test_count_aggregation_no_receipt_summary_survives_pruning(self) -> None:
+        """
+        Regression test: a room the user has never sent a read receipt in must keep
+        its badge count once the push actions behind it have been deleted.
+
+        Note that the interesting engine here is Postgres. The badge query trusts a
+        summary row with a NULL `last_receipt_stream_ordering` when its
+        `stream_ordering` is past the user's latest receipt, but with no receipts at
+        all `GREATEST(NULL, NULL)` is NULL, so the comparison was unknown and the row
+        was rejected -- leaving the count to come from `event_push_actions`, which
+        has nothing left to offer. SQLite already COALESCEd to 0 and so was fine.
+        """
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={"msgtype": "m.text", "body": "msg"},
+            tok=other_token,
+        )
+        self.get_success(self.store._rotate_notifs())
+
+        # Delete the (rotated, and now more than a day old) push actions, so that the
+        # summary row is the only remaining record of the notification.
+        self.pump(60 * 60 * 24)
+        self.get_success(self.store._remove_old_push_actions_that_have_rotated())
+        self.assertEqual(
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    table="event_push_actions",
+                    keyvalues=None,
+                    retcols=("event_id",),
+                )
+            ),
+            [],
+        )
+
+        counts = self.get_success(
+            self.store.db_pool.runInteraction(
+                "get-aggregate-unread-counts",
+                self.store._get_unread_counts_by_room_for_user_txn,
+                user_id,
+            )
+        )
+        self.assertEqual(counts.get(room_id, 0), 1)
+
+    def test_count_aggregation_badge_recount_is_scoped_per_room(self) -> None:
+        """
+        Regression test: a room whose summary row is out of date must be recounted
+        from `event_push_actions`, even when another room has an up-to-date summary
+        for the same thread ID.
+
+        The set of threads a valid summary was found for used to be keyed on the
+        thread ID alone, so a single room with an up-to-date `main` summary excluded
+        `main` from the recount in *every* room, dropping those rooms' counts.
+        """
+        user_id, token, other_id, other_token, room_id = self._create_users_and_room()
+
+        stale_room_id = self.helper.create_room_as(user_id, tok=token)
+        self.helper.join(stale_room_id, other_id, tok=other_token)
+
+        def _send(room: str) -> str:
+            return self.helper.send_event(
+                room,
+                type="m.room.message",
+                content={"msgtype": "m.text", "body": "msg"},
+                tok=other_token,
+            )["event_id"]
+
+        def _read(room: str, event_id: str) -> None:
+            self.get_success(
+                self.store.insert_receipt(
+                    room,
+                    "m.read",
+                    user_id=user_id,
+                    event_ids=[event_id],
+                    thread_id=None,
+                    data={},
+                )
+            )
+
+        def _badge(room: str) -> int:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            return counts.get(room, 0)
+
+        # `room_id` keeps an up-to-date summary throughout, so its `main` thread is
+        # always one we found a valid summary for.
+        first = _send(room_id)
+        _send(room_id)
+
+        stale_first = _send(stale_room_id)
+        stale_second = _send(stale_room_id)
+        _send(stale_room_id)
+
+        # Read one event in each room and rotate, so that both summary rows record
+        # the receipt they were calculated against.
+        _read(room_id, first)
+        _read(stale_room_id, stale_first)
+        self.get_success(self.store._rotate_notifs())
+
+        self.assertEqual(_badge(room_id), 1)
+        self.assertEqual(_badge(stale_room_id), 2)
+
+        # A second receipt, which rotation has not processed yet: `stale_room_id`'s
+        # summary row no longer matches it, so its count has to be recovered from
+        # `event_push_actions`.
+        _read(stale_room_id, stale_second)
+
+        self.assertEqual(_badge(room_id), 1)
+        self.assertEqual(_badge(stale_room_id), 1)
+
     def test_count_aggregation_threads(self) -> None:
         """
         This is essentially the same test as test_count_aggregation, but adds
