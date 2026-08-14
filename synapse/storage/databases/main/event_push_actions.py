@@ -80,6 +80,7 @@ receipt.
 """
 
 import logging
+import sys
 from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
@@ -347,6 +348,29 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         )
         return 0
 
+    def _pruned_upto_stream_ordering(self) -> int:
+        """Approximately the highest stream ordering whose (rotated) rows in
+        `event_push_actions` may already have been deleted by
+        `_remove_old_push_actions_that_have_rotated`.
+
+        Counting from `event_push_actions` only gives a complete answer above this
+        point; below it we have to keep relying on `event_push_summary`.
+
+        This is a heuristic rather than an exact bound: `stream_ordering_day_ago` is
+        a per-process value refreshed every ten minutes, while the deletion may be
+        running on another worker, so this can lag reality by roughly that much. The
+        cost of getting it wrong is the same bounded staleness we already accept
+        elsewhere here -- a summary row trusted for up to one rotation cycle longer
+        than it strictly had to be -- so being approximate is fine.
+        """
+        if self.stream_ordering_day_ago is None:
+            # `stream_ordering_day_ago` is populated synchronously in `__init__`, so
+            # in practice this doesn't happen; if it somehow did we'd rather never
+            # prefer `event_push_actions` over the summary.
+            return sys.maxsize
+
+        return self.stream_ordering_day_ago
+
     async def get_unread_counts_by_room_for_user(self, user_id: str) -> dict[str, int]:
         """Get the notification count by room for a user. Only considers notifications,
         not highlight or unread counts, and threads are currently aggregated under their room.
@@ -422,6 +446,12 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 COALESCE(unthreaded_receipt_stream_ordering, 0)
             )"""
 
+        # A null `last_receipt_stream_ordering` means the row does not account for any
+        # read receipt (see `_get_unread_counts_by_pos_txn`), so it is only up-to-date
+        # while the user has no receipt applying to the room/thread. We only distrust
+        # it while the fallback below can still see the push actions it summarised,
+        # i.e. while the receipt is above the deletion horizon. With no receipts at
+        # all the max receipt clause is 0, so such a row is always trusted.
         sql = f"""
             {receipts_cte}
             SELECT eps.room_id, eps.thread_id, notif_count
@@ -430,11 +460,15 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             WHERE user_id = ?
                 AND notif_count != 0
                 AND (
-                    (last_receipt_stream_ordering IS NULL AND stream_ordering > {max_clause})
+                    (
+                        last_receipt_stream_ordering IS NULL
+                        AND stream_ordering > {max_clause}
+                        AND {max_clause} <= ?
+                    )
                     OR last_receipt_stream_ordering = {max_clause}
                 )
         """
-        txn.execute(sql, args)
+        txn.execute(sql, args + [self._pruned_upto_stream_ordering()])
 
         # The (room ID, thread ID) pairs we found an up-to-date summary for.
         seen_room_thread_ids = set()
@@ -604,10 +638,36 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         # We then do a manual count of all the rows in the `event_push_actions` table
         # for any user/room/thread which did not have a valid summary found.
         #
-        # If `last_receipt_stream_ordering` is null then that means it's up-to-date
-        # (as the row was written by an older version of Synapse that
-        # updated `event_push_summary` synchronously when persisting a new read
-        # receipt).
+        # A null `last_receipt_stream_ordering` means the row does not account for any
+        # read receipt: it was either written by a version of Synapse older than
+        # v1.62.0 (which updated `event_push_summary` synchronously when persisting a
+        # new read receipt), or by a `_rotate_notifs_before_txn` that ran while the
+        # user had no receipt in the room. Such a row counts from the user's join, so
+        # once the user does have a receipt it may include events at or before it and
+        # we must not trust it.
+        #
+        # We only do that while the manual count below can still see the push actions
+        # the row summarised: `_remove_old_push_actions_that_have_rotated` deletes
+        # rotated push actions older than a day, so for an older receipt we keep using
+        # the (possibly stale) summary and let the next rotation correct it instead.
+        if unthreaded_receipt_stream_ordering is None:
+            # `from_stream_ordering` is the user's membership event rather than a
+            # receipt, so a row stamped with a receipt at or before it can never
+            # match. That happens when the receipt is for an event from before the
+            # user's latest join, e.g. they read back into history they can see, or
+            # they rejoined the room. There is no newer receipt for the row to be out
+            # of date with respect to, and nothing will ever recalculate it, so keep
+            # it rather than recounting push actions that may already have been
+            # deleted.
+            unreconcilable_clause = """
+                    OR (
+                        last_receipt_stream_ordering IS NOT NULL
+                        AND threaded_receipt_stream_ordering IS NULL
+                    )
+            """
+        else:
+            unreconcilable_clause = ""
+
         txn.execute(
             f"""
                 SELECT notif_count, COALESCE(unread_count, 0), thread_id
@@ -624,8 +684,13 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 ) AS receipts USING (thread_id)
                 WHERE room_id = ? AND user_id = ?
                 AND (
-                    (last_receipt_stream_ordering IS NULL AND stream_ordering > COALESCE(threaded_receipt_stream_ordering, ?))
+                    (
+                        last_receipt_stream_ordering IS NULL
+                        AND stream_ordering > COALESCE(threaded_receipt_stream_ordering, ?)
+                        AND COALESCE(threaded_receipt_stream_ordering, ?) <= ?
+                    )
                     OR last_receipt_stream_ordering = COALESCE(threaded_receipt_stream_ordering, ?)
+                    {unreconcilable_clause}
                 ) AND (notif_count != 0 OR COALESCE(unread_count, 0) != 0)
             """,
             (
@@ -636,6 +701,10 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 room_id,
                 user_id,
                 from_stream_ordering,
+                # 0 rather than the join position: with no receipt at all there is
+                # nothing for the row to be out of date with respect to.
+                unthreaded_receipt_stream_ordering or 0,
+                self._pruned_upto_stream_ordering(),
                 from_stream_ordering,
             ),
         )
@@ -1422,6 +1491,11 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             retcol="stream_ordering",
         )
 
+        # NOTE: unlike `_rotate_notifs_before_txn` and the readers, this does not
+        # filter on `receipt_type`, so a receipt of some other type stamps a
+        # `last_receipt_stream_ordering` the readers will never match against. That
+        # predates this code; the consequence is that the row is treated as out of
+        # date (a bounded overcount), not that its counts are lost.
         sql = """
             SELECT r.stream_id, r.room_id, r.user_id, r.thread_id, r.event_stream_ordering
             FROM receipts_linearized AS r

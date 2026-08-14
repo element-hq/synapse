@@ -493,6 +493,322 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             room_id, type="m.room.message", content=content, tok=tok
         )["event_id"]
 
+    def test_count_aggregation_threaded_receipt_for_old_event_after_rotation(
+        self,
+    ) -> None:
+        """
+        Regression test: a threaded receipt for an event older than the summary's
+        high-water mark must be reflected in the counts straight away, rather than
+        only once the next rotation has run.
+
+        `_rotate_notifs_before_txn` writes `event_push_summary` rows with a NULL
+        `last_receipt_stream_ordering`. Such a row counts from the user's join, so
+        it must not be treated as up-to-date once the user has a receipt covering
+        the thread it summarises.
+        """
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+
+        def _assert_counts(
+            notif_count: int,
+            highlight_count: int,
+            thread_notif_count: int,
+        ) -> None:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-unread-counts",
+                    self.store._get_unread_counts_by_receipt_txn,
+                    room_id,
+                    user_id,
+                )
+            )
+            self.assertEqual(
+                counts.main_timeline,
+                NotifCounts(
+                    notify_count=notif_count,
+                    unread_count=0,
+                    highlight_count=highlight_count,
+                ),
+            )
+            if thread_notif_count:
+                self.assertEqual(
+                    counts.threads,
+                    {
+                        thread_root: NotifCounts(
+                            notify_count=thread_notif_count,
+                            unread_count=0,
+                            highlight_count=0,
+                        )
+                    },
+                )
+            else:
+                self.assertEqual(counts.threads, {})
+
+            aggregate_counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            self.assertEqual(
+                aggregate_counts.get(room_id, 0), notif_count + thread_notif_count
+            )
+
+        def _mark_read(event_id: str, thread_id: str) -> None:
+            self.get_success(
+                self.store.insert_receipt(
+                    room_id,
+                    "m.read",
+                    user_id=user_id,
+                    event_ids=[event_id],
+                    thread_id=thread_id,
+                    data={},
+                )
+            )
+
+        # Two events on the main timeline (the second one a highlight) and two in a
+        # thread hanging off the first.
+        thread_root = self._send_message(room_id, other_token)
+        first_thread_event = self._send_message(
+            room_id, other_token, thread_root=thread_root
+        )
+        self._send_message(room_id, other_token, thread_root=thread_root)
+        self._send_message(room_id, other_token, highlight_for=user_id)
+
+        # Rotate *before* any receipt is sent: this writes summary rows with a NULL
+        # `last_receipt_stream_ordering`.
+        self.get_success(self.store._rotate_notifs())
+        _assert_counts(2, 1, 2)
+
+        # Read the very first event of the room, which is older than everything the
+        # summary rows cover.
+        _mark_read(thread_root, MAIN_TIMELINE)
+        _assert_counts(1, 1, 2)
+
+        # Same again for the thread.
+        _mark_read(first_thread_event, thread_root)
+        _assert_counts(1, 1, 1)
+
+    def test_count_aggregation_unthreaded_receipt_for_old_event_after_rotation(
+        self,
+    ) -> None:
+        """
+        As above, but for an unthreaded receipt, which applies to every thread in
+        the room (including the main timeline).
+
+        A second room with an up-to-date summary is used to check that rejecting one
+        room's summary row doesn't stop the counts being recovered from
+        `event_push_actions`.
+        """
+        user_id, token, other_id, other_token, room_id = self._create_users_and_room()
+
+        other_room_id = self.helper.create_room_as(user_id, tok=token)
+        self.helper.join(other_room_id, other_id, tok=other_token)
+
+        def _assert_counts(notif_count: int, thread_notif_count: int) -> None:
+            counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-unread-counts",
+                    self.store._get_unread_counts_by_receipt_txn,
+                    room_id,
+                    user_id,
+                )
+            )
+            self.assertEqual(
+                counts.main_timeline,
+                NotifCounts(
+                    notify_count=notif_count, unread_count=0, highlight_count=0
+                ),
+            )
+            if thread_notif_count:
+                self.assertEqual(
+                    counts.threads,
+                    {
+                        thread_root: NotifCounts(
+                            notify_count=thread_notif_count,
+                            unread_count=0,
+                            highlight_count=0,
+                        )
+                    },
+                )
+            else:
+                self.assertEqual(counts.threads, {})
+
+            aggregate_counts = self.get_success(
+                self.store.db_pool.runInteraction(
+                    "get-aggregate-unread-counts",
+                    self.store._get_unread_counts_by_room_for_user_txn,
+                    user_id,
+                )
+            )
+            self.assertEqual(
+                aggregate_counts.get(room_id, 0), notif_count + thread_notif_count
+            )
+            # The other room has no receipts at all, so its (also NULL) summary row
+            # is still up-to-date.
+            self.assertEqual(aggregate_counts.get(other_room_id, 0), 1)
+
+        # The other room gets a single notification, which is never read.
+        self._send_message(other_room_id, other_token)
+
+        thread_root = self._send_message(room_id, other_token)
+        first_thread_event = self._send_message(
+            room_id, other_token, thread_root=thread_root
+        )
+        self._send_message(room_id, other_token)
+
+        self.get_success(self.store._rotate_notifs())
+        _assert_counts(2, 1)
+
+        # An unthreaded receipt for the thread event clears everything at or before
+        # it, in the thread and on the main timeline.
+        self.get_success(
+            self.store.insert_receipt(
+                room_id,
+                "m.read",
+                user_id=user_id,
+                event_ids=[first_thread_event],
+                thread_id=None,
+                data={},
+            )
+        )
+        _assert_counts(1, 0)
+
+    def test_count_aggregation_summary_written_after_receipt_survives_pruning(
+        self,
+    ) -> None:
+        """
+        Regression test: rotation mints a summary row for every thread with new push
+        actions, including threads that only appear *after* the user's latest read
+        receipt. `_handle_new_receipts_for_notifs_txn` stamps
+        `last_receipt_stream_ordering` only in response to a *new* receipt, so such a
+        row must record the receipt it was calculated against as it is written --
+        otherwise nothing can tell it apart from a row that predates the receipt, and
+        its counts are lost as soon as
+        `_remove_old_push_actions_that_have_rotated` deletes the backing push actions.
+        """
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+
+        # Read the first event of the room, and let the receipt be processed. This
+        # leaves the room with no summary rows at all.
+        thread_root = self._send_message(room_id, other_token)
+        self.get_success(
+            self.store.insert_receipt(
+                room_id,
+                "m.read",
+                user_id=user_id,
+                event_ids=[thread_root],
+                thread_id=None,
+                data={},
+            )
+        )
+        self.get_success(self.store._rotate_notifs())
+
+        # A thread which only starts after that receipt: rotation mints a brand new
+        # summary row for it.
+        self._send_message(room_id, other_token, thread_root=thread_root)
+        self._send_message(room_id, other_token, thread_root=thread_root)
+        self.get_success(self.store._rotate_notifs())
+
+        # Every row rotation wrote must record the receipt it counted against.
+        summary_rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="event_push_summary",
+                keyvalues={"user_id": user_id, "room_id": room_id},
+                retcols=("thread_id", "notif_count", "last_receipt_stream_ordering"),
+            )
+        )
+        self.assertEqual(
+            [(thread_id, count) for thread_id, count, _ in summary_rows if count],
+            [(thread_root, 2)],
+        )
+        for _, _, last_receipt_stream_ordering in summary_rows:
+            self.assertIsNotNone(last_receipt_stream_ordering)
+
+        # Deleting the (rotated, and now more than a day old) push actions must not
+        # lose the counts: the summary is all that is left.
+        self.pump(60 * 60 * 24)
+        self.get_success(self.store._remove_old_push_actions_that_have_rotated())
+        self.assertEqual(
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    table="event_push_actions",
+                    keyvalues=None,
+                    retcols=("event_id",),
+                )
+            ),
+            [],
+        )
+
+        counts = self.get_success(
+            self.store.db_pool.runInteraction(
+                "get-unread-counts",
+                self.store._get_unread_counts_by_receipt_txn,
+                room_id,
+                user_id,
+            )
+        )
+        self.assertEqual(counts.main_timeline, NotifCounts())
+        self.assertEqual(
+            counts.threads, {thread_root: NotifCounts(notify_count=2, unread_count=0)}
+        )
+
+        aggregate_counts = self.get_success(
+            self.store.db_pool.runInteraction(
+                "get-aggregate-unread-counts",
+                self.store._get_unread_counts_by_room_for_user_txn,
+                user_id,
+            )
+        )
+        self.assertEqual(aggregate_counts.get(room_id, 0), 2)
+
+    def test_count_aggregation_receipt_before_join_survives_pruning(self) -> None:
+        """
+        Regression test: a summary row stamped with a receipt from before the user's
+        latest membership event must keep its counts.
+
+        With no unthreaded receipt the counts are taken from the user's join, so such
+        a stamp can never match and the row would be discarded forever -- losing the
+        counts entirely once the push actions behind them have been deleted. Nothing
+        recalculates the row either, as the receipt is not new.
+        """
+        user_id, token, _, other_token, room_id = self._create_users_and_room()
+
+        # A notification the user reads with a threaded receipt, so that the summary
+        # row gets stamped with its stream ordering...
+        old_event = self._send_message(room_id, other_token)
+        self.get_success(
+            self.store.insert_receipt(
+                room_id,
+                "m.read",
+                user_id=user_id,
+                event_ids=[old_event],
+                thread_id=MAIN_TIMELINE,
+                data={},
+            )
+        )
+        # ...and one they don't read, which is what the summary ends up counting.
+        self._send_message(room_id, other_token)
+        self.get_success(self.store._rotate_notifs())
+
+        # Now make the user's membership event newer than that receipt.
+        self.helper.leave(room_id, user_id, tok=token)
+        self.helper.join(room_id, user_id, tok=token)
+
+        # Delete the push actions the summary row stands in for.
+        self.pump(60 * 60 * 24)
+        self.get_success(self.store._remove_old_push_actions_that_have_rotated())
+
+        counts = self.get_success(
+            self.store.db_pool.runInteraction(
+                "get-unread-counts",
+                self.store._get_unread_counts_by_receipt_txn,
+                room_id,
+                user_id,
+            )
+        )
+        self.assertEqual(counts.main_timeline, NotifCounts(notify_count=1))
+
     def test_count_aggregation_main_timeline_top_up_stays_on_main_timeline(
         self,
     ) -> None:

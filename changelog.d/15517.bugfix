@@ -1,0 +1,1 @@
+Fix unread/notification counts not immediately reflecting a read receipt for an event older than the latest push-summary rotation.
