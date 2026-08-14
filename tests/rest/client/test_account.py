@@ -42,7 +42,7 @@ from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.server import FakeSite, make_request
+from tests.server import FakeChannel, FakeSite, make_request
 from tests.unittest import override_config
 
 
@@ -994,21 +994,21 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
     def test_add_email_no_at(self) -> None:
         self._request_token_invalid_email(
             "address-without-at.bar",
-            expected_errcode=Codes.BAD_JSON,
+            expected_errcode=Codes.INVALID_PARAM,
             expected_error="Unable to parse email address",
         )
 
     def test_add_email_two_at(self) -> None:
         self._request_token_invalid_email(
             "foo@foo@test.bar",
-            expected_errcode=Codes.BAD_JSON,
+            expected_errcode=Codes.INVALID_PARAM,
             expected_error="Unable to parse email address",
         )
 
     def test_add_email_bad_format(self) -> None:
         self._request_token_invalid_email(
             "user@bad.example.net@good.example.com",
-            expected_errcode=Codes.BAD_JSON,
+            expected_errcode=Codes.INVALID_PARAM,
             expected_error="Unable to parse email address",
         )
 
@@ -1417,6 +1417,91 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
 
         threepids = {threepid["address"] for threepid in channel.json_body["threepids"]}
         self.assertIn(expected_email, threepids)
+
+
+class ThreepidMsisdnRestTestCase(unittest.HomeserverTestCase):
+    """Tests the error codes of /account/3pid/msisdn/requestToken. (MSC4178)"""
+
+    servlets = [
+        account.register_servlets,
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.user_id = self.register_user("kermit", "test")
+
+    def _request_token(self, country: str, phone_number: str) -> FakeChannel:
+        return self.make_request(
+            "POST",
+            b"account/3pid/msisdn/requestToken",
+            {
+                "client_secret": "foobar",
+                "country": country,
+                "phone_number": phone_number,
+                "send_attempt": 1,
+            },
+        )
+
+    @override_config({"account_threepid_delegates": {"msisdn": "https://id_server"}})
+    def test_invalid_country_code(self) -> None:
+        """A malformed country code is reported with M_INVALID_PARAM."""
+        channel = self._request_token("gb", "07700900001")
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
+    @override_config({"account_threepid_delegates": {"msisdn": "https://id_server"}})
+    def test_invalid_phone_number(self) -> None:
+        """An unparseable phone number is reported with M_INVALID_PARAM."""
+        channel = self._request_token("GB", "not a phone number")
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
+    def test_medium_not_supported_checked_before_in_use(self) -> None:
+        """When the server cannot send validation SMSes, it reports
+        M_THREEPID_MEDIUM_NOT_SUPPORTED even if the phone number is already in
+        use: the unsupported-medium check comes first, as on the email variant.
+        """
+        # Add the phone number to the user's account, so that it is in use.
+        self.get_success(
+            self.store.user_add_threepid(
+                user_id=self.user_id,
+                medium="msisdn",
+                address="447700900001",
+                validated_at=0,
+                added_at=0,
+            )
+        )
+
+        # The stock test config has no `account_threepid_delegates.msisdn`, so
+        # the medium is not supported.
+        channel = self._request_token("GB", "07700900001")
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(
+            Codes.THREEPID_MEDIUM_NOT_SUPPORTED, channel.json_body["errcode"]
+        )
+
+    @override_config({"allowed_local_3pids": [{"medium": "email", "pattern": ".*"}]})
+    def test_medium_not_supported_checked_before_denied(self) -> None:
+        """When the server cannot send validation SMSes, it reports
+        M_THREEPID_MEDIUM_NOT_SUPPORTED even if the phone number would be
+        denied: the unsupported-medium check comes first, as on the email
+        variant.
+        """
+        channel = self._request_token("GB", "07700900001")
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(
+            Codes.THREEPID_MEDIUM_NOT_SUPPORTED, channel.json_body["errcode"]
+        )
 
 
 class AccountStatusTestCase(unittest.HomeserverTestCase):
