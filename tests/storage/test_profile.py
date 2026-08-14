@@ -21,6 +21,7 @@
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import ProfileFields
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine
@@ -39,7 +40,13 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
     def test_displayname(self) -> None:
         self.get_success(self.store.create_profile(self.u_frank))
 
-        self.get_success(self.store.set_profile_displayname(self.u_frank, "Frank"))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
 
         self.assertEqual(
             "Frank",
@@ -47,7 +54,13 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         )
 
         # test set to None
-        self.get_success(self.store.set_profile_displayname(self.u_frank, None))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=None,
+            )
+        )
 
         self.assertIsNone(
             self.get_success(self.store.get_profile_displayname(self.u_frank))
@@ -57,7 +70,11 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         self.get_success(self.store.create_profile(self.u_frank))
 
         self.get_success(
-            self.store.set_profile_avatar_url(self.u_frank, "http://my.site/here")
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.site/here",
+            )
         )
 
         self.assertEqual(
@@ -66,7 +83,13 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         )
 
         # test set to None
-        self.get_success(self.store.set_profile_avatar_url(self.u_frank, None))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value=None,
+            )
+        )
 
         self.assertIsNone(
             self.get_success(self.store.get_profile_avatar_url(self.u_frank))
