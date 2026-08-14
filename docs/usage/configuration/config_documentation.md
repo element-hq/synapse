@@ -336,6 +336,17 @@ Example configuration:
 include_profile_data_on_invite: false
 ```
 ---
+### `include_profile_updates_in_sync`
+
+*(boolean)* Use this option to include updates of other users' profiles in sync responses, for users who share rooms.
+Requires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatible client, and is currently limited to legacy sync and local users only.
+This feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms. Defaults to `false`.
+
+Example configuration:
+```yaml
+include_profile_updates_in_sync: true
+```
+---
 ### `allow_public_rooms_without_auth`
 
 *(boolean)* If set to true, removes the need for authentication to access the server's public rooms directory through the client API, meaning that anyone can query the room directory. Defaults to `false`.
@@ -1276,11 +1287,10 @@ Options related to federation.
 ---
 ### `federation_domain_whitelist`
 
-*(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.
-
-Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
-
-Defaults to `[]`.
+*(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+If specified as an empty list (`[]`), federation will be denied with all servers. Specifying an empty list (`[]`) here is the recommended way of disabling federation.
+If not specified, the default is to allow federation with all servers.
+Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist. There is no default for this option.
 
 Example configuration:
 ```yaml
