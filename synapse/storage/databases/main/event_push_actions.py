@@ -1647,12 +1647,39 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             rotate_to_stream_ordering: The new maximum event stream ordering to summarise.
         """
 
-        # Calculate the new counts that should be upserted into event_push_summary
+        receipt_types_clause, receipt_types_args = make_in_list_sql_clause(
+            self.database_engine,
+            "receipt_type",
+            (ReceiptTypes.READ, ReceiptTypes.READ_PRIVATE),
+        )
+
+        # Calculate the new counts that should be upserted into event_push_summary.
+        #
+        # A row we insert here has to record which receipt its counts are relative to,
+        # otherwise `_get_unread_counts_by_pos_txn` has no way of telling whether the
+        # row predates the user's receipt. `_handle_new_receipts_for_notifs_txn` ran
+        # first, so barring a receipt that landed in the gap between the two phases
+        # (which self-heals on the next rotation, at the cost of overcounting it until
+        # then) the user's latest receipt for the thread is what the counts below are
+        # relative to: rows we are updating keep the value it stamped (their counts
+        # have not been recalculated since), and rows we are inserting get the latest
+        # receipt, or NULL if the user has never sent one in the room.
         def _sql(count_column: str, action_column: str) -> str:
             return f"""
             SELECT user_id, room_id, thread_id,
                 coalesce(old.{count_column}, 0) + upd.cnt,
-                upd.stream_ordering
+                upd.stream_ordering,
+                COALESCE(
+                    old.last_receipt_stream_ordering,
+                    (
+                        SELECT MAX(r.event_stream_ordering)
+                        FROM receipts_linearized AS r
+                        WHERE r.user_id = upd.user_id
+                            AND r.room_id = upd.room_id
+                            AND (r.thread_id IS NULL OR r.thread_id = upd.thread_id)
+                            AND {receipt_types_clause}
+                    )
+                )
             FROM (
                 SELECT user_id, room_id, thread_id, count(*) as cnt,
                     max(ea.stream_ordering) as stream_ordering
@@ -1669,7 +1696,11 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             LEFT JOIN event_push_summary AS old USING (user_id, room_id, thread_id)
         """
 
-        args = (old_rotate_stream_ordering, rotate_to_stream_ordering)
+        args = (
+            *receipt_types_args,
+            old_rotate_stream_ordering,
+            rotate_to_stream_ordering,
+        )
 
         # First get the count of unread messages.
         txn.execute(_sql("unread_count", "unread"), args)
@@ -1685,6 +1716,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 unread_count=row[3],
                 stream_ordering=row[4],
                 notif_count=0,
+                last_receipt_stream_ordering=row[5],
             )
 
         # Then get the count of notifications.
@@ -1702,6 +1734,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                     unread_count=0,
                     stream_ordering=row[4],
                     notif_count=row[3],
+                    last_receipt_stream_ordering=row[5],
                 )
 
         logger.info("Rotating notifications, handling %d rows", len(summaries))
@@ -1711,12 +1744,18 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             table="event_push_summary",
             key_names=("user_id", "room_id", "thread_id"),
             key_values=list(summaries),
-            value_names=("notif_count", "unread_count", "stream_ordering"),
+            value_names=(
+                "notif_count",
+                "unread_count",
+                "stream_ordering",
+                "last_receipt_stream_ordering",
+            ),
             value_values=[
                 (
                     summary.notif_count,
                     summary.unread_count,
                     summary.stream_ordering,
+                    summary.last_receipt_stream_ordering,
                 )
                 for summary in summaries.values()
             ],
@@ -1960,3 +1999,7 @@ class _EventPushSummary:
     unread_count: int
     stream_ordering: int
     notif_count: int
+    # The stream ordering of the user's latest read receipt for the thread at the
+    # point these counts were calculated, or None if they have never sent one in the
+    # room. See `_get_unread_counts_by_pos_txn` for how this is used.
+    last_receipt_stream_ordering: int | None
