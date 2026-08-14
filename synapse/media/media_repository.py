@@ -1388,8 +1388,10 @@ class MediaRepository:
                     )
 
                 # JPEG has no alpha channel, so it would flatten a transparent
-                # image onto a black background.
-                needs_alpha = thumbnailer.has_transparency
+                # image onto a solid color background.
+                needs_alpha = await defer_to_thread(
+                    self.hs.get_reactor(), lambda: thumbnailer.has_transparency
+                )
 
                 # We deduplicate the thumbnail sizes by ignoring the cropped versions if
                 # they have the same dimensions of a scaled one.

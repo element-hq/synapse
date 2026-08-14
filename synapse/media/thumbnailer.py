@@ -179,6 +179,9 @@ class Thumbnailer:
         """Whether the current frame actually makes use of transparency.
 
         Having an alpha channel isn't enough: fully opaque RGBA is common.
+
+        Note that this can block for a while on large images, as `getextrema()`
+        scans the entire alpha plane. Consider calling it via `defer_to_thread`.
         """
         image = self.image
 
@@ -192,9 +195,9 @@ class Thumbnailer:
             with image.getchannel("A") as alpha:
                 # Single band, so `getextrema` returns a plain (min, max) pair.
                 min_alpha = cast(float, alpha.getextrema()[0])
-        except Exception as e:
+        except Exception:
             # Assume transparency, since dropping it is the destructive option.
-            logger.info("Error inspecting image alpha channel: %s", e)
+            logger.exception("Error inspecting image alpha channel")
             return True
 
         return min_alpha < 255
