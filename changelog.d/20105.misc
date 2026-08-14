@@ -1,0 +1,1 @@
+Introduce `LaxJsonDict` type and use it in tests where `JsonDict` is relied upon being lax.
