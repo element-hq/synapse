@@ -32,7 +32,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import EduTypes
+from synapse.api.constants import Direction, EduTypes
 from synapse.replication.tcp.streams import ReceiptsStream
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -579,19 +579,20 @@ class ReceiptsWorkerStore(SQLBaseStore):
         to_key: MultiWriterStreamToken,
         from_key: MultiWriterStreamToken | None = None,
         limit: int = 100,
-        most_recent_first: bool = False,
+        order: Direction = Direction.FORWARDS,
     ) -> tuple[Mapping[str, JsonMapping], MultiWriterStreamToken]:
         """Get receipts for all rooms between two stream_ids, up to a limit of
-        the `limit` oldest read receipts in that range.
+        `limit` read receipts in that range.
 
         Args:
             to_key: Max stream id to fetch receipts up to.
             from_key: Min stream id to fetch receipts from. None fetches
                 from the start.
             limit: The maximum number of receipts to fetch.
-            most_recent_first: If True, fetch the newest `limit` receipts in the
-                range instead of the oldest. Anything older is deliberately
-                skipped: the returned stream token is always `to_key`.
+            order: `Direction.FORWARDS` fetches the oldest `limit` receipts in
+                the range. `Direction.BACKWARDS` fetches the newest `limit`
+                instead; anything older is deliberately skipped, and the
+                returned stream token is always `to_key`.
 
         Returns:
             A two-tuple containing the following:
@@ -601,7 +602,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
                   must call this method again from the returned token to fetch
                   the remaining receipts.
         """
-        order = "DESC" if most_recent_first else "ASC"
+        sql_order = "DESC" if order == Direction.BACKWARDS else "ASC"
 
         def f(
             txn: LoggingTransaction,
@@ -611,7 +612,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
                     SELECT stream_id, instance_name, room_id, receipt_type, user_id, event_id, data
                     FROM receipts_linearized WHERE
                     stream_id > ? AND stream_id <= ?
-                    ORDER BY stream_id {order}
+                    ORDER BY stream_id {sql_order}
                     LIMIT ?
                 """
                 txn.execute(sql, [from_key.stream, to_key.get_max_stream_pos(), limit])
@@ -620,7 +621,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
                     SELECT stream_id, instance_name, room_id, receipt_type, user_id, event_id, data
                     FROM receipts_linearized WHERE
                     stream_id <= ?
-                    ORDER BY stream_id {order}
+                    ORDER BY stream_id {sql_order}
                     LIMIT ?
                 """
 
@@ -640,7 +641,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
             "get_linearized_receipts_for_all_rooms", f
         )
 
-        if not most_recent_first and fetched_row_count >= limit and txn_results:
+        if order == Direction.FORWARDS and fetched_row_count >= limit and txn_results:
             # We hit the limit, so there may be more receipts in the range. Report
             # how far we actually got so that the caller can fetch the rest. The
             # rows are ordered by ascending stream ID, so the last row is the
