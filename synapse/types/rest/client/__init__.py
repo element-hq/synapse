@@ -100,10 +100,6 @@ class EmailRequestTokenBody(ThreepidRequestTokenBody):
         return validate_email(email)
 
 
-# The constraint declares its own error: "value_error" is the type that
-# validate_json_object translates to the M_INVALID_PARAM errcode named by
-# MSC4178, whereas a plain pattern mismatch would be reported as the catch-all
-# M_BAD_JSON.
 ISO3166_1_Alpha_2 = Annotated[
     str,
     GetPydanticSchema(
