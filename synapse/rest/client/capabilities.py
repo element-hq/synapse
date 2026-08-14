@@ -92,41 +92,36 @@ class CapabilitiesRestServlet(RestServlet):
                 "enabled": self.config.experimental.msc3664_enabled,
             }
 
-        disallowed_profile_fields = []
-        response["capabilities"]["m.profile_fields"] = {"enabled": True}
-        if not self.config.registration.enable_set_displayname:
-            disallowed_profile_fields.append("displayname")
-        if not self.config.registration.enable_set_avatar_url:
-            disallowed_profile_fields.append("avatar_url")
-        if disallowed_profile_fields:
-            response["capabilities"]["m.profile_fields"]["disallowed"] = (
-                disallowed_profile_fields
-            )
+        allowlist = self.config.experimental.msc4133_key_allowlist
+        denylist = self.config.experimental.msc4133_key_denylist
+
+        profile_fields: JsonDict = {"enabled": True}
+
+        if allowlist is not None:
+            allowed_profile_fields = list(allowlist)
+            if self.config.registration.enable_set_displayname:
+                allowed_profile_fields.append("displayname")
+            if self.config.registration.enable_set_avatar_url:
+                allowed_profile_fields.append("avatar_url")
+
+            profile_fields["allowed"] = allowed_profile_fields
+        else:
+            disallowed_profile_fields = list(denylist or [])
+            if not self.config.registration.enable_set_displayname:
+                disallowed_profile_fields.append("displayname")
+            if not self.config.registration.enable_set_avatar_url:
+                disallowed_profile_fields.append("avatar_url")
+
+            if disallowed_profile_fields:
+                profile_fields["disallowed"] = disallowed_profile_fields
+
+        response["capabilities"]["m.profile_fields"] = profile_fields
 
         # For transition from unstable to stable identifiers.
         if self.config.experimental.msc4133_enabled:
-            allowed_profile_fields = list(
-                self.config.experimental.msc4133_key_allowlist or []
+            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = dict(
+                profile_fields
             )
-            disallowed_msc4133_profile_fields = list(
-                self.config.experimental.msc4133_key_denylist or []
-            )
-
-            if self.config.registration.enable_set_displayname:
-                allowed_profile_fields.append("displayname")
-            else:
-                disallowed_msc4133_profile_fields.append("displayname")
-
-            if self.config.registration.enable_set_avatar_url:
-                allowed_profile_fields.append("avatar_url")
-            else:
-                disallowed_msc4133_profile_fields.append("avatar_url")
-
-            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = {
-                "enabled": True,
-                "allowed": allowed_profile_fields,
-                "disallowed": disallowed_msc4133_profile_fields,
-            }
 
         response["capabilities"]["org.matrix.msc4140.delayed_events"] = {
             "max_delay_ms": self.config.server.max_event_delay_duration.as_millis(),

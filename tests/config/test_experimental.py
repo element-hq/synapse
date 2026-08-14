@@ -15,7 +15,7 @@
 import yaml
 from parameterized import parameterized
 
-from synapse.config._base import RootConfig
+from synapse.config._base import ConfigError, RootConfig
 from synapse.config.experimental import ExperimentalConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.types import JsonDict
@@ -55,6 +55,34 @@ class ExperimentalConfigTestCase(unittest.TestCase):
         """
 
         _read_config(config_values)
+
+    @parameterized.expand(["msc4133_key_allowlist", "msc4133_key_denylist"])
+    def test_msc4133_key_lists_parsing(self, option: str) -> None:
+        """A list of strings is accepted, and defaults to None when absent."""
+        _read_config({"experimental_features": {option: ["some_field"]}})
+        _read_config({"experimental_features": {option: []}})
+
+        config = ExperimentalConfig(RootConfig())
+        config.read_config({}, allow_secrets_in_config=False)
+        self.assertIsNone(getattr(config, option))
+
+    @parameterized.expand(
+        [
+            (f"{option}_{test_description}", option, value)
+            for option in ("msc4133_key_allowlist", "msc4133_key_denylist")
+            for test_description, value in (
+                ("not_a_list", "some_field"),
+                ("non_string_entries", ["some_field", 1]),
+                ("nested_list", [["some_field"]]),
+            )
+        ]
+    )
+    def test_msc4133_key_lists_reject_invalid_values(
+        self, test_description: str, option: str, value: object
+    ) -> None:
+        """Values which are not a list of custom profile field names are rejected."""
+        with self.assertRaises(ConfigError):
+            _read_config({"experimental_features": {option: value}})
 
 
 def _read_config(config_values: JsonDict) -> None:

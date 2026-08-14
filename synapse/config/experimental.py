@@ -244,6 +244,8 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
+        # MSC4133: Allowlist for custom profile fields. If present this list takes
+        # precedence over the denylist and only the specified profile fields may be set.
         self.msc4133_key_allowlist: Optional[list[str]] = experimental.get(
             "msc4133_key_allowlist"
         )
@@ -256,6 +258,8 @@ class ExperimentalConfig(Config):
                     ("experimental", "msc4133_key_allowlist"),
                 )
 
+        # MSC4133: Denylist for custom profile fields. If present the user may set any
+        # custom field except the specified fields. Will be overruled by the allowlist.
         self.msc4133_key_denylist: Optional[list[str]] = experimental.get(
             "msc4133_key_denylist"
         )
