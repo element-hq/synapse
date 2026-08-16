@@ -17,6 +17,7 @@ class InviteRule(Enum):
     ALLOW = "allow"
     BLOCK = "block"
     IGNORE = "ignore"
+    UNSTABLE_BLOCK_PUBLIC = "uk.timedout.msc4494.deny_public"
 
 
 class InviteRulesConfig:
@@ -143,9 +144,14 @@ class MSC4380InviteRulesConfig(InviteRulesConfig):
     def from_account_data(cls, data: JsonMapping) -> "MSC4380InviteRulesConfig":
         default = data.get("default_action")
 
-        default_invite_rule = (
-            InviteRule.BLOCK if default == "block" else InviteRule.ALLOW
-        )
+        match default:
+            case "block":
+                default_invite_rule = InviteRule.BLOCK
+            case "uk.timedout.msc4494.deny_public":
+                default_invite_rule = InviteRule.UNSTABLE_BLOCK_PUBLIC
+            case _:
+                # Unrecognized actions default to allow.
+                default_invite_rule = InviteRule.ALLOW
         return cls(default_invite_rule=default_invite_rule)
 
     def get_invite_rule(self, inviter_user_id: str) -> InviteRule:

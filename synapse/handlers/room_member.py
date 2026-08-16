@@ -31,6 +31,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     GuestAccess,
+    JoinRules,
     Membership,
 )
 from synapse.api.errors import (
@@ -941,6 +942,46 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         "You are not permitted to invite this user.",
                         errcode=Codes.INVITE_BLOCKED,
                     )
+                elif (
+                    rule == InviteRule.UNSTABLE_BLOCK_PUBLIC
+                    and self.config.experimental.msc4494_enabled
+                ):
+                    mutual_rooms = await self.store.get_mutual_rooms_between_users(
+                        frozenset((requester.user.to_string(), target_id))
+                    )
+                    private = False
+                    for mutual_room_id in mutual_rooms:
+                        join_rule = JoinRules.INVITE
+                        state = (
+                            await self._storage_controllers.state.get_current_state_ids(
+                                mutual_room_id,
+                                StateFilter.from_types([(EventTypes.JoinRules, "")]),
+                            )
+                        )
+                        event_id = state.get((EventTypes.JoinRules, ""))
+                        if event_id:
+                            join_rules_event = await self.store.get_event(
+                                event_id, allow_none=True
+                            )
+                            if join_rules_event:
+                                join_rule = join_rules_event.content.get(
+                                    "join_rule", JoinRules.INVITE
+                                )
+                        if join_rule != JoinRules.PUBLIC:
+                            private = True
+                            break
+                    if not private:
+                        logger.info(
+                            "Automatically rejecting invite from %s as they do not "
+                            "share a non-public room with %s",
+                            requester.user,
+                            target_id,
+                        )
+                        raise SynapseError(
+                            403,
+                            "You are not permitted to invite this user.",
+                            errcode=Codes.INVITE_BLOCKED,
+                        )
                 # InviteRule.IGNORE is handled at the sync layer.
 
         if prev_event_ids is not None:

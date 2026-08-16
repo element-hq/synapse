@@ -272,6 +272,9 @@ pub struct UnstableFeatureMap {
     /// MSC4446: Allow moving the fully read marker backwards.
     #[serde(rename = "com.beeper.msc4446")]
     msc4446_enabled: bool,
+    /// MSC4494: Membership-based invite blocking
+    #[serde(rename = "uk.timedout.msc4494")]
+    msc4494_enabled: bool,
 
     // Whether new rooms will be set to encrypted or not (based on presets).
     #[serde(rename = "io.element.e2ee_forced.public")]
@@ -324,6 +327,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4491_enabled: config.experimental.msc4491_enabled,
         msc4143_enabled: config.experimental.msc4143_enabled,
         msc4446_enabled: config.experimental.msc4446_enabled,
+        msc4494_enabled: config.experimental.msc4494_enabled,
         e2ee_forced_public: config
             .room
             .encryption_enabled_by_default_for_room_presets
