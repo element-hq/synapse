@@ -13,7 +13,6 @@
 #
 
 import logging
-import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ from synapse.appservice import SCOPE_QUERY_ROOM_MEMBERSHIP
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_string
 from synapse.http.site import SynapseRequest
+from synapse.rest.client._base import client_patterns
 from synapse.types import JsonDict, RoomID, UserID
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -33,11 +33,9 @@ logger = logging.getLogger(__name__)
 
 
 class AppserviceRoomMembershipRestServlet(RestServlet):
-    PATTERNS = [
-        re.compile(
-            r"^/_matrix/client/unstable/io\.element\.msc4502/rooms/(?P<room_id>[^/]*)/is_joined$"
-        )
-    ]
+    PATTERNS = client_patterns(
+        r"/io\.element\.msc4502/rooms/(?P<room_id>[^/]*)/is_joined$", releases=()
+    )
     CATEGORY = "Client API requests"
 
     def __init__(self, hs: "HomeServer"):
