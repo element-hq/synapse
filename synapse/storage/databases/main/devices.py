@@ -922,32 +922,54 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     def _mark_as_sent_devices_by_remote_txn(
         self, txn: LoggingTransaction, destination: str, stream_id: int
     ) -> None:
-        # We update the device_lists_outbound_last_success with the successfully
-        # poked users.
+        # Delete all sent outbound pokes, returning them so that we can update
+        # `device_lists_outbound_last_success` with the successfully poked users.
+        #
+        # This is a high frequency transaction (runs very often when processing a
+        # backlog of device list changes) and can bog down the database CPU with the
+        # sheer number of statements.
+        #
+        # We prefer to trade a little bit of processing time on the Python side
+        # (aggregating `max_stream_id_by_user_id`) as the alternative would be to have
+        # two separate queries; a `SELECT ... GROUP BY user_id` with the aggregation and
+        # then a `DELETE` which means we touch the same rows twice. We get to save the
+        # cost of one of those statements (less CPU on the database) and fewer
+        # statements per transaction (less round-trips) means connections turn over
+        # faster, and can move on to process the next thing.
+        #
+        # By the nature of `MAX_EDUS_PER_TRANSACTION`, we're only dealing with 100 rows
+        # at max which is pretty trivial for us to process on the Python side.
         sql = """
-            SELECT user_id, coalesce(max(o.stream_id), 0)
-            FROM device_lists_outbound_pokes as o
-            WHERE destination = ? AND o.stream_id <= ?
-            GROUP BY user_id
+            DELETE FROM device_lists_outbound_pokes
+            WHERE destination = ? AND stream_id <= ?
+            RETURNING user_id, stream_id
         """
         txn.execute(sql, (destination, stream_id))
-        rows = txn.fetchall()
 
+        # `RETURNING` gives us a row per poke (i.e. per device), so collapse down to the
+        # maximum stream ID we've successfully poked for each user.
+        max_stream_id_by_user_id: dict[str, int] = {}
+        for user_id, poke_stream_id in txn:
+            max_stream_id_by_user_id[user_id] = max(
+                max_stream_id_by_user_id.get(user_id, 0), poke_stream_id
+            )
+
+        # Update `device_lists_outbound_last_success` with the successfully poked
+        # users.
+        #
+        # We could potentially combine this in one big CTE with the query above but it
+        # isn't supported by SQLite (SQLite doesn't support `DELETE` in a CTE).
         self.db_pool.simple_upsert_many_txn(
             txn=txn,
             table="device_lists_outbound_last_success",
             key_names=("destination", "user_id"),
-            key_values=[(destination, user_id) for user_id, _ in rows],
+            key_values=[(destination, user_id) for user_id in max_stream_id_by_user_id],
             value_names=("stream_id",),
-            value_values=[(stream_id,) for _, stream_id in rows],
+            value_values=[
+                (user_stream_id,)
+                for user_stream_id in max_stream_id_by_user_id.values()
+            ],
         )
-
-        # Delete all sent outbound pokes
-        sql = """
-            DELETE FROM device_lists_outbound_pokes
-            WHERE destination = ? AND stream_id <= ?
-        """
-        txn.execute(sql, (destination, stream_id))
 
     async def add_user_signature_change_to_streams(
         self, from_user_id: str, user_ids: list[str]
