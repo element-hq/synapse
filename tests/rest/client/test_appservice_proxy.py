@@ -289,7 +289,8 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
             access_token=self.access_token,
         )
 
-        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.code, 500)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
         self.agent.request.assert_called()
 
     def test_unauthenticated_get_is_rejected(self) -> None:

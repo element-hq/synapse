@@ -138,12 +138,10 @@ def _send_response(request: SynapseRequest, response: IResponse) -> None:
 
 
 def _send_error_response(request: SynapseRequest) -> None:
-    request.setResponseCode(404)
+    request.setResponseCode(500)
     set_cors_headers(request)
     request.setHeader(b"Content-Type", b"application/json")
     request.write(
-        json.dumps(
-            {"errcode": Codes.UNRECOGNIZED, "error": "Unrecognized request"}
-        ).encode()
+        json.dumps({"errcode": Codes.UNKNOWN, "error": "Unrecognized request"}).encode()
     )
     request.finish()
