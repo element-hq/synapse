@@ -120,7 +120,7 @@ def _send_response(request: SynapseRequest, response: IResponse) -> None:
     set_cors_headers(request)
 
     # We strip the "hop-by-hop" headers as defined by RFC2616.
-    headers_to_strip = HOP_BY_HOP_HEADERS_LOWERCASE
+    headers_to_strip = set(HOP_BY_HOP_HEADERS_LOWERCASE)
 
     # The `Connection` header can define additional headers that should not be
     # copied over.
