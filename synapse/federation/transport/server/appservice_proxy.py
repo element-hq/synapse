@@ -40,6 +40,11 @@ def _make_proxy_callback(
     ratelimiter: FederationRateLimiter,
     appservice: ApplicationService,
 ) -> ServletCallback:
+    """Builds a servlet callback that authenticates an incoming federation request,
+    rate-limits it by origin, and forwards it to the given application service's
+    proxy URL.
+    """
+
     async def _proxy(request: SynapseRequest, **kwargs: str) -> None:
         raw_body = request.content.read()  # type: ignore[union-attr]
 
