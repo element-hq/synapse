@@ -57,6 +57,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# We report the calculated current position as seen by this worker. Note that
+# this is always positive (even for negative streams like backfill) to make
+# monitoring/alerting easier.
 stream_current_position_gauge = Gauge(
     "synapse_storage_stream_current_position",
     "The stream's current position as this process sees it."
@@ -368,6 +371,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         """
         assert self._lock.locked()
 
+        # Note that we always report this as a positive value, so we don't
+        # multiply by the return factor.
         self._current_position_gauge.set(self._persisted_upto_position)
 
     def _load_current_ids(
