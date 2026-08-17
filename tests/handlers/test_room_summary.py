@@ -31,6 +31,7 @@ from synapse.api.constants import (
     JoinRules,
     Membership,
     RestrictedJoinRuleTypes,
+    RoomEncryptionAlgorithms,
     RoomTypes,
 )
 from synapse.api.errors import AuthError, NotFoundError, SynapseError
@@ -184,9 +185,6 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         result_room_ids = []
         result_children_ids = []
         for result_room in result["rooms"]:
-            # Ensure federation results are not leaking over the client-server API.
-            self.assertNotIn("allowed_room_ids", result_room)
-
             result_room_ids.append(result_room["room_id"])
             result_children_ids.append(
                 [
@@ -488,6 +486,42 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             self.handler.get_room_hierarchy(create_requester(user2), self.space)
         )
         self._assert_hierarchy(result, expected)
+
+    def test_summary_fields(self) -> None:
+        """
+        The room entries returned to clients include the `room_version`,
+        `encryption` and `allowed_room_ids` fields, which Matrix 1.15 (MSC3266)
+        added to the client `/hierarchy` API.
+        """
+        restricted_room = self._create_room_with_join_rule(
+            JoinRules.RESTRICTED,
+            room_version=RoomVersions.V8.identifier,
+            allow=[
+                {
+                    "type": RestrictedJoinRuleTypes.ROOM_MEMBERSHIP,
+                    "room_id": self.space,
+                    "via": [self.hs.hostname],
+                }
+            ],
+        )
+        self.helper.send_state(
+            restricted_room,
+            event_type=EventTypes.RoomEncryption,
+            body={"algorithm": RoomEncryptionAlgorithms.DEFAULT},
+            tok=self.token,
+        )
+
+        result = self.get_success(
+            self.handler.get_room_hierarchy(create_requester(self.user), self.space)
+        )
+        room_entries = {entry["room_id"]: entry for entry in result["rooms"]}
+        entry = room_entries[restricted_room]
+        self.assertEqual(entry["room_version"], RoomVersions.V8.identifier)
+        self.assertEqual(entry["encryption"], RoomEncryptionAlgorithms.DEFAULT)
+        self.assertEqual(entry["allowed_room_ids"], [self.space])
+
+        # Rooms without restricted join rules should not have the field at all.
+        self.assertNotIn("allowed_room_ids", room_entries[self.room])
 
     def test_complex_space(self) -> None:
         """
@@ -959,6 +993,13 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
                 self.handler.get_room_hierarchy(create_requester(self.user), self.space)
             )
         self._assert_hierarchy(result, expected)
+
+        # `allowed_room_ids` returned over federation should be passed through
+        # to the client.
+        room_entries = {entry["room_id"]: entry for entry in result["rooms"]}
+        self.assertEqual(
+            room_entries[restricted_accessible_room]["allowed_room_ids"], [self.room]
+        )
 
     def test_fed_invited(self) -> None:
         """
