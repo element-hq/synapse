@@ -338,6 +338,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ),
         )
 
+        # Set value to empty string. For displayname/avatar_url, this is basically
+        # a delete of the field. For other fields, it's a value.
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -353,9 +355,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 limit=1,
             )
         )
+        expected_action = (
+            ProfileUpdateAction.DELETE.value
+            if field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
+            else ProfileUpdateAction.UPDATE.value
+        )
         self.assertEqual(
             delete_updates[0],
-            (3, "@1234abcd:test", ProfileUpdateAction.UPDATE.value, {field_name}),
+            (3, "@1234abcd:test", expected_action, {field_name}),
         )
 
     @override_config({"include_profile_updates_in_sync": True})
