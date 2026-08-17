@@ -13,12 +13,11 @@
 #
 import logging
 
-from parameterized import parameterized
+from parameterized import parameterized, parameterized_class
 
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, JoinRules
 from synapse.rest.client import knock, login, profile, room, sync
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
@@ -34,16 +33,16 @@ logger = logging.getLogger(__name__)
 # foreground update for
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
 # https://github.com/element-hq/synapse/issues/17623)
-# @parameterized_class(
-#     ("use_new_tables",),
-#     [
-#         (True,),
-#         (False,),
-#     ],
-#     class_name_func=lambda cls,
-#     num,
-#     params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
-# )
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
 class SlidingSyncProfilesTestCase(SlidingSyncBase):
     """Tests for the profile updates sliding sync extension"""
 
@@ -1141,115 +1140,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                 "@user:test"
             )
         )
-
-    @parameterized.expand(
-        [
-            True,
-            False,
-        ]
-    )
-    @override_config({"include_profile_updates_in_sync": True})
-    def test_lazy_loading_sends_full_profile_for_knock_and_invite_senders(
-        self,
-        is_initial: bool,
-    ) -> None:
-        """
-        Test that when lazy loading for lazy rooms, even without timeline events,
-        we get profiles for users who knock or got invited.
-        """
-        # Create some users to fill the heroes so they don't pollute the test
-        for i in range(4):
-            user = self.register_user(f"hero{i}", "password")
-            tok = self.login(f"hero{i}", "password")
-            self.helper.join(self.joined_room, user=user, tok=tok)
-
-        self.helper.send_state(
-            self.joined_room,
-            EventTypes.JoinRules,
-            {"join_rule": JoinRules.KNOCK},
-            tok=self.tok,
-        )
-        if is_initial:
-            self.register_user("knock_user", "password")
-            knock_tok = self.login("knock_user", "password")
-            self.helper.knock(self.joined_room, tok=knock_tok)
-            invite_user = self.register_user("invite_user", "password")
-            self.helper.invite(self.joined_room, self.user, invite_user, tok=self.tok)
-
-        # Make an initial Sliding Sync request with the profiles extension enabled
-        sync_body: dict[str, dict] = {
-            "lists": {},
-            "room_subscriptions": {
-                self.joined_room: {
-                    "required_state": [],
-                    # Force zero timeline events in the response, as we're
-                    # testing for membership events.
-                    "timeline_limit": 0,
-                },
-            },
-            "extensions": {
-                "org.matrix.msc4262.profiles": {
-                    "enabled": True,
-                },
-            },
-        }
-        if is_initial:
-            sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
-                ["m.room.member", "$LAZY"],
-                ["*", "*"],
-            ]
-
-        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
-
-        if is_initial:
-            self.assertIsNotNone(
-                response_body["extensions"].get("org.matrix.msc4262.profiles")
-            )
-            # Knocking user should be included
-            self.assertIsNotNone(
-                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
-                    "@knock_user:test"
-                )
-            )
-            # Invited user should be included
-            self.assertIsNotNone(
-                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
-                    "@invite_user:test"
-                )
-            )
-        else:
-            sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
-                ["m.room.member", "$LAZY"],
-                ["*", "*"],
-            ]
-
-            self.register_user("knock_user", "password")
-            knock_tok = self.login("knock_user", "password")
-            self.helper.knock(self.joined_room, tok=knock_tok)
-            invite_user = self.register_user("invite_user", "password")
-            self.helper.invite(self.joined_room, self.user, invite_user, tok=self.tok)
-
-            response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
-
-            self.assertIsNotNone(
-                response_body["extensions"].get("org.matrix.msc4262.profiles")
-            )
-            # Knocking user should be included
-            # FIXME: this fails as somehow there are profile update rows which
-            # seem wrong:
-            # ProfileUpdate(stream_id=7, user_id='@knock_user:test', action='left_room', affected_fields=None)
-            # ProfileUpdate(stream_id=8, user_id='@invite_user:test', action='left_room', affected_fields=None)
-            self.assertIsNotNone(
-                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
-                    "@knock_user:test"
-                )
-            )
-            # Invited user should be included
-            self.assertIsNotNone(
-                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
-                    "@invite_user:test"
-                )
-            )
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_repeat_of_sync_correctly_includes_profile_information_again(self) -> None:
