@@ -963,7 +963,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn=txn,
             table="device_lists_outbound_last_success",
             key_names=("destination", "user_id"),
-            key_values=[(destination, user_id) for user_id in max_stream_id_by_user_id],
+            key_values=[
+                (destination, user_id) for user_id in max_stream_id_by_user_id.keys()
+            ],
             value_names=("stream_id",),
             value_values=[
                 (user_stream_id,)
