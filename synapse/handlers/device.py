@@ -67,6 +67,7 @@ from synapse.types import (
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
+    is_compliant_user_id_localpart,
 )
 from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
@@ -1478,6 +1479,28 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 {
                     "message": "Got a device list update edu from a user and "
                     "device which does not match the origin of the request.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            return
+
+        if not is_compliant_user_id_localpart(UserID.from_string(user_id).localpart):
+            # We SHOULD NOT forward non-compliant (grandfathered historical)
+            # user IDs to clients outside the context of an event, and the spec
+            # gives dropping their device list updates as the example. See
+            # https://spec.matrix.org/v1.14/appendices/#historical-user-ids
+            logger.warning(
+                "Dropping device list update edu for non-compliant user ID %r from %r",
+                user_id,
+                origin,
+            )
+
+            set_tag("error", True)
+            log_kv(
+                {
+                    "message": "Got a device list update edu from a "
+                    "non-compliant user ID, dropping it.",
                     "user_id": user_id,
                     "device_id": device_id,
                 }
