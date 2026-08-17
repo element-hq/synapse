@@ -923,3 +923,64 @@ class OwnProfileUnrestrictedTestCase(unittest.HomeserverTestCase):
             access_token=self.requester_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
+
+
+class ProfileRatelimitTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+        profile.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.owner = self.register_user("owner", "pass")
+        self.owner_tok = self.login("owner", "pass")
+        self.other = self.register_user("other", "pass", displayname="Bob")
+        self.other_tok = self.login("other", "pass")
+
+    @unittest.override_config({"rc_profile": {"per_second": 0.1, "burst_count": 3}})
+    def test_ratelimit_authenticated(self) -> None:
+        """Profile lookups from an authenticated user are rate limited per user,
+        with the limit shared across the profile endpoints.
+        """
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}/displayname", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}/avatar_url", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 429, channel.result)
+
+        # Another user is not affected by the first user's limit.
+        channel = self.make_request(
+            "GET", f"/profile/{self.owner}", access_token=self.other_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+    @unittest.override_config({"rc_profile": {"per_second": 0.1, "burst_count": 3}})
+    def test_ratelimit_unauthenticated(self) -> None:
+        """Unauthenticated profile lookups are rate limited per IP address."""
+        for _ in range(3):
+            channel = self.make_request("GET", f"/profile/{self.other}")
+            self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request("GET", f"/profile/{self.other}")
+        self.assertEqual(channel.code, 429, channel.result)
+
+        # An authenticated user is not affected by the per-IP limit.
+        channel = self.make_request(
+            "GET", f"/profile/{self.other}", access_token=self.owner_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
