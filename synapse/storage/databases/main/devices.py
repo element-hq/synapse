@@ -946,8 +946,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         """
         txn.execute(sql, (destination, stream_id))
 
-        # `RETURNING` gives us a row per poke (i.e. per device), so collapse down to the
-        # maximum stream ID we've successfully poked for each user.
+        # Aggregate `max_stream_id_by_user_id`
         max_stream_id_by_user_id: dict[str, int] = {}
         for user_id, poke_stream_id in txn:
             max_stream_id_by_user_id[user_id] = max(
