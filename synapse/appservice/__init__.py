@@ -108,7 +108,7 @@ class ApplicationService:
         supports_unstable_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
         msc4190_device_management: bool = False,
-        scopes: Iterable[str] | None = None,
+        scopes: Iterable[str] = frozenset(),
     ):
         self.token = token
         self.url = (
@@ -145,7 +145,7 @@ class ApplicationService:
         else:
             self.protocols = set()
 
-        self.scopes = set(scopes) if scopes else set()
+        self.scopes = set(scopes)
         unknown_scopes = self.scopes - KNOWN_SCOPES
         if unknown_scopes:
             raise ValueError(f"Unknown application service scope(s): {unknown_scopes}")
