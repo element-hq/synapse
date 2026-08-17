@@ -205,3 +205,9 @@ class Auth(Protocol):
             membership event ID of the user. If the user is not in the room and
             never has been, then `(Membership.JOIN, None)` is returned.
         """
+
+    def assert_requester_has_scope(self, requester: Requester, scope: str) -> None:
+        """Asserts that the requester has the given scope, either directly
+        (e.g. via an OAuth token) or via the scopes registered against the
+        application service.
+        """

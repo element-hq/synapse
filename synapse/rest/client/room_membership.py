@@ -52,25 +52,7 @@ class AppserviceRoomMembershipRestServlet(RestServlet):
         self, request: SynapseRequest, room_id: str
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
-
-        app_service = (
-            self.store.get_app_service_by_id(requester.app_service_id)
-            if requester.app_service_id
-            else None
-        )
-
-        # Users and appservices can call this endpoint if they have the scope.
-        has_scope = (
-            app_service is not None
-            and app_service.has_scope(SCOPE_QUERY_ROOM_MEMBERSHIP)
-        ) or SCOPE_QUERY_ROOM_MEMBERSHIP in requester.scope
-
-        if not has_scope:
-            raise SynapseError(
-                HTTPStatus.FORBIDDEN,
-                f"Missing {SCOPE_QUERY_ROOM_MEMBERSHIP} scope",
-                Codes.FORBIDDEN,
-            )
+        self.auth.assert_requester_has_scope(requester, SCOPE_QUERY_ROOM_MEMBERSHIP)
 
         if not RoomID.is_valid(room_id):
             raise SynapseError(
