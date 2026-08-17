@@ -116,7 +116,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         generators from earlier tests.
         """
 
-        return self.get_metric(
+        return self.get_prometheus_metric_current_value(
             stream_current_position_gauge,
             instance_name=instance_name,
             stream_name="test_stream",

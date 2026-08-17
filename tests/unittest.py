@@ -1099,7 +1099,9 @@ class HomeserverTestCase(TestCase):
             event_injection.inject_member_event(self.hs, room, user, membership)
         )
 
-    def get_metric(self, metric: "Collector", **labels: str) -> int:
+    def get_prometheus_metric_current_value(
+        self, metric: "Collector", **labels: str
+    ) -> int:
         """Get the value of a prometheus metric with the given labels.
 
         Note that the metrics outlives each individual test, so it may hold
