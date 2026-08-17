@@ -46,7 +46,6 @@ class AppserviceRoomMembershipRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
         self.is_mine_id = hs.is_mine_id
-        self.is_mine_server_name = hs.is_mine_server_name
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
@@ -102,10 +101,7 @@ class AppserviceRoomMembershipRestServlet(RestServlet):
                     f"Invalid server name: {server_name}",
                     Codes.INVALID_PARAM,
                 )
-            if self.is_mine_server_name(server_name):
-                joined = await self.store.is_locally_joined(room_id)
-            else:
-                joined = await self.store.is_host_joined(room_id, server_name)
+            joined = await self.store.is_host_joined(room_id, server_name)
 
         return HTTPStatus.OK, {"joined": joined}
 
