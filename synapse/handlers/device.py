@@ -1063,7 +1063,10 @@ class DeviceWriterHandler(DeviceHandler):
         """Report how far behind we are at converting rows in
         `device_lists_changes_in_room` to `device_lists_outbound_pokes`.
         """
-        oldest_ts, converted_pos = await self.store.get_device_list_conversion_lag()
+        (
+            oldest_ts,
+            last_converted_pos,
+        ) = await self.store.get_device_list_conversion_lag()
 
         if oldest_ts is None:
             device_list_conversion_lag_ms = 0
@@ -1082,7 +1085,7 @@ class DeviceWriterHandler(DeviceHandler):
 
         device_list_conversion_stream_lag_gauge.labels(
             **{SERVER_NAME_LABEL: self.server_name}
-        ).set(max(0, current_pos - converted_pos))
+        ).set(max(0, current_pos - last_converted_pos))
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
