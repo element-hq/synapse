@@ -2465,14 +2465,29 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         `FALSE` have not been converted.
         """
 
+        return await self.db_pool.runInteraction(
+            desc="get_device_change_last_converted_pos",
+            func=self.get_device_change_last_converted_pos_txn,
+            db_autocommit=True,
+        )
+
+    def get_device_change_last_converted_pos_txn(
+        self, txn: LoggingTransaction
+    ) -> tuple[int, str]:
+        """Get the position of the last row in `device_list_changes_in_room` that has been
+        converted to `device_lists_outbound_pokes`.
+
+        Rows with a strictly greater position where `converted_to_destinations` is
+        `FALSE` have not been converted."""
+
         # There should be only one row in this table, though we want to
         # future-proof ourselves for when we have multiple rows (one for each
         # instance). So to handle that case we take the minimum of all rows.
-        rows = await self.db_pool.simple_select_list(
+        rows = self.db_pool.simple_select_list_txn(
+            txn,
             table="device_lists_changes_converted_stream_position",
             keyvalues={},
             retcols=["stream_id", "room_id"],
-            desc="get_device_change_last_converted_pos",
         )
         return cast(tuple[int, str], min(rows))
 
@@ -2502,15 +2517,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         def get_device_list_conversion_lag_txn(
             txn: LoggingTransaction,
         ) -> tuple[int | None, int]:
-            # As in `get_device_change_last_converted_pos`, take the minimum
-            # of all rows in case there is more than one.
-            pos_rows = self.db_pool.simple_select_list_txn(
-                txn,
-                table="device_lists_changes_converted_stream_position",
-                keyvalues={},
-                retcols=["stream_id", "room_id"],
-            )
-            stream_id, room_id = cast(tuple[int, str], min(pos_rows))
+            stream_id, room_id = self.get_device_change_last_converted_pos_txn(txn)
 
             txn.execute(sql, (stream_id, room_id))
             row = txn.fetchone()
