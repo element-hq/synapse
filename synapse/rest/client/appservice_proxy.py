@@ -55,9 +55,9 @@ def _make_proxy_callback(
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     """Registers blanket reverse-proxy routes for each application service that has
     configured a proxy prefix. This forwards requests under
-    /_matrix/client/<version>/<prefix>/* (where <version> is either "vN" or
-    "unstable/<prefix>") to the same path under the application service's
-    configured proxy URL after verifying request authentication.
+    /_matrix/client/<version>/<prefix>/* (where <version> is either "vN" or "unstable")
+    to the same path under the application service's proxy URL after verifying request
+    authentication.
     """
     if not hs.config.experimental.msc4512_enabled:
         return
