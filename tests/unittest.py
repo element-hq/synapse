@@ -1113,6 +1113,8 @@ class HomeserverTestCase(TestCase):
         labels = dict(labels)
         labels[SERVER_NAME_LABEL] = self.hs.hostname
 
+        found_values = []  # Matching values for the given labels. Should be exactly one.
+
         for collected in metric.collect():
             for sample in collected.samples:
                 # Check that all the labels match. If any label doesn't match,
@@ -1123,9 +1125,16 @@ class HomeserverTestCase(TestCase):
                 else:
                     # We didn't break, so all the labels matched. Return this
                     # sample's value.
-                    return int(sample.value)
+                    found_values.append(int(sample.value))
 
-        raise AssertionError(f"No metric found for {metric} with labels {labels}")
+        if len(found_values) == 1:
+            return found_values[0]
+        elif len(found_values) > 1:
+            raise AssertionError(
+                f"Multiple metrics found for {metric} with labels {labels}: {found_values}"
+            )
+        else:
+            raise AssertionError(f"No metric found for {metric} with labels {labels}")
 
 
 class FederatingHomeserverTestCase(HomeserverTestCase):
