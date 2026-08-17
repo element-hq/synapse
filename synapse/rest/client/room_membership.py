@@ -73,7 +73,7 @@ class AppserviceRoomMembershipRestServlet(RestServlet):
             if not UserID.is_valid(mxid):
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
-                    "Invalid MXID: %s" % (mxid,),
+                    f"Invalid MXID: {mxid}",
                     Codes.INVALID_PARAM,
                 )
             if self.is_mine_id(mxid):
@@ -99,7 +99,7 @@ class AppserviceRoomMembershipRestServlet(RestServlet):
             except ValueError:
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
-                    "Invalid server name: %s" % (server_name,),
+                    f"Invalid server name: {server_name}",
                     Codes.INVALID_PARAM,
                 )
             if self.is_mine_server_name(server_name):
