@@ -149,9 +149,7 @@ class ApplicationService:
             raise KeyError("proxy_url and proxy_prefix must always be set together")
         if proxy_prefix is not None:
             if not proxy_prefix or not self.proxy_url:
-                raise ValueError(
-                    "proxy_prefix and proxy_url must be non-empty strings"
-                )
+                raise ValueError("proxy_prefix and proxy_url must be non-empty strings")
             if not self._is_proxy_prefix_allowed(proxy_prefix):
                 raise ValueError(f"cannot claim reserved proxy prefix {proxy_prefix!r}")
 
