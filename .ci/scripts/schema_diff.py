@@ -193,7 +193,7 @@ def main() -> None:
             # Refresh dependencies
             print("Installing dependencies for base commit...", file=sys.stderr)
             subprocess.run(
-                ["poetry", "install", "--no-root", "--extras", "postgres"],
+                ["poetry", "install", "--extras", "postgres"],
                 cwd=REPO_ROOT,
                 check=True,
                 # Poetry install is noisy, so pipe its stdout to stderr
