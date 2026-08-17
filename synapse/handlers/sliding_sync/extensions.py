@@ -1092,7 +1092,7 @@ class SlidingSyncExtensionHandler:
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
     ) -> tuple[set[str], set[str]]:
         """
-        Calculate target user profiles as candiates to include in the profile
+        Calculate target user profiles as candidates to include in the profile
         extension sync response.
 
         This function looks at both the sync config and the already calculated
