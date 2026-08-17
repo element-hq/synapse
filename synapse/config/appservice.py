@@ -98,12 +98,7 @@ def load_appservices(
                     if appservice.proxy_prefix in seen_proxy_prefixes:
                         raise ConfigError(
                             "Cannot reuse io.element.msc4512.proxy_prefix across application services: "
-                            "%s (files: %s, %s)"
-                            % (
-                                appservice.proxy_prefix,
-                                config_file,
-                                seen_proxy_prefixes[appservice.proxy_prefix],
-                            )
+                            f"{appservice.proxy_prefix} (files: {config_file}, {seen_proxy_prefixes[appservice.proxy_prefix]})"
                         )
                     seen_proxy_prefixes[appservice.proxy_prefix] = config_file
                 logger.info("Loaded application service: %s", appservice)
