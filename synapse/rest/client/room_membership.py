@@ -76,13 +76,7 @@ class AppserviceRoomMembershipRestServlet(RestServlet):
                     Codes.INVALID_PARAM,
                 )
             if self.is_mine_id(mxid):
-                (
-                    membership,
-                    _,
-                ) = await self.store.get_local_current_membership_for_user_in_room(
-                    mxid, room_id
-                )
-                joined = membership == Membership.JOIN
+                joined = await self.store.check_local_user_in_room(mxid, room_id)
             else:
                 event = await self.storage_controllers.state.get_current_state_event(
                     room_id, EventTypes.Member, mxid
