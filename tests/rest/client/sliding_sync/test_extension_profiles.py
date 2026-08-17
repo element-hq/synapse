@@ -604,10 +604,9 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
     @override_config({"include_profile_updates_in_sync": True})
     def test_tracking_of_sent_fields_per_sliding_sync_connection(self) -> None:
         """
-        > Homeservers are encouraged to maintain a record of which user profile fields
-        > have been sent down in a given sliding sync connection. That way, as new rooms
-        > enter the room subset, users who were already in rooms within the room subset
-        > will not have their full profiles sent down a second time.
+        Test that we track sent fields per sliding sync connection, so we don't
+        deliver them unnecessarily, or can later figure out if we need to send
+        fields for new rooms or field request subset changes.
         """
         new_room = self.helper.create_room_as(self.user, tok=self.tok)
         # Make an initial Sliding Sync request with the profiles extension enabled
@@ -681,8 +680,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
     @override_config({"include_profile_updates_in_sync": True})
     def test_removed_fields_get_sent_down_as_removed(self) -> None:
         """
-        > Likewise, any field IDs that are cleared/removed from a user's profile will appear under users-><user_id>->removed.
-        > Likewise, the removed field should not be present if there were only updates to existing fields (and none were cleared).
+        Test that we deliver clear/removed fields in the "removed" key in the response.
         """
         self.get_success(
             self.profile_handler.set_field(
@@ -726,12 +724,14 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             },
         )
 
+    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_updated_key_only_present_if_updates(self) -> None:
         """
         > The updated field SHOULD only be present if there are changes to existing fields on a user's profile.
         """
 
+    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_rooms_subset_changing_includes_full_profile(self) -> None:
         """
@@ -743,6 +743,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > implementation.
         """
 
+    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_fields_subset_changing_sends_down_field_even_if_not_changed(self) -> None:
         """
@@ -1141,6 +1142,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
         )
 
+    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_repeat_of_sync_correctly_includes_profile_information_again(self) -> None:
         """
