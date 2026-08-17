@@ -29,6 +29,7 @@ from synapse.api.constants import (
     AccountDataTypes,
     EduTypes,
     EventTypes,
+    ProfileFields,
     ProfileUpdateAction,
     StickyEvent,
 )
@@ -1336,7 +1337,11 @@ class SlidingSyncExtensionHandler:
         updated_user_fields: dict[str, set[str]] = {}
         # Set fields from updates
         for update in updates:
-            if not update.affected_fields or update.user_id in left_room_user_ids:
+            if (
+                update.action != ProfileUpdateAction.UPDATE.value
+                or not update.affected_fields
+                or update.user_id in left_room_user_ids
+            ):
                 continue
             for field_name in update.affected_fields:
                 # Skip the update if the client didn't ask for this field, or we're not
@@ -1421,7 +1426,11 @@ class SlidingSyncExtensionHandler:
                 response[update.user_id] = None
                 continue
             for field_name in update.affected_fields:
-                if field_name in profile_data.keys():
+                if field_name in (ProfileFields.AVATAR_URL, ProfileFields.DISPLAYNAME):
+                    if profile_data.get(field_name) is not None:
+                        # Displayname/avatar_url are not unset anymore
+                        continue
+                elif field_name in profile_data.keys():
                     # This field has re-appeared to the profile, skip
                     continue
                 if response.get(update.user_id) is None:

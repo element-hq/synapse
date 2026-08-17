@@ -18,6 +18,7 @@ from parameterized import parameterized, parameterized_class
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
+from synapse.api.constants import ProfileFields
 from synapse.rest.client import knock, login, profile, room, sync
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
@@ -677,8 +678,12 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             },
         )
 
+    @parameterized.expand(["displayname", "avatar_url", "someotherfield"])
     @override_config({"include_profile_updates_in_sync": True})
-    def test_removed_fields_get_sent_down_as_removed(self) -> None:
+    def test_removed_fields_get_sent_down_as_removed(
+        self,
+        field_name: str,
+    ) -> None:
         """
         Test that we deliver clear/removed fields in the "removed" key in the response.
         """
@@ -686,7 +691,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.other_user),
                 requester=create_requester(self.other_user),
-                field_name="field",
+                field_name=field_name,
                 new_value="value",
             )
         )
@@ -702,13 +707,23 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
 
         # Delete the field
-        self.get_success(
-            self.profile_handler.delete_profile_field(
-                target_user=UserID.from_string(self.other_user),
-                requester=create_requester(self.other_user),
-                field_name="field",
+        if field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL):
+            self.get_success(
+                self.profile_handler.set_profile_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name=field_name,
+                    new_value=None,
+                )
             )
-        )
+        else:
+            self.get_success(
+                self.profile_handler.delete_profile_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name=field_name,
+                )
+            )
 
         # Make an incremental Sliding Sync request
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
@@ -719,7 +734,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             ],
             {
                 "removed": [
-                    "field",
+                    field_name,
                 ],
             },
         )
