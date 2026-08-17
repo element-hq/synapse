@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+import os
 import tempfile
 from unittest.mock import Mock
 
@@ -45,8 +46,10 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        _, path = tempfile.mkstemp(prefix="as_proxy_config")
-        with open(path, "w") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", prefix="as_proxy_config", delete=False
+        ) as f:
+            self.addCleanup(os.remove, f.name)
             yaml.dump(
                 {
                     "id": "proxy_as",
@@ -60,7 +63,7 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
                 },
                 f,
             )
-        config["app_service_config_files"] = [path]
+            config["app_service_config_files"] = [f.name]
         config.setdefault("experimental_features", {}).setdefault(
             "msc4512_enabled", True
         )
