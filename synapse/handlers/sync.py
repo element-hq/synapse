@@ -29,6 +29,7 @@ from typing import (
     Any,
     Mapping,
     Sequence,
+    cast,
 )
 
 import attr
@@ -40,6 +41,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    ProfileFields,
     ProfileUpdateAction,
     StickyEvent,
 )
@@ -237,6 +239,37 @@ class _RoomChanges:
     newly_left_rooms: list[str]
 
 
+@attr.s(slots=True, auto_attribs=True)
+class ProfilesResult:
+    """
+    Updates to profiles to add to the sync response. Includes per user updated or
+    existing fields in `profile_updates`, and field removals in
+    `removed_profile_fields`.
+    """
+
+    # user ID -> {profile field -> value | null if unset }
+    profile_updates: dict[str, dict[str, JsonValue | dict[str, JsonValue]] | None] = (
+        attr.ib(factory=dict)
+    )
+    # user ID -> [field name]
+    removed_profile_fields: dict[str, list[str]] = attr.ib(factory=dict)
+
+    def __bool__(self) -> bool:
+        return bool(self.profile_updates.keys()) or bool(
+            self.removed_profile_fields.keys()
+        )
+
+    def to_response(self) -> dict[str, dict[str, JsonValue | dict[str, JsonValue]]]:
+        response: dict[str, JsonDict] = {}
+        for user_id, updates in self.profile_updates.items():
+            response[user_id] = {"profile_updates": updates}
+        for user_id, removals in self.removed_profile_fields.items():
+            if response.get(user_id) is None:
+                response[user_id] = {}
+            response[user_id]["removed_profile_fields"] = removals
+        return response
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class SyncResult:
     """
@@ -244,7 +277,7 @@ class SyncResult:
         next_batch: Token for the next sync
         presence: List of presence events for the user.
         account_data: List of account_data events for the user.
-        profile_updates: Map of user_id to profile field updates for that user.
+        profiles: The ProfilesResult object containing updates and removals.
         joined: JoinedSyncResult for each joined room.
         invited: InvitedSyncResult for each invited room.
         knocked: KnockedSyncResult for each knocked on room.
@@ -260,8 +293,7 @@ class SyncResult:
     next_batch: StreamToken
     presence: list[UserPresenceState]
     account_data: list[JsonDict]
-    # user ID -> {profile field -> value | null if unset }
-    profile_updates: dict[str, dict[str, JsonValue | dict[str, JsonValue]] | None]
+    profiles: ProfilesResult
     joined: list[JoinedSyncResult]
     invited: list[InvitedSyncResult]
     knocked: list[KnockedSyncResult]
@@ -283,7 +315,7 @@ class SyncResult:
             or self.knocked
             or self.archived
             or self.account_data
-            or self.profile_updates
+            or self.profiles
             or self.to_device
             or self.device_lists
         )
@@ -299,7 +331,7 @@ class SyncResult:
             next_batch=next_batch,
             presence=[],
             account_data=[],
-            profile_updates={},
+            profiles=ProfilesResult(),
             joined=[],
             invited=[],
             knocked=[],
@@ -1954,7 +1986,7 @@ class SyncHandler:
         return SyncResult(
             presence=sync_result_builder.presence,
             account_data=sync_result_builder.account_data,
-            profile_updates=sync_result_builder.profile_updates,
+            profiles=sync_result_builder.profiles,
             joined=sync_result_builder.joined,
             invited=sync_result_builder.invited,
             knocked=sync_result_builder.knocked,
@@ -2274,7 +2306,9 @@ class SyncHandler:
                 profile_updates[other_user_id] = per_user_updates
 
         if profile_updates:
-            sync_result_builder.profile_updates = profile_updates
+            sync_result_builder.profiles = ProfilesResult(
+                profile_updates=profile_updates,
+            )
 
     async def _generate_sync_entry_for_profile_updates(
         self, sync_result_builder: "SyncResultBuilder"
@@ -2350,6 +2384,11 @@ class SyncHandler:
             for update in updates
             if update.action == ProfileUpdateAction.JOINED_ROOM.value
         }
+        delete_field_user_ids = {
+            update.user_id
+            for update in updates
+            if update.action == ProfileUpdateAction.DELETE.value
+        }
         users = set()
         updated_users = {
             update.user_id
@@ -2364,7 +2403,7 @@ class SyncHandler:
         # Add any newly joined users
         users.update(joined_room_user_ids)
 
-        if not users and not left_room_user_ids:
+        if not users and not left_room_user_ids and not delete_field_user_ids:
             return
 
         # Serialise the profile updates into the sync response format.
@@ -2372,6 +2411,19 @@ class SyncHandler:
         profile_updates: dict[
             str, dict[str, JsonValue | dict[str, JsonValue]] | None
         ] = {}
+
+        # Note: there's a small race condition here where a profile update may
+        # occur between fetching `now_token` above and reaching this step. In
+        # that case, the profile information will be newer than `now_token`.
+        # This is fine, as users will generally always want the latest profile
+        # information. However, it does mean that on the next sync, the same
+        # profile update will come down a second time.
+        #
+        # Hopefully clients can just filter these out.
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            # Get profiles for both updates and deletes in one go
+            users.union(delete_field_user_ids)
+        )
 
         # Process field updates and users who have events in the sync response
         if users:
@@ -2392,16 +2444,6 @@ class SyncHandler:
                     # Add any fields that were affected and that we're interested in
                     update.affected_fields & profile_fields
                 )
-
-            # Note: there's a small race condition here where a profile update may
-            # occur between fetching `now_token` above and reaching this step. In
-            # that case, the profile information will be newer than `now_token`.
-            # This is fine, as users will generally always want the latest profile
-            # information. However, it does mean that on the next sync, the same
-            # profile update will come down a second time.
-            #
-            # Hopefully clients can just filter these out.
-            profile_data_by_user = await self.store.get_profile_data_for_users(users)
 
             # Note, we've already collected field updates above via `updates`,
             # outside of events in the timeline when lazy loading. When lazy loading,
@@ -2476,16 +2518,61 @@ class SyncHandler:
                 if per_user_updates:
                     profile_updates[other_user_id] = per_user_updates
 
+        # Process deleted fields
+        removed_profile_fields: dict[str, list[str]] = {}
+        for update in updates:
+            if (
+                update.action != ProfileUpdateAction.DELETE.value
+                or not update.affected_fields
+                or update.user_id in left_room_user_ids
+            ):
+                continue
+            profile_data = profile_data_by_user.get(update.user_id)
+            for field_name in update.affected_fields:
+                if field_name not in profile_fields:
+                    # Only include fields the client is interested in
+                    continue
+                if profile_data is not None:
+                    if field_name in (
+                        ProfileFields.AVATAR_URL,
+                        ProfileFields.DISPLAYNAME,
+                    ):
+                        if profile_data.get(field_name) is not None:
+                            # Displayname/avatar_url are not unset anymore
+                            continue
+                    elif field_name in profile_data.keys():
+                        # This field has re-appeared to the profile, skip
+                        continue
+                if removed_profile_fields.get(update.user_id) is None:
+                    removed_profile_fields[update.user_id] = []
+
+                # Ensure we only add the field once
+                if field_name in removed_profile_fields[update.user_id]:
+                    continue
+                removed_profile_fields[update.user_id].append(field_name)
+
+                # FIXME: Initial MSC4429 behaviour of including removed profile fields
+                # in the main `profile_updates` key. We need to keep this around for
+                # a few releases so that clients can adapt.
+                # See https://github.com/matrix-org/matrix-spec-proposals/pull/4429#discussion_r3512513534
+                # Removing will be tracked via https://github.com/element-hq/synapse/issues/19981
+                if profile_updates.get(update.user_id) is None:
+                    profile_updates[update.user_id] = {}
+                # Typing fix as mypy thinks this may be None
+                entry = cast(JsonDict, profile_updates[update.user_id])
+                entry[field_name] = None
+
         # Process left rooms
         if left_room_user_ids:
             for other_user_id in left_room_user_ids:
                 # Return an empty dictionary to the client
                 profile_updates[other_user_id] = None
 
-        # FIXME: handle profile field deletions like we do for sliding sync
-
         if profile_updates:
-            sync_result_builder.profile_updates = profile_updates
+            sync_result_builder.profiles = ProfilesResult(
+                profile_updates=profile_updates,
+                removed_profile_fields=removed_profile_fields,
+            )
 
     async def _generate_sync_entry_for_presence(
         self,
@@ -3503,7 +3590,7 @@ class SyncResultBuilder:
         # The following mirror the fields in a sync response
         presence
         account_data
-        profile_updates
+        profiles
         joined
         invited
         knocked
@@ -3522,9 +3609,7 @@ class SyncResultBuilder:
 
     presence: list[UserPresenceState] = attr.Factory(list)
     account_data: list[JsonDict] = attr.Factory(list)
-    profile_updates: dict[str, dict[str, JsonValue | dict[str, JsonValue]] | None] = (
-        attr.Factory(dict)
-    )
+    profiles: ProfilesResult = attr.Factory(ProfilesResult)
     joined: list[JoinedSyncResult] = attr.Factory(list)
     invited: list[InvitedSyncResult] = attr.Factory(list)
     knocked: list[KnockedSyncResult] = attr.Factory(list)

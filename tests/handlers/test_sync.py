@@ -1208,7 +1208,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        self.assertEqual(initial_result.profile_updates, {})
+        self.assertEqual(initial_result.profiles.profile_updates, {})
+        self.assertEqual(initial_result.profiles.removed_profile_fields, {})
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_no_profile_updates_if_not_filtered_for(self) -> None:
@@ -1234,7 +1235,11 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
         )
         self.assertEqual(
-            initial_result.profile_updates,
+            initial_result.profiles.profile_updates,
+            {},
+        )
+        self.assertEqual(
+            initial_result.profiles.removed_profile_fields,
             {},
         )
 
@@ -1277,17 +1282,18 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        assert initial_result.profile_updates[self.user] is not None
-        assert initial_result.profile_updates["@other_user:test"] is not None
+        profile_updates = initial_result.profiles.profile_updates
+        assert profile_updates[self.user] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            initial_result.profile_updates["@other_user:test"]["m.status"],
+            profile_updates["@other_user:test"]["m.status"],
             {"text": "On holiday", "emoji": "🏖"},
         )
         self.assertFalse(
-            "displayname" in initial_result.profile_updates["@other_user:test"].keys(),
+            "displayname" in profile_updates["@other_user:test"].keys(),
         )
         self.assertCountEqual(
-            initial_result.profile_updates.keys(),
+            profile_updates.keys(),
             [
                 self.user,
                 "@other_user:test",
@@ -1341,7 +1347,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        self.assertIsNone(initial_result.profile_updates.get(third_user))
+        self.assertIsNone(initial_result.profiles.profile_updates.get(third_user))
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_lazy_loading_responds_with_only_profiles_with_events(
@@ -1414,7 +1420,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         # Only third_user is returned, as lazy loading filters out the events from
         # the other users
         self.assertCountEqual(
-            initial_result.profile_updates.keys(),
+            initial_result.profiles.profile_updates.keys(),
             [
                 "@third_user:test",
             ],
@@ -1479,21 +1485,105 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        profile_updates = incremental_result.profiles.profile_updates
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"]["m.status"],
+            profile_updates["@other_user:test"]["m.status"],
             {"text": "On holiday", "emoji": "🏖"},
         )
         # We only send diffs in incremental sync for profile field updates
         self.assertFalse(
-            "displayname"
-            in incremental_result.profile_updates["@other_user:test"].keys(),
+            "displayname" in profile_updates["@other_user:test"].keys(),
         )
         # The client didn't ask for this field
         self.assertFalse(
-            "uninterestingfield"
-            in incremental_result.profile_updates["@other_user:test"].keys(),
+            "uninterestingfield" in profile_updates["@other_user:test"].keys(),
         )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_profile_field_removals(
+        self,
+    ) -> None:
+        """Test that with MSC4429 enabled the incremental sync response correctly
+        responds with field removals.
+
+        Note that initially MSC4429 defined field removals being in the
+        `profile_updates` key, with the field having a null value if it was removed.
+        This got implemented and released in Element Web, thus we kept the behaviour
+        in the pr adding profile updates over legacy sync
+        (https://github.com/element-hq/synapse/pull/19556).
+
+        The latest suggestion in MSC4429 is to do something similar that sliding sync
+        MSC4262 has, ie have a dedicated key for field removals, see:
+        https://github.com/matrix-org/matrix-spec-proposals/pull/4429#pullrequestreview-4616853235
+
+        To ensure clients have time to adapt, we should include field removals in both
+        keys for a few Synapse releases.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="otherfield",
+                new_value="value",
+            )
+        )
+        self.get_success(
+            self.profile_handler.delete_profile_field(
+                target_user=UserID.from_string(self.other_user),
+                requester=create_requester(self.other_user),
+                field_name="m.status",
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        profile_updates = incremental_result.profiles.profile_updates
+        assert profile_updates["@other_user:test"] is not None
+        # Legacy behaviour - field is null
+        self.assertIsNone(profile_updates["@other_user:test"]["m.status"])
+        # Latest behaviour, in `removed_fields`
+        field_removals = incremental_result.profiles.removed_profile_fields
+        self.assertEqual(
+            field_removals["@other_user:test"],
+            ["m.status"],
+        )
+        # Client didn't ask for this field
+        self.assertFalse("otherfield" in field_removals["@other_user:test"])
+        self.assertFalse("otherfield" in profile_updates["@other_user:test"].keys())
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_does_not_filter_profile_updates_when_lazy_loading(
@@ -1592,49 +1682,46 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
         )
 
+        profile_updates = incremental_result.profiles.profile_updates
         # Ensure our federated user is filtered out, even though they have an
         # event in the joined room timeline
-        self.assertFalse(
-            "@federateduser:federatedhs" in incremental_result.profile_updates.keys()
-        )
+        self.assertFalse("@federateduser:federatedhs" in profile_updates.keys())
 
         # Lazy loading only filters initial sync profile updates. Incremental syncs
         # should include all tracked profile updates for the syncing user.
         self.assertCountEqual(
-            incremental_result.profile_updates.keys(),
+            profile_updates.keys(),
             [
                 "@other_user:test",
                 "@third_user:test",
             ],
         )
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
 
         # This is a field update, so should be here
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"]["m.status"],
+            profile_updates["@other_user:test"]["m.status"],
             {"text": "On holiday", "emoji": "🏖"},
         )
 
         # We don't have events for this user in this response, so their full profile
         # is not included
         self.assertFalse(
-            "displayname"
-            in incremental_result.profile_updates["@other_user:test"].keys(),
+            "displayname" in profile_updates["@other_user:test"].keys(),
         )
-        assert incremental_result.profile_updates["@third_user:test"] is not None
+        assert profile_updates["@third_user:test"] is not None
 
         # This user has events in the timeline, thus the fields the client asked for
         # are included
         self.assertEqual(
-            incremental_result.profile_updates["@third_user:test"]["m.status"],
+            profile_updates["@third_user:test"]["m.status"],
             {"text": "On fire", "emoji": "🔥"},
         )
         self.assertFalse(
-            "uninterestingfield"
-            in incremental_result.profile_updates["@third_user:test"].keys(),
+            "uninterestingfield" in profile_updates["@third_user:test"].keys(),
         )
         self.assertEqual(
-            incremental_result.profile_updates["@third_user:test"]["displayname"],
+            profile_updates["@third_user:test"]["displayname"],
             "third_user",
         )
 
@@ -1693,7 +1780,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         # Ensure our federated user is filtered out, even though they have an
         # event in the joined room timeline
         self.assertFalse(
-            "@federateduser1:federatedhs" in initial_result.profile_updates.keys()
+            "@federateduser1:federatedhs"
+            in initial_result.profiles.profile_updates.keys()
         )
         if not is_initial:
             # Join another federated user to the room, causing a membership event into
@@ -1725,7 +1813,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             # event in the joined room timeline
             self.assertFalse(
                 "@federateduser2:federatedhs"
-                in incremental_result.profile_updates.keys()
+                in incremental_result.profiles.profile_updates.keys()
             )
 
     @parameterized.expand(
@@ -1782,9 +1870,10 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
         )
         if is_initial:
-            assert initial_result.profile_updates["@third_user:test"] is not None
+            profile_updates = initial_result.profiles.profile_updates
+            assert profile_updates["@third_user:test"] is not None
             self.assertEqual(
-                initial_result.profile_updates["@third_user:test"]["field"],
+                profile_updates["@third_user:test"]["field"],
                 "Content",
             )
         else:
@@ -1810,9 +1899,10 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                     request_key=generate_request_key(),
                 )
             )
-            assert incremental_result.profile_updates["@third_user:test"] is not None
+            profile_updates = incremental_result.profiles.profile_updates
+            assert profile_updates["@third_user:test"] is not None
             self.assertEqual(
-                incremental_result.profile_updates["@third_user:test"]["field"],
+                profile_updates["@third_user:test"]["field"],
                 "Content",
             )
 
@@ -1867,11 +1957,10 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 )
             )
             if is_initial:
-                assert initial_result.profile_updates["@other_user:test"] is not None
+                profile_updates = initial_result.profiles.profile_updates
+                assert profile_updates["@other_user:test"] is not None
                 self.assertEqual(
-                    initial_result.profile_updates["@other_user:test"][
-                        "falseyvaluefield"
-                    ],
+                    profile_updates["@other_user:test"]["falseyvaluefield"],
                     value,
                 )
             else:
@@ -1897,13 +1986,10 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                         request_key=generate_request_key(),
                     )
                 )
-                assert (
-                    incremental_result.profile_updates["@other_user:test"] is not None
-                )
+                profile_updates = incremental_result.profiles.profile_updates
+                assert profile_updates["@other_user:test"] is not None
                 self.assertEqual(
-                    incremental_result.profile_updates["@other_user:test"][
-                        "falseyvaluefield"
-                    ],
+                    profile_updates["@other_user:test"]["falseyvaluefield"],
                     value,
                 )
 
@@ -1968,16 +2054,17 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         # Lazy loading incremental sync should include profiles from events
         self.assertCountEqual(
-            incremental_result.profile_updates.keys(),
+            profile_updates.keys(),
             [
                 "@other_user:test",
             ],
         )
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            set(incremental_result.profile_updates["@other_user:test"].keys()),
+            set(profile_updates["@other_user:test"].keys()),
             {"avatar_url", "displayname"},
         )
 
@@ -2009,8 +2096,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         self.assertCountEqual(
-            incremental_result.profile_updates.keys(),
+            profile_updates.keys(),
             [],
         )
         # However, if we again add an event, we do expect any fields the client didn't
@@ -2046,15 +2134,16 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         self.assertCountEqual(
-            incremental_result.profile_updates.keys(),
+            profile_updates.keys(),
             [
                 "@other_user:test",
             ],
         )
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            set(incremental_result.profile_updates["@other_user:test"].keys()),
+            set(profile_updates["@other_user:test"].keys()),
             {"sooninterestingfield"},
         )
 
@@ -2105,7 +2194,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
         )
         self.assertIsNone(
-            incremental_result.profile_updates["@other_user:test"],
+            incremental_result.profiles.profile_updates["@other_user:test"],
         )
 
     @override_config({"include_profile_updates_in_sync": True})
@@ -2187,20 +2276,21 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        assert incremental_result.profile_updates["@third_user:test"] is not None
+        profile_updates = incremental_result.profiles.profile_updates
+        assert profile_updates["@third_user:test"] is not None
         self.assertCountEqual(
-            incremental_result.profile_updates.keys(),
+            profile_updates.keys(),
             [third_user],
         )
         self.assertEqual(
-            incremental_result.profile_updates["@third_user:test"]["displayname"],
+            profile_updates["@third_user:test"]["displayname"],
             "third_user",
         )
         self.assertIsNone(
-            incremental_result.profile_updates["@third_user:test"]["avatar_url"],
+            profile_updates["@third_user:test"]["avatar_url"],
         )
         self.assertFalse(
-            "m.status" in incremental_result.profile_updates["@third_user:test"].keys(),
+            "m.status" in profile_updates["@third_user:test"].keys(),
         )
 
     @parameterized.expand(
@@ -2258,14 +2348,15 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        assert incremental_result.profile_updates["@user:test"] is not None
+        profile_updates = incremental_result.profiles.profile_updates
+        assert profile_updates["@user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@user:test"]["m.status"],
+            profile_updates["@user:test"]["m.status"],
             {"text": "On holiday", "emoji": "🏖"},
         )
         # We didn't ask for displayname
         self.assertFalse(
-            "displayname" in incremental_result.profile_updates["@user:test"].keys(),
+            "displayname" in profile_updates["@user:test"].keys(),
         )
 
     @parameterized.expand([[True, False], [True, True], [False, False], [False, True]])
@@ -2337,7 +2428,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
             # We expect there to be the users profile
             self.assertIsNotNone(
-                incremental_result.profile_updates["@third_user:test"],
+                incremental_result.profiles.profile_updates["@third_user:test"],
             )
             next_token = incremental_result.next_batch
         # Leave the room
@@ -2365,7 +2456,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
             # We expect there to be a null profile
             self.assertIsNone(
-                incremental_result.profile_updates["@third_user:test"],
+                incremental_result.profiles.profile_updates["@third_user:test"],
             )
             next_token = incremental_result.next_batch
         # Join the room
@@ -2393,7 +2484,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
             # We expect there to be the users profile
             self.assertIsNotNone(
-                incremental_result.profile_updates["@third_user:test"],
+                incremental_result.profiles.profile_updates["@third_user:test"],
             )
             next_token = incremental_result.next_batch
         # Leave the room
@@ -2420,7 +2511,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         # The end result should be null profile
         self.assertIsNone(
-            incremental_result.profile_updates["@third_user:test"],
+            incremental_result.profiles.profile_updates["@third_user:test"],
         )
 
     @parameterized.expand(
@@ -2469,7 +2560,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
         )
         self.assertFalse(
-            "@other_user:test" in initial_result.profile_updates,
+            "@other_user:test" in initial_result.profiles.profile_updates,
         )
 
         # Update the field
@@ -2505,12 +2596,13 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         # We should have the field change in our sync response.
         # It will also be added to the lazy loading cache, so the same field value
         # isn't sent again immediately.
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"]["field"],
+            profile_updates["@other_user:test"]["field"],
             value,
         )
 
@@ -2547,11 +2639,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         # Even though the field was added to the lazy loading members cache,
         # it should come through as an update, as the field value changed.
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"]["field"],
+            profile_updates["@other_user:test"]["field"],
             new_value,
         )
 
@@ -2586,7 +2679,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             )
         )
         self.assertFalse(
-            "@other_user:test" in initial_result.profile_updates,
+            "@other_user:test" in initial_result.profiles.profile_updates,
         )
 
         # Update the field
@@ -2615,12 +2708,13 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         # We should have the field change in our sync response.
         # It will also be added to the lazy loading cache, so the same field value
         # isn't sent again immediately.
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"]["field"],
+            profile_updates["@other_user:test"]["field"],
             "value",
         )
 
@@ -2650,11 +2744,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         # Even though the field was added to the lazy loading members cache,
         # it should come through as an update, as the field value changed.
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"]["field"],
+            profile_updates["@other_user:test"]["field"],
             "new value",
         )
 
@@ -2684,11 +2779,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        profile_updates = incremental_result.profiles.profile_updates
         # Even though we've quite recently sent down this value, we should still
         # see it again as it is a change
-        assert incremental_result.profile_updates["@other_user:test"] is not None
+        assert profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@other_user:test"]["field"],
+            profile_updates["@other_user:test"]["field"],
             "value",
         )
 
