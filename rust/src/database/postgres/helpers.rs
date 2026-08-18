@@ -35,26 +35,25 @@ use tokio::runtime::Handle;
 
 use crate::database::postgres::pg_err_to_py;
 
-/// Block on a future on the shared runtime, releasing the GIL while we wait.
+/// Block on a future on a given runtime, releasing the GIL while we wait.
 pub trait BlockingPostgres
 where
     Self: Future + Sized + Send + Ungil,
     Self::Output: Ungil + Send,
 {
-    /// Drive `self` to completion on the shared runtime, returning its output.
+    /// Drive `self` to completion on the given runtime, returning its output.
     /// Releases the GIL for the duration so the wait doesn't block other Python
     /// threads.
     ///
-    /// Blocks on the runtime the calling thread has *entered* — taken from the
-    /// thread-local context via [`Handle::current`], not passed in. Every
-    /// thread that drives these calls must have the server's shared runtime
-    /// (see [`crate::tokio_runtime`]) entered first with
-    /// [`Handle::enter`](tokio::runtime::Handle::enter); [`Handle::current`]
-    /// panics otherwise. The blocking wait runs on the calling (Python) thread,
-    /// never on a runtime worker, so it cannot starve the worker threads that
-    /// complete the future.
-    fn block_on(self, py: Python<'_>) -> Self::Output {
-        py.detach(|| Handle::current().block_on(self))
+    /// `handle` is expected to be the server's shared runtime (see
+    /// [`crate::tokio_runtime`]). It is passed in explicitly rather than taken
+    /// from the thread-local context via [`Handle::current`], so callers work
+    /// from any Python thread with no need to have *entered* the runtime first.
+    /// The blocking wait runs on the calling (Python) thread, never on a
+    /// runtime worker, so it cannot starve the worker threads that complete the
+    /// future.
+    fn block_on(self, py: Python<'_>, handle: &Handle) -> Self::Output {
+        py.detach(|| handle.block_on(self))
     }
 }
 
@@ -65,9 +64,10 @@ where
     Self: Future<Output = Result<T, tokio_postgres::Error>> + Sized + Send + Ungil,
     Self::Output: Ungil + Send,
 {
-    /// Block on `self` and convert a Postgres error into a `PyErr`.
-    fn block_on_result(self, py: Python<'_>) -> PyResult<T> {
-        self.block_on(py).map_err(pg_err_to_py)
+    /// Block on `self` on the given runtime and convert a Postgres error into
+    /// a `PyErr`.
+    fn block_on_result(self, py: Python<'_>, handle: &Handle) -> PyResult<T> {
+        self.block_on(py, handle).map_err(pg_err_to_py)
     }
 }
 
@@ -87,7 +87,7 @@ where
 }
 
 /// Pull items from a [`Fuse`]d stream from synchronous Python code, blocking on
-/// the shared runtime only when the next item isn't already buffered.
+/// a given runtime only when the next item isn't already buffered.
 ///
 /// Implemented for any pinned, fused stream (`Pin<&mut Fuse<S>>`) whose items
 /// can cross the GIL-release boundary, so it can be tested against an
@@ -102,14 +102,14 @@ where
     Self: futures::Stream + Sized + Send + Ungil + Unpin,
     Self::Item: Ungil + Send,
 {
-    /// Get the next item from the stream, blocking on the shared runtime if
+    /// Get the next item from the stream, blocking on the given runtime if
     /// necessary.
     ///
     /// If the stream is not ready to yield an item, this will release the GIL
     /// and block until the next item is available.
     ///
     /// This method will return `None` if the stream is exhausted.
-    fn block_on_next(&mut self, py: Python<'_>) -> Option<Self::Item> {
+    fn block_on_next(&mut self, py: Python<'_>, handle: &Handle) -> Option<Self::Item> {
         match self.get_next_if_ready() {
             // `Some(Some(item))` (ready) and `Some(None)` (exhausted) are both
             // answers we can return immediately — we just hand the inner
@@ -117,7 +117,7 @@ where
             Some(row) => row,
             // `None` means "not ready yet": release the GIL and block until the
             // next item (or end of stream) arrives.
-            None => self.next().block_on(py),
+            None => self.next().block_on(py, handle),
         }
     }
 
@@ -151,10 +151,9 @@ mod tests {
 
     use super::*;
 
-    /// A throwaway runtime standing in for the shared one. The helpers only
-    /// need *some* runtime entered on the current thread, so that
-    /// [`Handle::current`] resolves. Each test calls `rt.enter()` and holds
-    /// the guard for the duration.
+    /// A throwaway runtime standing in for the shared one. The helpers take
+    /// the runtime to block on explicitly, so each test just passes this
+    /// runtime's handle.
     fn test_runtime() -> Runtime {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -167,9 +166,8 @@ mod tests {
     fn block_on_runs_future_and_returns_output() {
         Python::initialize();
         let rt = test_runtime();
-        let _guard = rt.enter();
         Python::attach(|py| {
-            assert_eq!(async { 1 + 2 }.block_on(py), 3);
+            assert_eq!(async { 1 + 2 }.block_on(py, rt.handle()), 3);
         });
     }
 
@@ -177,10 +175,9 @@ mod tests {
     fn block_on_result_maps_ok_through() {
         Python::initialize();
         let rt = test_runtime();
-        let _guard = rt.enter();
         Python::attach(|py| {
             let ok = async { Ok::<i32, tokio_postgres::Error>(5) };
-            assert_eq!(ok.block_on_result(py).unwrap(), 5);
+            assert_eq!(ok.block_on_result(py, rt.handle()).unwrap(), 5);
             // The error path (mapping a `tokio_postgres::Error` to a `PyErr`)
             // isn't covered here, because that error type can't be constructed
             // by hand. Exercising it needs a live server.
@@ -191,7 +188,6 @@ mod tests {
     fn get_next_if_ready_returns_buffered_rows_then_signals_end() {
         Python::initialize();
         let rt = test_runtime();
-        let _guard = rt.enter();
         Python::attach(|py| {
             // `stream::iter` yields each item immediately, so every poll is
             // ready: we get the items, then a `Some(None)` end-of-stream once
@@ -209,8 +205,8 @@ mod tests {
             // `block_on_next` takes the same already-ready value.
             let stream = stream::iter(vec![Ok::<i32, ()>(9)]).fuse();
             let mut stream = pin!(stream);
-            assert_eq!(stream.as_mut().block_on_next(py), Some(Ok(9)));
-            assert_eq!(stream.as_mut().block_on_next(py), None);
+            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), Some(Ok(9)));
+            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), None);
         });
     }
 
@@ -218,7 +214,6 @@ mod tests {
     fn block_on_next_blocks_when_first_poll_is_pending() {
         Python::initialize();
         let rt = test_runtime();
-        let _guard = rt.enter();
         Python::attach(|py| {
             // A stream whose first poll is `Pending` (it yields back to the
             // runtime before producing the value). `get_next_if_ready` /
@@ -236,8 +231,8 @@ mod tests {
             // pinned stream; `block_on_next` re-polls that same stream via
             // `&mut self`, resuming the yielded future rather than restarting
             // it, so it still resolves to 7.
-            assert_eq!(stream.as_mut().block_on_next(py), Some(Ok(7)));
-            assert_eq!(stream.as_mut().block_on_next(py), None);
+            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), Some(Ok(7)));
+            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), None);
 
             // And, on a fresh stream, `block_on_next` handles a pending first
             // poll on its own, with no preceding `get_next_if_ready`.
@@ -247,7 +242,7 @@ mod tests {
             })
             .fuse();
             let mut stream = pin!(stream);
-            assert_eq!(stream.as_mut().block_on_next(py), Some(Ok(8)));
+            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), Some(Ok(8)));
         });
     }
 }
