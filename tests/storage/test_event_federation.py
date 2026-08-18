@@ -1610,7 +1610,8 @@ def build_state_dag(
     Args:
         creator: The user ID creating the graph. Should be unique per-test to ensure room IDs change between tests.
         graph: A map of fake event ID e.g. "B" to a list of prev_state_events e.g. ["A"]. Graphs must
-        be created in causal order (earliest events first).
+        be created in causal order (earliest events first). The first entry is assumed to be the
+        create event, so it must have no prev_state_events; every later entry must have at least one.
     Returns:
         A tuple of the room ID and a map from fake event ID e.g. "B" to real event which you can use .event_id
         to extract the real event ID. Guarantees that the real event IDs start with the fake event ID e.g.
@@ -1634,10 +1635,19 @@ def build_state_dag(
     )
     room_id = create_event.room_id
     entropy = 1
-    for graph_event_id in graph:
-        if len(graph[graph_event_id]) == 0:  # create event
+    for index, graph_event_id in enumerate(graph):
+        if index == 0:
+            # The first entry is the create event, which roots the state DAG.
+            assert len(graph[graph_event_id]) == 0, (
+                f"the first graph event {graph_event_id} is the create event, so it cannot "
+                "have any prev_state_events"
+            )
             graph_events[graph_event_id] = create_event
             continue
+        assert len(graph[graph_event_id]) > 0, (
+            f"graph event {graph_event_id} has no prev_state_events, but only the create event "
+            "(the first entry) may be missing them"
+        )
         # Map previous event IDs to real event IDs. Requires us to build events in causal order.
         prev_state_event_ids = [
             graph_events[prev_graph_event_id].event_id
@@ -1660,7 +1670,9 @@ def build_state_dag(
                     "sender": creator,
                     "origin_server_ts": 1 + entropy,
                     "prev_state_events": prev_state_event_ids,
-                    "prev_events": [],  # nothing should be looking at this field so keep it empty
+                    # Nothing in these tests looks at the message DAG, so just mirror the
+                    # state DAG here.
+                    "prev_events": prev_state_event_ids,
                     "room_id": room_id,
                     "depth": 1,
                 },

@@ -1340,6 +1340,10 @@ class EventFederationWorkerStore(
                 FROM msc4242_state_dag_edges e
                 WHERE e.room_id = ?
                 AND {seed_clause}
+                -- The create event has no edges, so it is stored as a single row with a NULL
+                -- `prev_state_event_id`. Skipping NULLs therefore only skips that sentinel
+                -- row: the create event is still returned by the walk, because it appears as
+                -- the `prev_state_event_id` of the events that reference it.
                 AND e.prev_state_event_id IS NOT NULL
                 AND {earliest_clause}
 
