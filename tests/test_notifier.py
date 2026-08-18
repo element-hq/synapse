@@ -158,10 +158,12 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
         # the future.
         token = StreamToken.START
         token = token.copy_and_advance(
-            StreamKeyType.RECEIPT, MultiWriterStreamToken(stream=1000000000)
+            StreamKeyType.RECEIPT,
+            MultiWriterStreamToken(stream=10000000000),  # arbitrarily large
         )
         token = token.copy_and_advance(
-            StreamKeyType.DEVICE_LIST, MultiWriterStreamToken(stream=10000000000)
+            StreamKeyType.DEVICE_LIST,
+            MultiWriterStreamToken(stream=10000000000),  # arbitrarily large
         )
 
         counts_before = self._get_timeout_counts_from_metric()
