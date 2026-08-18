@@ -1059,7 +1059,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             Set of local user ID's who share a room with the given user.
         """
         room_ids = await self.get_rooms_for_user(user_id)
-        if limit_to_rooms:
+        if limit_to_rooms is not None:
             room_ids = room_ids.intersection(limit_to_rooms)
 
         user_who_share_room: set[str] = set()
