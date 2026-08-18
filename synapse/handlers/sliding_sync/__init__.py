@@ -57,6 +57,7 @@ from synapse.types import (
     StrCollection,
     StreamKeyType,
     StreamToken,
+    StrictJsonMapping,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.handlers.sliding_sync import (
@@ -287,7 +288,6 @@ class SlidingSyncHandler:
 
         lists = interested_rooms.lists
         relevant_room_map = interested_rooms.relevant_room_map
-        all_rooms = interested_rooms.all_rooms
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
@@ -328,6 +328,7 @@ class SlidingSyncHandler:
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
             new_connection_state=new_connection_state,
+            all_interested_room_ids=interested_rooms.all_rooms,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -350,7 +351,7 @@ class SlidingSyncHandler:
             if from_token:
                 # The set of rooms that the client (may) care about, but aren't
                 # in any list range (or subscribed to).
-                missing_rooms = all_rooms - relevant_room_map.keys()
+                missing_rooms = interested_rooms.all_rooms - relevant_room_map.keys()
 
                 # We now just go and try fetching any events in the above rooms
                 # to see if anything has happened since the `from_token`.
@@ -953,7 +954,10 @@ class SlidingSyncHandler:
             )
             name_event = name_states.get((EventTypes.Name, ""))
             if name_event is not None:
-                room_name = name_event.content.get("name")
+                name_event_content: StrictJsonMapping = name_event.content
+                unchecked_room_name = name_event_content.get("name")
+                if isinstance(unchecked_room_name, str):
+                    room_name = unchecked_room_name
 
         # We only need the room summary for calculating heroes, however if we do
         # fetch it then we can use it to calculate `joined_count` and
@@ -1356,18 +1360,28 @@ class SlidingSyncHandler:
         room_avatar: str | None = None
         avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
         if avatar_event is not None:
-            room_avatar = avatar_event.content.get("url")
+            room_avatar_content: StrictJsonMapping = avatar_event.content
+            unchecked_room_avatar = room_avatar_content.get("url")
+            if isinstance(unchecked_room_avatar, str):
+                room_avatar = unchecked_room_avatar
 
         # Assemble heroes: extract the info from the state we just fetched
         heroes: list[SlidingSyncResult.RoomResult.StrippedHero] = []
         for hero_user_id in hero_user_ids:
             member_event = hero_membership_state.get((EventTypes.Member, hero_user_id))
             if member_event is not None:
+                member_event_content: StrictJsonMapping = member_event.content
+                unchecked_display_name = member_event_content.get("displayname")
+                unchecked_avatar_url = member_event_content.get("avatar_url")
                 heroes.append(
                     SlidingSyncResult.RoomResult.StrippedHero(
                         user_id=hero_user_id,
-                        display_name=member_event.content.get("displayname"),
-                        avatar_url=member_event.content.get("avatar_url"),
+                        display_name=unchecked_display_name
+                        if isinstance(unchecked_display_name, str)
+                        else None,
+                        avatar_url=unchecked_avatar_url
+                        if isinstance(unchecked_avatar_url, str)
+                        else None,
                     )
                 )
 

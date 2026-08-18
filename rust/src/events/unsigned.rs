@@ -291,6 +291,14 @@ impl Unsigned {
     }
 }
 
+impl Unsigned {
+    /// Get the `age_ts` field, which is used to generate the `age` field when
+    /// serializing an event.
+    pub fn age_ts(&self) -> PyResult<Option<Number>> {
+        Ok(self.py_read()?.persisted_fields.age_ts.clone())
+    }
+}
+
 fn room_state_to_py<'py>(
     py: Python<'py>,
     state: &[serde_json::Value],

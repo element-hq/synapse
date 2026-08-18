@@ -1219,6 +1219,60 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         result = self.get_success(self.handler.get_room_summary(user2, self.room))
         self.assertEqual(result.get("room_id"), self.room)
 
+    def test_allowed_room_ids_local(self) -> None:
+        """allowed_room_ids is returned for a local room with restricted join rules."""
+        # Create a space that the restricted room will allow membership from.
+        space = self.helper.create_room_as(
+            self.user,
+            tok=self.token,
+            extra_content={
+                "creation_content": {"type": RoomTypes.SPACE},
+                "initial_state": [
+                    {
+                        "type": EventTypes.JoinRules,
+                        "state_key": "",
+                        "content": {"join_rule": JoinRules.PUBLIC},
+                    }
+                ],
+            },
+        )
+
+        # Create a room version 8 room with join_rule=restricted allowing members
+        # of the space above.
+        restricted_room = self.helper.create_room_as(
+            self.user,
+            room_version=RoomVersions.V8.identifier,
+            tok=self.token,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.JoinRules,
+                        "state_key": "",
+                        "content": {
+                            "join_rule": JoinRules.RESTRICTED,
+                            "allow": [
+                                {
+                                    "type": RestrictedJoinRuleTypes.ROOM_MEMBERSHIP,
+                                    "room_id": space,
+                                }
+                            ],
+                        },
+                    }
+                ]
+            },
+        )
+
+        result = self.get_success(
+            self.handler.get_room_summary(self.user, restricted_room)
+        )
+        self.assertEqual(result.get("room_id"), restricted_room)
+        self.assertEqual(result.get("allowed_room_ids"), [space])
+
+    def test_allowed_room_ids_absent_without_restricted_join_rules(self) -> None:
+        """allowed_room_ids is absent for rooms that do not use restricted join rules."""
+        result = self.get_success(self.handler.get_room_summary(self.user, self.room))
+        self.assertNotIn("allowed_room_ids", result)
+
     def test_fed(self) -> None:
         """
         Return data over federation and ensure that it is handled properly.

@@ -2,6 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright (C) 2025 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -12,20 +13,23 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.app.phone_stats_home import (
+    COUNT_USERS_INTERVAL,
     PHONE_HOME_INTERVAL,
     start_phone_stats_home,
 )
-from synapse.rest import admin, login, register, room
+from synapse.appservice import ApplicationService
+from synapse.rest import account, admin, login, register, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.metrics import get_latest_metrics
 from tests.server import ThreadedMemoryReactorClock
 
 TEST_REPORT_STATS_ENDPOINT = "https://fake.endpoint/stats"
@@ -261,3 +265,134 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         synapse_logger = logging.getLogger("synapse")
         log_level = synapse_logger.getEffectiveLevel()
         self.assertEqual(phone_home_stats["log_level"], logging.getLevelName(log_level))
+
+
+class TotalUsersGaugeTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        account.register_servlets,
+        admin.register_servlets,
+        register.register_servlets,
+        login.register_servlets,
+    ]
+
+    def make_homeserver(
+        self, reactor: ThreadedMemoryReactorClock, clock: Clock
+    ) -> HomeServer:
+        config = self.default_config()
+        config["enable_metrics"] = True
+        self.appservice = ApplicationService(
+            token="i_am_an_app_service",
+            id="1234",
+            namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
+            # Note: this user does not match the regex above, so that tests
+            # can distinguish the sender from the AS user.
+            sender=UserID.from_string("@as_main:test"),
+        )
+
+        mock_load_appservices = Mock(return_value=[self.appservice])
+        with patch(
+            "synapse.storage.databases.main.appservice.load_appservices",
+            mock_load_appservices,
+        ):
+            return self.setup_test_homeserver(config=config)
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = homeserver.get_datastores().main
+        self.wait_for_background_updates()
+        start_phone_stats_home(hs=homeserver)
+        super().prepare(reactor, clock, homeserver)
+
+        # Always register the first user as an admin so we can
+        # deactivate.
+        self.register_user("admin", "password", admin=True)
+        self._admin_token = self.login("admin", "password")
+
+    def _deactivate_user(self, user_id: str, access_token: str) -> None:
+        """
+        Helper to deactivate a user using the /account/deactivate endpoint
+
+        Args:
+            user_id: the string formatted mxid(not a UserID)
+            access_token: the user's access token
+        """
+        request_data = {
+            "auth": {
+                "type": "m.login.password",
+                "user": user_id,
+                "password": "password",
+            },
+            "erase": False,
+        }
+
+        # If an appservice calls this, append the user_id
+        url = (
+            f"account/deactivate?user_id={user_id}"
+            if access_token == self.appservice.token
+            else "account/deactivate"
+        )
+        channel = self.make_request(
+            "POST",
+            url,
+            request_data,
+            access_token=access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+    def _get_user_count_metrics(self) -> dict[str, str]:
+        # Ensure we have the latest stats by waiting enough time for the
+        # counting loop to run again
+        self.reactor.advance(COUNT_USERS_INTERVAL.as_secs())
+        return get_latest_metrics()
+
+    def _native_key(self) -> str:
+        return f'synapse_non_deactivated_user_count{{app_service="native",server_name="{self.hs.config.server.server_name}"}}'
+
+    def _appservice_key(self) -> str:
+        return f'synapse_non_deactivated_user_count{{app_service="{self.appservice.id}",server_name="{self.hs.config.server.server_name}"}}'
+
+    def test_two_native_users(self) -> None:
+        """Two registered native users are counted correctly."""
+        self.register_user("user_2", "password")
+
+        metrics = self._get_user_count_metrics()
+
+        self.assertEqual(metrics.get(self._native_key()), "2.0")
+
+    def test_deactivated_native_user_excluded(self) -> None:
+        """A deactivated native user is not counted."""
+        user_2 = self.register_user("user_2", "password")
+
+        # Sanity check that all users are counted before deactivation
+        metrics = self._get_user_count_metrics()
+        self.assertEqual(metrics.get(self._native_key()), "2.0")
+
+        self._deactivate_user(user_2, self.login("user_2", "password"))
+
+        # The deactivated user should not be counted
+        metrics = self._get_user_count_metrics()
+        self.assertEqual(metrics.get(self._native_key()), "1.0")
+
+    def test_native_and_appservice_users(self) -> None:
+        """A native user and an appservice user are counted under separate labels."""
+        self.register_appservice_user("as_user_1", self.appservice.token)
+
+        metrics = self._get_user_count_metrics()
+
+        self.assertEqual(metrics.get(self._native_key()), "1.0")
+        self.assertEqual(metrics.get(self._appservice_key()), "1.0")
+
+    def test_deactivated_appservice_user_excluded(self) -> None:
+        """A deactivated appservice user is not counted."""
+        as_user, _ = self.register_appservice_user("as_user_1", self.appservice.token)
+
+        # Sanity check that all users are counted before deactivation
+        metrics = self._get_user_count_metrics()
+        self.assertEqual(metrics.get(self._appservice_key()), "1.0")
+
+        self._deactivate_user(as_user, self.appservice.token)
+
+        # The deactivated user should not be counted
+        metrics = self._get_user_count_metrics()
+        self.assertIsNone(metrics.get(self._appservice_key()))

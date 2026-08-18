@@ -42,6 +42,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    ProfileUpdateAction,
     RelationTypes,
 )
 from synapse.api.errors import PartialStateConflictError
@@ -76,6 +77,7 @@ from synapse.types import (
     MutableStateMap,
     StateMap,
     StrCollection,
+    UserID,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -267,6 +269,7 @@ class PersistEventsStore:
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
+        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -2118,6 +2121,129 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
+        if self._msc4429_enabled:
+            # Handle changes to the profile updates stream.
+            # We've already done a bunch of work calculating the changes needed
+            # for the sliding sync tables, so we may as well re-use that information
+            # here to avoid parsing the state delta again, and handling various
+            # edge cases.
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
+            profile_update_additions = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id)
+                # FIXME: Ideally we would filter out JOIN -> JOIN. See note below.
+                and c.membership == Membership.JOIN
+            }
+            profile_update_leaves = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id)
+                # Any transition from JOIN to something else counts as a leave here.
+                # Even the 'invalid' transitions might effectively happen due to
+                # state resolution.
+                and c.membership != Membership.JOIN
+            } | (
+                # We also need to consider users that get fully state reset out of the room.
+                # These should be treated as 'leave'
+                set(sliding_sync_table_changes.to_delete_membership_snapshots)
+            )
+
+            if profile_update_additions:
+                # Write the profile updates for additions to the room, from either
+                # a join, knock, invite, etc.
+                # FIXME this will add rows also when a display name changes due to
+                # the facts that `sliding_sync_table_changes` contains a JOIN
+                # membership event in that case. We should aim to filter these
+                # unnecessary rows out, as we're also generating an UPDATE profile
+                # update action row for the actual display name change itself.
+                # See https://github.com/element-hq/synapse/issues/19981
+                self.store.record_profile_updates_for_user_joined_room_txn(
+                    txn=txn,
+                    room_id=room_id,
+                    joined_users=profile_update_additions,
+                )
+            if profile_update_leaves:
+                # Write the profile updates for LEAVE events
+                for user_id in profile_update_leaves:
+                    self._record_profile_updates_for_user_left_room_txn(
+                        txn=txn,
+                        user_id=UserID.from_string(user_id),
+                        room_id=room_id,
+                    )
+
+    def _record_profile_updates_for_user_left_room_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: UserID,
+        room_id: str,
+    ) -> None:
+        """
+        Record updates into the profile updates stream for when a user leaves a room.
+
+        If this was the last shared room with a set of users, clear all old rows from
+        the `profile_updates_per_user` table relating to those users, to avoid exposing
+        any profile field changes past the point of not being in any common rooms with
+        the user.
+
+        Currently, updates are only recorded for local users.
+
+        Note, this method lives here in the events store file due to the profile
+        store not having access to the membership store (which the events store does),
+        which we need to re-use the `do_users_share_a_room_txn` method there.
+
+        Args:
+            user_id: The user who left the room.
+            room_id: The room that was left.
+        """
+        # Get the local members of the room
+        room_members = self.db_pool.simple_select_onecol_txn(
+            txn=txn,
+            table="local_current_membership",
+            retcol="user_id",
+            keyvalues={
+                "membership": Membership.JOIN,
+                "room_id": room_id,
+            },
+        )
+        # For each user check if we still share rooms
+        users_sharing_rooms = self.store.do_users_share_a_room_txn(
+            txn=txn,
+            user_id=user_id.to_string(),
+            other_user_ids=set(room_members),
+        )
+        users_no_longer_sharing_rooms = set(room_members) - set(
+            users_sharing_rooms.keys()
+        )
+
+        # First clear the previous rows from the table
+        user_clause, user_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "user_id",
+            users_no_longer_sharing_rooms,
+        )
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {user_clause}
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE user_id = ?
+                    )
+            """,
+            (*user_args, user_id.to_string()),
+        )
+
+        # Now record the "left room" action in the stream
+        self.store.record_profile_updates_txn(
+            txn=txn,
+            user_id=user_id,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users=users_no_longer_sharing_rooms,
+        )
+
     @classmethod
     def _get_relevant_sliding_sync_current_state_event_ids_txn(
         cls, txn: LoggingTransaction, room_id: str
@@ -3513,7 +3639,10 @@ class PersistEventsStore:
             values={
                 "event_id": event_id,
                 "reason": reason,
-                "last_check": self._clock.time_msec(),
+                # `last_check` is a TEXT column, so store the timestamp as a
+                # string rather than relying on the driver to coerce an int.
+                # (Ideally we'd fix the schema, but that is non-trivial)
+                "last_check": str(self._clock.time_msec()),
             },
         )
 

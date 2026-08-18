@@ -37,7 +37,7 @@ class RegistrationConfigTestCase(ConfigFileTestCase):
         Test that the user is faced with configuration errors if they make it
         smaller, as that configuration doesn't make sense.
         """
-        config_dict = default_config("test")
+        config_dict = default_config(server_name="test")
 
         # First test all the error conditions
         with self.assertRaises(ConfigError):

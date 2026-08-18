@@ -22,6 +22,7 @@ crate-type = ["lib", "cdylib"]
 name = "synapse.synapse_rust"
 
 [dependencies]
+async-trait = "0.1.89"
 anyhow = "1.0.63"
 base64 = "0.22.1"
 bytes = "1.6.0"

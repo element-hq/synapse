@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class CreateResource(RestServlet):
-    PATTERNS = [re.compile("/_matrix/media/v1/create")]
+    PATTERNS = [re.compile("/_matrix/media/v1/create$")]
 
     def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
         super().__init__()

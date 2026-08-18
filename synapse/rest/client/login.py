@@ -708,7 +708,7 @@ class SsoRedirectServlet(RestServlet):
 
 
 class CasTicketServlet(RestServlet):
-    PATTERNS = client_patterns("/login/cas/ticket", v1=True)
+    PATTERNS = client_patterns("/login/cas/ticket$", v1=True)
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -733,7 +733,7 @@ class CasTicketServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled:
         return
 
     LoginRestServlet(hs).register(http_server)

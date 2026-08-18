@@ -101,6 +101,7 @@ class ApplicationService:
         rate_limited: bool = True,
         ip_range_whitelist: IPSet | None = None,
         supports_ephemeral: bool = False,
+        supports_unstable_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
         msc4190_device_management: bool = False,
     ):
@@ -125,6 +126,7 @@ class ApplicationService:
         self.namespaces = self._check_namespaces(namespaces)
         self.id = id
         self.ip_range_whitelist = ip_range_whitelist
+        self.supports_unstable_ephemeral = supports_unstable_ephemeral
         self.supports_ephemeral = supports_ephemeral
         self.msc3202_transaction_extensions = msc3202_transaction_extensions
         self.msc4190_device_management = msc4190_device_management

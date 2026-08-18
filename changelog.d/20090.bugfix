@@ -1,0 +1,1 @@
+Fix a bug where presence updates could stop being sent to clients (the presence stream position becoming stuck) if a `/sync` request was cancelled while a presence write was allocating a stream ID. Contributed by @FrenchGithubUser @Famedly.

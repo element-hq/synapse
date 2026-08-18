@@ -122,6 +122,7 @@ from synapse.types import (
 )
 from synapse.util.async_helpers import Linearizer
 from synapse.util.duration import Duration
+from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
 from synapse.util.wheel_timer import WheelTimer
 
@@ -179,18 +180,17 @@ presence_wheel_timer_size_gauge = LaterGauge(
     labelnames=[SERVER_NAME_LABEL],
 )
 
-# If a user was last active in the last LAST_ACTIVE_GRANULARITY, consider them
-# "currently_active"
-LAST_ACTIVE_GRANULARITY = 60 * 1000
+# Note: the timers deciding when a user goes idle or offline and how long
+# they count as "currently_active" are configurable, via the
+# `last_active_granularity`, `sync_online_timeout` and `idle_timeout` options
+# in the `presence` config section (see
+# `synapse.config.server.DEFAULT_LAST_ACTIVE_GRANULARITY` and friends for the
+# defaults).
 
-# How long to wait until a new /events or /sync request before assuming
-# the client has gone.
-SYNC_ONLINE_TIMEOUT = 30 * 1000
-# Busy status waits longer, but does eventually go offline.
+# How long to wait until a device with busy status stops syncing before it
+# goes offline. Busy status waits longer than the (configurable) sync online
+# timeout, but does eventually go offline.
 BUSY_ONLINE_TIMEOUT = 60 * 60 * 1000
-
-# How long to wait before marking the user as idle. Compared against last active
-IDLE_TIMER = 5 * 60 * 1000
 
 # How often we expect remote servers to resend us presence.
 FEDERATION_TIMEOUT = 30 * 60 * 1000
@@ -205,8 +205,6 @@ EXTERNAL_PROCESS_EXPIRY = 5 * 60 * 1000
 # Delay before a worker tells the presence handler that a user has stopped
 # syncing.
 UPDATE_SYNCING_USERS = Duration(seconds=10)
-
-assert LAST_ACTIVE_GRANULARITY < IDLE_TIMER
 
 
 class BasePresenceHandler(abc.ABC):
@@ -224,6 +222,19 @@ class BasePresenceHandler(abc.ABC):
 
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
+
+        # Rooms which, on their own, should not cause presence to be routed
+        # between their members. See `exclude_rooms_from_presence` in the config.
+        self._rooms_to_exclude_from_presence = frozenset(
+            hs.config.server.rooms_to_exclude_from_presence
+        )
+
+        # The (configurable) presence state machine timers.
+        self._last_active_granularity = (
+            hs.config.server.presence_last_active_granularity
+        )
+        self._sync_online_timeout = hs.config.server.presence_sync_online_timeout
+        self._idle_timer = hs.config.server.presence_idle_timeout
 
         self._federation = None
         if hs.should_send_federation():
@@ -431,6 +442,7 @@ class BasePresenceHandler(abc.ABC):
             self.store,
             self.presence_router,
             states,
+            self._rooms_to_exclude_from_presence,
         )
 
         for destinations, host_states in hosts_to_states:
@@ -526,10 +538,34 @@ class WorkerPresenceHandler(BasePresenceHandler):
         # syncing but we haven't notified the presence writer of that yet
         self._user_devices_going_offline: dict[tuple[str, str | None], int] = {}
 
+        # How often to relay an unchanged sync-driven presence state to the
+        # presence writer. The relayed updates are what feed the writer's device
+        # last_sync_ts/last_active_ts timers, so this must sit comfortably below
+        # the timers it feeds — the (configurable) sync online timeout and
+        # last-active granularity — or users would flap offline / lose
+        # "currently active" between relays. We use 5/6 of the tighter of the
+        # two, i.e. the historic 25s at the default 30s sync online timeout.
+        self._sync_presence_relay_interval = (
+            min(self._sync_online_timeout, self._last_active_granularity) * 5 // 6
+        )
+
+        # (user_id, device_id) -> (state, last_sent_ms) of the most recent
+        # sync-driven presence update we proxied to the presence writer. Used
+        # to suppress the per-sync-request set_state/bump calls, which are
+        # no-ops on the writer at finer granularity than its timers: while
+        # the state is unchanged there is no point relaying more than one
+        # update per relay interval. Entries older than the window are swept by
+        # `_sweep_last_sent_presence`.
+        self._last_sent_presence: dict[tuple[str, str | None], tuple[str, int]] = {}
+
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS)
+        if self._track_presence:
+            self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS)
+            self.clock.looping_call(
+                self._sweep_last_sent_presence, Duration(minutes=30)
+            )
 
         hs.register_async_shutdown_handler(
             phase="before",
@@ -572,6 +608,8 @@ class WorkerPresenceHandler(BasePresenceHandler):
         sending a stopped syncing immediately followed by a started syncing
         notification to the presence writer
         """
+        if not self._track_presence:
+            return
         self._user_devices_going_offline[(user_id, device_id)] = self.clock.time_msec()
 
     def send_stop_syncing(self) -> None:
@@ -585,6 +623,22 @@ class WorkerPresenceHandler(BasePresenceHandler):
             if now - last_sync_ms > UPDATE_SYNCING_USERS.as_millis():
                 self._user_devices_going_offline.pop((user_id, device_id), None)
                 self.send_user_sync(user_id, device_id, False, last_sync_ms)
+                # Once the writer knows the device stopped syncing it may time
+                # the user out, so if the device comes back we must relay its
+                # state again rather than suppress it as a repeat.
+                self._last_sent_presence.pop((user_id, device_id), None)
+
+    def _sweep_last_sent_presence(self) -> None:
+        """Drop expired presence-throttling entries.
+
+        Entries should be dropped in `send_stop_syncing`, but we add a safety
+        net here to ensure that the dict deesn't grow unbounded.
+        """
+        now = self.clock.time_msec()
+
+        for key, (_, last_sent_ms) in list(self._last_sent_presence.items()):
+            if now - last_sent_ms >= self._sync_presence_relay_interval:
+                self._last_sent_presence.pop(key, None)
 
     async def user_syncing(
         self,
@@ -602,7 +656,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
             return _NullContextManager()
 
         # Note that this causes last_active_ts to be incremented which is not
-        # what the spec wants.
+        # what the spec wants. (This call is throttled in `set_state`: while
+        # the state is unchanged, only one update per relay interval is relayed
+        # to the presence writer.)
         await self.set_state(
             UserID.from_string(user_id),
             device_id,
@@ -640,7 +696,12 @@ class WorkerPresenceHandler(BasePresenceHandler):
     async def notify_from_replication(
         self, states: list[UserPresenceState], stream_id: int
     ) -> None:
-        parties = await get_interested_parties(self.store, self.presence_router, states)
+        parties = await get_interested_parties(
+            self.store,
+            self.presence_router,
+            states,
+            self._rooms_to_exclude_from_presence,
+        )
         room_ids_to_states, users_to_states = parties
 
         self.notifier.on_new_event(
@@ -685,7 +746,11 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self.user_to_current_state[new_state.user_id] = new_state
             is_mine = self.is_mine_id(new_state.user_id)
             if not old_state or should_notify(
-                old_state, new_state, is_mine, self.server_name
+                old_state,
+                new_state,
+                is_mine,
+                self.server_name,
+                last_active_granularity=self._last_active_granularity,
             ):
                 state_to_notify.append(new_state)
 
@@ -735,6 +800,28 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if not self._track_presence:
             return
 
+        now = self.clock.time_msec()
+        if is_sync and not force_notify:
+            # Sync-driven updates arrive on every /sync request, which is far
+            # finer-grained than any of the writer's presence timers need:
+            # while the state is unchanged, relaying one update per relay
+            # interval is enough to keep them fed. State changes always go
+            # through immediately.
+            last_sent = self._last_sent_presence.get((user_id, device_id))
+            if last_sent is not None:
+                last_presence, last_sent_ms = last_sent
+                if (
+                    presence == last_presence
+                    and now - last_sent_ms < self._sync_presence_relay_interval
+                ):
+                    return
+            self._last_sent_presence[(user_id, device_id)] = (presence, now)
+        else:
+            # An explicit (non-sync) update doesn't refresh the writer's
+            # last_sync_ts, so it must not count as a recent relay: drop any
+            # entry so the next sync-driven update goes through.
+            self._last_sent_presence.pop((user_id, device_id), None)
+
         # Proxy request to instance that writes presence
         await self._set_state_client(
             instance_name=self._presence_writer_instance,
@@ -755,8 +842,25 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if not self._track_presence:
             return
 
-        # Proxy request to instance that writes presence
         user_id = user.to_string()
+
+        # A bump's only effects on the writer are updating last_active_ts and
+        # flipping an idle device back online. Going idle takes far longer
+        # than the relay window, so if we relayed an *online* update within
+        # the window the user cannot have gone idle since, and this bump is a
+        # no-op: skip it. Bumps after any other state (or an unknown one) go
+        # through immediately, as they may un-idle the device.
+        now = self.clock.time_msec()
+        last_sent = self._last_sent_presence.get((user_id, device_id))
+        if (
+            last_sent is not None
+            and last_sent[0] == PresenceState.ONLINE
+            and now - last_sent[1] < self._sync_presence_relay_interval
+        ):
+            return
+        self._last_sent_presence[(user_id, device_id)] = (PresenceState.ONLINE, now)
+
+        # Proxy request to instance that writes presence
         await self._bump_active_client(
             instance_name=self._presence_writer_instance,
             user_id=user_id,
@@ -791,7 +895,8 @@ class PresenceHandler(BasePresenceHandler):
         if self._track_presence:
             for state in self.user_to_current_state.values():
                 # Create a psuedo-device to properly handle time outs. This will
-                # be overridden by any "real" devices within SYNC_ONLINE_TIMEOUT.
+                # be overridden by any "real" devices within the sync online
+                # timeout.
                 pseudo_device_id = None
                 self._user_to_device_to_current_state[state.user_id] = {
                     pseudo_device_id: UserDevicePresenceState(
@@ -804,12 +909,14 @@ class PresenceHandler(BasePresenceHandler):
                 }
 
                 self.wheel_timer.insert(
-                    now=now, obj=state.user_id, then=state.last_active_ts + IDLE_TIMER
+                    now=now,
+                    obj=state.user_id,
+                    then=state.last_active_ts + self._idle_timer,
                 )
                 self.wheel_timer.insert(
                     now=now,
                     obj=state.user_id,
-                    then=state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=state.last_user_sync_ts + self._sync_online_timeout,
                 )
                 if self.is_mine_id(state.user_id):
                     self.wheel_timer.insert(
@@ -878,6 +985,14 @@ class PresenceHandler(BasePresenceHandler):
                 Duration(minutes=1),
             )
 
+        if not self._presence_enabled and self.user_to_current_state:
+            # Presence is disabled but the database still contains non-offline
+            # presence states, i.e. presence used to be enabled. Nothing writes
+            # to the presence stream while presence is disabled, so without
+            # intervention clients would show the stale states forever. Send
+            # out one final round of updates marking everyone as offline.
+            self.clock.call_when_running(self._mark_stale_presence_as_offline)
+
         presence_wheel_timer_size_gauge.register_hook(
             homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): len(self.wheel_timer)},
@@ -934,6 +1049,36 @@ class PresenceHandler(BasePresenceHandler):
             await self.store.update_presence(
                 [self.user_to_current_state[user_id] for user_id in unpersisted]
             )
+
+    @wrap_as_background_process("PresenceHandler._mark_stale_presence_as_offline")
+    async def _mark_stale_presence_as_offline(self) -> None:
+        """One-off job, run at startup when presence is disabled, that marks
+        any non-offline presence states left over from when presence was
+        enabled as offline, and streams the changes out to clients.
+        """
+        states = [
+            state.copy_and_replace(
+                state=PresenceState.OFFLINE,
+                status_msg=None,
+                currently_active=False,
+            )
+            for state in self.user_to_current_state.values()
+            if state.state != PresenceState.OFFLINE
+        ]
+        if not states:
+            return
+
+        logger.info(
+            "Presence is disabled: marking %d stale presence states as offline",
+            len(states),
+        )
+
+        self.user_to_current_state.update({state.user_id: state for state in states})
+
+        # There may be a lot of stale states (e.g. everyone that was online
+        # when presence was disabled), so persist them in batches.
+        for batch in batch_iter(states, 500):
+            await self._persist_and_notify(list(batch))
 
     async def _update_states(
         self,
@@ -996,6 +1141,9 @@ class PresenceHandler(BasePresenceHandler):
                     # When overriding disabled presence, don't kick off all the
                     # wheel timers.
                     persist=not self._track_presence,
+                    idle_timer=self._idle_timer,
+                    sync_online_timeout=self._sync_online_timeout,
+                    last_active_granularity=self._last_active_granularity,
                 )
 
                 if force_notify:
@@ -1044,6 +1192,7 @@ class PresenceHandler(BasePresenceHandler):
                     self.store,
                     self.presence_router,
                     list(to_federation_ping.values()),
+                    self._rooms_to_exclude_from_presence,
                 )
 
                 for destinations, states in hosts_to_states:
@@ -1108,6 +1257,9 @@ class PresenceHandler(BasePresenceHandler):
             syncing_user_devices=syncing_user_devices,
             user_to_devices=self._user_to_device_to_current_state,
             now=now,
+            idle_timer=self._idle_timer,
+            sync_online_timeout=self._sync_online_timeout,
+            last_active_granularity=self._last_active_granularity,
         )
 
         return await self._update_states(changes)
@@ -1314,7 +1466,12 @@ class PresenceHandler(BasePresenceHandler):
         """
         stream_id, max_token = await self.store.update_presence(states)
 
-        parties = await get_interested_parties(self.store, self.presence_router, states)
+        parties = await get_interested_parties(
+            self.store,
+            self.presence_router,
+            states,
+            self._rooms_to_exclude_from_presence,
+        )
         room_ids_to_states, users_to_states = parties
 
         self.notifier.on_new_event(
@@ -1461,7 +1618,10 @@ class PresenceHandler(BasePresenceHandler):
             observed_user.to_string()
         )
 
-        if observer_room_ids & observed_room_ids:
+        shared_room_ids = (
+            observer_room_ids & observed_room_ids
+        ) - self._rooms_to_exclude_from_presence
+        if shared_room_ids:
             return True
 
         return False
@@ -1571,6 +1731,12 @@ class PresenceHandler(BasePresenceHandler):
         """Process current state deltas for the room to find new joins that need
         to be handled.
         """
+
+        # Excluded rooms should not, on their own, share presence between their
+        # members. This method is entirely per-room presence fan-out, so skip
+        # excluded rooms wholesale.
+        if room_id in self._rooms_to_exclude_from_presence:
+            return
 
         # Sets of newly joined users. Note that if the local server is
         # joining a remote room for the first time we'll see both the joining
@@ -1695,6 +1861,8 @@ def should_notify(
     new_state: UserPresenceState,
     is_mine: bool,
     our_server_name: str,
+    *,
+    last_active_granularity: int,
 ) -> bool:
     """Decides if a presence state change should be sent to interested parties."""
     user_location = "remote"
@@ -1741,7 +1909,7 @@ def should_notify(
 
         if (
             new_state.last_active_ts - old_state.last_active_ts
-            > LAST_ACTIVE_GRANULARITY
+            > last_active_granularity
         ):
             # Only notify about last active bumps if we're not currently active
             if not new_state.currently_active:
@@ -1752,7 +1920,7 @@ def should_notify(
                 ).inc()
                 return True
 
-    elif new_state.last_active_ts - old_state.last_active_ts > LAST_ACTIVE_GRANULARITY:
+    elif new_state.last_active_ts - old_state.last_active_ts > last_active_granularity:
         # Always notify for a transition where last active gets bumped.
         notify_reason_counter.labels(
             locality=user_location,
@@ -1827,6 +1995,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+        self._rooms_to_exclude_from_presence = frozenset(
+            hs.config.server.rooms_to_exclude_from_presence
+        )
 
     async def get_new_events(
         self,
@@ -1941,9 +2112,31 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).inc()
 
-                    sharing_users = await self.store.do_users_share_a_room(
-                        user_id, updated_users
-                    )
+                    # An updated user is interesting if they share a
+                    # (non-excluded) room with the syncing user. We check by
+                    # intersecting the cached per-user room sets rather than via
+                    # `do_users_share_a_room`: its per-pair cache has a
+                    # quadratic working set and is cleared wholesale on every
+                    # membership change, so on busy servers every check missed
+                    # into SQL.
+                    #
+                    # For every presence update we need to run this code for
+                    # every user that is currently syncing. The
+                    # `get_rooms_for_user` will therefore be computed only once
+                    # for each updated user regardless of the number of syncing
+                    # users.
+                    #
+                    # The syncing user's rooms will also be cached as its needed
+                    # during sync processing anyway.
+                    my_rooms = await self.store.get_rooms_for_user(user_id)
+                    if self._rooms_to_exclude_from_presence:
+                        my_rooms = my_rooms - self._rooms_to_exclude_from_presence
+                    rooms_by_user = await self.store.get_rooms_for_users(updated_users)
+                    sharing_users = {
+                        updated_user
+                        for updated_user, rooms in rooms_by_user.items()
+                        if not my_rooms.isdisjoint(rooms)
+                    }
 
                     interested_and_updated_users = (
                         sharing_users.union(additional_users_interested_in)
@@ -1958,7 +2151,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                     ).inc()
 
                     users_interested_in = (
-                        await self.store.get_users_who_share_room_with_user(user_id)
+                        await self.store.get_users_who_share_room_with_user(
+                            user_id, self._rooms_to_exclude_from_presence
+                        )
                     )
                     users_interested_in.update(additional_users_interested_in)
 
@@ -1971,7 +2166,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                 # No from_key has been specified. Return the presence for all users
                 # this user is interested in
                 interested_and_updated_users = (
-                    await self.store.get_users_who_share_room_with_user(user_id)
+                    await self.store.get_users_who_share_room_with_user(
+                        user_id, self._rooms_to_exclude_from_presence
+                    )
                 )
                 interested_and_updated_users.update(additional_users_interested_in)
 
@@ -2075,6 +2272,10 @@ def handle_timeouts(
     syncing_user_devices: AbstractSet[tuple[str, str | None]],
     user_to_devices: dict[str, dict[str | None, UserDevicePresenceState]],
     now: int,
+    *,
+    idle_timer: int,
+    sync_online_timeout: int,
+    last_active_granularity: int,
 ) -> list[UserPresenceState]:
     """Checks the presence of users that have timed out and updates as
     appropriate.
@@ -2085,6 +2286,11 @@ def handle_timeouts(
         syncing_user_devices: A set of (user ID, device ID) tuples with active syncs..
         user_to_devices: A map of user ID to device ID to UserDevicePresenceState.
         now: Current time in ms.
+        idle_timer: How long in ms before an inactive device is marked as idle.
+        sync_online_timeout: How long in ms after the last sync before a device
+            is marked as offline.
+        last_active_granularity: How long in ms a user counts as
+            "currently active" after their last activity.
 
     Returns:
         List of UserPresenceState updates
@@ -2101,6 +2307,9 @@ def handle_timeouts(
             syncing_user_devices,
             user_to_devices.get(user_id, {}),
             now,
+            idle_timer=idle_timer,
+            sync_online_timeout=sync_online_timeout,
+            last_active_granularity=last_active_granularity,
         )
         if new_state:
             changes[state.user_id] = new_state
@@ -2114,6 +2323,10 @@ def handle_timeout(
     syncing_device_ids: AbstractSet[tuple[str, str | None]],
     user_devices: dict[str | None, UserDevicePresenceState],
     now: int,
+    *,
+    idle_timer: int,
+    sync_online_timeout: int,
+    last_active_granularity: int,
 ) -> UserPresenceState | None:
     """Checks the presence of the user to see if any of the timers have elapsed
 
@@ -2123,6 +2336,11 @@ def handle_timeout(
         syncing_user_devices: A set of (user ID, device ID) tuples with active syncs..
         user_devices: A map of device ID to UserDevicePresenceState.
         now: Current time in ms.
+        idle_timer: How long in ms before an inactive device is marked as idle.
+        sync_online_timeout: How long in ms after the last sync before a device
+            is marked as offline.
+        last_active_granularity: How long in ms a user counts as
+            "currently active" after their last activity.
 
     Returns:
         A UserPresenceState update or None if no update.
@@ -2140,7 +2358,7 @@ def handle_timeout(
         offline_devices = []
         for device_id, device_state in user_devices.items():
             if device_state.state == PresenceState.ONLINE:
-                if now - device_state.last_active_ts > IDLE_TIMER:
+                if now - device_state.last_active_ts > idle_timer:
                     # Currently online, but last activity ages ago so auto
                     # idle
                     device_state.state = PresenceState.UNAVAILABLE
@@ -2161,7 +2379,7 @@ def handle_timeout(
                 online_timeout = (
                     BUSY_ONLINE_TIMEOUT
                     if device_state.state == PresenceState.BUSY
-                    else SYNC_ONLINE_TIMEOUT
+                    else sync_online_timeout
                 )
                 if now - sync_or_active > online_timeout:
                     # Mark the device as going offline.
@@ -2180,7 +2398,7 @@ def handle_timeout(
                 state = state.copy_and_replace(state=new_presence)
                 changed = True
 
-        if now - state.last_active_ts > LAST_ACTIVE_GRANULARITY:
+        if now - state.last_active_ts > last_active_granularity:
             # So that we send down a notification that we've
             # stopped updating.
             changed = True
@@ -2209,6 +2427,10 @@ def handle_update(
     wheel_timer: WheelTimer,
     now: int,
     persist: bool,
+    *,
+    idle_timer: int,
+    sync_online_timeout: int,
+    last_active_granularity: int,
 ) -> tuple[UserPresenceState, bool, bool]:
     """Given a presence update:
         1. Add any appropriate timers.
@@ -2223,6 +2445,11 @@ def handle_update(
         now: Time now in ms
         persist: True if this state should persist until another update occurs.
             Skips insertion into wheel timers.
+        idle_timer: How long in ms before an inactive device is marked as idle.
+        sync_online_timeout: How long in ms after the last sync before a device
+            is marked as offline.
+        last_active_granularity: How long in ms a user counts as
+            "currently active" after their last activity.
 
     Returns:
         3-tuple: `(new_state, persist_and_notify, federation_ping)` where:
@@ -2242,17 +2469,17 @@ def handle_update(
             # Idle timer
             if not persist:
                 wheel_timer.insert(
-                    now=now, obj=user_id, then=new_state.last_active_ts + IDLE_TIMER
+                    now=now, obj=user_id, then=new_state.last_active_ts + idle_timer
                 )
 
-            active = now - new_state.last_active_ts < LAST_ACTIVE_GRANULARITY
+            active = now - new_state.last_active_ts < last_active_granularity
             new_state = new_state.copy_and_replace(currently_active=active)
 
             if active and not persist:
                 wheel_timer.insert(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_active_ts + LAST_ACTIVE_GRANULARITY,
+                    then=new_state.last_active_ts + last_active_granularity,
                 )
 
         if new_state.state != PresenceState.OFFLINE:
@@ -2261,7 +2488,7 @@ def handle_update(
                 wheel_timer.insert(
                     now=now,
                     obj=user_id,
-                    then=new_state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
+                    then=new_state.last_user_sync_ts + sync_online_timeout,
                 )
 
             last_federate = new_state.last_federation_update_ts
@@ -2287,7 +2514,13 @@ def handle_update(
             )
 
     # Check whether the change was something worth notifying about
-    if should_notify(prev_state, new_state, is_mine, our_server_name):
+    if should_notify(
+        prev_state,
+        new_state,
+        is_mine,
+        our_server_name,
+        last_active_granularity=last_active_granularity,
+    ):
         new_state = new_state.copy_and_replace(last_federation_update_ts=now)
         persist_and_notify = True
 
@@ -2335,7 +2568,10 @@ def _combine_device_states(
 
 
 async def get_interested_parties(
-    store: DataStore, presence_router: PresenceRouter, states: list[UserPresenceState]
+    store: DataStore,
+    presence_router: PresenceRouter,
+    states: list[UserPresenceState],
+    excluded_rooms: AbstractSet[str] = frozenset(),
 ) -> tuple[dict[str, list[UserPresenceState]], dict[str, list[UserPresenceState]]]:
     """Given a list of states return which entities (rooms, users)
     are interested in the given states.
@@ -2344,6 +2580,8 @@ async def get_interested_parties(
         store: The homeserver's data store.
         presence_router: A module for augmenting the destinations for presence updates.
         states: A list of incoming user presence updates.
+        excluded_rooms: Rooms which should not, on their own, cause presence to
+            be routed between their members.
 
     Returns:
         A 2-tuple of `(room_ids_to_states, users_to_states)`,
@@ -2354,6 +2592,8 @@ async def get_interested_parties(
     for state in states:
         room_ids = await store.get_rooms_for_user(state.user_id)
         for room_id in room_ids:
+            if room_id in excluded_rooms:
+                continue
             room_ids_to_states.setdefault(room_id, []).append(state)
 
         # Always notify self
@@ -2374,6 +2614,7 @@ async def get_interested_remotes(
     store: DataStore,
     presence_router: PresenceRouter,
     states: list[UserPresenceState],
+    excluded_rooms: AbstractSet[str] = frozenset(),
 ) -> list[tuple[StrCollection, Collection[UserPresenceState]]]:
     """Given a list of presence states figure out which remote servers
     should be sent which.
@@ -2384,6 +2625,8 @@ async def get_interested_remotes(
         store: The homeserver's data store.
         presence_router: A module for augmenting the destinations for presence updates.
         states: A list of incoming user presence updates.
+        excluded_rooms: Rooms which should not, on their own, cause presence to
+            be routed to their remote members.
 
     Returns:
         A map from destinations to presence states to send to that destination.
@@ -2397,6 +2640,8 @@ async def get_interested_remotes(
         room_ids = await store.get_rooms_for_user(state.user_id)
         hosts: set[str] = set()
         for room_id in room_ids:
+            if room_id in excluded_rooms:
+                continue
             room_hosts = await store.get_current_hosts_in_room(room_id)
             hosts.update(room_hosts)
         hosts_and_states.append((hosts, [state]))

@@ -331,6 +331,14 @@ impl MSC4388RendezvousHandler {
             .ok_or_else(NotFoundError::new)?;
 
         if !session.sequence_token().eq(&sequence_token) {
+            // Allow clients to safely retry a PUT (e.g. after a network error)
+            // by accepting the previous sequence_token as long as the data
+            // being submitted matches what is currently stored. This makes
+            // PUTs idempotent without weakening the concurrent-write check.
+            if session.is_idempotent_retry(&sequence_token, &data) {
+                return Ok((200, session.put_response()));
+            }
+
             return Err(SynapseError::new(
                 StatusCode::CONFLICT,
                 "sequence_token does not match".to_owned(),

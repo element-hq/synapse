@@ -30,6 +30,7 @@ from synapse.replication.http import (
     login,
     membership,
     presence,
+    profile,
     push,
     register,
     send_events,
@@ -59,6 +60,7 @@ class ReplicationRestResource(JsonResource):
         push.register_servlets(hs, self)
         state.register_servlets(hs, self)
         devices.register_servlets(hs, self)
+        profile.register_servlets(hs, self)
 
         # The following can't currently be instantiated on workers.
         if hs.config.worker.worker_app is None:

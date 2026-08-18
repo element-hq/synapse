@@ -619,7 +619,7 @@ class ThreepidRestServlet(RestServlet):
     # ThreePidBindRestServelet.PostBody with an `alias_generator` to handle
     # `threePidCreds` versus `three_pid_creds`.
     async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        if self.hs.config.mas.enabled or self.hs.config.experimental.msc3861.enabled:
+        if self.hs.config.mas.enabled:
             raise NotFoundError(errcode=Codes.UNRECOGNIZED)
 
         if not self.hs.config.registration.enable_3pid_changes:
@@ -911,7 +911,7 @@ class AccountStatusRestServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+    auth_delegated = hs.config.mas.enabled
 
     ThreepidRestServlet(hs).register(http_server)
     WhoamiRestServlet(hs).register(http_server)

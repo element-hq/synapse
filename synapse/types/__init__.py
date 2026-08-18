@@ -27,22 +27,29 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Annotated,
     Any,
     ClassVar,
+    Final,
     Literal,
     Mapping,
     Match,
     MutableMapping,
     NoReturn,
     Optional,
+    Sequence,
     TypedDict,
     TypeVar,
     Union,
     overload,
 )
 
+import annotated_types
 import attr
+import pydantic_core.core_schema
 from immutabledict import immutabledict
+from pydantic import GetCoreSchemaHandler, StrictInt
+from pydantic_core import CoreSchema
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
 from typing_extensions import Self
@@ -96,6 +103,47 @@ JsonMapping = Mapping[str, Any]
 # A JSON-serialisable object.
 JsonSerializable = object
 
+StrictJsonValue = Union[
+    None,
+    bool,
+    int,
+    float,
+    str,
+    "StrictJsonList",
+    "StrictJsonDict",
+    "StrictJsonSequence",
+    "StrictJsonMapping",
+]
+"""
+Type that represents any valid JSON value, recursively.
+Does not fall back to `Any` at deeper levels, which makes it more safe than `JsonValue`.
+
+Can also represent immutable mapping and tuple types.
+(Not sure if we would be better splitting them out.)
+"""
+
+StrictJsonList = list["StrictJsonValue"]
+"""
+Type that represents a list of any valid JSON value.
+"""
+
+StrictJsonDict = dict[str, "StrictJsonValue"]
+"""
+Type that represents a dict with string keys (as per JSON) and values of any
+valid JSON type.
+Does not fall back to `Any` at deeper levels, which makes it more safe than `JsonDict`.
+"""
+
+StrictJsonSequence = Sequence["StrictJsonValue"]
+"""
+Like `StrictJsonList` but using a `Sequence` as the collection type.
+"""
+
+StrictJsonMapping = Mapping[str, "StrictJsonValue"]
+"""
+Like `StrictJsonDict` but using `Mapping` as the collection type.
+"""
+
 # Collection[str] that does not include str itself; str being a Sequence[str]
 # is very misleading and results in bugs.
 #
@@ -107,6 +155,110 @@ StrCollection = tuple[str, ...] | list[str] | AbstractSet[str]
 #
 # Unlike StrCollection, StrSequence is an ordered collection of strings.
 StrSequence = tuple[str, ...] | list[str]
+
+
+class AbsentType(Enum):
+    """
+    Type of a sentinel to use as an alternative to `None`
+    for when we really mean 'absent' and not JSON null.
+
+    Generally suitable for distinguishing a default state from user-suppliable values.
+    Has no meaning on its own.
+
+    It is falsy (like None is), so shorthand forms like `x or 0` can be used.
+    """
+
+    # Making this an Enum member makes this compatible with type narrowing,
+    # meaning `x is not Absent` will narrow `x: int | AbsentType` to `x: int` etc.
+    _Absent = object()
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: object, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """
+        This function is checked for and used by Pydantic when
+        attempting to deserialise/validate a field of this type.
+
+        As the `Absent` type has no valid value when deserialising
+        from JSON (as that's the point; `Absent` is a marker representing
+        a lack of any JSON value), we always reject any value.
+        Instead of deserialising from this type, we rely on the struct class
+        we are in having field defaults that provide an `Absent`, which does not
+        go through the JSON validation.
+
+        When validating Python, we accept the absent marker itself.
+        """
+
+        def _reject_from_json(v: object) -> "AbsentType":
+            """
+            Reject the JSON value, no matter what it is, since absent values
+            are meant to be ... absent, thus have nothing they can be deserialised
+            from.
+            """
+            raise ValueError("AbsentType cannot be deserialized from JSON")
+
+        # `json_or_python_schema` wrapper needed for Pydantic < 2.10
+        # but can be replaced with just the `is_instance_schema` after that version.
+        return pydantic_core.core_schema.json_or_python_schema(
+            json_schema=pydantic_core.core_schema.no_info_plain_validator_function(
+                _reject_from_json
+            ),
+            python_schema=pydantic_core.core_schema.is_instance_schema(cls),
+        )
+
+    def __copy__(self) -> "AbsentType":
+        """
+        Copy implementation used by `copy.copy()`.
+        Always use the same instance.
+
+        Without this and the deep version `__deepcopy__`,
+        `copy.copy(Absent)` on Python 3.10 (olddeps)
+        had a problem where it tried to construct a new Absent
+        as part of a deepcopy operation and resulted in:
+            ValueError: <object object at 0x7f64b3b6d930> is not a valid AbsentType
+        """
+        return self
+
+    def __deepcopy__(self, memo: object) -> "AbsentType":
+        """
+        Copy implementation used by `copy.deepcopy()`.
+        Always use the same instance.
+        """
+        return self
+
+    def __bool__(self) -> Literal[False]:
+        return False
+
+    def __str__(self) -> str:
+        return "Absent"
+
+    def __repr__(self) -> str:
+        return "Absent"
+
+
+Absent: Final = AbsentType._Absent
+"""
+Sentinel to use as an alternative to `None`
+for when we really mean 'absent' and not JSON null.
+
+Generally suitable for distinguishing a default state from user-suppliable values.
+Has no meaning on its own.
+
+It is falsy (like None is), so shorthand forms like `x or 0` can be used.
+
+(Previously known as `Sentinel.UNSET_SENTINEL`.)
+"""
+
+
+NonNegativeStrictInt = Annotated[StrictInt, annotated_types.Ge(0)]
+"""A strict integer that must be greater than or equal to zero.
+
+Should be preferred in place of Pydantic's own (lax) NonNegativeInt,
+which will coerce strings to integers in a way that does not agree with
+the Matrix specification (and would risk backing us into a backward compatibility
+hole where we had to support input forms we didn't intend).
+"""
 
 
 # Note that this seems to require inheriting *directly* from Interface in order
@@ -985,6 +1137,7 @@ class StreamKeyType(Enum):
     THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
     STICKY_EVENTS = "sticky_events_key"
     QUARANTINED_MEDIA = "quarantined_media_key"
+    PROFILE_UPDATES = "profile_updates_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -992,7 +1145,7 @@ class StreamToken:
     """A collection of keys joined together by underscores in the following
     order and which represent the position in their respective streams.
 
-    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242_4141_4343`
+    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242_4141_4343_4444`
         1. `room_key`: `s2633508` which is a `RoomStreamToken`
            - `RoomStreamToken`'s can also look like `t426-2633508` or `m56~2.58~3.59`
            - See the docstring for `RoomStreamToken` for more details.
@@ -1008,6 +1161,7 @@ class StreamToken:
         11. `thread_subscriptions_key`: 4242
         12. `sticky_events_key`: 4141
         13. `quarantined_media_key`: 4343
+        14. `profile_updates_key`: 4444
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
@@ -1071,6 +1225,7 @@ class StreamToken:
     quarantined_media_key: MultiWriterStreamToken = attr.ib(
         validator=attr.validators.instance_of(MultiWriterStreamToken)
     )
+    profile_updates_key: int
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1101,6 +1256,7 @@ class StreamToken:
                 thread_subscriptions_key,
                 sticky_events_key,
                 quarantined_media_key,
+                profile_updates_key,
             ) = keys
 
             return cls(
@@ -1121,6 +1277,7 @@ class StreamToken:
                 quarantined_media_key=await MultiWriterStreamToken.parse(
                     store, quarantined_media_key
                 ),
+                profile_updates_key=int(profile_updates_key),
             )
         except CancelledError:
             raise
@@ -1146,6 +1303,7 @@ class StreamToken:
                 str(self.thread_subscriptions_key),
                 str(self.sticky_events_key),
                 await self.quarantined_media_key.to_string(store),
+                str(self.profile_updates_key),
             ]
         )
 
@@ -1219,6 +1377,7 @@ class StreamToken:
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
             StreamKeyType.STICKY_EVENTS,
+            StreamKeyType.PROFILE_UPDATES,
         ],
     ) -> int: ...
 
@@ -1274,9 +1433,10 @@ class StreamToken:
             f"typing: {self.typing_key}, receipt: {self.receipt_key}, "
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
-            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
-            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}"
-            f"quarantined_media: {self.quarantined_media_key})"
+            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key}, "
+            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key}, "
+            f"quarantined_media: {self.quarantined_media_key}, "
+            f"profile_updates: {self.profile_updates_key})"
         )
 
 
@@ -1294,6 +1454,7 @@ StreamToken.START = StreamToken(
     thread_subscriptions_key=0,
     sticky_events_key=0,
     quarantined_media_key=MultiWriterStreamToken(stream=0),
+    profile_updates_key=0,
 )
 
 
