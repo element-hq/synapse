@@ -373,7 +373,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         assert self._lock.locked()
 
         # Note that we always report this as a positive value, so we don't
-        # multiply by the return factor.
+        # multiply by the `_return_factor`.
         self._current_position_gauge.set(self._persisted_upto_position)
 
     def _load_current_ids(
