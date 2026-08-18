@@ -1393,7 +1393,7 @@ class StreamToken:
         """Returns the stream ID for the given key."""
         return getattr(self, key.value)
 
-    def _iter_fields_behind(
+    def _iter_fields_strictly_after_token(
         self, other_token: "StreamToken"
     ) -> Iterator[StreamKeyType]:
         """The keys where `other_token` is behind this token.
@@ -1428,11 +1428,13 @@ class StreamToken:
                 if self_value > other_value:
                     yield key
 
-    def fields_behind(self, other_token: "StreamToken") -> list[StreamKeyType]:
+    def fields_strictly_after_token(
+        self, other_token: "StreamToken"
+    ) -> list[StreamKeyType]:
         """The keys where `other_token` is behind this token, i.e. the keys that
         stop `self.is_before_or_eq(other_token)` from being True.
         """
-        return list(self._iter_fields_behind(other_token))
+        return list(self._iter_fields_strictly_after_token(other_token))
 
     def is_before_or_eq(self, other_token: "StreamToken") -> bool:
         """Whether this token is before the other token, i.e. every constituent
@@ -1443,7 +1445,7 @@ class StreamToken:
         Note: if `self.is_before_or_eq(other_token) is False` then that does not
         imply that the reverse is True.
         """
-        return next(self._iter_fields_behind(other_token), None) is None
+        return next(self._iter_fields_strictly_after_token(other_token), None) is None
 
     def __str__(self) -> str:
         return (

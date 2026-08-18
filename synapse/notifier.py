@@ -907,7 +907,9 @@ class Notifier:
             # Equivalent to `is_before_or_eq`, except we can get the lagging
             # stream keys for logging.
             current_token = self.event_sources.get_current_token()
-            lagging_stream_keys = stream_token.fields_behind(current_token)
+            lagging_stream_keys = stream_token.fields_strictly_after_token(
+                current_token
+            )
             if not lagging_stream_keys:
                 return True
 
