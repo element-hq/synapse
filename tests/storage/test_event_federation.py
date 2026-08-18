@@ -1417,14 +1417,12 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # elapsed past the backoff range so there is no events to backoff from.
         self.assertEqual(event_ids_with_backoff, {})
 
-    @tests.unittest.override_config(
-        {"experimental_features": {"msc4242_enabled": True}}
-    )
-    def test_get_state_dag(self) -> None:
+    def _create_msc4242_room(self) -> tuple[str, str]:
+        """Create an MSC4242 room with an additional join rules state event.
+
+        Returns:
+            A tuple of the room ID and the event ID of the most recent state event.
         """
-        Test that MSC4242 state dag rooms can return the complete state dag on request.
-        """
-        # Create the room
         user_id = self.register_user("alice", "test")
         tok = self.login("alice", "test")
         room_id = self.helper.create_room_as(
@@ -1438,7 +1436,16 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             {"join_rule": "knock"},
             tok=tok,
         )
-        latest = resp["event_id"]
+        return room_id, resp["event_id"]
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_state_dag(self) -> None:
+        """
+        Test that MSC4242 state dag rooms can return the complete state dag on request.
+        """
+        room_id, latest = self._create_msc4242_room()
         state_dag = self.get_success(
             self.store.get_state_dag(room_id, {latest}),
         )
@@ -1453,27 +1460,32 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             EventTypes.JoinRules,
         ]
         got_types = []
-        create_event_id = None
         curr = {latest}
         while len(curr) > 0:
             event_id = curr.pop()
             ev = state_dag[event_id]
             got_types.append(ev.type)
             curr.update(ev.prev_state_events)
-            if ev.type == EventTypes.Create:
-                create_event_id = ev.event_id
         got_types.reverse()  # we walked up the graph but want_types is walking down
         self.assertEqual(got_types, want_types)
 
-        # Check that getting the state DAG from the create event returns just the create event
-        # itself: we always return the requested forward extremities, and there are no earlier
-        # events to walk back to.
-        assert create_event_id is not None
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_state_dag_at_create_event(self) -> None:
+        """
+        Test that asking for the state DAG at the create event returns just the create event:
+        we always return the requested forward extremities, and there are no earlier events to
+        walk back to.
+        """
+        room_id, _ = self._create_msc4242_room()
+        # Room IDs are the hash of the create event in this room version, so the create event
+        # ID is derivable from the room ID.
+        create_event_id = f"${room_id[1:]}"
         state_dag = self.get_success(
             self.store.get_state_dag(room_id, {create_event_id}),
         )
-        self.assertEquals(len(state_dag), 1)
-        assert create_event_id in state_dag
+        self.assertEqual(list(state_dag), [create_event_id])
 
 
 class EventFederationGetMissingEventsStateDAGTestCase(
@@ -1581,6 +1593,48 @@ class EventFederationGetMissingEventsStateDAGTestCase(
             [ev.event_id for ev in got],
             [self.graph_events[graph_event_id].event_id for graph_event_id in want],
             f"latest={latest} want={want} limit={limit}",
+        )
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_missing_events_state_dag_with_cycle(self) -> None:
+        """The walk must terminate even if the edges table contains a cycle.
+
+        A cycle cannot be produced by the normal write path, as an event's prev_state_events
+        are fixed at creation and its event ID is a hash of them. Insert one directly to check
+        that the query is bounded regardless.
+        """
+        # Claim that A (the create event) has E as a prev_state_event, so walking back from E
+        # eventually reaches A and then E again.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="msc4242_state_dag_edges",
+                values={
+                    "room_id": self.room_id,
+                    "event_id": self.graph_events["A"].event_id,
+                    "prev_state_event_id": self.graph_events["E"].event_id,
+                },
+                desc="insert_state_dag_cycle",
+            )
+        )
+
+        got = self.get_success(
+            self.store.get_missing_events_state_dag(
+                room_id=self.room_id,
+                earliest_event_ids=[],
+                latest_event_ids=[self.graph_events["E"].event_id],
+                limit=100,
+            ),
+        )
+        # Same as the acyclic walk from E, with E itself now reachable via A at the end. Each
+        # event appears exactly once: the CTE groups by event ID and keeps the fewest hops.
+        self.assertEquals(
+            [ev.event_id for ev in got],
+            [
+                self.graph_events[graph_event_id].event_id
+                for graph_event_id in ["D", "T", "W", "C", "R", "B", "A", "E"]
+            ],
         )
 
 

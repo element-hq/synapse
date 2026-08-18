@@ -1318,19 +1318,13 @@ class EventFederationWorkerStore(
             self.database_engine, "e.event_id", seed_ids
         )
 
-        # `make_in_list_sql_clause` doesn't handle empty iterables, so guard
-        # the no-earliest case explicitly with an always-true clause.
-        if earliest_event_ids:
-            earliest_clause, earliest_args = make_in_list_sql_clause(
-                self.database_engine,
-                "e.prev_state_event_id",
-                earliest_event_ids,
-                negative=True,
-            )
-        else:
-            # No-op clause that is TRUE for every row, in both dialects.
-            earliest_clause = "1=1"
-            earliest_args = []
+        # With no earliest events this is a no-op clause that is TRUE for every row.
+        earliest_clause, earliest_args = make_in_list_sql_clause(
+            self.database_engine,
+            "e.prev_state_event_id",
+            earliest_event_ids,
+            negative=True,
+        )
 
         query = f"""
             WITH RECURSIVE walk(event_id, hops) AS (
@@ -1363,7 +1357,10 @@ class EventFederationWorkerStore(
                 AND {earliest_clause}
                 -- Bound the recursion by `limit`: every extra hop adds at least one event to
                 -- the result, so events more than `limit` hops away can never make it into a
-                -- `limit`-sized response. This also caps the work done for a single query.
+                -- `limit`-sized response. This is also what makes the query safe against a
+                -- cyclic edge set: a cycle cannot be created via the normal write path, but
+                -- if one did exist the walk would still stop after `limit` hops rather than
+                -- spinning forever.
                 AND w.hops < ?
             )
             -- An event can be reached by several paths with different hop counts. MSC4242
