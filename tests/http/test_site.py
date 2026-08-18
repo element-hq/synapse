@@ -146,7 +146,7 @@ class SynapseRequestTestCase(HomeserverTestCase):
         self.assertRegex(transport.value().decode(), r"^HTTP/1\.1 415 ")
 
     def test_content_length_too_large(self) -> None:
-        """HTTP requests with Content-Length exceeding max size should be rejected with 413"""
+        """Reject an oversized Content-Length before accepting the request body."""
         self.hs.start_listening()
 
         # find the HTTP server which is configured to listen on port 0
@@ -160,26 +160,67 @@ class SynapseRequestTestCase(HomeserverTestCase):
         transport = StringTransport()
         protocol.makeConnection(transport)
 
-        # Send a request with Content-Length header that exceeds the limit.
-        # Default max is 50MB (from media max_upload_size), so send something larger.
+        # The default maximum is 50M (from media max_upload_size). Send only
+        # the headers for a larger request, as a real client using
+        # ``Expect: 100-continue`` would do before transmitting the body.
         oversized_length = 1 + max_request_body_size(self.hs.config)
         protocol.dataReceived(
             b"POST / HTTP/1.1\r\n"
-            b"Connection: close\r\n"
             b"Content-Length: " + str(oversized_length).encode() + b"\r\n"
-            b"\r\n"
-            b"" + b"x" * oversized_length + b"\r\n"
+            b"Expect: 100-continue\r\n"
             b"\r\n"
         )
 
-        # Advance the reactor to process the request
-        while not transport.disconnecting:
-            self.reactor.advance(1)
-
-        # We should get a 413 Content Too Large
+        # Synapse should send the final error immediately, without inviting the
+        # client to send the oversized body, and close the connection gracefully.
         response = transport.value().decode()
         self.assertRegex(response, r"^HTTP/1\.1 413 ")
         self.assertSubstring("M_TOO_LARGE", response)
+        self.assertSubstring("Connection: close", response)
+        self.assertNotIn("100 Continue", response)
+        self.assertTrue(transport.disconnecting)
+        self.assertFalse(transport.disconnected)
+
+        # Any body bytes which arrive before the connection finishes closing are
+        # ignored.
+        protocol.dataReceived(b"x" * 1024)
+        self.assertEqual(transport.value().decode(), response)
+
+    def test_content_length_below_limit_sends_continue(self) -> None:
+        """Allow a request below the limit to proceed after ``100 Continue``."""
+        self.hs.start_listening()
+
+        # find the HTTP server which is configured to listen on port 0
+        (port, factory, _backlog, interface) = self.reactor.tcpServers[0]
+        self.assertEqual(interface, "::")
+        self.assertEqual(port, 0)
+
+        # complete the connection and wire it up to a fake transport
+        client_address = IPv6Address("TCP", "::1", 2345)
+        protocol = factory.buildProtocol(client_address)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
+
+        protocol.dataReceived(
+            b"POST / HTTP/1.1\r\n"
+            b"Connection: close\r\n"
+            b"Content-Length: 5\r\n"
+            b"Expect: 100-continue\r\n"
+            b"\r\n"
+        )
+
+        self.assertEqual(transport.value(), b"HTTP/1.1 100 Continue\r\n\r\n")
+        self.assertFalse(transport.disconnecting)
+
+        protocol.dataReceived(b"xxxxx")
+        while not transport.disconnecting:
+            self.reactor.advance(1)
+
+        response = transport.value().decode()
+        self.assertRegex(
+            response,
+            r"^HTTP/1\.1 100 Continue\r\n\r\nHTTP/1\.1 404 ",
+        )
 
     def test_too_many_content_length_headers(self) -> None:
         """HTTP requests with multiple Content-Length headers should be rejected with 400"""
