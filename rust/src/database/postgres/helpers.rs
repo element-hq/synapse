@@ -66,13 +66,14 @@ where
 {
     /// Block on `self` on the given runtime and convert a Postgres error into
     /// a `PyErr`.
-    fn block_on_result(self, py: Python<'_>, handle: &Handle) -> PyResult<T> {
+    fn block_on_pg_result(self, py: Python<'_>, handle: &Handle) -> PyResult<T> {
         self.block_on(py, handle).map_err(pg_err_to_py)
     }
 }
 
 // Blanket impls: every suitable future automatically gets `block_on` /
-// `block_on_result`, so callers can write `fut.block_on(py)` directly.
+// `block_on_pg_result`, so callers can write `fut.block_on(py, handle)`
+// directly.
 impl<F> BlockingPostgres for F
 where
     F: Future + Sized + Send + Ungil,
@@ -172,12 +173,12 @@ mod tests {
     }
 
     #[test]
-    fn block_on_result_maps_ok_through() {
+    fn block_on_pg_result_maps_ok_through() {
         Python::initialize();
         let rt = test_runtime();
         Python::attach(|py| {
             let ok = async { Ok::<i32, tokio_postgres::Error>(5) };
-            assert_eq!(ok.block_on_result(py, rt.handle()).unwrap(), 5);
+            assert_eq!(ok.block_on_pg_result(py, rt.handle()).unwrap(), 5);
             // The error path (mapping a `tokio_postgres::Error` to a `PyErr`)
             // isn't covered here, because that error type can't be constructed
             // by hand. Exercising it needs a live server.
