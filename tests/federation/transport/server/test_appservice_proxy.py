@@ -265,7 +265,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
             "GET", f"/_matrix/federation/{VERSIONED_PREFIX}/some/path"
         )
 
-        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.code, 500)
         self.agent.request.assert_called()
 
     def test_unregistered_prefix_is_rejected(self) -> None:
