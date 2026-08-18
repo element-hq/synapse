@@ -168,7 +168,7 @@ class NotifierTestCase(tests.unittest.HomeserverTestCase):
 
         wait_d = defer.ensureDeferred(self.notifier.wait_for_stream_token(token))
 
-        # Advance time to make the `wait_for_stream_token(...)`.
+        # Advance time to make the `wait_for_stream_token(...)` timeout.
         self.reactor.advance(Duration(seconds=11).as_secs())
 
         # Make sure we gave up waiting and not caught-up (False)
