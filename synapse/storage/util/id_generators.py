@@ -244,9 +244,10 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self._writers = writers
         self._return_factor = 1 if positive else -1
 
-        # The `instance_name` label is what separates one process's series from
-        # another's. In production the scrape labels would do that too, but tests
-        # run several homeservers in one process.
+        # The `instance_name` label is what separates one worker's metrics from
+        # another's when there are multiple Synapse workers for the same homeserver
+        # running in the same process. In production the scrape labels would do that
+        # too, but tests run several homeservers in one process.
         self._current_position_gauge = stream_current_position_gauge.labels(
             stream_name=stream_name,
             instance_name=instance_name,
