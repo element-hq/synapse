@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-7fd3c2af.js";
+            window.path_to_searchindex_js = "../../searchindex-35ac8dfb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -335,11 +335,12 @@ necessary registration and event handling.</p>
 <ul>
 <li>will need an <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/storage/databases/main/thread_subscriptions.py#L75">ID generator</a>
 <ul>
-<li>may need <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/synapse/config/workers.py#L177">writer configuration</a>, if there isn’t already an obvious source of configuration for which workers should be designated as writers to your new stream.
+<li>may need <a href="https://github.com/element-hq/synapse/blob/62a4bc46203880dd5034483b0e84156d03a3a8c6/synapse/config/workers.py#L184-L187">writer configuration</a>, if there isn’t already an obvious source of configuration for which workers should be designated as writers to your new stream.
 <ul>
 <li>if adding new writer configuration, add Docker-worker configuration, which lets us configure the writer worker in Complement tests: <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L331">[1]</a>, <a href="https://github.com/element-hq/synapse/blob/4367fb2d078c52959aeca0fe6874539c53e8360d/docker/configure_workers_and_start.py#L440">[2]</a></li>
 </ul>
 </li>
+<li>Ensure that it’s been correctly added to <code>synapse/replication/tcp/handler.py</code> and it’s <code>streams_to_replicate</code> attribute to ensure that changes are actually replicated.</li>
 </ul>
 </li>
 </ul>

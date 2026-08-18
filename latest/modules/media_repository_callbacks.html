@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-7fd3c2af.js";
+            window.path_to_searchindex_js = "../searchindex-35ac8dfb.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-64310643.js"></script>
@@ -279,9 +279,6 @@ may change without notice.
 </span></strong></p>
 <p>Called when a user attempts to upload media that would exceed a
 <a href="../usage/configuration/config_documentation.html#media_upload_limits">configured media upload limit</a>.</p>
-<p>This callback will only be called on workers which handle
-<a href="https://spec.matrix.org/v1.15/client-server-api/#post_matrixmediav3upload">POST /_matrix/media/v3/upload</a>
-requests.</p>
 <p>This could be used to inform the user that they have reached a media upload limit through
 some external method.</p>
 <p>The arguments passed to this callback are:</p>
