@@ -1104,6 +1104,9 @@ class HomeserverTestCase(TestCase):
     ) -> int:
         """Get the value of a prometheus metric with the given labels.
 
+        This function will raise an AssertionError if there is not exactly one
+        sample with the given labels.
+
         Note that the metrics outlives each individual test, so it may hold
         values from previous tests.
 
@@ -1113,7 +1116,8 @@ class HomeserverTestCase(TestCase):
         labels = dict(labels)
         labels[SERVER_NAME_LABEL] = self.hs.hostname
 
-        found_values = []  # Matching values for the given labels. Should be exactly one.
+        # Matching samples for the given labels.
+        found_samples = []
 
         for collected in metric.collect():
             for sample in collected.samples:
@@ -1125,13 +1129,25 @@ class HomeserverTestCase(TestCase):
                 else:
                     # We didn't break, so all the labels matched. Return this
                     # sample's value.
-                    found_values.append(int(sample.value))
+                    found_samples.append(sample)
 
-        if len(found_values) == 1:
-            return found_values[0]
-        elif len(found_values) > 1:
+        # The caller expects there to be exactly one sample with the given
+        # labels. If there are multiple (or zero) samples, we error.
+        if len(found_samples) == 1:
+            # We found exactly one sample with the given labels, so return its
+            # value.
+            return int(found_samples[0].value)
+        elif len(found_samples) > 1:
+            # We found multiple samples with the given labels, so we error. We
+            # helpfully include the differences in labels between the samples to
+            # help the caller figure out why they got multiple samples.
+            labels_differences_dicts = _get_dict_differences(
+                [sample.labels for sample in found_samples]
+            )
+            differences_str = "\n".join(f" {diff}" for diff in labels_differences_dicts)
+
             raise AssertionError(
-                f"Multiple metrics found for {metric} with labels {labels}: {found_values}"
+                f"Multiple metrics found for '{metric}' with labels {labels}\n\nDifferences in labels:\n{differences_str}"
             )
         else:
             raise AssertionError(f"No metric found for {metric} with labels {labels}")
@@ -1318,3 +1334,25 @@ def skip_unless(condition: bool, reason: str) -> Callable[[TV], TV]:
         return f
 
     return decorator
+
+
+def _get_dict_differences(dicts: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Return a list of dicts where each dict has the common key/values removed.
+
+    Useful for printing comparisons of prometheus metrics with different labels.
+    """
+    if not dicts:
+        return []
+
+    # Find the common key/values across all dicts
+    common_items = set(dicts[0].items())
+    for d in dicts[1:]:
+        common_items.intersection_update(d.items())
+
+    # Remove the common items from each dict
+    differences = []
+    for d in dicts:
+        diff = {k: v for k, v in d.items() if (k, v) not in common_items}
+        differences.append(diff)
+
+    return differences
