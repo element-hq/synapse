@@ -1,0 +1,1 @@
+Fix `__len__` of Sliding Sync `PerConnectionState` ignoring account data.

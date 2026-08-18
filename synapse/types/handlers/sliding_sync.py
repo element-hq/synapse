@@ -951,7 +951,12 @@ class PerConnectionState:
         )
 
     def __len__(self) -> int:
-        return len(self.rooms) + len(self.receipts) + len(self.room_configs)
+        return (
+            len(self.account_data)
+            + len(self.rooms)
+            + len(self.receipts)
+            + len(self.room_configs)
+        )
 
 
 @attr.s(auto_attribs=True)
