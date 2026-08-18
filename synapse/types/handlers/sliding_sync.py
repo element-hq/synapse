@@ -965,13 +965,12 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
     def record_sent_fields(self, user_id: str, field_names: list[str]) -> None:
         """Record that we have sent these fields for a user in the response"""
         updated_statuses = cast(
-            MutableMapping[str, MutableMapping[str, HaveSent[T]]], self._statuses.maps[0]
+            MutableMapping[str, MutableMapping[str, HaveSent[T]]],
+            self._statuses.maps[0],
         )
         user_fields = updated_statuses.get(user_id)
         if user_fields is None:
-            user_fields = dict(
-                cast(Mapping[str, HaveSent[T]], self._statuses.get(user_id, {}))
-            )
+            user_fields = dict(self._statuses.get(user_id, {}))
             updated_statuses[user_id] = user_fields
 
         for field_name in field_names:
@@ -980,6 +979,7 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
                 continue
 
             user_fields[field_name] = HaveSent.live()
+
     def record_unsent_fields(
         self, user_id: str, field_names: list[str], from_token: T
     ) -> None:
@@ -990,11 +990,12 @@ class MutableProfileFieldStatusMap(ProfileFieldStatusMap[T]):
             return
 
         updated_statuses = cast(
-            MutableMapping[str, MutableMapping[str, HaveSent[T]]], self._statuses.maps[0]
+            MutableMapping[str, MutableMapping[str, HaveSent[T]]],
+            self._statuses.maps[0],
         )
         user_fields = updated_statuses.get(user_id)
         if user_fields is None:
-            user_fields = dict(cast(Mapping[str, HaveSent[T]], self._statuses[user_id]))
+            user_fields = dict(self._statuses[user_id])
             updated_statuses[user_id] = user_fields
 
         for field_name in field_names:
