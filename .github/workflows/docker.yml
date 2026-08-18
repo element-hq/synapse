@@ -41,13 +41,13 @@ jobs:
           echo "SYNAPSE_VERSION=$(grep "^version" pyproject.toml | sed -E 's/version\s*=\s*["]([^"]*)["]/\1/')" >> $GITHUB_ENV
 
       - name: Log in to DockerHub
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -79,7 +79,7 @@ jobs:
              services/backend-repositories/secret/data/oci.element.io password | OCI_PASSWORD ;
 
       - name: Login to Element OCI Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: oci-push.vpn.infra.element.io
           username: ${{ steps.import-secrets.outputs.OCI_USERNAME }}
@@ -136,14 +136,14 @@ jobs:
           merge-multiple: true
 
       - name: Log in to DockerHub
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: ${{ startsWith(matrix.repository, 'docker.io') }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         if: ${{ startsWith(matrix.repository, 'ghcr.io') }}
         with:
           registry: ghcr.io
@@ -176,7 +176,7 @@ jobs:
              services/backend-repositories/secret/data/oci.element.io password | OCI_PASSWORD ;
 
       - name: Login to Element OCI Registry
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: oci-push.vpn.infra.element.io
           username: ${{ steps.import-secrets.outputs.OCI_USERNAME }}
