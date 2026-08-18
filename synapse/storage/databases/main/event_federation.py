@@ -1194,8 +1194,8 @@ class EventFederationWorkerStore(
         # Return all events where not all sets can reach them.
         return {eid for eid, n in event_to_missing_sets.items() if n}
 
-    # 22/04/2026: Unused currently, but will be used in future MSC4242 PRs.
-    # Remove comment when used.
+    # FIXME(2026-04-22): Remove comment when used. Unused currently, but will be used in
+    # future MSC4242 PRs.
     async def get_state_dag(
         self, room_id: str, forward_extrems: set[str]
     ) -> dict[str, FrozenEventVMSC4242]:
@@ -1257,8 +1257,8 @@ class EventFederationWorkerStore(
 
         return result
 
-    # 22/04/2026: Unused currently, but will be used in future MSC4242 PRs.
-    # Remove comment when used.
+    # FIXME(2026-04-22): Remove comment when used. Unused currently, but will be used in
+    # future MSC4242 PRs.
     async def get_missing_events_state_dag(
         self,
         *,
@@ -1301,12 +1301,15 @@ class EventFederationWorkerStore(
         Earliest events are treated as already-visited: they are not emitted,
         and their predecessors are not traversed via them.
 
-        Results are deterministic and ordered by BFS, with lexicographic tie-breaking among
-        siblings at the same # hops away.
+        Results are deterministic and ordered by breadth-first search (BFS), with lexicographic
+        tie-breaking among siblings at the same hops away.
 
         Executes as a single recursive CTE in both SQLite and Postgres.
         """
         earliest_set = set(earliest_event_ids)
+        # Sort the seeds lexicographically by event ID: seeds are all 0 hops away from
+        # themselves, so the event ID is the only tie-breaker available for them and we need
+        # the walk to start from a deterministic order.
         seed_ids = sorted(set(latest_event_ids) - earliest_set)
         if not seed_ids or limit <= 0:
             return []
@@ -1340,6 +1343,9 @@ class EventFederationWorkerStore(
                 AND e.prev_state_event_id IS NOT NULL
                 AND {earliest_clause}
 
+                -- `UNION` rather than `UNION ALL`: the same (event_id, hops) pair can be
+                -- reached via multiple children, and de-duplicating here stops us expanding
+                -- the same row over and over.
                 UNION
 
                 SELECT
@@ -1351,8 +1357,15 @@ class EventFederationWorkerStore(
                 AND e.event_id = w.event_id
                 WHERE e.prev_state_event_id IS NOT NULL
                 AND {earliest_clause}
+                -- Bound the recursion by `limit`: every extra hop adds at least one event to
+                -- the result, so events more than `limit` hops away can never make it into a
+                -- `limit`-sized response. This also caps the work done for a single query.
                 AND w.hops < ?
             )
+            -- An event can be reached by several paths with different hop counts. MSC4242
+            -- orders by distance from the seed events, which is the *shortest* such path, so
+            -- collapse each event to its minimum hop count before sorting. `hops` is only
+            -- selected because we need it as the primary sort key.
             SELECT event_id, MIN(hops) AS hops
             FROM walk
             GROUP BY event_id

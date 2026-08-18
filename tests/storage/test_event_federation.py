@@ -1465,8 +1465,9 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         got_types.reverse()  # we walked up the graph but want_types is walking down
         self.assertEqual(got_types, want_types)
 
-        # Check that getting the state DAG from the create event returns nothing as there are
-        # no earlier events.
+        # Check that getting the state DAG from the create event returns just the create event
+        # itself: we always return the requested forward extremities, and there are no earlier
+        # events to walk back to.
         assert create_event_id is not None
         state_dag = self.get_success(
             self.store.get_state_dag(room_id, {create_event_id}),
@@ -1642,11 +1643,19 @@ def build_state_dag(
             graph_events[prev_graph_event_id].event_id
             for prev_graph_event_id in graph[graph_event_id]
         ]
+        # Event IDs are hashes of the event, so we cannot choose them directly. Instead, keep
+        # rebuilding the event with a different `origin_server_ts` until the hash happens to
+        # start with the fake event ID (e.g. "B" produces "$B..."). Ordering in the state DAG
+        # breaks ties lexicographically on the real event ID, so having the real IDs sort in
+        # the same order as the fake names is what makes the expectations in these tests
+        # readable.
         while graph_event_id not in graph_events:
             graph_event = FrozenEventVMSC4242(
                 {
                     "type": "foo",
-                    "state_key": graph_event_id,  # modify state_key as that forms part of the event hash
+                    # All the fake events share a `type`, so the `state_key` is what makes
+                    # each one a distinct piece of state.
+                    "state_key": graph_event_id,
                     "content": {},
                     "sender": creator,
                     "origin_server_ts": 1 + entropy,
