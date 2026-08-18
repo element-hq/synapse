@@ -922,7 +922,7 @@ class Notifier:
                     ).inc()
 
                 logger.warning(
-                    "Timed out this worker's streams to advance to given token: %s",
+                    "Timed out waiting for this worker's streams to advance to given token: %s",
                     _describe_lagging_streams(
                         stream_token, current_token, lagging_stream_keys
                     ),
