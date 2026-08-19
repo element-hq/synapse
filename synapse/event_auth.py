@@ -61,10 +61,12 @@ from synapse.api.room_versions import (
     EventFormatVersions,
     RoomVersion,
 )
-from synapse.events import FrozenEventVMSC4242, is_creator
+from synapse.events import is_creator
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
+    JsonMapping,
     MutableStateMap,
     StateKey,
     StateMap,
@@ -128,7 +130,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
     )
 
     # Check the sender's domain has signed the event
-    if not event.signatures.get(sender_domain):
+    if sender_domain not in event.signatures:
         # We allow invites via 3pid to have a sender from a different
         # HS, as the sender must match the sender of the original
         # 3pid invite. This is checked further down with the
@@ -141,7 +143,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
         event_id_domain = get_domain_from_id(event.event_id)
 
         # Check the origin domain has signed the event
-        if not event.signatures.get(event_id_domain):
+        if event_id_domain not in event.signatures:
             raise AuthError(403, "Event not signed by sending server")
 
     is_invite_via_allow_rule = (
@@ -154,7 +156,7 @@ def validate_event_for_room_version(event: "EventBase") -> None:
         authoriser_domain = get_domain_from_id(
             event.content[EventContentFields.AUTHORISING_USER]
         )
-        if not event.signatures.get(authoriser_domain):
+        if authoriser_domain not in event.signatures:
             raise AuthError(403, "Event not signed by authorising server")
 
 
@@ -187,8 +189,8 @@ async def check_state_independent_auth_rules(
         return
 
     # State DAGs 2. Considering the event's prev_state_events:
-    if event.room_version.msc4242_state_dags:
-        prev_state_events_ids = set(cast(FrozenEventVMSC4242, event).prev_state_events)
+    if supports_msc4242_state_dag(event):
+        prev_state_events_ids = set(event.prev_state_events)
         # Fetch all of the `prev_state_events`
         prev_state_events = {}
         # Try to load the `prev_state_events` from `batched_auth_events` initially as
@@ -515,8 +517,7 @@ def _check_create(event: "EventBase") -> None:
         raise AuthError(403, "Create event has prev events")
 
     # State DAGs 1.2 If it has any prev_state_events, reject.
-    if event.room_version.msc4242_state_dags:
-        assert isinstance(event, FrozenEventVMSC4242)
+    if supports_msc4242_state_dag(event):
         if len(event.prev_state_events) > 0:
             raise AuthError(403, "Create event has prev state events")
 
@@ -856,6 +857,7 @@ def get_send_level(
         power level required to send this event.
     """
 
+    power_levels_content: JsonMapping
     if power_levels_event:
         power_levels_content = power_levels_event.content
     else:

@@ -36,7 +36,7 @@ from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import EventBase, FrozenEventV3
+from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.federation.transport.client import (
     StateRequestResponse,
@@ -566,17 +566,20 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
             SynapseError,
         )
 
-        # Send a message to the dehydrated device
-        ensureDeferred(
-            self.message_handler.send_device_message(
-                requester=requester,
-                message_type="test.message",
-                messages={user_id: {stored_dehydrated_device_id: {"body": "foo"}}},
+        # Send some messages to the dehydrated device
+        for i in range(12):
+            ensureDeferred(
+                self.message_handler.send_device_message(
+                    requester=requester,
+                    message_type="test.message",
+                    messages={
+                        user_id: {stored_dehydrated_device_id: {"body": f"foo_{i}"}}
+                    },
+                )
             )
-        )
         self.pump()
 
-        # Fetch the message of the dehydrated device
+        # Fetch the first batch of messages from the dehydrated device
         res = self.get_success(
             self.message_handler.get_events_for_dehydrated_device(
                 requester=requester,
@@ -586,12 +589,14 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        self.assertTrue(len(res["next_batch"]) > 1)
-        self.assertEqual(len(res["events"]), 1)
-        self.assertEqual(res["events"][0]["content"]["body"], "foo")
+        self.assertTrue(res.limited)
+        # This batch contains the first 10 events
+        self.assertEqual(len(res.events), 10)
+        self.assertEqual(res.events[0]["content"]["body"], "foo_0")
+        self.assertEqual(res.events[1]["content"]["body"], "foo_1")
 
-        # Fetch the message of the dehydrated device again, which should return
-        # the same message as it has not been deleted
+        # Fetch the first batch again, which should return the same messages as they
+        # have not been deleted
         res = self.get_success(
             self.message_handler.get_events_for_dehydrated_device(
                 requester=requester,
@@ -600,9 +605,26 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
                 limit=10,
             )
         )
-        self.assertTrue(len(res["next_batch"]) > 1)
-        self.assertEqual(len(res["events"]), 1)
-        self.assertEqual(res["events"][0]["content"]["body"], "foo")
+        self.assertTrue(res.limited)
+        self.assertEqual(len(res.events), 10)
+        self.assertEqual(res.events[0]["content"]["body"], "foo_0")
+        self.assertEqual(res.events[7]["content"]["body"], "foo_7")
+
+        # Fetch the next batch
+        res = self.get_success(
+            self.message_handler.get_events_for_dehydrated_device(
+                requester=requester,
+                device_id=stored_dehydrated_device_id,
+                since_token=res.stream_id,
+                limit=10,
+            )
+        )
+        # This is the last batch
+        self.assertFalse(res.limited)
+        # This batch contains the last 2 events
+        self.assertEqual(len(res.events), 2)
+        self.assertEqual(res.events[0]["content"]["body"], "foo_10")
+        self.assertEqual(res.events[1]["content"]["body"], "foo_11")
 
 
 @patch("synapse.crypto.keyring.Keyring.process_request", AsyncMock(return_value=None))
@@ -677,7 +699,7 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
             self.REMOTE1_SERVER_SIGNATURE_KEY,
         )
 
-        create_event = FrozenEventV3(create_event_dict, room_version, {}, None)
+        create_event = make_event_from_dict(create_event_dict, room_version)
         events.append(create_event)
 
         room_version = self.hs.config.server.default_room_version
@@ -700,7 +722,7 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = FrozenEventV3(join_event_dict, room_version, {}, None)
+        join_event = make_event_from_dict(join_event_dict, room_version)
         events.append(join_event)
 
         # Then set the join rules to public
@@ -722,7 +744,7 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
             self.REMOTE1_SERVER_NAME,
             self.REMOTE1_SERVER_SIGNATURE_KEY,
         )
-        join_rules_event = FrozenEventV3(join_rules_event_dict, room_version, {}, None)
+        join_rules_event = make_event_from_dict(join_rules_event_dict, room_version)
         events.append(join_rules_event)
 
         return {(event.type, event.state_key): event for event in events}
@@ -733,7 +755,7 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
         user: str,
         signing_key: SigningKey,
         state: StateMap[EventBase],
-    ) -> FrozenEventV3:
+    ) -> EventBase:
         """Build a join event for the local user, signed by the local server."""
 
         latest_event = max(state.values(), key=lambda e: e.depth)
@@ -759,7 +781,7 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
             get_domain_from_id(user),
             signing_key,
         )
-        return FrozenEventV3(join_event_dict, room_version, {}, None)
+        return make_event_from_dict(join_event_dict, room_version)
 
     @parameterized.expand([("not_pruned", False), ("pruned", True)])
     @patch(

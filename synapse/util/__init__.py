@@ -24,6 +24,7 @@ import logging
 import os
 import typing
 from typing import (
+    Any,
     Iterator,
     Mapping,
     Sequence,
@@ -31,10 +32,13 @@ from typing import (
 )
 
 import attr
+from canonicaljson import encode_canonical_json
 from matrix_common.versionstring import get_distribution_version_string
 
 from twisted.internet import defer
 from twisted.python.failure import Failure
+
+from synapse.types import JsonDict
 
 if typing.TYPE_CHECKING:
     pass
@@ -165,3 +169,107 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
         self._underlying_map = {}
         self._mutable_map.clear()
         self._deletions.clear()
+
+
+@attr.s(slots=True, auto_attribs=True)
+class _DictSplitterState:
+    """State for splitting a dict into multiple dicts, c.f.
+    `split_dict_to_fit_to_size`."""
+
+    subset: dict[str, Any]
+    """A subset of the original dict."""
+
+    estimated_size: int
+    """Estimated size of the JSON encoding of the current payload, including any
+    wrapping structure."""
+
+
+def split_dict_to_fit_to_size(
+    original_dict: dict[str, Any],
+    *,
+    soft_max_size: int,
+    wrapping_object_size: int = 2,
+) -> Iterator[tuple[dict[str, JsonDict], int]]:
+    """Splits a dict up into a list of dicts, each of which is small enough to
+    fit into the given size when encoded as JSON. Every entry in the original
+    dict is in exactly one of the resulting dicts.
+
+    The `wrapping_object_size` can be used if the resulting dicts are going to
+    be wrapped in some additional JSON structure, to account for the additional
+    size of that structure. The default assumes no wrapping, and just accounts
+    for the two curly braces of the dict itself.
+
+    Note that if an individual entry in the original dict is larger than
+    `soft_max_size` then this will emit a dict containing just that entry, which
+    will be larger than `soft_max_size` when encoded as JSON.
+
+    Args:
+        original_dict: The dict to split.
+        soft_max_size: The maximum size of each dict when encoded as JSON.
+        wrapping_object_size: The estimated size of the JSON encoding of the
+            payload when empty.
+
+    Returns:
+        An iterator of (dict, size) pairs, where dict is a subset of the
+        original dict and size is the estimated size of the JSON encoding of
+        that dict, including any wrapping structure.
+    """
+
+    if not original_dict:
+        return
+
+    # Check if the whole dict fits within the size limit. If it does, we can
+    # skip the splitting logic and just return the original dict.
+    full_size = _len_with_wrapping_object(original_dict, wrapping_object_size)
+    if full_size <= soft_max_size:
+        yield (original_dict, full_size)
+        return
+
+    # The current payload being built up. We keep track of the estimated size of
+    # the JSON encoding of this payload so that we can decide when to start a
+    # new one.
+    current_payload = _DictSplitterState(subset={}, estimated_size=wrapping_object_size)
+
+    for key, payload in original_dict.items():
+        current_payload.subset[key] = payload
+        current_size = _len_with_wrapping_object(
+            current_payload.subset, wrapping_object_size
+        )
+
+        if current_size > soft_max_size:
+            # We've exceeded the size limit, so we need to start a new payload. We pop
+            # the current entry from the payload and yield the previous payload, then
+            # start a new payload with just the current entry.
+            if len(current_payload.subset) > 1:
+                current_payload.subset.pop(key)
+                yield current_payload.subset, current_payload.estimated_size
+
+                current_payload = _DictSplitterState(
+                    subset={},
+                    estimated_size=wrapping_object_size,
+                )
+
+                # Recalculate the current size with just the current entry.
+                current_size = _len_with_wrapping_object(
+                    {key: payload}, wrapping_object_size
+                )
+
+        current_payload.subset[key] = payload
+        current_payload.estimated_size = current_size
+
+    if current_payload.subset:
+        # yield the final payload if it's non-empty
+        yield current_payload.subset, current_payload.estimated_size
+
+
+def _len_with_wrapping_object(payload: Any, wrapping_object_size: int) -> int:
+    """Helper function to calculate the size of a payload when encoded as JSON,
+    including any wrapping structure."""
+    return (
+        len(encode_canonical_json(payload))
+        + wrapping_object_size
+        # account for the curly braces of the dict itself, which are
+        # included in the size of the subset but not in the size of the
+        # payload
+        - 2
+    )

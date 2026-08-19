@@ -82,8 +82,8 @@ class HttpTransactionCache:
             assert requester.user is not None, "Guest requester must have a user ID set"
             return (path, "guest", requester.user)
 
-        elif requester.app_service is not None:
-            return (path, "appservice", requester.app_service.id)
+        elif requester.app_service_id is not None:
+            return (path, "appservice", requester.app_service_id)
 
         # Use the user ID and device ID as the transaction key.
         elif requester.device_id:

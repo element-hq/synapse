@@ -23,7 +23,12 @@
 import logging
 import re
 
-from synapse.api.errors import Codes, cs_error
+from synapse.api.errors import (
+    Codes,
+    SynapseError,
+    UnrecognizedRequestError,
+    cs_error,
+)
 from synapse.http.server import (
     HttpServer,
     respond_with_json,
@@ -31,7 +36,12 @@ from synapse.http.server import (
     set_corp_headers,
     set_cors_headers,
 )
-from synapse.http.servlet import RestServlet, parse_integer, parse_string
+from synapse.http.servlet import (
+    RestServlet,
+    parse_boolean,
+    parse_integer,
+    parse_string,
+)
 from synapse.http.site import SynapseRequest
 from synapse.media._base import (
     DEFAULT_MAX_TIMEOUT_MS,
@@ -40,7 +50,7 @@ from synapse.media._base import (
 )
 from synapse.media.media_repository import MediaRepository
 from synapse.media.media_storage import MediaStorage
-from synapse.media.thumbnailer import ThumbnailProvider
+from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
 from synapse.server import HomeServer
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -79,11 +89,17 @@ class PreviewURLServlet(RestServlet):
         self.clock = hs.get_clock()
         self.media_repo = media_repo
         self.media_storage = media_storage
-        assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
+        self.can_respond_403 = hs.config.experimental.msc4452_enabled
 
     async def on_GET(self, request: SynapseRequest) -> None:
         requester = await self.auth.get_user_by_req(request)
+        if self.url_previewer is None:
+            # If we have no url_previewer then it has been disabled by the server.
+            if self.can_respond_403:
+                raise SynapseError(403, "URL Previews are disabled", Codes.FORBIDDEN)
+            else:
+                raise UnrecognizedRequestError(code=404)
         url = parse_string(request, "url", required=True)
         ts = parse_integer(request, "ts")
         if ts is None:
@@ -152,8 +168,9 @@ class ThumbnailResource(RestServlet):
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")
+        animated = parse_boolean(request, "animated", default=False)
         # TODO Parse the Accept header to get an prioritised list of thumbnail types.
-        m_type = "image/png"
+        m_type = ANIMATED_THUMBNAIL_TYPE if animated else "image/png"
         max_timeout_ms = parse_integer(
             request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
         )
@@ -170,6 +187,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    animated=animated,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
@@ -193,23 +211,33 @@ class ThumbnailResource(RestServlet):
                 return
 
             ip_address = request.getClientAddress().host
-            remote_resp_function = (
-                self.thumbnailer.select_or_generate_remote_thumbnail
-                if self.dynamic_thumbnails
-                else self.thumbnailer.respond_remote_thumbnail
-            )
-            await remote_resp_function(
-                request,
-                server_name,
-                media_id,
-                width,
-                height,
-                method,
-                m_type,
-                max_timeout_ms,
-                ip_address,
-                True,
-            )
+            if self.dynamic_thumbnails:
+                await self.thumbnailer.select_or_generate_remote_thumbnail(
+                    request,
+                    server_name,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    ip_address,
+                    True,
+                    animated=animated,
+                )
+            else:
+                await self.thumbnailer.respond_remote_thumbnail(
+                    request,
+                    server_name,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    ip_address,
+                    True,
+                )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
 
@@ -299,10 +327,7 @@ class DownloadResource(RestServlet):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     media_repo = hs.get_media_repository()
-    if hs.config.media.url_preview_enabled:
-        PreviewURLServlet(hs, media_repo, media_repo.media_storage).register(
-            http_server
-        )
+    PreviewURLServlet(hs, media_repo, media_repo.media_storage).register(http_server)
     MediaConfigResource(hs).register(http_server)
     ThumbnailResource(hs, media_repo, media_repo.media_storage).register(http_server)
     DownloadResource(hs, media_repo).register(http_server)

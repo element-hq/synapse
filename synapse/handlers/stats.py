@@ -31,7 +31,7 @@ from typing import (
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.storage.databases.main.state_deltas import StateDelta
-from synapse.types import JsonDict
+from synapse.types import JsonMapping
 from synapse.util.duration import Duration
 from synapse.util.events import get_plain_text_topic_from_event_content
 
@@ -195,7 +195,7 @@ class StatsHandler:
                 )
                 continue
 
-            event_content: JsonDict = {}
+            event_content: JsonMapping = {}
 
             if delta.event_id is not None:
                 event = await self.store.get_event(delta.event_id, allow_none=True)

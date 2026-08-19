@@ -33,7 +33,6 @@ from synapse.api.errors import SynapseError
 from synapse.config._base import RootConfig
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
-from synapse.federation.federation_base import event_from_pdu_json
 from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey
 from synapse.module_api import ModuleApi
 from synapse.rest import admin
@@ -43,6 +42,7 @@ from synapse.types import StreamToken, UserID, UserInfo, create_requester
 from synapse.util.clock import Clock
 
 from tests.handlers.test_sync import generate_sync_config
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -182,7 +182,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
-        invite_event = event_from_pdu_json(
+        invite_event = make_test_pdu_event(
             {
                 "type": EventTypes.Member,
                 "content": {"membership": "invite"},
@@ -308,7 +308,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             remote_server = "otherserver"
             remote_user = "@otheruser:" + remote_server
 
-            invite_event = event_from_pdu_json(
+            invite_event = make_test_pdu_event(
                 {
                     "type": EventTypes.Member,
                     "content": {"membership": "invite"},

@@ -260,7 +260,7 @@ class TestTaskScheduler(HomeserverTestCase):
             await self.task_scheduler.update_task(
                 task.id, result={"counter": current_counter}
             )
-            await self.hs.get_clock().sleep(Duration(microseconds=1))
+            await self.hs.get_clock().sleep(Duration(seconds=1))
 
         return TaskStatus.COMPLETE, None, None  # type: ignore[unreachable]
 

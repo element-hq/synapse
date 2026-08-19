@@ -27,6 +27,7 @@ import math
 import random
 import string
 from collections import OrderedDict
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -67,7 +68,11 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase, event_exists_in_state_dag
 from synapse.events.snapshot import UnpersistedEventContext
-from synapse.events.utils import FilteredEvent, copy_and_fixup_power_levels_contents
+from synapse.events.utils import (
+    FilteredEvent,
+    PowerLevelsContent,
+    copy_and_fixup_power_levels_contents,
+)
 from synapse.handlers.relations import BundledAggregations
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams import EventSource
@@ -500,10 +505,12 @@ class RoomCreationHandler:
             except AuthError as e:
                 logger.warning("Unable to update PLs in old room: %s", e)
 
+        power_levels_content: JsonMapping = old_room_pl_state.content
+
         new_room_version = await self.store.get_room_version(new_room_id)
         if new_room_version.msc4289_creator_power_enabled:
-            self._remove_creators_from_pl_users_map(
-                old_room_pl_state.content.get("users", {}),
+            power_levels_content = self._copy_and_remove_creators_from_pl_users_map(
+                power_levels_content,
                 requester.user.to_string(),
                 additional_creators,
             )
@@ -515,9 +522,7 @@ class RoomCreationHandler:
                 "state_key": "",
                 "room_id": new_room_id,
                 "sender": requester.user.to_string(),
-                "content": copy_and_fixup_power_levels_contents(
-                    old_room_pl_state.content
-                ),
+                "content": copy_and_fixup_power_levels_contents(power_levels_content),
             },
             ratelimit=False,
         )
@@ -686,11 +691,12 @@ class RoomCreationHandler:
 
         if new_room_version.msc4289_creator_power_enabled:
             # the creator(s) cannot be in the users map
-            self._remove_creators_from_pl_users_map(
-                user_power_levels,
+            fixed_power_levels = self._copy_and_remove_creators_from_pl_users_map(
+                power_levels,
                 user_id,
                 additional_creators,
             )
+            initial_state[(EventTypes.PowerLevels, "")] = fixed_power_levels
 
         # We construct a subset of what the body of a call to /createRoom would look like
         # for passing to the spam checker. We don't include a preset here, as we expect the
@@ -700,12 +706,12 @@ class RoomCreationHandler:
         spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
             user_id,
             {
-                "creation_content": creation_content,
+                "creation_content": dict(creation_content),
                 "initial_state": [
                     {
                         "type": state_key[0],
                         "state_key": state_key[1],
-                        "content": event_content,
+                        "content": dict(event_content),
                     }
                     for state_key, event_content in initial_state.items()
                 ],
@@ -1339,6 +1345,11 @@ class RoomCreationHandler:
             if is_direct:
                 content["is_direct"] = is_direct
 
+            if self.config.experimental.msc4491_enabled:
+                reason = config.get("uk.timedout.msc4491.invite_reason")
+                if reason and isinstance(reason, str):
+                    content["reason"] = reason
+
             for invitee in invite_list:
                 (
                     member_event_id,
@@ -1398,30 +1409,77 @@ class RoomCreationHandler:
         is_public: bool,
         room_version: RoomVersion,
     ) -> tuple[EventBase, synapse.events.snapshot.EventContext]:
-        (
-            creation_event,
-            new_unpersisted_context,
-        ) = await self.event_creation_handler.create_event(
-            creator,
-            {
+        """Create and store the create event for a v12+ room, retrying on room ID collision.
+
+        In v12+ rooms the room ID is derived from the create event, so this
+        builds the create event, stores the room under the resulting ID, and
+        retries with a slightly older `origin_server_ts` if that ID is already taken.
+
+        Args:
+            creator: The user creating the room.
+            creation_content: The content for the create event.
+            is_public: Whether the room is published to the room directory.
+            room_version: The version of the room being created.
+
+        Returns:
+            A tuple of the create event and its event context.
+
+        Raises:
+            StoreError: if a unique room ID could not be generated after several
+                attempts.
+        """
+        # In v12+ rooms, the room ID is the reference hash of the create event,
+        # so two rooms whose create events have identical content collide on the
+        # same room ID. This happens in practice when the same user creates
+        # several rooms at once (e.g. concurrent /createRoom requests with the
+        # same config), as the only entropy in the create event is
+        # `origin_server_ts`, which has millisecond resolution.
+        #
+        # Retry a few times on collision, perturbing `origin_server_ts`
+        # so the create event hashes to a fresh room ID. This mirrors the
+        # collision handling in `_generate_and_create_room_id` used for
+        # older room versions.
+        attempts = 0
+        while attempts < 5:
+            event_dict: JsonDict = {
                 "content": creation_content,
                 "sender": creator.user.to_string(),
                 "type": EventTypes.Create,
                 "state_key": "",
-            },
-            prev_event_ids=[],
-            depth=1,
-            state_map={},
-            for_batch=False,
-        )
-        await self.store.store_room(
-            room_id=creation_event.room_id,
-            room_creator_user_id=creator.user.to_string(),
-            is_public=is_public,
-            room_version=room_version,
-        )
-        creation_context = await new_unpersisted_context.persist(creation_event)
-        return (creation_event, creation_context)
+            }
+            if attempts > 0:
+                # Bump the timestamp to give the create event (and hence the
+                # room ID it hashes to) different content from the colliding one.
+                event_dict["origin_server_ts"] = (
+                    self.clock.time_msec() + random.randint(1, 10)
+                )
+
+            (
+                creation_event,
+                new_unpersisted_context,
+            ) = await self.event_creation_handler.create_event(
+                creator,
+                event_dict,
+                prev_event_ids=[],
+                depth=1,
+                state_map={},
+                for_batch=False,
+            )
+            try:
+                await self.store.store_room(
+                    room_id=creation_event.room_id,
+                    room_creator_user_id=creator.user.to_string(),
+                    is_public=is_public,
+                    room_version=room_version,
+                )
+            except StoreError:
+                attempts += 1
+                continue
+
+            creation_context = await new_unpersisted_context.persist(creation_event)
+            return (creation_event, creation_context)
+
+        raise StoreError(500, "Couldn't generate a unique room ID.")
 
     async def _send_events_for_new_room(
         self,
@@ -1431,7 +1489,7 @@ class RoomCreationHandler:
         room_config: JsonDict,
         invite_list: list[str],
         initial_state: MutableStateMap,
-        creation_content: JsonDict,
+        creation_content: JsonMapping,
         room_alias: RoomAlias | None = None,
         power_level_content_override: JsonDict | None = None,
         creator_join_profile: JsonDict | None = None,
@@ -1502,7 +1560,7 @@ class RoomCreationHandler:
 
         async def create_event(
             etype: str,
-            content: JsonDict,
+            content: JsonMapping,
             for_batch: bool,
             **kwargs: Any,
         ) -> tuple[EventBase, synapse.events.snapshot.UnpersistedEventContextBase]:
@@ -1555,6 +1613,7 @@ class RoomCreationHandler:
         if creation_event_with_context is None:
             # MSC2175 removes the creator field from the create event.
             if not room_version.implicit_room_creator:
+                creation_content = dict(creation_content)
                 creation_content["creator"] = creator_id
             creation_event, unpersisted_creation_context = await create_event(
                 EventTypes.Create, creation_content, False
@@ -1829,18 +1888,28 @@ class RoomCreationHandler:
             )
         return preset_name, preset_config
 
-    def _remove_creators_from_pl_users_map(
+    def _copy_and_remove_creators_from_pl_users_map(
         self,
-        users_map: dict[str, int],
+        power_levels_content: PowerLevelsContent,
         creator: str,
         additional_creators: list[str] | None,
-    ) -> None:
+    ) -> PowerLevelsContent:
+        users_map = power_levels_content.get("users", {})
+        if not users_map:
+            return power_levels_content
+
+        assert isinstance(users_map, Mapping)
+        users_map = dict(users_map)
+
         creators = [creator]
         if additional_creators:
             creators.extend(additional_creators)
         for creator in creators:
             # the creator(s) cannot be in the users map
             users_map.pop(creator, None)
+
+        power_levels_content = {**power_levels_content, "users": users_map}
+        return power_levels_content
 
     def _generate_room_id(self) -> str:
         """Generates a random room ID.

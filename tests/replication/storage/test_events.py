@@ -272,6 +272,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             "origin_server_ts": self.event_id,
             "prev_events": prev_events,
             "auth_events": auth_events,
+            "hashes": {},
         }
         if key is not None:
             event_dict["state_key"] = key

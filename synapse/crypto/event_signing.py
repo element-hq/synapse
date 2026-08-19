@@ -33,8 +33,9 @@ from unpaddedbase64 import decode_base64, encode_base64
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
-from synapse.events.utils import prune_event, prune_event_dict
+from synapse.events.utils import prune_event
 from synapse.logging.opentracing import trace
+from synapse.synapse_rust.events import redact_event_dict
 from synapse.types import JsonDict, UserID
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,7 @@ def compute_event_signature(
     Returns:
         a dictionary in the same format of an event's signatures field.
     """
-    redact_json = prune_event_dict(room_version, event_dict)
+    redact_json = redact_event_dict(room_version, event_dict)
     redact_json.pop("age_ts", None)
     redact_json.pop("unsigned", None)
     if logger.isEnabledFor(logging.DEBUG):
@@ -236,9 +237,7 @@ def event_needs_resigning(
     if sender.domain != server_name:
         return False
     want_key_id = verify_key.alg + ":" + verify_key.version
-    signed_with_current_key_id = ev.signatures.get(server_name, {}).get(
-        want_key_id, None
-    )
+    signed_with_current_key_id = ev.signatures.get_signature(server_name, want_key_id)
     if signed_with_current_key_id:
         return False
 

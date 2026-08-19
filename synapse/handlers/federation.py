@@ -106,6 +106,12 @@ backfill_processing_before_timer = Histogram(
 )
 
 
+NUMBER_OF_EVENTS_TO_BACKFILL = 100
+"""
+The number of events we try to backfill from other servers in a single request.
+"""
+
+
 # TODO: We can refactor this away now that there is only one backfill point again
 class _BackfillPointType(Enum):
     # a regular backwards extremity (ie, an event which we don't yet have, but which
@@ -256,7 +262,9 @@ class FederationHandler:
             _BackfillPoint(event_id, depth, _BackfillPointType.BACKWARDS_EXTREMITY)
             for event_id, depth in await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=current_depth,
+                # Per the docstring, it's best to pad the `current_depth` by the
+                # number of messages you plan to backfill from these points.
+                nearby_depth=current_depth + NUMBER_OF_EVENTS_TO_BACKFILL,
                 # We only need to end up with 5 extremities combined with the
                 # insertion event extremities to make the `/backfill` request
                 # but fetch an order of magnitude more to make sure there is
@@ -268,11 +276,22 @@ class FederationHandler:
             )
         ]
 
-        # we now have a list of potential places to backpaginate from. We prefer to
-        # start with the most recent (ie, max depth), so let's sort the list.
+        # we now have a list of potential places to backpaginate from. Figure out which
+        # ones we should prefer, so let's sort the list.
         sorted_backfill_points: list[_BackfillPoint] = sorted(
             backwards_extremities,
-            key=lambda e: -int(e.depth),
+            key=lambda e: (
+                # Prefer backfill points that are closer to the `current_depth`
+                # (absolute distance)
+                abs(current_depth - e.depth),
+                # For the tie-break, we care about events that are actually in the past
+                # as they're more likely to reveal history that we can return (something
+                # absolutely in the past is better than something can potentially extend
+                # into the past).
+                #
+                # This sorts ascending so 0 sorts before 1
+                0 if current_depth >= e.depth else 1,
+            ),
         )
 
         logger.debug(
@@ -293,19 +312,20 @@ class FederationHandler:
             str(len(sorted_backfill_points)),
         )
 
-        # If we have no backfill points lower than the `current_depth` then either we
+        # If we have no backfill points lower than the `nearby_depth` then either we
         # can a) bail or b) still attempt to backfill. We opt to try backfilling anyway
         # just in case we do get relevant events. This is good for eventual consistency
         # sake but we don't need to block the client for something that is just as
         # likely not to return anything relevant so we backfill in the background. The
         # only way, this could return something relevant is if we discover a new branch
         # of history that extends all the way back to where we are currently paginating
-        # and it's within the 100 events that are returned from `/backfill`.
+        # and it's within the `NUMBER_OF_EVENTS_TO_BACKFILL` events that are returned
+        # from `/backfill`.
         if not sorted_backfill_points and current_depth != MAX_DEPTH:
             # Check that we actually have later backfill points, if not just return.
             have_later_backfill_points = await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=MAX_DEPTH,
+                nearby_depth=MAX_DEPTH,
                 limit=1,
             )
             if not have_later_backfill_points:
@@ -465,7 +485,10 @@ class FederationHandler:
 
                 try:
                     await self._federation_event_handler.backfill(
-                        dom, room_id, limit=100, extremities=extremities_to_request
+                        dom,
+                        room_id,
+                        limit=NUMBER_OF_EVENTS_TO_BACKFILL,
+                        extremities=extremities_to_request,
                     )
                     # If this succeeded then we probably already have the
                     # appropriate stuff.
@@ -560,8 +583,8 @@ class FederationHandler:
 
         return pdu
 
-    async def on_event_auth(self, event_id: str) -> list[EventBase]:
-        event = await self.store.get_event(event_id)
+    async def on_event_auth(self, event_id: str, room_id: str) -> list[EventBase]:
+        event = await self.store.get_event(event_id, check_room_id=room_id)
         auth = await self.store.get_auth_chain(
             event.room_id, list(event.auth_event_ids()), include_given=True
         )
@@ -781,9 +804,54 @@ class FederationHandler:
             if not predecessor or not isinstance(predecessor.get("room_id"), str):
                 return event.event_id, max_stream_id
             old_room_id = predecessor["room_id"]
-            logger.debug(
-                "Found predecessor for %s during remote join: %s", room_id, old_room_id
+
+            # We can't take the new room's word for it.
+            # Check to see that the predecessor room consents to the
+            # room upgrade.
+            if not await self._event_auth_handler.is_host_in_room(
+                room_id=old_room_id, host=self.hs.hostname
+            ):
+                logger.info(
+                    "Ignoring unverified predecessor for %s during remote join: %s (not in old room)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            tombstone = await self._state_storage_controller.get_current_state_event(
+                old_room_id,
+                event_type=EventTypes.Tombstone,
+                state_key="",
             )
+
+            if tombstone is None:
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: %s (no tombstone in old room)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            intended_successor_room = tombstone.content.get(
+                EventContentFields.TOMBSTONE_SUCCESSOR_ROOM, None
+            )
+
+            if not isinstance(intended_successor_room, str):
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: %s (tombstone is invalid)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            if intended_successor_room != room_id:
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: predecessor defined as %s (the old room ID) but the old room's tombstone points to %r which doesn't match",
+                    room_id,
+                    old_room_id,
+                    intended_successor_room,
+                )
+                return event.event_id, max_stream_id
 
             # We retrieve the room member handler here as to not cause a cyclic dependency
             member_handler = self.hs.get_room_member_handler()
@@ -1523,7 +1591,14 @@ class FederationHandler:
                     if i == max_retries - 1:
                         raise e
         else:
-            destinations = {x.split(":", 1)[-1] for x in (sender_user_id, room_id)}
+            # The sender always tells us a server to try. Pre-v12 room IDs also
+            # encode the resident server's domain, but v12+ room IDs are a hash
+            # with no domain component, so we must not treat them as a server
+            # name -- doing so raises an invalid-destination error which can
+            # abort the whole exchange before the valid destination is tried.
+            destinations = {get_domain_from_id(sender_user_id)}
+            if ":" in room_id:
+                destinations.add(get_domain_from_id(room_id))
 
             try:
                 await self.federation_client.forward_third_party_invite(

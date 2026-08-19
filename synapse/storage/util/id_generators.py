@@ -38,6 +38,7 @@ from typing import (
 import attr
 from sortedcontainers import SortedList, SortedSet
 
+from synapse.logging import issue9533_logger
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.database import (
     DatabasePool,
@@ -774,6 +775,14 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # We move the current min position up if the minimum current positions
         # of all instances is higher (since by definition all positions less
         # that that have been persisted).
+        #
+        # If we are one of several writers, then we don't need to factor our own
+        # `_current_position` into `_persisted_upto_position` unless we have unfinished
+        # writes (since we know that any future write that happens locally will have
+        # a higher stream ID than any of the other writers' current positions). In other
+        # words, when we have no outstanding writes, then the new `_persisted_upto_position`
+        # can be the minimum of all *other* writers' current positions,
+        #
         our_current_position = self._current_positions.get(self._instance_name, 0)
         min_curr = min(
             (
@@ -783,7 +792,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             ),
             default=our_current_position,
         )
-
         if our_current_position and (self._unfinished_ids or self._in_flight_fetches):
             min_curr = min(min_curr, our_current_position)
 
@@ -819,6 +827,24 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # There was a gap in seen positions, so there is nothing more to
                 # do.
                 break
+
+        # Hacky debug logging to attempt to trace https://github.com/element-hq/synapse/issues/19795.
+        # If this is the to-device stream, and we are a writer for that stream, log some stats
+        if (
+            issue9533_logger.isEnabledFor(logging.DEBUG)
+            and our_current_position > 0
+            and self._stream_name == "to_device"
+        ):
+            issue9533_logger.debug(
+                "stream_id=%i now persisted for stream=%s; _current_positions=%s _unfinished_ids=%s, _known_persisted_positions=%s _persisted_upto_position=%i min_curr=%i",
+                new_id,
+                self._stream_name,
+                self._current_positions,
+                self._unfinished_ids,
+                self._known_persisted_positions,
+                self._persisted_upto_position,
+                min_curr,
+            )
 
     def _update_stream_positions_table_txn(self, txn: Cursor) -> None:
         """Update the `stream_positions` table with newly persisted position."""
@@ -880,14 +906,44 @@ class _MultiWriterCtxManager:
     stream_ids: list[int] = attr.Factory(list)
 
     async def __aenter__(self) -> int | list[int]:
+        def _load(txn: LoggingTransaction) -> list[int]:
+            ids = self.id_gen._load_next_mult_id_txn(txn, self.multiple_ids or 1)
+            # Record the allocated IDs on the context manager as a side effect
+            # (rather than only via the return value), so that if this coroutine
+            # is cancelled after the transaction has committed we still know
+            # which IDs to release below.
+            self.stream_ids = ids
+            return ids
+
         # It's safe to run this in autocommit mode as fetching values from a
         # sequence ignores transaction semantics anyway.
-        self.stream_ids = await self.id_gen._db.runInteraction(
-            "_load_next_mult_id",
-            self.id_gen._load_next_mult_id_txn,
-            self.multiple_ids or 1,
-            db_autocommit=True,
-        )
+        try:
+            await self.id_gen._db.runInteraction(
+                "_load_next_mult_id",
+                _load,
+                db_autocommit=True,
+            )
+        except BaseException:
+            # We catch `BaseException` rather than `Exception`,
+            # because request cancellation surfaces here as exceptions that are
+            # not `Exception` subclasses: `asyncio.CancelledError`
+            # and `GeneratorExit` (raised when a paused coroutine is garbage
+            # collected).
+            #
+            # If we're interrupted (e.g. the enclosing request was cancelled)
+            # after the transaction allocated the IDs but before we returned,
+            # then `__aexit__` will never run, because Python only invokes it
+            # once `__aenter__` has returned. The allocated IDs would then be
+            # leaked into `_unfinished_ids` forever, permanently pinning the
+            # persisted stream position and, e.g., wedging presence.
+            #
+            # So mark them as finished here to unblock the position. This mirrors
+            # what `__aexit__` does on the failure path (marking the IDs finished
+            # and notifying replication, but not persisting a new position).
+            if self.stream_ids:
+                self.id_gen._mark_ids_as_finished(self.stream_ids)
+                self.notifier.notify_replication()
+            raise
 
         if self.multiple_ids is None:
             return self.stream_ids[0] * self.id_gen._return_factor

@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import Field, StrictStr, ValidationError, field_validator
 
-from synapse.types import JsonDict
+from synapse.types import JsonMapping
 from synapse.util.pydantic_models import ParseModel
 from synapse.util.stringutils import random_string
 
@@ -103,7 +103,7 @@ class TopicContent(ParseModel):
             return None
 
 
-def get_plain_text_topic_from_event_content(content: JsonDict) -> str | None:
+def get_plain_text_topic_from_event_content(content: JsonMapping) -> str | None:
     """
     Given the `content` of an `m.room.topic` event, returns the plain-text topic
     representation. Prefers pulling plain-text from the newer `m.topic` field if

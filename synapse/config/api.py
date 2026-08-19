@@ -48,6 +48,9 @@ class ApiConfig(Config):
         self, config: JsonDict
     ) -> Iterable[tuple[str, str | None]]:
         """Get the event types and state keys to include in the prejoin state."""
+        # MSC4311: the create event must always be included in invite/knock state.
+        yield EventTypes.Create, ""
+
         room_prejoin_state_config = config.get("room_prejoin_state") or {}
 
         # backwards-compatibility support for room_invite_state_types

@@ -34,10 +34,11 @@ from synapse.crypto.event_signing import (
     event_needs_resigning,
     resign_event,
 )
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.types import JsonDict
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 
 # Perform these tests using given secret key so we get entirely deterministic
 # signatures output that we can test against.
@@ -62,6 +63,7 @@ class EventSigningTestCase(unittest.TestCase):
             "origin_server_ts": 1000000,
             "signatures": {},
             "type": "X",
+            "content": {},
             "unsigned": {"age_ts": 1000000},
         }
 
@@ -69,12 +71,12 @@ class EventSigningTestCase(unittest.TestCase):
             RoomVersions.V1, event_dict, HOSTNAME, self.signing_key
         )
 
-        event = make_event_from_dict(event_dict)
+        event = make_test_event(event_dict)
 
         self.assertTrue(hasattr(event, "hashes"))
         self.assertIn("sha256", event.hashes)
         self.assertEqual(
-            event.hashes["sha256"], "A6Nco6sqoy18PPfPDVdYvoowfc0PVBk9g9OiyT3ncRM"
+            event.hashes["sha256"], "mq4QfPPpC+QsBd6eqfVsmJIEz8uvMSVK0+AU67PLESk"
         )
 
         self.assertTrue(hasattr(event, "signatures"))
@@ -82,8 +84,8 @@ class EventSigningTestCase(unittest.TestCase):
         self.assertIn(KEY_NAME, event.signatures["domain"])
         self.assertEqual(
             event.signatures[HOSTNAME][KEY_NAME],
-            "PBc48yDVszWB9TRaB/+CZC1B+pDAC10F8zll006j+NN"
-            "fe4PEMWcVuLaG63LFTK9e4rwJE8iLZMPtCKhDTXhpAQ",
+            "18rGIkd4JJXxw9m+1j3BtN+TmqmLip4VHvFbyXLngpB"
+            "LXOqbxlQViQABRzep2cODQ2aa5FnFgz+Llt2P03WiAw",
         )
 
     def test_sign_message(self) -> None:
@@ -102,7 +104,7 @@ class EventSigningTestCase(unittest.TestCase):
             RoomVersions.V1, event_dict, HOSTNAME, self.signing_key
         )
 
-        event = make_event_from_dict(event_dict)
+        event = make_test_event(event_dict)
 
         self.assertTrue(hasattr(event, "hashes"))
         self.assertIn("sha256", event.hashes)
@@ -140,7 +142,7 @@ class EventResigningTestCase(unittest.TestCase):
         add_hashes_and_signatures(
             RoomVersions.V1, event_dict, HOSTNAME, self.signing_key
         )
-        event = make_event_from_dict(event_dict)
+        event = make_test_event(event_dict)
         self.assertIn(HOSTNAME, event.signatures)
         self.assertIn(KEY_NAME, event.signatures[HOSTNAME])
         signature = event.signatures[HOSTNAME][KEY_NAME]
@@ -170,7 +172,7 @@ class EventResigningTestCase(unittest.TestCase):
             "signatures": {},
             "unsigned": {"age_ts": 1000000},
         }
-        event = make_event_from_dict(event_dict)
+        event = make_test_event(event_dict)
         resigned_event = resign_event(event, HOSTNAME, signing_key_2)
         self.assertIn(HOSTNAME, resigned_event["signatures"])
         self.assertIn(key_name_2, resigned_event["signatures"][HOSTNAME])
@@ -187,7 +189,7 @@ class EventResigningTestCase(unittest.TestCase):
             "unsigned": {"age_ts": 1000000},
         }
         internal_metadata: JsonDict = {}
-        event_that_needs_resigning = make_event_from_dict(
+        event_that_needs_resigning = make_test_event(
             event_that_needs_resigning_dict,
             RoomVersions.V1,
             internal_metadata,
@@ -206,7 +208,7 @@ class EventResigningTestCase(unittest.TestCase):
         events_that_dont_need_resigning: list[TestCase] = [
             {
                 "name": "sender domain isn't ours",
-                "event": make_event_from_dict(
+                "event": make_test_event(
                     {**event_that_needs_resigning_dict, "sender": "@u:somewhereelse"},
                     RoomVersions.V1,
                     internal_metadata,
@@ -214,7 +216,7 @@ class EventResigningTestCase(unittest.TestCase):
             },
             {
                 "name": "already signed with this key",
-                "event": make_event_from_dict(
+                "event": make_test_event(
                     {
                         **event_that_needs_resigning_dict,
                         "signatures": {

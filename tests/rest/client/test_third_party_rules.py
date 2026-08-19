@@ -236,7 +236,10 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         async def check(
             ev: EventBase, state: StateMap[EventBase]
         ) -> tuple[bool, JsonDict | None]:
-            ev.content = {"x": "y"}
+            # Try and modify the content, this will fail because the event is
+            # immutable. (We therefore need the type ignore linter, as the
+            # linter will pick this bug up)
+            ev.content = {"x": "y"}  # type: ignore[misc]
             return True, None
 
         self.hs.get_module_api_callbacks().third_party_event_rules._check_event_allowed_callbacks = [
@@ -532,6 +535,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
                     "origin_server_ts": self.clock.time_msec(),
                     "prev_events": [],
                     "auth_events": [],
+                    "hashes": {},
                     "signatures": {},
                     "unsigned": {},
                 }

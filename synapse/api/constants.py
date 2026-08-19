@@ -30,6 +30,33 @@ from synapse.util.duration import Duration
 
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
+# This isn't spec'ed but is our own reasonable default to play nice with Synapse's
+# `max_request_size`/`max_request_body_size`. We chose the same as `MAX_PDU_SIZE` as our
+# `max_request_body_size` math is currently limited by 200 `MAX_PDU_SIZE` things. The
+# spec for a `/federation/v1/send` request sets the limit at 100 EDU's and 50 PDU's
+# which is below that 200 `MAX_PDU_SIZE` limit (`max_request_body_size`).
+#
+# Allowing oversized EDU's results in failed `/federation/v1/send` transactions (because
+# the request overall can overrun the `max_request_body_size`) which are retried over
+# and over and prevent other outbound federation traffic from happening.
+#
+# We may send EDU's that are larger than this, but we aim to avoid doing so.
+SOFT_MAX_EDU_SIZE = 65536
+
+# This is the maximum size of the content of a to-device message. This is not
+# (yet) spec'ed but is our own reasonable default. We need to set a limit on the
+# size of to-device message contents, as they get sent over federation and
+# therefore need to fit inside transactions.
+#
+# https://github.com/matrix-org/matrix-spec/pull/2340 tracks adding this to the
+# spec.
+MAX_TO_DEVICE_CONTENT_SIZE = SOFT_MAX_EDU_SIZE
+
+# This is defined in the Matrix spec and enforced by the receiver.
+MAX_EDUS_PER_TRANSACTION = 100
+# A transaction can contain up to 100 EDUs but synapse reserves 10 EDUs for other purposes
+# like trickling out some device list updates.
+NUMBER_OF_RESERVED_EDUS_PER_TRANSACTION = 10
 
 # The maximum allowed size of an HTTP request.
 # Other than media uploads, the biggest request we expect to see is a fully-loaded
@@ -381,6 +408,57 @@ class Direction(enum.Enum):
 class ProfileFields:
     DISPLAYNAME: Final = "displayname"
     AVATAR_URL: Final = "avatar_url"
+
+
+class ProfileUpdateAction(str, enum.Enum):
+    """
+    Enum representing the action of a row in the profile updates stream tables.
+    The action determines whether a profile field update has occurred, or whether
+    something else has happened that the sync code should know about, for example
+    a user joining or leaving a room.
+    """
+
+    JOINED_ROOM = "joined_room"
+    """
+    This profile update row action represents a user joining a room.
+
+    When gathering an incremental sync non-lazy response for profile updates,
+    we always include the full profile of users who have joined a room the syncing
+    user is a member of, where full profile means all the current profile values the
+    client asked for, regardless of whether they have changed recently. This ensures
+    that clients have profiles re-populated for any users who have recently left
+    shared rooms.
+
+    A scenario example would be as follows:
+
+        * Alice leaves a room with Bob
+        * Bob's client clears all profile fields from Alice
+        * Alice joins a room with Bob
+        * Bob's client does an incremental non-lazy sync
+
+    At the end of the flow Bob should receive all the profile fields the client
+    is interested in, not just the potential diff, which non-lazy incremental sync
+    normally includes. This update action currently has no meaning for sync responses
+    that are not incremental and non-lazy.
+    """
+    LEFT_ROOM = "left_room"
+    """
+    This profile update row action represents a user leaving a room.
+
+    Clients will want to know when they no longer share rooms with a user. This
+    profile action row allows the sync code to deliver a `null` response for those
+    profiles, so clients can clear their cache containing the users profile data
+    they are no longer interested in.
+    """
+    UPDATE = "update"
+    """
+    This profile update row action represents a user updating a profile field.
+
+    Depending on the type of sync (initial/incremental, lazy/non-lazy), either the
+    diff of profile field updates or all the current profile fields are included
+    in the sync response. In the latter case the profile update action row signifies
+    a change, but the client may still get fields that have not changed.
+    """
 
 
 class StickyEventField(TypedDict):

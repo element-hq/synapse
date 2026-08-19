@@ -30,7 +30,7 @@ from synapse.api.constants import (
     Membership,
 )
 from synapse.api.errors import SynapseError
-from synapse.events.utils import FilteredEvent, SerializeEventConfig
+from synapse.events.utils import FilteredEvent
 from synapse.events.validator import EventValidator
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.receipts import ReceiptEventSource
@@ -169,7 +169,9 @@ class InitialSyncHandler:
 
         public_room_ids = await self.store.get_public_room_ids()
 
-        serializer_options = SerializeEventConfig(as_client_event=as_client_event)
+        serializer_options = await self._event_serializer.create_config(
+            as_client_event=as_client_event
+        )
 
         async def handle_room(event: RoomsForUser) -> None:
             d: JsonDict = {
@@ -395,7 +397,9 @@ class InitialSyncHandler:
         end_token = StreamToken.START.copy_and_replace(StreamKeyType.ROOM, stream_token)
 
         time_now = self.clock.time_msec()
-        serialize_options = SerializeEventConfig(requester=requester)
+        serialize_options = await self._event_serializer.create_config(
+            requester=requester
+        )
 
         return {
             "membership": membership,
@@ -436,7 +440,9 @@ class InitialSyncHandler:
 
         # TODO: These concurrently
         time_now = self.clock.time_msec()
-        serialize_options = SerializeEventConfig(requester=requester)
+        serialize_options = await self._event_serializer.create_config(
+            requester=requester
+        )
         # Don't bundle aggregations as this is a deprecated API.
         state = await self._event_serializer.serialize_events(
             [FilteredEvent.state(e) for e in current_state.values()],

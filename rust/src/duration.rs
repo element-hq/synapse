@@ -29,16 +29,43 @@ fn duration_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 }
 
 /// Mirrors the `synapse.util.duration.Duration` Python class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SynapseDuration {
-    microseconds: u64,
+    milliseconds: u64,
 }
 
 impl SynapseDuration {
-    /// For now we only need to create durations from milliseconds.
-    pub fn from_milliseconds(milliseconds: u64) -> Self {
+    /// Creates a `SynapseDuration` from a number of milliseconds.
+    pub const fn from_milliseconds(milliseconds: u64) -> Self {
+        Self { milliseconds }
+    }
+
+    /// Returns the duration as a number of milliseconds.
+    pub const fn as_millis(&self) -> u64 {
+        self.milliseconds
+    }
+
+    /// Creates a `SynapseDuration` from a number of hours.
+    pub const fn from_hours(hours: u32) -> Self {
+        // We take a u32 here so that we know the multiplication won't overflow.
+        // We could instead panic, but that is unstable in a const context (for
+        // the current MSRV 1.82).
         Self {
-            microseconds: milliseconds * 1_000,
+            milliseconds: (hours as u64) * 3_600_000,
         }
+    }
+}
+
+impl<'py> IntoPyObject<'py> for SynapseDuration {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let duration_module = duration_module(py)?;
+        let kwargs = [("milliseconds", self.milliseconds)].into_py_dict(py)?;
+        let duration_instance = duration_module.call_method("Duration", (), Some(&kwargs))?;
+        Ok(duration_instance.into_bound())
     }
 }
 
@@ -49,7 +76,7 @@ impl<'py> IntoPyObject<'py> for &SynapseDuration {
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         let duration_module = duration_module(py)?;
-        let kwargs = [("microseconds", self.microseconds)].into_py_dict(py)?;
+        let kwargs = [("milliseconds", self.milliseconds)].into_py_dict(py)?;
         let duration_instance = duration_module.call_method("Duration", (), Some(&kwargs))?;
         Ok(duration_instance.into_bound())
     }

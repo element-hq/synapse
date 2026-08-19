@@ -21,7 +21,6 @@
 #
 
 
-import copy
 import itertools
 import logging
 from typing import (
@@ -1225,12 +1224,10 @@ class FederationClient(FederationBase):
                 # Copy valid PDUs along with internal metadata.
                 # It's unclear why this is needed but the code seems to expect it.
                 signed_state_dag = [
-                    copy.copy(valid_pdus_map[p.event_id])
+                    valid_pdus_map[p.event_id].deep_copy()
                     for p in state_dag
                     if p.event_id in valid_pdus_map
                 ]
-                for s in signed_state_dag:
-                    s.internal_metadata = s.internal_metadata.copy()
 
                 # Verify each event is for this room (and thus has the same create event as it is v12+)
                 for state_event in signed_state_dag:
@@ -1260,7 +1257,7 @@ class FederationClient(FederationBase):
                 # NB: We *need* to copy to ensure that we don't have multiple
                 # references being passed on, as that causes... issues.
                 signed_state = [
-                    copy.copy(valid_pdus_map[p.event_id])
+                    valid_pdus_map[p.event_id].deep_copy()
                     for p in state
                     if p.event_id in valid_pdus_map
                 ]
@@ -1270,11 +1267,6 @@ class FederationClient(FederationBase):
                     for p in auth_chain
                     if p.event_id in valid_pdus_map
                 ]
-
-                # NB: We *need* to copy to ensure that we don't have multiple
-                # references being passed on, as that causes... issues.
-                for s in signed_state:
-                    s.internal_metadata = s.internal_metadata.copy()
 
                 # double-check that the auth chain doesn't include a different create event
                 auth_chain_create_events = [
@@ -1627,10 +1619,15 @@ class FederationClient(FederationBase):
                 timeout=timeout,
                 state_dag=state_dag,
             )
+            received_time = self._clock.time_msec()
 
             room_version = await self.store.get_room_version(room_id)
 
-            events = parse_events_from_pdu_json(content.get("events", []), room_version)
+            events = parse_events_from_pdu_json(
+                content.get("events", []),
+                room_version,
+                received_time=received_time,
+            )
 
             signed_events = await self._check_sigs_and_hash_for_pulled_events_and_fetch(
                 destination, events, room_version=room_version
