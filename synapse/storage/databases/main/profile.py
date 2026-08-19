@@ -537,7 +537,9 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_profile_updates_for_user_and_fields_txn(
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
+            # Build a `field_clause` that matches updates containing the fields we are interested in
             if field_names_empty_means_all_fields and not field_names:
+                # We are interested in all fields, so match any update with fields
                 field_clause = "pu.affected_fields IS NOT NULL"
                 field_args: list[str] = []
             else:

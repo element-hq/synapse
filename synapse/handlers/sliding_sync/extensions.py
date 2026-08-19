@@ -1097,14 +1097,14 @@ class SlidingSyncExtensionHandler:
         extension sync response.
 
         This function looks at both the sync config and the already calculated
-        rooms response, and pieces together the full set of user ID's to include
+        rooms response, and pieces together the full set of user IDs to include
         profiles for, based on sync config rooms being lazy loading or not.
 
         For rooms with lazy loading, only profiles for those users who have sent events
         into the timeline will be included, unless they would be included otherwise.
         For other rooms, all members of the room will be included as candidates.
 
-        Note, this does not collect user ID's from the profile updates stream.
+        Note, this does not collect user IDs from the profile updates stream.
 
         Args:
             user_id: The full user ID syncing.
@@ -1114,8 +1114,8 @@ class SlidingSyncExtensionHandler:
             actual_room_response_map: A calculated map of responses per room.
 
         Returns:
-            Tuple containing two sets, first including all found user ID's,
-            second containing user ID's calculated via lazy configured rooms.
+            Tuple containing two sets, first including all found user IDs,
+            second containing user IDs calculated via lazy configured rooms.
         """
         lazy_profile_user_ids = set()
         non_lazy_profile_user_ids = set()
@@ -1190,7 +1190,7 @@ class SlidingSyncExtensionHandler:
             fields: A set of fields to include in the response.
             rooms: A set of rooms to limit the user profiles for.
             new_connection_state: The new connection state to be modified.
-            profile_user_ids: Set of user profile ID's related to this sync response.
+            profile_user_ids: Set of user IDs whose profiles are related to this sync response.
 
         Returns:
             A dictionary containing the profile updates in an `updated` dictionary.

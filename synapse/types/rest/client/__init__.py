@@ -486,9 +486,9 @@ class SlidingSyncBody(RequestBodyModel):
                 fields: List of fields to filter upon (optional)
             """
 
-            enabled: StrictBool | None = False
+            enabled: StrictBool = False
             # Optionally filter on specific fields
-            fields: list[StrictStr] | None = []
+            fields: list[StrictStr] | AbsentType = Absent
 
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None

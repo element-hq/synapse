@@ -470,9 +470,9 @@ class ProfileUpdateAction(str, enum.Enum):
     In the sync response deleted fields are indicated separately from updated fields,
     as `None` is a valid value for a field.
 
-    Note that even though deleting displaynames and avatar_url's is done by setting
+    Note that even though deleting displaynames and avatar_urls is done by setting
     them to an empty string, for consistency the profile update stream gets a DELETE
-    action written to it, as the profile updates sync MSC's don't special case
+    action written to it, as the profile updates sync MSCs don't special case
     displayname or avatar_url.
     """
 
