@@ -32,7 +32,7 @@ use std::{
     pin::{pin, Pin},
 };
 
-use futures::{stream::Fuse, FutureExt, StreamExt};
+use futures::{stream::FusedStream, FutureExt, StreamExt};
 use pyo3::{marker::Ungil, PyResult, Python};
 use tokio::runtime::Handle;
 
@@ -112,20 +112,20 @@ where
 {
 }
 
-/// Pull items from a [`Fuse`]d stream from synchronous Python code, blocking on
+/// Pull items from a [`FusedStream`] from synchronous Python code, blocking on
 /// a given runtime only when the next item isn't already buffered.
 ///
-/// Implemented for any pinned, fused stream (`Pin<&mut Fuse<S>>`) whose items
-/// can cross the GIL-release boundary, so it can be tested against an
+/// Implemented for any pinned, fused stream (e.g. `Pin<&mut Fuse<S>>`) whose
+/// items can cross the GIL-release boundary, so it can be tested against an
 /// in-memory stream as well as a [`tokio_postgres::RowStream`].
 ///
-/// The [`Fuse`] bound matters because [`Self::get_next_if_ready`] may poll the
-/// stream again after it has finished. A bare `Stream` is allowed to panic if
-/// polled past completion; a fused stream keeps yielding `None`, so calls
-/// after exhaustion are safe.
+/// The [`FusedStream`] bound matters because [`Self::get_next_if_ready`] may
+/// poll the stream again after it has finished. A bare `Stream` is allowed to
+/// panic if polled past completion; a fused stream keeps yielding `None`, so
+/// calls after exhaustion are safe.
 pub trait BlockingPostgresStream
 where
-    Self: futures::Stream + Sized + Send + Ungil + Unpin,
+    Self: FusedStream + Sized + Send + Ungil + Unpin,
     Self::Item: Ungil + Send,
 {
     /// Get the next item from the stream, blocking on the given runtime if
@@ -136,6 +136,10 @@ where
     ///
     /// This method will return `None` if the stream is exhausted.
     fn block_on_next(&mut self, py: Python<'_>, handle: &Handle) -> Option<Self::Item> {
+        if self.is_terminated() {
+            return None;
+        }
+
         self.next().block_on(py, handle)
     }
 
@@ -144,6 +148,10 @@ where
     /// Returns `None` if the stream is not ready to yield an item. Returns
     /// `Some(None)` if the stream is exhausted.
     fn get_next_if_ready(&mut self) -> Option<Option<Self::Item>> {
+        if self.is_terminated() {
+            return Some(None);
+        }
+
         // Note it is safe to call `now_or_never` here as it's fine to
         // repeatedly call `next()` (as it's a thin wrapper that simply calls
         // `poll_next` on the underlying stream).
@@ -153,10 +161,10 @@ where
 
 // Blanket impl over any pinned, fused stream, not just `RowStream`, so the
 // tests can use an in-memory stream.
-impl<S> BlockingPostgresStream for Pin<&mut Fuse<S>>
+impl<S> BlockingPostgresStream for Pin<&mut S>
 where
-    Self: futures::Stream + Send + Ungil + Unpin,
-    <Self as futures::Stream>::Item: Ungil + Send,
+    Self: FusedStream + Send + Ungil + Unpin,
+    <Self as futures::stream::Stream>::Item: Ungil + Send,
 {
 }
 
