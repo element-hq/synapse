@@ -151,11 +151,14 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
             headers.getRawHeaders(b"X-Matrix-Origin"),
             [self.OTHER_SERVER_NAME.encode("ascii")],
         )
+        self.assertEqual(
+            kwargs["headers"].getRawHeaders(b"Content-Type"), [b"application/json"]
+        )
 
         body_producer = kwargs["bodyProducer"]
         self.assertGreater(body_producer.length, 0)
 
-    def test_connection_header_not_forwarded(self) -> None:
+    def test_headers_outside_the_allowlist_not_forwarded(self) -> None:
         self.agent.request = Mock(
             return_value=defer.succeed(FakeResponse.json(code=200, payload={}))
         )
@@ -170,9 +173,9 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
 
         headers: Headers = kwargs["headers"]
         self.assertIsNone(headers.getRawHeaders(b"Connection"))
-        self.assertEqual(headers.getRawHeaders(b"X-Forward"), [b"forward"])
+        self.assertIsNone(headers.getRawHeaders(b"X-Forward"))
 
-    def test_connection_header_with_named_request_headers_not_forwarded(self) -> None:
+    def test_allowlisted_headers_forwarded(self) -> None:
         self.agent.request = Mock(
             return_value=defer.succeed(FakeResponse.json(code=200, payload={}))
         )
@@ -181,18 +184,16 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
             "GET",
             f"/_matrix/federation/{VERSIONED_PREFIX}/some/path",
             custom_headers=[
-                ("Connection", "close, X-Omit"),
-                ("X-Omit", "omit"),
-                ("X-Forward", "forward"),
+                ("Accept", "application/json"),
+                ("Accept-Language", "en-US"),
             ],
         )
 
         ((_method, _uri), kwargs) = self.agent.request.call_args
 
         headers: Headers = kwargs["headers"]
-        self.assertIsNone(headers.getRawHeaders(b"Connection"))
-        self.assertIsNone(headers.getRawHeaders(b"X-Omit"))
-        self.assertEqual(headers.getRawHeaders(b"X-Forward"), [b"forward"])
+        self.assertEqual(headers.getRawHeaders(b"Accept"), [b"application/json"])
+        self.assertEqual(headers.getRawHeaders(b"Accept-Language"), [b"en-US"])
 
     def test_host_and_content_length_headers_not_forwarded(self) -> None:
         self.agent.request = Mock(

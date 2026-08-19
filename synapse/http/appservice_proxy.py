@@ -59,27 +59,16 @@ async def proxy_request_to_appservice(
     assert appservice.proxy_url is not None
     target_uri = appservice.proxy_url.encode("ascii") + request.uri
 
-    # Other than the "hop-by-hop" headers as defined by RFC2616 we also strip:
-    # - Host and Content-Length (twisted adds these on its own)
-    # - Authorization (because the app service shouldn't need to be concerned with it)
-    headers_to_strip = HOP_BY_HOP_HEADERS_LOWERCASE | {
-        "host",
-        "content-length",
-        "authorization",
-    }
-
-    # The `Connection` header can define additional headers that should not be
-    # copied over.
-    connection_header = request.requestHeaders.getRawHeaders(b"connection")
-    headers_to_strip |= parse_connection_header_value(
-        connection_header[0] if connection_header else None
-    )
-
+    # Only forward the bare minimum of request headers an application service could
+    # plausibly need.
     headers = Headers()
     for header_name, header_values in request.requestHeaders.getAllRawHeaders():
-        if header_name.decode("ascii").lower() in headers_to_strip:
-            continue
-        headers.setRawHeaders(header_name, header_values)
+        if header_name.decode("ascii").lower() in {
+            "content-type",
+            "accept",
+            "accept-language",
+        }:
+            headers.setRawHeaders(header_name, header_values)
     if extra_request_headers:
         for header_name, header_value in extra_request_headers.items():
             headers.setRawHeaders(header_name, [header_value])
