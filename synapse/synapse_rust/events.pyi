@@ -274,6 +274,14 @@ class Event:
     @property
     def unsigned(self) -> Unsigned: ...
     @property
+    def prev_state_events(self) -> list[str]:
+        """The `prev_state_events` field of this event (MSC4242 state DAGs).
+
+        Raises `AttributeError` for event formats which do not support MSC4242, so only
+        access this after checking the room version supports state DAGs.
+        """
+
+    @property
     def internal_metadata(self) -> EventInternalMetadata: ...
     @property
     def rejected_reason(self) -> str | None: ...

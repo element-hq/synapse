@@ -41,7 +41,7 @@ from synapse.api.room_versions import (
     EventFormatVersions,
     RoomVersion,
 )
-from synapse.events import EventBase, FrozenEventVMSC4242
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -1527,7 +1527,7 @@ class EventFederationGetMissingEventsStateDAGTestCase(
 
     def _persist_state_dag(
         self, creator: str, graph: dict[str, list[str]]
-    ) -> tuple[str, dict[str, FrozenEventVMSC4242]]:
+    ) -> tuple[str, dict[str, EventBase]]:
         """Build and persist a state DAG in its own room, as `build_state_dag` returns it."""
         (room_id, graph_events) = build_state_dag(creator, graph)
 
@@ -1563,7 +1563,7 @@ class EventFederationGetMissingEventsStateDAGTestCase(
         earliest: list[str],
         limit: int,
         room_id: str | None = None,
-        graph_events: dict[str, FrozenEventVMSC4242] | None = None,
+        graph_events: dict[str, EventBase] | None = None,
     ) -> list[str]:
         """Run `get_missing_events_state_dag` in terms of fake event IDs, returning the fake
         event IDs which came back. Queries the room built in `prepare` unless told otherwise.
@@ -1791,7 +1791,7 @@ class FakeEvent:
 
 def walk_state_dag(
     graph: dict[str, list[str]],
-    graph_events: dict[str, FrozenEventVMSC4242],
+    graph_events: dict[str, EventBase],
     latest: list[str],
     earliest: list[str],
     limit: int,
@@ -1830,7 +1830,7 @@ def walk_state_dag(
 
 def build_state_dag(
     creator: str, graph: dict[str, list[str]]
-) -> tuple[str, dict[str, FrozenEventVMSC4242]]:
+) -> tuple[str, dict[str, EventBase]]:
     """Build an MSC4242 state DAG.
 
     Args:
@@ -1845,8 +1845,8 @@ def build_state_dag(
         The create event is the exception: its ID is fixed by the room ID, so it does not start with its
         fake event ID.
     """
-    graph_events: dict[str, FrozenEventVMSC4242] = {}  # graph ID => built event
-    create_event = FrozenEventVMSC4242(
+    graph_events: dict[str, EventBase] = {}  # graph ID => built event
+    create_event = make_event_from_dict(
         {
             "type": EventTypes.Create,
             "state_key": "",
@@ -1888,7 +1888,7 @@ def build_state_dag(
         # the same order as the fake names is what makes the expectations in these tests
         # readable.
         while graph_event_id not in graph_events:
-            graph_event = FrozenEventVMSC4242(
+            graph_event = make_event_from_dict(
                 {
                     "type": "foo",
                     # All the fake events share a `type`, so the `state_key` is what makes

@@ -37,7 +37,7 @@ from prometheus_client import Counter, Gauge
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
-from synapse.events import EventBase, FrozenEventVMSC4242, make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -1198,7 +1198,7 @@ class EventFederationWorkerStore(
     # future MSC4242 PRs.
     async def get_state_dag(
         self, room_id: str, forward_extrems: set[str]
-    ) -> dict[str, FrozenEventVMSC4242]:
+    ) -> dict[str, EventBase]:
         """Get the current state DAG for the given room.
 
         This function is called when calculating a /send_join response.
@@ -1231,7 +1231,7 @@ class EventFederationWorkerStore(
         event_map = await self.get_events(event_ids)
         # Filter the returned state events to only include ones on the paths back from the forward
         # extremities.
-        result: dict[str, FrozenEventVMSC4242] = {}
+        result: dict[str, EventBase] = {}
         next_ids = forward_extrems
         seen: set[str] = set()
         while len(next_ids) > 0:
@@ -1242,7 +1242,9 @@ class EventFederationWorkerStore(
                 continue
             seen.add(event_id)
             ev = event_map[event_id]
-            assert isinstance(ev, FrozenEventVMSC4242)
+            # `prev_state_events` only exists on MSC4242 event formats, and this is only
+            # called for state DAG rooms.
+            assert ev.room_version.msc4242_state_dags
             result[event_id] = ev
             for prev_state_event_id in ev.prev_state_events:
                 next_ids.add(prev_state_event_id)
@@ -1250,7 +1252,7 @@ class EventFederationWorkerStore(
         assert len(result) > 0  # we always return the forward extremities
         # Assert that the create event was returned. Pick the first event (any will do) to verify
         # that this room version supports room IDs as hashes.
-        first_event: FrozenEventVMSC4242 = next(iter(result.values()))
+        first_event: EventBase = next(iter(result.values()))
         if first_event.room_version.msc4291_room_ids_as_hashes:
             create_event_id = f"${room_id[1:]}"
             assert create_event_id in result
