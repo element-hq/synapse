@@ -207,12 +207,15 @@ pub fn pg_row_to_py<'py>(
 
 /// A decoded column value, ready to drop into a Python tuple. `None`
 /// represents SQL `NULL`; otherwise it holds the corresponding Python object.
-pub struct PythonPgFromSql(pub Option<Py<PyAny>>);
+struct PythonPgFromSql(pub Option<Py<PyAny>>);
 
 impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
     fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
         // Decoding builds Python objects, so we need the GIL. `try_get` (our
-        // only caller) already runs under it, so this attach is cheap.
+        // only caller) already runs under it, so this attach is cheap. This
+        // also only runs on the python thread and *not* the tokio runtime's
+        // worker threads, so we don't need to blocking wait for the GIL.
+        Python::initialize();
         Python::attach(|py| Self::from_sql_with_py(py, ty, raw))
     }
 
