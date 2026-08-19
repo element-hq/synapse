@@ -501,8 +501,7 @@ class ProfileWorkerStore(SQLBaseStore):
         from_id: int,
         to_id: int,
         user_id: str,
-        field_names: Set[str],
-        field_names_empty_means_all_fields: bool = False,
+        field_names: Set[str] | None,
         include_users: set[str] | None = None,
     ) -> list[ProfileUpdate]:
         """Get profile update markers for a user in a stream range.
@@ -517,8 +516,7 @@ class ProfileWorkerStore(SQLBaseStore):
             to_id: The ending stream ID (inclusive).
             user_id: The full user ID to filter on.
             field_names: Set of field names to filter update actions against.
-            field_names_empty_means_all_fields: If `field_names` is empty and this
-                is `True`, include all field names. Defaults to `False`.
+                `None` means "include all fields".
             include_users: If given, only include updates for these user IDs.
 
         Returns:
@@ -527,7 +525,7 @@ class ProfileWorkerStore(SQLBaseStore):
         if from_id >= to_id:
             return []
 
-        if not field_names_empty_means_all_fields and len(field_names) == 0:
+        if field_names is not None and len(field_names) == 0:
             return []
 
         if include_users is not None and len(include_users) == 0:
@@ -538,7 +536,7 @@ class ProfileWorkerStore(SQLBaseStore):
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
             # Build a `field_clause` that matches updates containing the fields we are interested in
-            if field_names_empty_means_all_fields and not field_names:
+            if field_names is None:
                 # We are interested in all fields, so match any update with fields
                 field_clause = "pu.affected_fields IS NOT NULL"
                 field_args: list[str] = []
@@ -608,14 +606,10 @@ class ProfileWorkerStore(SQLBaseStore):
             for stream_id, updated_user_id, action, affected_fields_dbjson in rows:
                 if affected_fields_dbjson is not None:
                     # Get the field names that were affected by this update
-                    if field_names_empty_means_all_fields and not field_names:
-                        affected_fields = frozenset(db_to_json(affected_fields_dbjson))
-                    else:
-                        # Only include those that intersect with the field names
-                        # we care about
-                        affected_fields = (
-                            frozenset(db_to_json(affected_fields_dbjson)) & field_names
-                        )
+                    affected_fields = frozenset(db_to_json(affected_fields_dbjson))
+                    if field_names is not None:
+                        # Only include the field names that we care about
+                        affected_fields &= field_names
                 else:
                     affected_fields = None
                 updates.append(

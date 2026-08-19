@@ -1169,7 +1169,7 @@ class SlidingSyncExtensionHandler:
     async def _get_profiles_extension_initial_sync_response(
         self,
         user_id: UserID,
-        fields: set[str],
+        fields: set[str] | None,
         new_connection_state: MutablePerConnectionState,
         profile_user_ids: set[str],
     ) -> dict[str, JsonDict | None]:
@@ -1179,6 +1179,7 @@ class SlidingSyncExtensionHandler:
         Args:
             user_id: The syncing user UserID
             fields: A set of fields to include in the response.
+                `None` means all fields.
             new_connection_state: The new connection state to be modified.
             profile_user_ids: Set of user IDs whose profiles are related to this sync response.
 
@@ -1254,7 +1255,7 @@ class SlidingSyncExtensionHandler:
             return None
 
         user_id = sync_config.user.to_string()
-        fields = set(profiles_request.fields) if profiles_request.fields else set()
+        fields = set(profiles_request.fields) if profiles_request.fields else None
 
         response: dict[str, JsonDict | None] = {}
 
@@ -1285,7 +1286,6 @@ class SlidingSyncExtensionHandler:
             to_id=to_token.profile_updates_key,
             user_id=user_id,
             field_names=fields,
-            field_names_empty_means_all_fields=True,
         )
 
         # Add any newly joined users to our list of users
@@ -1336,7 +1336,7 @@ class SlidingSyncExtensionHandler:
                 # Skip the update if the client didn't ask for this field, or we're not
                 # interested in this user.
                 if (
-                    field_name not in fields and fields
+                    fields and field_name not in fields
                 ) or update.user_id not in profile_user_ids:
                     continue
                 updated_user_fields.setdefault(update.user_id, set()).add(field_name)
