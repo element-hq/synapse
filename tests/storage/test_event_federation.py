@@ -41,7 +41,7 @@ from synapse.api.room_versions import (
     EventFormatVersions,
     RoomVersion,
 )
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
@@ -57,6 +57,7 @@ from synapse.util.json import json_encoder
 
 import tests.unittest
 import tests.utils
+from tests.test_utils.event_builders import make_test_event
 
 # The silly auth graph we use to test the auth difference algorithm,
 # where the top are the most recent events.
@@ -1847,7 +1848,7 @@ def build_state_dag(
         fake event ID.
     """
     graph_events: dict[str, MSC4242Event] = {}  # graph ID => built event
-    create_event = make_event_from_dict(
+    create_event = make_test_event(
         {
             "type": EventTypes.Create,
             "state_key": "",
@@ -1856,11 +1857,8 @@ def build_state_dag(
             },
             "sender": creator,
             "origin_server_ts": 1,
-            "prev_state_events": [],
-            "prev_events": [],
-            "depth": 1,
         },
-        RoomVersions.MSC4242v12,
+        room_version=RoomVersions.MSC4242v12,
     )
     # Narrow to an MSC4242 event, so that `prev_state_events` can be used.
     assert supports_msc4242_state_dag(create_event)
@@ -1891,7 +1889,7 @@ def build_state_dag(
         # the same order as the fake names is what makes the expectations in these tests
         # readable.
         while graph_event_id not in graph_events:
-            graph_event = make_event_from_dict(
+            graph_event = make_test_event(
                 {
                     "type": "foo",
                     # All the fake events share a `type`, so the `state_key` is what makes
@@ -1905,9 +1903,8 @@ def build_state_dag(
                     # state DAG here.
                     "prev_events": prev_state_event_ids,
                     "room_id": room_id,
-                    "depth": 1,
                 },
-                RoomVersions.MSC4242v12,
+                room_version=RoomVersions.MSC4242v12,
             )
             assert supports_msc4242_state_dag(graph_event)
             if not graph_event.event_id[1:].startswith(graph_event_id):
