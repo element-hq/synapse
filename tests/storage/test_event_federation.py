@@ -42,6 +42,7 @@ from synapse.api.room_versions import (
     RoomVersion,
 )
 from synapse.events import EventBase, make_event_from_dict
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -1527,7 +1528,7 @@ class EventFederationGetMissingEventsStateDAGTestCase(
 
     def _persist_state_dag(
         self, creator: str, graph: dict[str, list[str]]
-    ) -> tuple[str, dict[str, EventBase]]:
+    ) -> tuple[str, dict[str, MSC4242Event]]:
         """Build and persist a state DAG in its own room, as `build_state_dag` returns it."""
         (room_id, graph_events) = build_state_dag(creator, graph)
 
@@ -1563,7 +1564,7 @@ class EventFederationGetMissingEventsStateDAGTestCase(
         earliest: list[str],
         limit: int,
         room_id: str | None = None,
-        graph_events: dict[str, EventBase] | None = None,
+        graph_events: dict[str, MSC4242Event] | None = None,
     ) -> list[str]:
         """Run `get_missing_events_state_dag` in terms of fake event IDs, returning the fake
         event IDs which came back. Queries the room built in `prepare` unless told otherwise.
@@ -1791,7 +1792,7 @@ class FakeEvent:
 
 def walk_state_dag(
     graph: dict[str, list[str]],
-    graph_events: dict[str, EventBase],
+    graph_events: dict[str, MSC4242Event],
     latest: list[str],
     earliest: list[str],
     limit: int,
@@ -1830,7 +1831,7 @@ def walk_state_dag(
 
 def build_state_dag(
     creator: str, graph: dict[str, list[str]]
-) -> tuple[str, dict[str, EventBase]]:
+) -> tuple[str, dict[str, MSC4242Event]]:
     """Build an MSC4242 state DAG.
 
     Args:
@@ -1845,7 +1846,7 @@ def build_state_dag(
         The create event is the exception: its ID is fixed by the room ID, so it does not start with its
         fake event ID.
     """
-    graph_events: dict[str, EventBase] = {}  # graph ID => built event
+    graph_events: dict[str, MSC4242Event] = {}  # graph ID => built event
     create_event = make_event_from_dict(
         {
             "type": EventTypes.Create,
@@ -1861,6 +1862,8 @@ def build_state_dag(
         },
         RoomVersions.MSC4242v12,
     )
+    # Narrow to an MSC4242 event, so that `prev_state_events` can be used.
+    assert supports_msc4242_state_dag(create_event)
     room_id = create_event.room_id
     entropy = 1
     for index, graph_event_id in enumerate(graph):
@@ -1906,6 +1909,7 @@ def build_state_dag(
                 },
                 RoomVersions.MSC4242v12,
             )
+            assert supports_msc4242_state_dag(graph_event)
             if not graph_event.event_id[1:].startswith(graph_event_id):
                 entropy += 1
                 continue
