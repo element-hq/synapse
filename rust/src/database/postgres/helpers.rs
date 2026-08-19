@@ -27,7 +27,10 @@
 //! unit-tested against an in-memory stream with no live database — see
 //! [`BlockingPostgresStream`]'s tests.
 
-use std::{future::Future, pin::Pin};
+use std::{
+    future::Future,
+    pin::{pin, Pin},
+};
 
 use futures::{stream::Fuse, FutureExt, StreamExt};
 use pyo3::{marker::Ungil, PyResult, Python};
@@ -36,6 +39,9 @@ use tokio::runtime::Handle;
 use crate::database::postgres::pg_err_to_py;
 
 /// Block on a future on a given runtime, releasing the GIL while we wait.
+///
+/// Note that this drives the future on *this* thread, not on the runtime's
+/// worker threads. See [`tokio::runtime::Handle::block_on`] for details.
 pub trait BlockingPostgres
 where
     Self: Future + Sized + Send + Ungil,
@@ -53,7 +59,26 @@ where
     /// runtime worker, so it cannot starve the worker threads that complete the
     /// future.
     fn block_on(self, py: Python<'_>, handle: &Handle) -> Self::Output {
-        py.detach(|| handle.block_on(self))
+        // Check if this future is already ready, and if so return immediately
+        // without needlessly releasing and reacquiring the GIL.
+        //
+        // This is basically the same as `FutureExt::now_or_never`, except we a)
+        // keep the pinned future to poll again below, and b) enter the runtime
+        // in case the future needs it.
+        let mut pin_self = pin!(self);
+        {
+            let _guard = handle.enter();
+            let noop_waker = futures::task::noop_waker();
+            let mut cx = futures::task::Context::from_waker(&noop_waker);
+            match pin_self.poll_unpin(&mut cx) {
+                std::task::Poll::Ready(val) => return val,
+                std::task::Poll::Pending => (),
+            }
+        }
+
+        // Note: this will drive the future to completion on *this* thread, not
+        // on the runtime's worker threads. See `Handle::block_on` for details.
+        py.detach(|| handle.block_on(pin_self))
     }
 }
 
@@ -111,15 +136,7 @@ where
     ///
     /// This method will return `None` if the stream is exhausted.
     fn block_on_next(&mut self, py: Python<'_>, handle: &Handle) -> Option<Self::Item> {
-        match self.get_next_if_ready() {
-            // `Some(Some(item))` (ready) and `Some(None)` (exhausted) are both
-            // answers we can return immediately — we just hand the inner
-            // `Option<Item>` straight back.
-            Some(row) => row,
-            // `None` means "not ready yet": release the GIL and block until the
-            // next item (or end of stream) arrives.
-            None => self.next().block_on(py, handle),
-        }
+        self.next().block_on(py, handle)
     }
 
     /// Get the next item from the stream if it's ready, without blocking.
@@ -127,6 +144,9 @@ where
     /// Returns `None` if the stream is not ready to yield an item. Returns
     /// `Some(None)` if the stream is exhausted.
     fn get_next_if_ready(&mut self) -> Option<Option<Self::Item>> {
+        // Note it is safe to call `now_or_never` here as it's fine to
+        // repeatedly call `next()` (as it's a thin wrapper that simply calls
+        // `poll_next` on the underlying stream).
         self.next().now_or_never()
     }
 }
