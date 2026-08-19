@@ -18,8 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import logging
-from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
 
@@ -31,8 +29,6 @@ from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request
-
-logger = logging.getLogger(__name__)
 
 
 class EventPersisterShardTestCase(BaseMultiWorkerStreamTestCase):
@@ -62,17 +58,6 @@ class EventPersisterShardTestCase(BaseMultiWorkerStreamTestCase):
             "worker2": {"host": "testserv", "port": 1002},
         }
         return conf
-
-    def _create_room(self, room_id: str, user_id: str, tok: str) -> None:
-        """Create a room with given room_id"""
-
-        # We control the room ID generation by patching out the
-        # `_generate_room_id` method
-        with patch(
-            "synapse.handlers.room.RoomCreationHandler._generate_room_id"
-        ) as mock:
-            mock.side_effect = lambda: room_id
-            self.helper.create_room_as(user_id, tok=tok)
 
     def test_basic(self) -> None:
         """Simple test to ensure that multiple rooms can be created and joined,
@@ -145,25 +130,22 @@ class EventPersisterShardTestCase(BaseMultiWorkerStreamTestCase):
         )
         sync_hs_site = self._hs_to_site[sync_hs]
 
-        # Specially selected room IDs that get persisted on different workers.
-        room_id1 = "!foo:test"
-        room_id2 = "!baz:test"
+        user_id = self.register_user("user", "pass")
+        access_token = self.login("user", "pass")
 
+        store = self.hs.get_datastores().main
+
+        room_generation_results = self._generate_rooms_on_worker(user_id, access_token)
+        room_id1 = room_generation_results["worker1"]
+        room_id2 = room_generation_results["worker2"]
+
+        # Verify that the expected worker is responsible for the specific room
         self.assertEqual(
             self.hs.config.worker.events_shard_config.get_instance(room_id1), "worker1"
         )
         self.assertEqual(
             self.hs.config.worker.events_shard_config.get_instance(room_id2), "worker2"
         )
-
-        user_id = self.register_user("user", "pass")
-        access_token = self.login("user", "pass")
-
-        store = self.hs.get_datastores().main
-
-        # Create two room on the different workers.
-        self._create_room(room_id1, user_id, access_token)
-        self._create_room(room_id2, user_id, access_token)
 
         # The other user joins
         self.helper.join(
