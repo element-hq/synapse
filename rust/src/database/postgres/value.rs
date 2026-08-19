@@ -284,6 +284,9 @@ impl PythonPgFromSql {
                 PyFloat::new(py, f).into_any().unbind()
             }
             Type::TEXT | Type::VARCHAR | Type::NAME | Type::BPCHAR => {
+                // Note: PyString::from_bytes expects UTF-8, and
+                // postgres_protocol::types::text_from_sql demonstrates that the
+                // wire bytes are indeed UTF-8, so this should be safe.
                 PyString::from_bytes(py, raw)?.into_any().unbind()
             }
             Type::BYTEA => PyBytes::new(py, raw).into_any().unbind(),
