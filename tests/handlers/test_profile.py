@@ -827,10 +827,15 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 )
             )
 
-            # Wait for the `TaskScheduler.SCHEDULE_INTERVAL`
+            # Wait for the `TaskScheduler.SCHEDULE_INTERVAL` so the task is relaunched
             self.reactor.advance(Duration(minutes=1).as_secs())
-            # Let's be sure we are over the delay introduced by slow_update_membership
-            self.reactor.advance(Duration(milliseconds=20).as_secs())
+
+            # The resumed task still has `room_id_2` and `room_id_3` to update, and
+            # `potentially_slow_update_membership` sleeps for each of them. A sleep
+            # scheduled *during* a `reactor.advance(...)` is queued past that advance's
+            # target time, so each one needs an advance of its own to fire.
+            for _ in (room_id_2, room_id_3):
+                self.reactor.advance(Duration(milliseconds=20).as_secs())
 
             # Updates should have been resumed from room 2 after the restart
             # so room 1 should not have been updated this time
