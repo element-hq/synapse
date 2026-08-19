@@ -215,7 +215,7 @@ class SlidingSyncExtensionHandler:
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
                 profiles_request=sync_config.extensions.profiles,
-                all_interested_room_ids=all_interested_room_ids,
+                actual_room_ids=actual_room_ids,
                 to_token=to_token,
                 from_token=from_token,
                 actual_room_response_map=actual_room_response_map,
@@ -1088,7 +1088,7 @@ class SlidingSyncExtensionHandler:
     async def _get_profile_ids_for_profiles_extension(
         self,
         user_id: str,
-        rooms: set[str],
+        actual_room_ids: set[str],
         sync_config: SlidingSyncConfig,
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
     ) -> tuple[set[str], set[str]]:
@@ -1108,8 +1108,7 @@ class SlidingSyncExtensionHandler:
 
         Args:
             user_id: The full user ID syncing.
-            rooms: A set of rooms that was already calculated as relevant for this
-                sync response.
+            actual_room_ids: set[str],
             sync_config: The Sliding Sync config object.
             actual_room_response_map: A calculated map of responses per room.
 
@@ -1119,7 +1118,7 @@ class SlidingSyncExtensionHandler:
         """
         lazy_profile_user_ids = set()
         non_lazy_profile_user_ids = set()
-        if rooms:
+        if actual_room_ids:
             # Separate rooms into lazy and non-lazy based on sync config.
             lazy_rooms = (
                 {
@@ -1148,7 +1147,7 @@ class SlidingSyncExtensionHandler:
                         for hero in room_data.heroes:
                             lazy_profile_user_ids.add(hero.user_id)
 
-            non_lazy_rooms = rooms.difference(lazy_rooms)
+            non_lazy_rooms = actual_room_ids.difference(lazy_rooms)
             # If we still have non-lazy rooms, get their members.
             if non_lazy_rooms:
                 non_lazy_profile_user_ids = (
@@ -1178,7 +1177,6 @@ class SlidingSyncExtensionHandler:
         self,
         user_id: UserID,
         fields: set[str],
-        rooms: set[str],
         new_connection_state: MutablePerConnectionState,
         profile_user_ids: set[str],
     ) -> dict[str, JsonDict | None]:
@@ -1188,7 +1186,6 @@ class SlidingSyncExtensionHandler:
         Args:
             user_id: The syncing user UserID
             fields: A set of fields to include in the response.
-            rooms: A set of rooms to limit the user profiles for.
             new_connection_state: The new connection state to be modified.
             profile_user_ids: Set of user IDs whose profiles are related to this sync response.
 
@@ -1238,7 +1235,7 @@ class SlidingSyncExtensionHandler:
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
         profiles_request: SlidingSyncConfig.Extensions.ProfilesExtension,
-        all_interested_room_ids: set[str],
+        actual_room_ids: set[str],
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
@@ -1251,7 +1248,7 @@ class SlidingSyncExtensionHandler:
             previous_connection_state: The previous immutable connection state.
             new_connection_state: The new connection state to be modified.
             profiles_request: The profiles extension request.
-            all_interested_room_ids: Set of rooms the sync request is interested in.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
             to_token: The stream token to generate a response until.
             from_token: The stream token to generate a response from.
             actual_room_response_map: A calculated map of responses per room.
@@ -1273,7 +1270,7 @@ class SlidingSyncExtensionHandler:
             lazy_profile_user_ids,
         ) = await self._get_profile_ids_for_profiles_extension(
             user_id=user_id,
-            rooms=all_interested_room_ids,
+            actual_room_ids=actual_room_ids,
             sync_config=sync_config,
             actual_room_response_map=actual_room_response_map,
         )
@@ -1284,7 +1281,6 @@ class SlidingSyncExtensionHandler:
                 users=await self._get_profiles_extension_initial_sync_response(
                     user_id=sync_config.user,
                     fields=fields,
-                    rooms=all_interested_room_ids,
                     new_connection_state=new_connection_state,
                     profile_user_ids=profile_user_ids,
                 ),
