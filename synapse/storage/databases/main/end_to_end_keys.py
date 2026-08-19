@@ -78,6 +78,10 @@ class DeviceKeyLookupResult:
 
 
 class EndToEndKeyBackgroundStore(SQLBaseStore):
+    CROSS_SIGNING_KEYS_REMOVE_DUPLICATES_NAME = (
+        "e2e_cross_signing_signatures_remove_duplicates"
+    )
+
     def __init__(
         self,
         database: DatabasePool,
@@ -101,6 +105,11 @@ class EndToEndKeyBackgroundStore(SQLBaseStore):
             columns=("user_id", "device_id", "algorithm", "ts_added_ms"),
         )
 
+        self.db_pool.updates.register_background_update_handler(
+            self.CROSS_SIGNING_KEYS_REMOVE_DUPLICATES_NAME,
+            self._background_cross_signing_signatures_remove_duplicates,
+        )
+
         self.db_pool.updates.register_background_index_update(
             update_name="e2e_cross_signing_signatures_add_key_id_to_index",
             index_name="e2e_cross_signing_signatures3_idx",
@@ -109,6 +118,66 @@ class EndToEndKeyBackgroundStore(SQLBaseStore):
             unique=True,
             replaces_index="e2e_cross_signing_signatures2_idx",
         )
+
+    async def _background_cross_signing_signatures_remove_duplicates(
+        self, progress: dict, batch_size: int
+    ) -> int:
+        """Removes duplicate cross-signing signatures so that we can add a
+        unique index on `(user_id, target_user_id, target_device_id, key_id)` to
+        `e2e_cross_signing_signatures`.
+        """
+
+        def _remove_duplicate_signatures_txn(txn: LoggingTransaction) -> int:
+            sql = """
+                SELECT user_id, key_id, target_user_id, target_device_id, MAX(signature)
+                FROM e2e_cross_signing_signatures
+                GROUP BY user_id, key_id, target_user_id, target_device_id
+                HAVING COUNT(*) > 1
+                LIMIT ?
+            """
+            txn.execute(sql, (batch_size,))
+            duplicate_keys = cast(list[tuple[str, str, str, str, str]], list(txn))
+
+            for (
+                user_id,
+                key_id,
+                target_user_id,
+                target_device_id,
+                signature,
+            ) in duplicate_keys:
+                sql = """
+                    DELETE FROM e2e_cross_signing_signatures
+                    WHERE
+                        user_id = ? AND
+                        key_id = ? AND
+                        target_user_id = ? AND
+                        target_device_id = ?
+                """
+                txn.execute(sql, (user_id, key_id, target_user_id, target_device_id))
+
+                sql = """
+                    INSERT INTO e2e_cross_signing_signatures
+                        (user_id, key_id, target_user_id, target_device_id, signature)
+                    VALUES
+                        (?, ?, ?, ?, ?)
+                """
+                txn.execute(
+                    sql, (user_id, key_id, target_user_id, target_device_id, signature)
+                )
+
+            return len(duplicate_keys)
+
+        number_deleted = await self.db_pool.runInteraction(
+            self.CROSS_SIGNING_KEYS_REMOVE_DUPLICATES_NAME,
+            _remove_duplicate_signatures_txn,
+        )
+
+        if number_deleted < batch_size:
+            await self.db_pool.updates._end_background_update(
+                self.CROSS_SIGNING_KEYS_REMOVE_DUPLICATES_NAME
+            )
+
+        return number_deleted
 
 
 class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorkerStore):

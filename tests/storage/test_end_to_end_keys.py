@@ -22,6 +22,7 @@
 from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
+from synapse.storage.database import LoggingTransaction
 from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -118,3 +119,98 @@ class EndToEndKeyStoreTestCase(HomeserverTestCase):
         self.assertIn("user2", res)
         self.assertNotIn("device1", res["user2"])
         self.assertIn("device2", res["user2"])
+
+    def test_bg_signatures_migration(self) -> None:
+        updater = self.hs.get_datastores().main.db_pool.updates
+
+        # drop the constraint so we can insert duplicate signatures
+        def f(txn: LoggingTransaction) -> None:
+            txn.execute("DROP INDEX e2e_cross_signing_signatures3_idx")
+
+        self.get_success(self.store.db_pool.runInteraction("", f))
+
+        # save multiple copies of the same key in the database
+        for _i in range(2):
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "e2e_cross_signing_signatures",
+                    {
+                        "user_id": "@alice:example.org",
+                        "key_id": "ed25519:abcdefg",
+                        "target_user_id": "@alice:example.org",
+                        "target_device_id": "hijklmnop",
+                        "signature": "some+signature",
+                    },
+                )
+            )
+
+        for _i in range(2):
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "e2e_cross_signing_signatures",
+                    {
+                        "user_id": "@alice:example.org",
+                        "key_id": "ed25519:hijklmnop",
+                        "target_user_id": "@alice:example.org",
+                        "target_device_id": "abcdefg",
+                        "signature": "some+signature",
+                    },
+                )
+            )
+
+        # run the background task to remove duplicates
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                values={
+                    "update_name": "e2e_cross_signing_signatures_remove_duplicates",
+                    "progress_json": "{}",
+                },
+            )
+        )
+
+        self.get_success(
+            updater.run_background_updates(False),
+        )
+
+        # re-add the unique index
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                values={
+                    "update_name": "e2e_cross_signing_signatures_add_key_id_to_index",
+                    "progress_json": "{}",
+                },
+            )
+        )
+
+        self.get_success(
+            updater.run_background_updates(False),
+        )
+
+        # check that we only have one copy of each key
+        expected_values = [
+            (
+                "@alice:example.org",
+                "ed25519:abcdefg",
+                "@alice:example.org",
+                "hijklmnop",
+                "some+signature",
+            ),
+            (
+                "@alice:example.org",
+                "ed25519:hijklmnop",
+                "@alice:example.org",
+                "abcdefg",
+                "some+signature",
+            ),
+        ]
+
+        res = self.get_success(
+            self.store.db_pool.execute(
+                "",
+                "SELECT user_id, key_id, target_user_id, target_device_id, signature from e2e_cross_signing_signatures ORDER BY key_id",
+            )
+        )
+        self.assertEqual(len(res), len(expected_values))
+        self.assertEqual(res, expected_values)

@@ -15,4 +15,6 @@
 -- ("user_id", "key_id", "target_user_id", "target_device_id") should be
 -- unique.
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9205, 'e2e_cross_signing_signatures_add_key_id_to_index', '{}');
+  (9205, 'e2e_cross_signing_signatures_remove_duplicates', '{}');
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+  (9206, 'e2e_cross_signing_signatures_add_key_id_to_index', '{}');
