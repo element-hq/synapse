@@ -195,6 +195,12 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         # Make an initial Sliding Sync request with the profiles extension enabled
         sync_body = {
             "lists": {},
+            "room_subscriptions": {
+                self.joined_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+            },
             "extensions": {
                 "org.matrix.msc4262.profiles": {
                     "enabled": True,
@@ -214,8 +220,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                     }
                 },
             )
-
-        if not is_initial:
+        else:
             self.get_success(
                 self.profile_handler.set_field(
                     target_user=UserID.from_string(self.other_user),
@@ -224,6 +229,9 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                     new_value="value",
                 )
             )
+            # We don't include room subscriptions, as we want to see updates coming
+            # through even without room subscriptions
+            del sync_body["room_subscriptions"]
             # Make an incremental Sliding Sync request
             response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
 
@@ -264,17 +272,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             },
         }
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
-        # Starting situation
-        self.assertEqual(
-            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
-                "@other_user:test"
-            ],
-            {
-                "updated": {
-                    "field": "value",
-                }
-            },
-        )
 
         # Update field
         self.get_success(
@@ -461,6 +458,13 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         # Make an initial Sliding Sync request with the profiles extension enabled
         sync_body = {
             "lists": {},
+            # We need to ensure a room is included to get things back in initial sync
+            "room_subscriptions": {
+                self.joined_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
+                },
+            },
             "extensions": {
                 "org.matrix.msc4262.profiles": {
                     "enabled": True,
@@ -483,7 +487,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                 },
             )
 
-        if not is_initial:
+        else:
             self.get_success(
                 self.profile_handler.set_field(
                     target_user=UserID.from_string(self.other_user),
@@ -492,6 +496,9 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                     new_value="value",
                 )
             )
+            # We don't include room subscriptions, as we want to see updates coming
+            # through even without room subscriptions
+            del sync_body["room_subscriptions"]
             # Make an incremental Sliding Sync request
             response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
             # As this is an incremental sync, we only get actual updates back

@@ -1118,49 +1118,42 @@ class SlidingSyncExtensionHandler:
         """
         lazy_profile_user_ids = set()
         non_lazy_profile_user_ids = set()
-        if actual_room_ids:
-            # Separate rooms into lazy and non-lazy based on sync config.
-            lazy_rooms = (
-                {
-                    room_id
-                    for room_id, room_config in sync_config.room_subscriptions.items()
-                    if ("m.room.member", "$LAZY") in room_config.required_state
-                }
-                if sync_config.room_subscriptions
-                else set()
-            )
 
-            if lazy_rooms:
-                # For rooms configured as lazy, include users based on room response.
-                for room_id, room_data in actual_room_response_map.items():
-                    if room_id not in lazy_rooms:
-                        continue
-                    # Include users from timeline events
-                    for timeline_event in room_data.timeline_events:
-                        lazy_profile_user_ids.add(timeline_event.event.sender)
-                    # Include users from required state
-                    for state_event in room_data.required_state:
-                        if state_event.type == EventTypes.Member:
-                            lazy_profile_user_ids.add(state_event.state_key)
-                    # Include heroes
-                    if room_data.heroes:
-                        for hero in room_data.heroes:
-                            lazy_profile_user_ids.add(hero.user_id)
+        # Separate rooms into lazy and non-lazy based on sync config.
+        lazy_rooms = (
+            {
+                room_id
+                for room_id, room_config in sync_config.room_subscriptions.items()
+                if ("m.room.member", "$LAZY") in room_config.required_state
+            }
+            if sync_config.room_subscriptions
+            else set()
+        )
 
-            non_lazy_rooms = actual_room_ids.difference(lazy_rooms)
-            # If we still have non-lazy rooms, get their members.
-            if non_lazy_rooms:
-                non_lazy_profile_user_ids = (
-                    await self.store.get_local_users_who_share_room_with_user(
-                        user_id,
-                        limit_to_rooms=non_lazy_rooms,
-                    )
-                )
-        else:
-            # Get all members of all rooms the sync response is dealing with.
+        if lazy_rooms:
+            # For rooms configured as lazy, include users based on room response.
+            for room_id, room_data in actual_room_response_map.items():
+                if room_id not in lazy_rooms:
+                    continue
+                # Include users from timeline events
+                for timeline_event in room_data.timeline_events:
+                    lazy_profile_user_ids.add(timeline_event.event.sender)
+                # Include users from required state
+                for state_event in room_data.required_state:
+                    if state_event.type == EventTypes.Member:
+                        lazy_profile_user_ids.add(state_event.state_key)
+                # Include heroes
+                if room_data.heroes:
+                    for hero in room_data.heroes:
+                        lazy_profile_user_ids.add(hero.user_id)
+
+        non_lazy_rooms = actual_room_ids.difference(lazy_rooms)
+        # If we still have non-lazy rooms, get their members.
+        if non_lazy_rooms:
             non_lazy_profile_user_ids = (
                 await self.store.get_local_users_who_share_room_with_user(
                     user_id,
+                    limit_to_rooms=non_lazy_rooms,
                 )
             )
 
