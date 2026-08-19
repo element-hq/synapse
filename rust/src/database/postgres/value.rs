@@ -29,20 +29,21 @@ use postgres_protocol::types::{
     text_to_sql,
 };
 use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
 use pyo3::types::{PyBool, PyBytes, PyFloat, PyInt, PyString, PyTuple};
 use pyo3::{prelude::*, BoundObject};
 use tokio_postgres::types::{to_sql_checked, IsNull, ToSql, Type, WrongType};
 
 /// Owned representation of a Python value that we can hand to [`tokio_postgres`]
 /// as a [`ToSql`] parameter.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PgValue {
     Null,
     Bool(bool),
     Int(i64),
     Float(f64),
-    Text(Box<str>),
-    Bytea(Box<[u8]>),
+    Text(PyBackedStr),
+    Bytea(PyBackedBytes),
 }
 
 impl PgValue {
@@ -55,7 +56,7 @@ impl PgValue {
     ///     `OverflowError` here, since Postgres has no wider integer type in
     ///     this mapping.
     ///   * A type we don't recognise raises `TypeError`.
-    pub fn from_py(obj: &Bound<PyAny>) -> PyResult<Self> {
+    pub fn from_py(obj: Bound<PyAny>) -> PyResult<Self> {
         if obj.is_none() {
             return Ok(PgValue::Null);
         }
@@ -70,12 +71,20 @@ impl PgValue {
         if let Ok(f) = obj.cast::<PyFloat>() {
             return Ok(PgValue::Float(f.value()));
         }
-        if let Ok(s) = obj.cast::<PyString>() {
-            return Ok(PgValue::Text(s.to_str()?.into()));
-        }
-        if let Ok(b) = obj.cast::<PyBytes>() {
-            return Ok(PgValue::Bytea(b.as_bytes().into()));
-        }
+
+        // The `cast_into` calls below are a bit awkward because we need to take
+        // ownership of `obj`, so we need to use `cast_into` and then
+        // `into_inner` to get the original `obj` back if the cast fails.
+        let obj = match obj.cast_into::<PyString>() {
+            Ok(s) => return Ok(PgValue::Text(s.try_into()?)),
+            Err(err) => err.into_inner(),
+        };
+
+        let obj = match obj.cast_into::<PyBytes>() {
+            Ok(s) => return Ok(PgValue::Bytea(s.into())),
+            Err(err) => err.into_inner(),
+        };
+
         Err(PyTypeError::new_err(format!(
             "unsupported parameter type for postgres: {}",
             obj.get_type().name()?,
@@ -89,7 +98,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PgValue {
     type Error = PyErr;
 
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        PgValue::from_py(&obj)
+        PgValue::from_py(obj.into_bound())
     }
 }
 
@@ -296,6 +305,8 @@ mod tests {
     //! byte buffers, so we can drive them directly with hand-built buffers and
     //! a chosen column [`Type`], and the `from_py` classifier just needs a GIL.
 
+    use pyo3::IntoPyObjectExt;
+
     use super::*;
 
     /// Encode `value` for column type `ty`, returning the wire bytes and the
@@ -314,38 +325,50 @@ mod tests {
         value.to_sql(ty, &mut buf).map(|_| ())
     }
 
+    /// Build a [`PgValue::Text`] from a Rust string. The variant is backed by a
+    /// Python `str`, so this needs an attached interpreter.
+    fn text(py: Python<'_>, s: &str) -> PgValue {
+        PgValue::Text(PyString::new(py, s).try_into().unwrap())
+    }
+
+    /// Build a [`PgValue::Bytea`] from a Rust byte slice. As with [`text`], the
+    /// variant is backed by a Python `bytes`.
+    fn bytea(py: Python<'_>, b: &[u8]) -> PgValue {
+        PgValue::Bytea(PyBytes::new(py, b).into())
+    }
+
     #[test]
     fn from_py_classifies_supported_types() {
         Python::initialize();
         Python::attach(|py| {
             // `None` -> NULL.
             assert!(matches!(
-                PgValue::from_py(&py.None().into_bound(py)).unwrap(),
+                PgValue::from_py(py.None().into_bound(py)).unwrap(),
                 PgValue::Null
             ));
 
             // `bool` must win over `int` (it is an `int` subclass in Python).
             assert!(matches!(
-                PgValue::from_py(&true.into_pyobject(py).unwrap()).unwrap(),
+                PgValue::from_py(true.into_bound_py_any(py).unwrap()).unwrap(),
                 PgValue::Bool(true)
             ));
 
             assert!(matches!(
-                PgValue::from_py(&7i64.into_pyobject(py).unwrap()).unwrap(),
+                PgValue::from_py(7i64.into_bound_py_any(py).unwrap()).unwrap(),
                 PgValue::Int(7)
             ));
 
             assert!(matches!(
-                PgValue::from_py(&1.5f64.into_pyobject(py).unwrap()).unwrap(),
+                PgValue::from_py(1.5f64.into_bound_py_any(py).unwrap()).unwrap(),
                 PgValue::Float(1.5)
             ));
 
-            match PgValue::from_py(&"hello".into_pyobject(py).unwrap()).unwrap() {
+            match PgValue::from_py("hello".into_bound_py_any(py).unwrap()).unwrap() {
                 PgValue::Text(s) => assert_eq!(&*s, "hello"),
                 other => panic!("expected Text, got {other:?}"),
             }
 
-            match PgValue::from_py(&PyBytes::new(py, b"\x00\xff").into_any()).unwrap() {
+            match PgValue::from_py(PyBytes::new(py, b"\x00\xff").into_any()).unwrap() {
                 PgValue::Bytea(b) => assert_eq!(&*b, b"\x00\xff"),
                 other => panic!("expected Bytea, got {other:?}"),
             }
@@ -369,7 +392,7 @@ mod tests {
         Python::attach(|py| {
             // A list is not a scalar we know how to bind.
             let list = pyo3::types::PyList::new(py, [1, 2, 3]).unwrap();
-            let err = PgValue::from_py(&list.into_any()).unwrap_err();
+            let err = PgValue::from_py(list.into_any()).unwrap_err();
             assert!(err.is_instance_of::<PyTypeError>(py));
             // The message should name the offending type.
             assert!(err.to_string().contains("list"), "got: {err}");
@@ -395,14 +418,11 @@ mod tests {
             encode(&PgValue::Float(1.0), &Type::FLOAT8).0,
             1.0f64.to_be_bytes()
         );
-        assert_eq!(
-            encode(&PgValue::Text("hi".into()), &Type::TEXT).0,
-            b"hi".to_vec()
-        );
-        assert_eq!(
-            encode(&PgValue::Bytea(Box::from(&b"\x01\x02"[..])), &Type::BYTEA).0,
-            vec![1, 2]
-        );
+        Python::initialize();
+        Python::attach(|py| {
+            assert_eq!(encode(&text(py, "hi"), &Type::TEXT).0, b"hi".to_vec());
+            assert_eq!(encode(&bytea(py, b"\x01\x02"), &Type::BYTEA).0, vec![1, 2]);
+        });
     }
 
     #[test]
@@ -426,20 +446,23 @@ mod tests {
     fn to_sql_rejects_mismatched_column_type() {
         // A value whose type doesn't match the column is a `WrongType` error
         // rather than a silent reinterpretation. Hit a few distinct arms.
-        let cases: &[(PgValue, Type)] = &[
-            (PgValue::Int(1), Type::TEXT),
-            (PgValue::Text("x".into()), Type::INT4),
-            (PgValue::Bytea(Box::from(&b"x"[..])), Type::TEXT),
-            (PgValue::Bool(true), Type::INT4),
-            (PgValue::Float(1.0), Type::INT8),
-        ];
-        for (value, ty) in cases {
-            let mut buf = BytesMut::new();
-            assert!(
-                value.to_sql(ty, &mut buf).is_err(),
-                "expected {value:?} -> {ty} to be rejected"
-            );
-        }
+        Python::initialize();
+        Python::attach(|py| {
+            let cases: &[(PgValue, Type)] = &[
+                (PgValue::Int(1), Type::TEXT),
+                (text(py, "x"), Type::INT4),
+                (bytea(py, b"x"), Type::TEXT),
+                (PgValue::Bool(true), Type::INT4),
+                (PgValue::Float(1.0), Type::INT8),
+            ];
+            for (value, ty) in cases {
+                let mut buf = BytesMut::new();
+                assert!(
+                    value.to_sql(ty, &mut buf).is_err(),
+                    "expected {value:?} -> {ty} to be rejected"
+                );
+            }
+        });
     }
 
     #[test]
