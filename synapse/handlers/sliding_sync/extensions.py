@@ -29,7 +29,6 @@ from synapse.api.constants import (
     AccountDataTypes,
     EduTypes,
     EventTypes,
-    ProfileFields,
     ProfileUpdateAction,
     StickyEvent,
 )
@@ -1292,13 +1291,6 @@ class SlidingSyncExtensionHandler:
             if update.action == ProfileUpdateAction.LEFT_ROOM.value
         }
 
-        # Collect users who deleted fields
-        delete_field_user_ids = {
-            update.user_id
-            for update in updates
-            if update.action == ProfileUpdateAction.DELETE.value
-        }
-
         # Process left rooms
         for other_user_id in left_room_user_ids:
             # Return a null response to the client
@@ -1323,8 +1315,7 @@ class SlidingSyncExtensionHandler:
                 updated_user_fields.setdefault(update.user_id, set()).add(field_name)
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
-            # Get profiles for both updates and deletes in one go
-            profile_user_ids.union(delete_field_user_ids),
+            profile_user_ids,
         )
 
         # Serialise the profile updates into the sync response format.
@@ -1340,65 +1331,44 @@ class SlidingSyncExtensionHandler:
                 continue
 
             per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
-            # Include the fields the client asked for, or all, if not specified
-            if fields:
-                user_fields = set(profile_data.keys()).intersection(fields)
-            else:
-                user_fields = set(profile_data.keys())
+            per_user_removals: set[str] = set()
 
-            # TODO lazy cache
-
-            # Include only the diff, unless the user recently joined,
-            # or the user is in a room that was lazy loaded,
-            # then send all the fields the client asked for.
+            # Calculate which fields had updates
             updated_fields: set[str] = updated_user_fields.get(profile_user_id, set())
+            # Calculate the full available field list
+            user_fields = set(profile_data.keys()).union(updated_fields)
+            # If the user joined the room or is included via lazy loading events,
+            # include all fields the client wants
             user_fields = (
                 user_fields
                 if profile_user_id in joined_room_user_ids
                 or profile_user_id in lazy_profile_user_ids
-                else updated_fields.intersection(profile_data.keys())
+                else updated_fields
             )
+            # Filter down if the client only wants a subset
+            if fields:
+                user_fields = user_fields.intersection(fields)
+
+            if not user_fields:
+                continue
+
             for field_name in user_fields:
-                per_user_updates[field_name] = profile_data[field_name]
+                if (
+                    profile_data.get(field_name) is None
+                    and field_name in updated_fields
+                ):
+                    per_user_removals.add(field_name)
+                else:
+                    per_user_updates[field_name] = profile_data.get(field_name)
 
+            if per_user_updates or per_user_removals:
+                response[profile_user_id] = {}
+            # Typing fix as mypy thinks this may be None
+            entry = cast(JsonDict, response[profile_user_id])
             if per_user_updates:
-                response[profile_user_id] = {
-                    "updated": per_user_updates,
-                }
-
-        # Process deleted fields
-        for update in updates:
-            if (
-                update.action != ProfileUpdateAction.DELETE.value
-                or not update.affected_fields
-                or update.user_id in left_room_user_ids
-            ):
-                continue
-            profile_data = profile_data_by_user.get(update.user_id)
-            if not profile_data:
-                # No profile data for this user, just return a blank dictionary
-                # telling the clients to remove all profile information for this user.
-                response[update.user_id] = None
-                continue
-            for field_name in update.affected_fields:
-                if field_name in (ProfileFields.AVATAR_URL, ProfileFields.DISPLAYNAME):
-                    if profile_data.get(field_name) is not None:
-                        # Displayname/avatar_url are not unset anymore
-                        continue
-                elif field_name in profile_data.keys():
-                    # This field has re-appeared to the profile, skip
-                    continue
-                if response.get(update.user_id) is None:
-                    response[update.user_id] = {"removed": []}
-
-                # Typing fix as mypy thinks this may be None
-                entry = cast(JsonDict, response[update.user_id])
-                removed = cast(list[str], entry.setdefault("removed", []))
-
-                # Ensure we only add the field once
-                if field_name in removed:
-                    continue
-                removed.append(field_name)
+                entry["updated"] = per_user_updates
+            if per_user_removals:
+                entry["removed"] = list(per_user_removals)
 
         return SlidingSyncResult.Extensions.ProfilesExtension(
             users=response,

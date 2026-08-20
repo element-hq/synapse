@@ -454,26 +454,14 @@ class ProfileUpdateAction(str, enum.Enum):
 
     UPDATE = "update"
     """
-    This profile update row action represents a user updating a profile field.
+    This profile update row action represents a user updating one or more
+    profile fields. An update could mean updating a field value, or removing a
+    field value.
 
     Depending on the type of sync (initial/incremental, lazy/non-lazy), either the
     diff of profile field updates or all the current profile fields are included
     in the sync response. In the latter case the profile update action row signifies
     a change, but the client may still get fields that have not changed.
-    """
-
-    # FIXME: add a test covering adding these to the streams tables
-    DELETE = "delete"
-    """
-    This profile update row action represents a user deleting a profile field.
-
-    In the sync response deleted fields are indicated separately from updated fields,
-    as `None` is a valid value for a field.
-
-    Note that even though deleting displaynames and avatar_urls is done by setting
-    them to an empty string, for consistency the profile update stream gets a DELETE
-    action written to it, as the profile updates sync MSCs don't special case
-    displayname or avatar_url.
     """
 
 

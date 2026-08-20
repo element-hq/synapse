@@ -367,7 +367,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         ]
     )
     @override_config({"include_profile_updates_in_sync": True})
-    def test_updated_fields_are_not_if_not_in_requested_rooms(
+    def test_updated_fields_are_not_included_if_not_in_requested_rooms(
         self, is_initial: bool
     ) -> None:
         """

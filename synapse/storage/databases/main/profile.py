@@ -557,12 +557,6 @@ class ProfileWorkerStore(SQLBaseStore):
                     )
                 field_clause = f"(EXISTS (SELECT 1 FROM {all_field_names_table_expression} WHERE {wanted_field_in_elems_clause}))"
 
-            action_clause, action_args = make_in_list_sql_clause(
-                txn.database_engine,
-                "pu.action",
-                (ProfileUpdateAction.UPDATE.value, ProfileUpdateAction.DELETE.value),
-                negative=True,
-            )
             user_clause = ""
             user_args: list[str] = []
             if include_users is not None:
@@ -587,7 +581,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     {user_clause}
                     AND (
                         {field_clause}
-                        OR {action_clause}
+                        OR pu.action != ?
                     )
                 ORDER BY pu.stream_id ASC
                 """,
@@ -597,7 +591,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     user_id,
                     *user_args,
                     *field_args,
-                    *action_args,
+                    ProfileUpdateAction.UPDATE.value,
                 ),
             )
             rows = cast(list[tuple[int, str, str, str | None]], txn.fetchall())
@@ -915,7 +909,7 @@ class ProfileWorkerStore(SQLBaseStore):
         if not self._msc4429_enabled:
             return None
 
-        if action in (ProfileUpdateAction.UPDATE, ProfileUpdateAction.DELETE):
+        if action == ProfileUpdateAction.UPDATE:
             assert field_names
         else:
             assert not field_names
@@ -955,8 +949,8 @@ class ProfileWorkerStore(SQLBaseStore):
                 # No point writing an update for ourselves, if a membership change and no
                 # other users interested
                 return None
-        elif action in (ProfileUpdateAction.UPDATE, ProfileUpdateAction.DELETE):
-            # Always include ourselves when updating/deleting field values
+        elif action == ProfileUpdateAction.UPDATE:
+            # Always include ourselves when updating field values
             users.add(user_id.to_string())
 
         # Record the profile update
@@ -1055,7 +1049,7 @@ class ProfileWorkerStore(SQLBaseStore):
             stream_id = self.record_profile_updates_txn(
                 txn=txn,
                 user_id=user_id,
-                action=ProfileUpdateAction.DELETE,
+                action=ProfileUpdateAction.UPDATE,
                 field_names=[field_name],
             )
             return stream_id
