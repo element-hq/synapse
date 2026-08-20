@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import Codes
 from synapse.appservice import SCOPE_QUERY_ROOM_MEMBERSHIP, ApplicationService
 from synapse.rest import admin
 from synapse.rest.client import login, room, room_membership
@@ -109,7 +110,7 @@ class AppserviceRoomMembershipRestServletTestCase(unittest.HomeserverTestCase):
             "not-a-room-id", f"mxid={self.joined_user}", AS_TOKEN
         )
         self.assertEqual(code, HTTPStatus.BAD_REQUEST, body)
-        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        self.assertEqual(body["errcode"], Codes.INVALID_PARAM)
 
     def test_both_mxid_and_server_name_given(self) -> None:
         code, body = self._get_joined(
@@ -118,22 +119,22 @@ class AppserviceRoomMembershipRestServletTestCase(unittest.HomeserverTestCase):
             AS_TOKEN,
         )
         self.assertEqual(code, HTTPStatus.BAD_REQUEST, body)
-        self.assertEqual(body["errcode"], "M_MISSING_PARAM")
+        self.assertEqual(body["errcode"], Codes.MISSING_PARAM)
 
     def test_neither_mxid_nor_server_name_given(self) -> None:
         code, body = self._get_joined(self.room_id, "", AS_TOKEN)
         self.assertEqual(code, HTTPStatus.BAD_REQUEST, body)
-        self.assertEqual(body["errcode"], "M_MISSING_PARAM")
+        self.assertEqual(body["errcode"], Codes.MISSING_PARAM)
 
     def test_invalid_mxid_format(self) -> None:
         code, body = self._get_joined(self.room_id, "mxid=not-a-userid", AS_TOKEN)
         self.assertEqual(code, HTTPStatus.BAD_REQUEST, body)
-        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        self.assertEqual(body["errcode"], Codes.INVALID_PARAM)
 
     def test_invalid_server_name_format(self) -> None:
         code, body = self._get_joined(self.room_id, "server_name=foo_bar", AS_TOKEN)
         self.assertEqual(code, HTTPStatus.BAD_REQUEST, body)
-        self.assertEqual(body["errcode"], "M_INVALID_PARAM")
+        self.assertEqual(body["errcode"], Codes.INVALID_PARAM)
 
     def test_local_user_joined(self) -> None:
         code, body = self._get_joined(
@@ -194,21 +195,21 @@ class AppserviceRoomMembershipRestServletTestCase(unittest.HomeserverTestCase):
     def test_no_token_unauthorized(self) -> None:
         code, body = self._get_joined(self.room_id, f"mxid={self.joined_user}", None)
         self.assertEqual(code, HTTPStatus.UNAUTHORIZED, body)
-        self.assertEqual(body["errcode"], "M_MISSING_TOKEN")
+        self.assertEqual(body["errcode"], Codes.MISSING_TOKEN)
 
     def test_normal_user_token_forbidden(self) -> None:
         code, body = self._get_joined(
             self.room_id, f"mxid={self.joined_user}", self.creator_tok
         )
         self.assertEqual(code, HTTPStatus.FORBIDDEN, body)
-        self.assertEqual(body["errcode"], "M_FORBIDDEN")
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
 
     def test_same_user_token_forbidden(self) -> None:
         code, body = self._get_joined(
             self.room_id, f"mxid={self.joined_user}", self.joined_user_tok
         )
         self.assertEqual(code, HTTPStatus.FORBIDDEN, body)
-        self.assertEqual(body["errcode"], "M_FORBIDDEN")
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
 
     def test_user_with_oauth_scope_allowed(self) -> None:
         requester = create_requester(self.creator, scope={SCOPE_QUERY_ROOM_MEMBERSHIP})
@@ -226,7 +227,7 @@ class AppserviceRoomMembershipRestServletTestCase(unittest.HomeserverTestCase):
             self.room_id, f"mxid={self.joined_user}", AS_TOKEN_NO_SCOPE
         )
         self.assertEqual(code, HTTPStatus.FORBIDDEN, body)
-        self.assertEqual(body["errcode"], "M_FORBIDDEN")
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
 
     @override_config({"experimental_features": {"msc4502_enabled": False}})
     def test_unreachable_when_experimental_flag_disabled(self) -> None:
