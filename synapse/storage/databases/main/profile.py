@@ -837,25 +837,13 @@ class ProfileWorkerStore(SQLBaseStore):
             return None
 
         # Record updates in the profile updates stream
-        if (
-            field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
-            and new_value == ""
-        ):
-            # Displayname and avatar_url are special in that they are deleted by
-            # setting the value to an empty string.
-            stream_id = self.record_profile_updates_txn(
-                txn=txn,
-                user_id=user_id,
-                action=ProfileUpdateAction.DELETE,
-                field_names=[field_name],
-            )
-        else:
-            stream_id = self.record_profile_updates_txn(
-                txn=txn,
-                user_id=user_id,
-                action=ProfileUpdateAction.UPDATE,
-                field_names=[field_name],
-            )
+        # FIXME: this should be DELETE if displayname/avatarurl are being emptied
+        stream_id = self.record_profile_updates_txn(
+            txn=txn,
+            user_id=user_id,
+            action=ProfileUpdateAction.UPDATE,
+            field_names=[field_name],
+        )
 
         return stream_id
 
