@@ -29,6 +29,7 @@ from synapse.api.constants import (
     AccountDataTypes,
     EduTypes,
     EventTypes,
+    ProfileFields,
     ProfileUpdateAction,
     StickyEvent,
 )
@@ -38,6 +39,7 @@ from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.types import (
     Absent,
+    AbsentType,
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
@@ -56,6 +58,7 @@ from synapse.types.handlers.sliding_sync import (
     PerConnectionState,
     SlidingSyncConfig,
     SlidingSyncResult,
+    StateValues,
 )
 from synapse.types.rest.client import SlidingSyncStickyEventsToken
 from synapse.util.async_helpers import (
@@ -1103,7 +1106,7 @@ class SlidingSyncExtensionHandler:
 
         Args:
             user_id: The full user ID syncing.
-            actual_room_ids: set[str],
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
             sync_config: The Sliding Sync config object.
             actual_room_response_map: A calculated map of responses per room.
 
@@ -1236,7 +1239,11 @@ class SlidingSyncExtensionHandler:
             return None
 
         user_id = sync_config.user.to_string()
-        fields = set(profiles_request.fields) if profiles_request.fields is not Absent else None
+        fields = (
+            set(profiles_request.fields)
+            if profiles_request.fields is not Absent
+            else None
+        )
 
         response: dict[str, JsonDict | None] = {}
 
@@ -1308,17 +1315,19 @@ class SlidingSyncExtensionHandler:
                 or update.user_id not in profile_user_ids
             ):
                 continue
-            interesting_changed_fields: Set[str]
+            interesting_changed_fields: set[str]
             if fields is not None:
-                interesting_changed_fields = update.affected_fields & fields
+                interesting_changed_fields = set(update.affected_fields) & fields
             else:
-                interesting_changed_fields = update.affected_fields
+                interesting_changed_fields = set(update.affected_fields)
 
             if not interesting_changed_fields:
                 # Skip the update as the client is not interested in these fields
                 continue
-            
-            updated_user_fields.setdefault(update.user_id, set()).update(interesting_changed_fields)
+
+            updated_user_fields.setdefault(update.user_id, set()).update(
+                interesting_changed_fields
+            )
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
             profile_user_ids,
@@ -1343,9 +1352,16 @@ class SlidingSyncExtensionHandler:
             updated_fields: set[str] = updated_user_fields.get(profile_user_id, set())
             # Calculate the full available field list
             user_fields = set(profile_data.keys()).union(updated_fields)
+
             # If the user joined the room or is included via lazy loading events,
-            # include all fields the client wants
-            # For non-lazy-loaded users, <FILLME>
+            # include all fields the client wants. This happens because when lazy
+            # a room, clients will not necessarily have the profile for the user that
+            # sent an event in the room, and thus we deliver all the fields. The same
+            # is true if another user joins the room - we need to deliver an initial
+            # state for clients to work on.
+            # For non-lazy-loaded users, include only updated fields. We assume clients
+            # with non-lazy loaded rooms have received the profiles for all the members
+            # in the room, and thus only need updates.
             user_fields = (
                 user_fields
                 if profile_user_id in joined_room_user_ids
@@ -1360,19 +1376,33 @@ class SlidingSyncExtensionHandler:
                 continue
 
             for field_name in user_fields:
-                field_value: JsonValue | dict[str, JsonValue] | AbsentType = profile_data.get(field_name, Absent)
+                # For custom fields the lack of a field means it will be `Absent`,
+                # for displayname/avatar_url it will be `None`, due to way we store
+                # things differently.
+                absent_type = (
+                    Absent
+                    if field_name
+                    not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
+                    else None
+                )
+                field_value: JsonValue | dict[str, JsonValue] | AbsentType = (
+                    profile_data.get(field_name, absent_type)
+                )
                 if (
-                    field_value is Absent
-                    # TODO: Please explain this part of the condition. I'm not actually sure it's necessary? But if it is, that means it's worth a comment
-                    # Looks to me that being absent naturally means this must have come from `updated_fields`
-                    and field_name in updated_fields
+                    # If the field isn't found on the profile and it is present in
+                    # `updated_fields`, that means an existing field has been removed.
+                    # We need the check against `updated_fields` as some profile fields
+                    # are `None` by default, for example each and every user created
+                    # by Synapse will have `avatar_url: None`, and we don't want to
+                    # constantly send that to the clients.
+                    field_value is absent_type and field_name in updated_fields
                 ):
                     per_user_removals.add(field_name)
                 else:
-                    per_user_updates[field_name] = field_value
+                    per_user_updates[field_name] = cast(JsonValue, field_value)
 
             if per_user_updates or per_user_removals:
-                entry = {}
+                entry: dict[str, JsonValue | JsonDict] = {}
                 response[profile_user_id] = entry
                 if per_user_updates:
                     entry["updated"] = per_user_updates
