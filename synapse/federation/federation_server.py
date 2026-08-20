@@ -30,6 +30,7 @@ from typing import (
     Callable,
     Collection,
     Mapping,
+    Sequence,
 )
 
 from prometheus_client import Counter, Gauge, Histogram
@@ -56,6 +57,7 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
 from synapse.federation.federation_base import (
     FederationBase,
@@ -864,6 +866,10 @@ class FederationServer(FederationBase):
         event, context = await self._on_send_membership_event(
             origin, content, Membership.JOIN, room_id
         )
+
+        if supports_msc4242_state_dag(event):
+            caller_supports_partial_state = False
+
         # Use the join event's own stream ordering as the upper bound when fetching
         # forward extremities (below), so we only consider extremities that existed at
         # or before the join rather than those introduced by concurrent writes that
@@ -890,28 +896,46 @@ class FederationServer(FederationBase):
             state_event_ids = prev_state_ids.values()
             servers_in_room = None
 
-        auth_chain_event_ids = await self.store.get_auth_chain_ids(
-            room_id, state_event_ids
-        )
+        state_dag: Sequence[EventBase] = ()
+        state_events: Sequence[EventBase] = ()
+        auth_chain_events: Sequence[EventBase] = ()
 
-        # if the caller has opted in, we can omit any auth_chain events which are
-        # already in state_event_ids
-        if caller_supports_partial_state:
-            auth_chain_event_ids.difference_update(state_event_ids)
+        if supports_msc4242_state_dag(event):
+            state_dag_map = await self.store.get_state_dag(
+                room_id, set(event.prev_state_events)
+            )
+            # Sort by depth, though this is just a nicety, MSC4242 does not require it
+            state_dag = sorted(
+                state_dag_map.values(), key=lambda ev: (ev.depth, ev.event_id)
+            )
+        else:
+            auth_chain_event_ids = await self.store.get_auth_chain_ids(
+                room_id, state_event_ids
+            )
 
-        auth_chain_events = await self.store.get_events_as_list(auth_chain_event_ids)
-        state_events = await self.store.get_events_as_list(state_event_ids)
+            # if the caller has opted in, we can omit any auth_chain events which are
+            # already in state_event_ids
+            if caller_supports_partial_state:
+                auth_chain_event_ids.difference_update(state_event_ids)
+
+            auth_chain_events = await self.store.get_events_as_list(
+                auth_chain_event_ids
+            )
+            state_events = await self.store.get_events_as_list(state_event_ids)
 
         # we try to do all the async stuff before this point, so that time_now is as
         # accurate as possible.
         time_now = self._clock.time_msec()
         event_json = event.get_pdu_json(time_now)
-        resp = {
+        resp: JsonDict = {
             "event": event_json,
-            "state": serialize_and_filter_pdus(state_events, time_now),
-            "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
             "members_omitted": caller_supports_partial_state,
         }
+        if supports_msc4242_state_dag(event):
+            resp["state_dag"] = serialize_and_filter_pdus(state_dag, time_now)
+        else:
+            resp["state"] = serialize_and_filter_pdus(state_events, time_now)
+            resp["auth_chain"] = serialize_and_filter_pdus(auth_chain_events, time_now)
 
         # Check the forward extremities for the room here. If there is more than one, it
         # is likely that another event was created in the room during the
@@ -942,7 +966,7 @@ class FederationServer(FederationBase):
 
         await self._federation_callbacks.notify_on_event_delivered_over_federation(
             origin,
-            [event, *state_events, *auth_chain_events],
+            [event, *state_dag, *state_events, *auth_chain_events],
             FederatedEventDeliveryMethod.SEND_JOIN,
         )
 
