@@ -455,8 +455,8 @@ class ProfileUpdateAction(str, enum.Enum):
     UPDATE = "update"
     """
     This profile update row action represents a user updating one or more
-    profile fields. An update could mean updating a field value, or removing a
-    field value.
+    profile fields.
+    'Updating' could mean creating, changing the value of, or deleting a field.
 
     Depending on the type of sync (initial/incremental, lazy/non-lazy), either the
     diff of profile field updates or all the current profile fields are included

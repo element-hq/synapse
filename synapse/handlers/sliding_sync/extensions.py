@@ -1119,7 +1119,7 @@ class SlidingSyncExtensionHandler:
             {
                 room_id
                 for room_id, room_config in sync_config.room_subscriptions.items()
-                if ("m.room.member", "$LAZY") in room_config.required_state
+                if (EventTypes.Member, StateValues.LAZY) in room_config.required_state
             }
             if sync_config.room_subscriptions
             else set()
@@ -1155,7 +1155,7 @@ class SlidingSyncExtensionHandler:
         # Unify the two lists
         profile_user_ids = lazy_profile_user_ids.union(non_lazy_profile_user_ids)
 
-        # Return a tuple containing the full list of user ID's and the lazy subset.
+        # Return a tuple containing the full list of user IDs and the lazy subset.
         return (
             profile_user_ids,
             lazy_profile_user_ids,
@@ -1236,7 +1236,7 @@ class SlidingSyncExtensionHandler:
             return None
 
         user_id = sync_config.user.to_string()
-        fields = set(profiles_request.fields) if profiles_request.fields else None
+        fields = set(profiles_request.fields) if profiles_request.fields is not Absent else None
 
         response: dict[str, JsonDict | None] = {}
 
@@ -1294,6 +1294,7 @@ class SlidingSyncExtensionHandler:
         # Process left rooms
         for other_user_id in left_room_user_ids:
             # Return a null response to the client
+            # This tells the client that it will no longer receive updates for the user
             response[other_user_id] = None
 
         updated_user_fields: dict[str, set[str]] = {}
@@ -1303,16 +1304,21 @@ class SlidingSyncExtensionHandler:
                 update.action != ProfileUpdateAction.UPDATE.value
                 or not update.affected_fields
                 or update.user_id in left_room_user_ids
+                # Skip if not interested in this user
+                or update.user_id not in profile_user_ids
             ):
                 continue
-            for field_name in update.affected_fields:
-                # Skip the update if the client didn't ask for this field, or we're not
-                # interested in this user.
-                if (
-                    fields and field_name not in fields
-                ) or update.user_id not in profile_user_ids:
-                    continue
-                updated_user_fields.setdefault(update.user_id, set()).add(field_name)
+            interesting_changed_fields: Set[str]
+            if fields is not None:
+                interesting_changed_fields = update.affected_fields & fields
+            else:
+                interesting_changed_fields = update.affected_fields
+
+            if not interesting_changed_fields:
+                # Skip the update as the client is not interested in these fields
+                continue
+            
+            updated_user_fields.setdefault(update.user_id, set()).update(interesting_changed_fields)
 
         profile_data_by_user = await self.store.get_profile_data_for_users(
             profile_user_ids,
@@ -1339,6 +1345,7 @@ class SlidingSyncExtensionHandler:
             user_fields = set(profile_data.keys()).union(updated_fields)
             # If the user joined the room or is included via lazy loading events,
             # include all fields the client wants
+            # For non-lazy-loaded users, <FILLME>
             user_fields = (
                 user_fields
                 if profile_user_id in joined_room_user_ids
@@ -1353,22 +1360,24 @@ class SlidingSyncExtensionHandler:
                 continue
 
             for field_name in user_fields:
+                field_value: JsonValue | dict[str, JsonValue] | AbsentType = profile_data.get(field_name, Absent)
                 if (
-                    profile_data.get(field_name) is None
+                    field_value is Absent
+                    # TODO: Please explain this part of the condition. I'm not actually sure it's necessary? But if it is, that means it's worth a comment
+                    # Looks to me that being absent naturally means this must have come from `updated_fields`
                     and field_name in updated_fields
                 ):
                     per_user_removals.add(field_name)
                 else:
-                    per_user_updates[field_name] = profile_data.get(field_name)
+                    per_user_updates[field_name] = field_value
 
             if per_user_updates or per_user_removals:
-                response[profile_user_id] = {}
-            # Typing fix as mypy thinks this may be None
-            entry = cast(JsonDict, response[profile_user_id])
-            if per_user_updates:
-                entry["updated"] = per_user_updates
-            if per_user_removals:
-                entry["removed"] = list(per_user_removals)
+                entry = {}
+                response[profile_user_id] = entry
+                if per_user_updates:
+                    entry["updated"] = per_user_updates
+                if per_user_removals:
+                    entry["removed"] = list(per_user_removals)
 
         return SlidingSyncResult.Extensions.ProfilesExtension(
             users=response,
