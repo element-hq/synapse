@@ -44,6 +44,7 @@ class AppserviceRoomMembershipRestServletTestCase(unittest.HomeserverTestCase):
         config = super().default_config()
         config["experimental_features"] = {
             "msc4502_enabled": True,
+            # Merge in this order to allow `override_config` to override the flag
             **config.get("experimental_features", {}),
         }
         return config
