@@ -1279,7 +1279,7 @@ class SlidingSyncExtensionHandler:
         joined_room_user_ids = {
             update.user_id
             for update in updates
-            if update.action == ProfileUpdateAction.JOINED_ROOM.value
+            if update.action == ProfileUpdateAction.JOINED_ROOM
         }
         profile_user_ids.update(joined_room_user_ids)
 
@@ -1287,7 +1287,7 @@ class SlidingSyncExtensionHandler:
         updated_user_ids = {
             update.user_id
             for update in updates
-            if update.action == ProfileUpdateAction.UPDATE.value
+            if update.action == ProfileUpdateAction.UPDATE
         }
         profile_user_ids.update(updated_user_ids)
 
@@ -1295,7 +1295,7 @@ class SlidingSyncExtensionHandler:
         left_room_user_ids = {
             update.user_id
             for update in updates
-            if update.action == ProfileUpdateAction.LEFT_ROOM.value
+            if update.action == ProfileUpdateAction.LEFT_ROOM
         }
 
         # Process left rooms
@@ -1308,7 +1308,7 @@ class SlidingSyncExtensionHandler:
         # Set fields from updates
         for update in updates:
             if (
-                update.action != ProfileUpdateAction.UPDATE.value
+                update.action != ProfileUpdateAction.UPDATE
                 or not update.affected_fields
                 or update.user_id in left_room_user_ids
                 # Skip if not interested in this user
