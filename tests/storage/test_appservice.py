@@ -595,7 +595,8 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
 
     def test_known_scope_works(self) -> None:
         f = self._write_config(
-            suffix="1", **{"io.element.msc4502.scopes": [Scopes.QUERY_ROOM_MEMBERSHIP]}
+            suffix="1",
+            **{"io.element.msc4502.scopes": [Scopes.QUERY_ROOM_MEMBERSHIP.value]},
         )
 
         self.hs.config.appservice.app_service_config_files = [f]
