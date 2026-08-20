@@ -1188,29 +1188,29 @@ class SlidingSyncExtensionHandler:
         """
         response: dict[str, JsonDict | None] = {}
 
-        # Ensure we're in the list even if we don't belong to any rooms
-        profile_user_ids = profile_user_ids.union({user_id.to_string()})
-
+        # This doesn't return entries for the users with no profile data,
+        # which is good as we don't want to generate anything for users
+        # with no profile data in initial sync.
         profile_data_by_user = await self.store.get_profile_data_for_users(
-            profile_user_ids
+            # Force our own user to be in the set, as we should
+            # always watch our own profile updates
+            profile_user_ids | {user_it.to_string()}
         )
+
         # Serialise the profile updates into the sync response format.
-        for profile_user_id in profile_user_ids:
-            profile_data = profile_data_by_user.get(profile_user_id)
-            if profile_data is None:
-                # Don't generate anything for users with no profile data
-                # in initial sync.
-                continue
-            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
+        for profile_user_id, profile_data in profile_data_by_user.items():
+            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]]
+            # We don't check for previous connection state when gathering the
+            # initial sync response.
             # Include the fields the client asked for, or all, if not specified
-            if fields:
-                user_fields = set(profile_data.keys()).intersection(fields)
+            if fields is not None:
+                per_user_updates = {
+                    k: v
+                    for k, v in profile_data.items()
+                    if k in fields
+                }
             else:
-                user_fields = set(profile_data.keys())
-            for field_name in user_fields:
-                # We don't check for previous connection state when gathering the
-                # initial sync response.
-                per_user_updates[field_name] = profile_data[field_name]
+                per_user_updates = profile_data
 
             if per_user_updates:
                 # Mark the fields as sent and add to the response
