@@ -2568,10 +2568,11 @@ class SyncHandler:
                 # Return an empty dictionary to the client
                 profile_updates[other_user_id] = None
 
-        sync_result_builder.profiles = ProfilesResult(
-            profile_updates=profile_updates,
-            removed_profile_fields=removed_profile_fields,
-        )
+        if profile_updates:
+            sync_result_builder.profiles = ProfilesResult(
+                profile_updates=profile_updates,
+                removed_profile_fields=removed_profile_fields,
+            )
 
     async def _generate_sync_entry_for_presence(
         self,
