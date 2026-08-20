@@ -1384,7 +1384,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 state_before_join, room_version, user_id, previous_membership
             )
         except SynapseError as e:
-            if e.code == Codes.UNABLE_AUTHORISE_JOIN:
+            if e.errcode == Codes.UNABLE_AUTHORISE_JOIN:
                 servers_that_can_issue_invite.discard(self.hs.hostname)
                 return True, list(servers_that_can_issue_invite)
             raise
