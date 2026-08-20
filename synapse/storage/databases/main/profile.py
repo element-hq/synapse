@@ -839,7 +839,7 @@ class ProfileWorkerStore(SQLBaseStore):
         # Record updates in the profile updates stream
         if (
             field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
-            and new_value is None
+            and new_value == ""
         ):
             # Displayname and avatar_url are special in that they are deleted by
             # setting the value to an empty string.
