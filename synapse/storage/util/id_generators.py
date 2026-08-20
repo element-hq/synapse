@@ -64,7 +64,7 @@ stream_current_position_gauge = Gauge(
     "synapse_storage_stream_current_position",
     "The stream's current position as this process sees it."
     "Note, these are always positive, even for negative streams.",
-    labelnames=["stream_name", "instance_name", SERVER_NAME_LABEL],
+    labelnames=["stream_name", SERVER_NAME_LABEL],
 )
 
 
@@ -250,7 +250,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # too, but tests run several homeservers in one process.
         self._current_position_gauge = stream_current_position_gauge.labels(
             stream_name=stream_name,
-            instance_name=instance_name,
             **{SERVER_NAME_LABEL: server_name},
         )
 
