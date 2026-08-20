@@ -1055,6 +1055,32 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             return
         self._test_send_join_common(room_version)
 
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
+    def test_make_join_state_dag(self) -> None:
+        room_version = RoomVersions.MSC4242v12.identifier
+        creator_user_id = self.register_user("kermit_msc4242", "test")
+        tok = self.login("kermit_msc4242", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=creator_user_id, tok=tok, room_version=room_version
+        )
+
+        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/make_join/{room_id}/{joining_user}?ver={room_version}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        event = channel.json_body["event"]
+        self.assertNotIn("auth_events", event)
+
+        extremities = self.get_success(
+            self.hs.get_datastores().main.get_state_dag_extremities(room_id)
+        )
+        self.assertGreater(len(extremities), 0)
+        self.assertCountEqual(event["prev_state_events"], extremities)
+        self.assertIncludes(set(event["prev_state_events"]), set(extremities), exact=True)
+
     def test_send_join_partial_state(self) -> None:
         """/send_join should return partial state, if requested"""
         joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME

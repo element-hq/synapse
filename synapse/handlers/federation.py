@@ -1035,6 +1035,9 @@ class FederationHandler:
         # Note that this requires the /send_join request to come back to the
         # same server.
         prev_event_ids = None
+        prev_state_events = None
+        if room_version.msc4242_state_dags:
+            prev_state_events = list(await self.store.get_state_dag_extremities(room_id))
         if room_version.restricted_join_rule:
             # Note that the room's state can change out from under us and render our
             # nice join rules-conformant event non-conformant by the time we build the
@@ -1091,6 +1094,7 @@ class FederationHandler:
             ) = await self.event_creation_handler.create_new_client_event(
                 builder=builder,
                 prev_event_ids=prev_event_ids,
+                prev_state_events=prev_state_events,
             )
         except SynapseError as e:
             logger.warning("Failed to create join to %s because %s", room_id, e)
