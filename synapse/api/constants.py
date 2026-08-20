@@ -500,3 +500,9 @@ class StickyEvent:
 
     This is the default specified in the MSC. Chosen arbitrarily.
     """
+
+
+class StateDag:
+    GET_MISSING_EVENTS_FIELD: Final = "org.matrix.msc4242.state_dag"
+
+    MAX_MISSING_EVENTS: Final = 1000

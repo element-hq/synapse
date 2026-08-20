@@ -27,12 +27,13 @@ from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, StateDag
 from synapse.api.errors import Codes, FederationError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.http.types import QueryParams
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
@@ -392,6 +393,173 @@ def _create_acl_event(content: JsonDict) -> EventBase:
             "content": content,
         }
     )
+
+
+class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
+    """
+    Tests for walking the MSC4242 state DAG via /get_missing_events.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4242_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self.local_user_id = self.register_user("alice", "pass")
+        self.local_user_token = self.login("alice", "pass")
+        self.room_id = self.helper.create_room_as(
+            room_creator=self.local_user_id,
+            tok=self.local_user_token,
+            room_version=RoomVersions.MSC4242v12.identifier,
+        )
+        self.inject_room_member(
+            self.room_id, f"@remote:{self.OTHER_SERVER_NAME}", "join"
+        )
+
+        # a message is interleaved between the two topics, so it is an ancestor of
+        # `second_topic_id` in the timeline DAG but absent from the state DAG
+        self.first_topic_id = self.helper.send_state(
+            self.room_id, "m.room.topic", {"topic": "one"}, tok=self.local_user_token
+        )["event_id"]
+        self.message_id = self.helper.send(
+            self.room_id, body="a message", tok=self.local_user_token
+        )["event_id"]
+        self.second_topic_id = self.helper.send_state(
+            self.room_id, "m.room.topic", {"topic": "two"}, tok=self.local_user_token
+        )["event_id"]
+
+    def _get_missing_events(
+        self,
+        earliest_events: list[str],
+        latest_events: list[str],
+        limit: int = 10,
+        walk_state_dag: bool = True,
+    ) -> list[JsonDict]:
+        content: JsonDict = {
+            "earliest_events": earliest_events,
+            "latest_events": latest_events,
+            "limit": limit,
+        }
+        if walk_state_dag:
+            content[StateDag.GET_MISSING_EVENTS_FIELD] = True
+
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_id}",
+            content=content,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.json_body)
+        return channel.json_body["events"]
+
+    def test_walks_the_state_dag(self) -> None:
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=True,
+        )
+
+        returned = [(ev["type"], ev.get("state_key")) for ev in events]
+        self.assertIn(("m.room.create", ""), returned)
+        self.assertIn(("m.room.topic", ""), returned)
+        self.assertIn(("m.room.member", self.local_user_id), returned)
+        self.assertIn(("m.room.member", f"@remote:{self.OTHER_SERVER_NAME}"), returned)
+
+        # the seed itself is not returned, so only the first topic is
+        self.assertEqual(len([ev for ev in returned if ev[0] == "m.room.topic"]), 1)
+
+        # the state DAG contains no message events
+        self.assertEqual([ev for ev in returned if ev[0] == "m.room.message"], [])
+
+    def test_stops_at_earliest_events(self) -> None:
+        events = self._get_missing_events(
+            earliest_events=[self.first_topic_id],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=True,
+        )
+        self.assertEqual(events, [])
+
+    def test_honours_limit(self) -> None:
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=2,
+            walk_state_dag=True,
+        )
+        self.assertEqual(len(events), 2)
+
+    def test_is_opt_in(self) -> None:
+        state_dag_events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=True,
+        )
+        timeline_events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=False,
+        )
+
+        self.assertEqual(
+            [ev for ev in state_dag_events if ev["type"] == "m.room.message"], []
+        )
+        self.assertNotEqual(
+            [ev for ev in timeline_events if ev["type"] == "m.room.message"], []
+        )
+
+    def test_walks_from_a_non_state_event(self) -> None:
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.message_id],
+            limit=20,
+            walk_state_dag=True,
+        )
+
+        returned = [(ev["type"], ev.get("state_key")) for ev in events]
+        self.assertIn(("m.room.create", ""), returned)
+        self.assertIn(("m.room.topic", ""), returned)
+        self.assertEqual([ev for ev in returned if ev[0] == "m.room.message"], [])
+
+    def test_first_hop_from_a_non_state_event_is_returned(self) -> None:
+        store = self.hs.get_datastores().main
+        message = self.get_success(store.get_event(self.message_id))
+        assert supports_msc4242_state_dag(message)
+        state_dag = self.get_success(
+            store.get_state_dag(self.room_id, set(message.prev_state_events))
+        )
+
+        events = self._get_missing_events(
+            earliest_events=[], latest_events=[self.message_id], limit=20
+        )
+
+        self.assertCountEqual(
+            [(ev["type"], ev.get("state_key")) for ev in events],
+            [(ev.type, ev.state_key) for ev in state_dag.values()],
+        )
+
+    def test_non_state_seed_stops_at_earliest_events(self) -> None:
+        message = self.get_success(
+            self.hs.get_datastores().main.get_event(self.message_id)
+        )
+        assert supports_msc4242_state_dag(message)
+        events = self._get_missing_events(
+            earliest_events=list(message.prev_state_events),
+            latest_events=[self.message_id],
+            limit=20,
+        )
+        self.assertEqual(events, [])
 
 
 class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
