@@ -36,9 +36,11 @@ from typing import (
 )
 
 import attr
+from prometheus_client import Counter
 from sortedcontainers import SortedList, SortedSet
 
 from synapse.logging import issue9533_logger
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.database import (
     DatabasePool,
@@ -57,6 +59,12 @@ logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
+
+tmp_quashed_stream_position_update_counter = Counter(
+    "synapse_rei_tmp_quashed_stream_position_update",
+    "Number of quashed stream_positions updates",
+    labelnames=["quashed", SERVER_NAME_LABEL],
+)
 
 
 class IdGenerator:
@@ -867,6 +875,14 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         pos = self.get_current_token_for_writer(self._instance_name)
         txn.execute(sql, (self._stream_name, self._instance_name, pos))
+
+        # rei 2026-08-20 m.org special: Track in metrics whether we get a lot of no-opped
+        # updates. If we do, https://www.datadoghq.com/blog/engineering/debugging-postgres-performance/#rewriting-the-query-to-avoid-upsert-overhead
+        # may be a useful optimisation here
+        quashed = txn.rowcount == 0
+        tmp_quashed_stream_position_update_counter.labels(
+            **{SERVER_NAME_LABEL: self.server_name}, quashed=int(quashed)
+        ).inc()
 
     async def get_max_allocated_token(self) -> int:
         return await self._db.runInteraction(
