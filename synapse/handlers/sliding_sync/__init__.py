@@ -61,7 +61,7 @@ from synapse.types import (
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.handlers.sliding_sync import (
-    HaveSentFlag,
+    HaveSentRoomFlag,
     MutablePerConnectionState,
     PerConnectionState,
     RoomLazyMembershipChanges,
@@ -669,14 +669,14 @@ class SlidingSyncHandler:
         ignore_timeline_bound = False
         if from_token and not newly_joined and not state_reset_out_of_room:
             room_status = previous_connection_state.rooms.have_sent_room(room_id)
-            if room_status.status == HaveSentFlag.LIVE:
+            if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
                 initial = False
-            elif room_status.status == HaveSentFlag.PREVIOUSLY:
+            elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
                 assert room_status.last_token is not None
                 from_bound = room_status.last_token
                 initial = False
-            elif room_status.status == HaveSentFlag.NEVER:
+            elif room_status.status == HaveSentRoomFlag.NEVER:
                 from_bound = None
                 initial = True
             else:
