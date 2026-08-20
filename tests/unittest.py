@@ -1147,10 +1147,20 @@ class HomeserverTestCase(TestCase):
             differences_str = "\n".join(f" {diff}" for diff in labels_differences_dicts)
 
             raise AssertionError(
-                f"Multiple metrics found for '{metric}' with labels {labels}\n\nDifferences in labels:\n{differences_str}"
+                f"Multiple metrics found for '{metric}' with labels {labels}\n"
+                f"The labels of the metrics that matched are (excluding common labels that are in all metrics):\n"
+                f"{differences_str}"
             )
         else:
-            raise AssertionError(f"No metric found for {metric} with labels {labels}")
+            all_metrics = "\n".join(
+                f" {sample.labels}"
+                for collected in metric.collect()
+                for sample in collected.samples
+            )
+            raise AssertionError(
+                f"No metric found for {metric} with labels {labels}\n"
+                f"All metrics:\n{all_metrics}"
+            )
 
 
 class FederatingHomeserverTestCase(HomeserverTestCase):
