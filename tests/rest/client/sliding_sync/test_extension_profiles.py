@@ -609,35 +609,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             expectation,
         )
 
-    @override_config({"include_profile_updates_in_sync": True})
-    def test_tracking_of_sent_fields_per_sliding_sync_connection(self) -> None:
-        """
-        Test that we track sent fields per sliding sync connection, so we don't
-        deliver them unnecessarily, or can later figure out if we need to send
-        fields for new rooms or field request subset changes.
-        """
-
-        # Set a new field value and ensure our tracking doesn't swallow updates
-        self.get_success(
-            self.profile_handler.set_field(
-                target_user=UserID.from_string(self.other_user),
-                requester=create_requester(self.other_user),
-                field_name="displayname",
-                new_value="new displayname",
-            )
-        )
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
-        self.assertEqual(
-            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
-                "@other_user:test"
-            ],
-            {
-                "updated": {
-                    "displayname": "new displayname",
-                },
-            },
-        )
-
     @parameterized.expand(["displayname", "avatar_url", "someotherfield"])
     @override_config({"include_profile_updates_in_sync": True})
     def test_removed_fields_get_sent_down_as_removed(
@@ -843,27 +814,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
 
         if not is_initial:
-            # Clear up the sliding sync connection profile updates tracking rows
-            # as otherwise we won't re-send these unchanged fields in this connection.
-            self.get_success(
-                self.store.db_pool.simple_delete_many(
-                    "sliding_sync_connection_profile_updates",
-                    column="user_id",
-                    iterable=[
-                        "@user:test",
-                        "@other_user:test",
-                        "@third_user:test",
-                        "@fourth_user:test",
-                        "@fifth_user:test",
-                        "@hero0:test",
-                        "@hero1:test",
-                        "@hero2:test",
-                    ],
-                    keyvalues={},
-                    desc="clear_old_sliding_sync_connection_profile_updates",
-                )
-            )
-
             self.helper.send_messages(
                 room_id=self.joined_room, num_events=1, tok=self.other_tok
             )

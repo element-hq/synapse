@@ -1351,16 +1351,15 @@ class SlidingSyncExtensionHandler:
             # Include only the diff, unless the user recently joined,
             # or the user is in a room that was lazy loaded,
             # then send all the fields the client asked for.
-            
+            updated_fields: set[str] = updated_user_fields.get(profile_user_id, set())
             user_fields = (
                 user_fields
                 if profile_user_id in joined_room_user_ids
                 or profile_user_id in lazy_profile_user_ids
-                else set(updated_user_fields.get(profile_user_id, [])).intersection(profile_data.keys())
+                else updated_fields.intersection(profile_data.keys())
             )
             for field_name in user_fields:
-                
-                    per_user_updates[field_name] = profile_data[field_name]
+                per_user_updates[field_name] = profile_data[field_name]
 
             if per_user_updates:
                 response[profile_user_id] = {
