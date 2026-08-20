@@ -219,6 +219,7 @@ class SlidingSyncExtensionHandler:
                 to_token=to_token,
                 from_token=from_token,
                 actual_room_response_map=actual_room_response_map,
+                actual_lists=actual_lists,
             )
 
         (
@@ -1089,6 +1090,7 @@ class SlidingSyncExtensionHandler:
         actual_room_ids: set[str],
         sync_config: SlidingSyncConfig,
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
     ) -> tuple[set[str], set[str]]:
         """
         Calculate target user profiles as candiates to include in the profile
@@ -1109,6 +1111,8 @@ class SlidingSyncExtensionHandler:
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             sync_config: The Sliding Sync config object.
             actual_room_response_map: A calculated map of responses per room.
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
 
         Returns:
             Tuple containing two sets, first including all found user IDs,
@@ -1118,6 +1122,7 @@ class SlidingSyncExtensionHandler:
         non_lazy_profile_user_ids = set()
 
         # Separate rooms into lazy and non-lazy based on sync config.
+        # Look at subscriptions first
         lazy_rooms = (
             {
                 room_id
@@ -1127,6 +1132,12 @@ class SlidingSyncExtensionHandler:
             if sync_config.room_subscriptions
             else set()
         )
+        # Iterate lists to find lazy rooms
+        if sync_config.lists:
+            for list_name, list_data in sync_config.lists.items():
+                if (EventTypes.Member, StateValues.LAZY) in list_data.required_state:
+                    for op in actual_lists[list_name].ops:
+                        lazy_rooms.update(set(op.room_ids))
 
         if lazy_rooms:
             # For rooms configured as lazy, include users based on room response.
@@ -1219,6 +1230,7 @@ class SlidingSyncExtensionHandler:
         to_token: StreamToken,
         from_token: SlidingSyncStreamToken | None,
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
     ) -> SlidingSyncResult.Extensions.ProfilesExtension | None:
         """
         Generate a response for the profiles extension.
@@ -1230,6 +1242,8 @@ class SlidingSyncExtensionHandler:
             to_token: The stream token to generate a response until.
             from_token: The stream token to generate a response from.
             actual_room_response_map: A calculated map of responses per room.
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
 
         Returns:
             A SlidingSyncResult.Extensions.ProfilesExtension object containing
@@ -1255,6 +1269,7 @@ class SlidingSyncExtensionHandler:
             actual_room_ids=actual_room_ids,
             sync_config=sync_config,
             actual_room_response_map=actual_room_response_map,
+            actual_lists=actual_lists,
         )
 
         if from_token is None:

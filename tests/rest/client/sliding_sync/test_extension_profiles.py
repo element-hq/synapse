@@ -700,14 +700,17 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
 
     @parameterized.expand(
         [
-            True,
-            False,
+            [True, True],
+            [True, False],
+            [False, False],
+            [False, True],
         ]
     )
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_down_full_profile_if_events_in_timeline(
         self,
         is_initial: bool,
+        use_room_subsciptions: bool,
     ) -> None:
         """
         Test that when lazy loading, only those members who have events in
@@ -754,8 +757,14 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
         # Make an initial Sliding Sync request with the profiles extension enabled
         sync_body: dict[str, dict] = {
-            "lists": {},
-            "room_subscriptions": {
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                },
+            },
+        }
+        if use_room_subsciptions:
+            sync_body["room_subscriptions"] = {
                 self.joined_room: {
                     "required_state": [],
                     "timeline_limit": 10,
@@ -764,19 +773,36 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                     "required_state": [],
                     "timeline_limit": 10,
                 },
-            },
-            "extensions": {
-                "org.matrix.msc4262.profiles": {
-                    "enabled": True,
+            }
+        else:
+            sync_body["lists"] = {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 10,
+                }
+            }
+            # We also need to specifically request the non-lazy room, otherwise
+            # our test to see if non-lazy members are also included will fail
+            sync_body["room_subscriptions"] = {
+                new_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
                 },
-            },
-        }
+            }
         if is_initial:
-            sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
-                ["m.room.member", "$LAZY"],
-                # Don't request other state as we're checking timeline events
-                # ["*", "*"],
-            ]
+            if use_room_subsciptions:
+                sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
+                    ["m.room.member", "$LAZY"],
+                    # Don't request other state as we're checking timeline events
+                    # ["*", "*"],
+                ]
+            else:
+                sync_body["lists"]["foo-list"]["required_state"] = [
+                    ["m.room.member", "$LAZY"],
+                    # Don't request other state as we're checking timeline events
+                    # ["*", "*"],
+                ]
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
         if is_initial:
             self.assertIsNotNone(
@@ -820,23 +846,43 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             self.helper.send_messages(
                 room_id=self.joined_room, num_events=10, tok=third_tok
             )
-            sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
-                ["m.room.member", "$LAZY"],
-                # Don't request other state as we're checking timeline events
-                # ["*", "*"],
-            ]
+            if use_room_subsciptions:
+                sync_body["room_subscriptions"][self.joined_room]["required_state"] = [
+                    ["m.room.member", "$LAZY"],
+                    # Don't request other state as we're checking timeline events
+                    # ["*", "*"],
+                ]
+            else:
+                sync_body["lists"]["foo-list"]["required_state"] = [
+                    ["m.room.member", "$LAZY"],
+                    # Don't request other state as we're checking timeline events
+                    # ["*", "*"],
+                ]
             # Make an incremental Sliding Sync request
             response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
             self.assertIsNotNone(
                 response_body["extensions"].get("org.matrix.msc4262.profiles")
             )
-            # Other user should be filtered out as heroes don't come down
-            # in incremental sync in the same way as initial sync.
-            self.assertIsNone(
-                response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
-                    "@other_user:test"
+            # TODO check this if it's expected that heroes come down differently
+            # depending on if using a room subscription or a list
+            if use_room_subsciptions:
+                # Other user should be filtered out as heroes don't come down
+                # in incremental sync in the same way as initial sync, if the
+                # room is included via a room subscription.
+                self.assertIsNone(
+                    response_body["extensions"]["org.matrix.msc4262.profiles"][
+                        "users"
+                    ].get("@other_user:test")
                 )
-            )
+            else:
+                # Other user should be included as heroes do come down
+                # in incremental sync in the same way as initial sync when the
+                # room is included in a list
+                self.assertIsNotNone(
+                    response_body["extensions"]["org.matrix.msc4262.profiles"][
+                        "users"
+                    ].get("@other_user:test")
+                )
             # Third user has events in the timeline, so should be here.
             self.assertIsNotNone(
                 response_body["extensions"]["org.matrix.msc4262.profiles"]["users"].get(
@@ -863,6 +909,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                 )
             )
 
+    # TODO use parametrize with lists
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_full_profile_even_if_no_events_if_otherwise_included(
         self,
@@ -937,6 +984,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
         )
 
+    # TODO use parametrize with lists
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_full_profile_for_required_state_member_events(
         self,
@@ -998,6 +1046,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
         )
 
+    # TODO use parametrize with lists
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_full_profile_for_heroes(
         self,
