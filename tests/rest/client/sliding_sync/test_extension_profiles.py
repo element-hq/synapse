@@ -656,9 +656,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         }
 
         # Make an incremental Sliding Sync request
-        response_body, from_token = self.do_sync(
-            sync_body, since=from_token, tok=self.tok
-        )
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
         # We should not get other user re-sent
         self.assertIsNone(
             response_body["extensions"].get("org.matrix.msc4262.profiles"),
