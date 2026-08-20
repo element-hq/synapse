@@ -831,7 +831,6 @@ class ProfileWorkerStore(SQLBaseStore):
             return None
 
         # Record updates in the profile updates stream
-        # FIXME: this should be DELETE if displayname/avatarurl are being emptied
         stream_id = self.record_profile_updates_txn(
             txn=txn,
             user_id=user_id,
@@ -893,10 +892,9 @@ class ProfileWorkerStore(SQLBaseStore):
         Args:
             txn: Transaction to use
             user_id: User ID that made the profile update
-            action: The profile update action, either `update`, `delete`, `left_room`
-                or `joined_room`.
-            field_names: A list of fields that were set, if
-                ProfileUpdateAction.UPDATE/DELETE
+            action: The profile update action, either `update`, `left_room` or
+                `joined_room`.
+            field_names: A list of fields that were set, if ProfileUpdateAction.UPDATE
             user_rooms: Optionally, a set of rooms that the update concerns. If not
                 given, a database lookup will be done to fetch all the users rooms.
             target_users: Optionally, set of users to create profile update stream rows

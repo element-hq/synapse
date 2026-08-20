@@ -2482,8 +2482,6 @@ class SyncHandler:
                 # Return an empty dictionary to the client
                 profile_updates[other_user_id] = None
 
-        # FIXME: handle profile field deletions like we do for sliding sync
-
         if profile_updates:
             sync_result_builder.profile_updates = profile_updates
 
