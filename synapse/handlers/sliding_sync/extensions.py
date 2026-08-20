@@ -1194,7 +1194,7 @@ class SlidingSyncExtensionHandler:
         profile_data_by_user = await self.store.get_profile_data_for_users(
             # Force our own user to be in the set, as we should
             # always watch our own profile updates
-            profile_user_ids | {user_it.to_string()}
+            profile_user_ids | {user_id.to_string()}
         )
 
         # Serialise the profile updates into the sync response format.
@@ -1205,9 +1205,7 @@ class SlidingSyncExtensionHandler:
             # Include the fields the client asked for, or all, if not specified
             if fields is not None:
                 per_user_updates = {
-                    k: v
-                    for k, v in profile_data.items()
-                    if k in fields
+                    k: v for k, v in profile_data.items() if k in fields
                 }
             else:
                 per_user_updates = profile_data
