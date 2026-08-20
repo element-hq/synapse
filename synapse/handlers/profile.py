@@ -106,7 +106,9 @@ class ProfileHandler:
         self._worker_locks = hs.get_worker_locks_handler()
 
         # Profile updates stream
-        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
         self._is_events_writer = (
             hs.get_instance_name() in hs.config.worker.writers.events
         )

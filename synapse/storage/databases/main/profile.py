@@ -86,7 +86,9 @@ class ProfileWorkerStore(SQLBaseStore):
             "populate_full_user_id_profiles", self.populate_full_user_id_profiles
         )
 
-        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
         self._is_events_writer = self._instance_name in hs.config.worker.writers.events
         self._profile_updates_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
             db_conn=db_conn,
@@ -764,7 +766,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             The profile updates stream ID that was created in this transaction
         """
-        if self._msc4429_enabled:
+        if self._include_profile_updates_in_sync:
             assert self._is_events_writer
 
         self._check_profile_size(txn, user_id, field_name, new_value)
@@ -827,7 +829,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     ),
                 )
 
-        if not self._msc4429_enabled:
+        if not self._include_profile_updates_in_sync:
             return None
 
         # Record updates in the profile updates stream
@@ -856,7 +858,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 users profile should be pushed to the client, should they need it
                 already even if the user hasn't actually joined the room.
         """
-        if not self._msc4429_enabled:
+        if not self._include_profile_updates_in_sync:
             return
 
         assert self._is_events_writer
@@ -904,7 +906,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             The latest stream ID created in this transaction
         """
-        if not self._msc4429_enabled:
+        if not self._include_profile_updates_in_sync:
             return None
 
         if action == ProfileUpdateAction.UPDATE:
@@ -1019,7 +1021,7 @@ class ProfileWorkerStore(SQLBaseStore):
             field_name: The name of the custom profile field.
         """
 
-        if self._msc4429_enabled:
+        if self._include_profile_updates_in_sync:
             assert self._is_events_writer
 
         def delete_profile_field(txn: LoggingTransaction) -> int | None:
@@ -1041,7 +1043,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     (f'$."{field_name}"', user_id.localpart),
                 )
 
-            if not self._msc4429_enabled:
+            if not self._include_profile_updates_in_sync:
                 return None
 
             stream_id = self.record_profile_updates_txn(
