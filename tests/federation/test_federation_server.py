@@ -20,6 +20,7 @@
 #
 import logging
 from http import HTTPStatus
+from unittest import skip as skip_test
 from unittest.mock import Mock
 
 from parameterized import parameterized
@@ -1002,36 +1003,43 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
-        # we should get complete room state back
-        returned_state = [
-            (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
+        expected_state = [
+            ("m.room.create", ""),
+            ("m.room.power_levels", ""),
+            ("m.room.join_rules", ""),
+            ("m.room.history_visibility", ""),
+            ("m.room.member", f"@kermit_v{room_version}:test"),
+            ("m.room.member", f"@fozzie_v{room_version}:test"),
+            # nb: *not* the joining user
         ]
-        self.assertCountEqual(
-            returned_state,
-            [
-                ("m.room.create", ""),
-                ("m.room.power_levels", ""),
-                ("m.room.join_rules", ""),
-                ("m.room.history_visibility", ""),
-                ("m.room.member", f"@kermit_v{room_version}:test"),
-                ("m.room.member", f"@fozzie_v{room_version}:test"),
-                # nb: *not* the joining user
-            ],
-        )
 
-        # also check the auth chain
-        returned_auth_chain_events = [
-            (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
-        ]
-        self.assertCountEqual(
-            returned_auth_chain_events,
-            [
-                ("m.room.create", ""),
-                ("m.room.member", f"@kermit_v{room_version}:test"),
-                ("m.room.power_levels", ""),
-                ("m.room.join_rules", ""),
-            ],
-        )
+        if KNOWN_ROOM_VERSIONS[room_version].msc4242_state_dags:
+            returned_state_dag = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]
+            ]
+            self.assertCountEqual(returned_state_dag, expected_state)
+            self.assertNotIn("state", channel.json_body)
+            self.assertNotIn("auth_chain", channel.json_body)
+        else:
+            # we should get complete room state back
+            returned_state = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
+            ]
+            self.assertCountEqual(returned_state, expected_state)
+
+            # also check the auth chain
+            returned_auth_chain_events = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
+            ]
+            self.assertCountEqual(
+                returned_auth_chain_events,
+                [
+                    ("m.room.create", ""),
+                    ("m.room.member", f"@kermit_v{room_version}:test"),
+                    ("m.room.power_levels", ""),
+                    ("m.room.join_rules", ""),
+                ],
+            )
 
         # the room should show that the new user is a member
         r = self.get_success(self._storage_controllers.state.get_current_state(room_id))
@@ -1041,19 +1049,58 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     @override_config({"use_frozen_dicts": True})
     def test_send_join_with_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=True"""
-        if room_version == RoomVersions.MSC4242v12.identifier:
-            # TODO: This room version doesn't work over federation in this PR.
-            return
         self._test_send_join_common(room_version)
 
     @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
     @override_config({"use_frozen_dicts": False})
     def test_send_join_without_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=False"""
-        if room_version == RoomVersions.MSC4242v12.identifier:
-            # TODO: This room version doesn't work over federation in this PR.
-            return
         self._test_send_join_common(room_version)
+
+    @skip_test("requires MSC4242 inbound event auth")
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
+    def test_send_join_state_dag(self) -> None:
+        self._test_send_join_common(RoomVersions.MSC4242v12.identifier)
+
+    @skip_test("requires MSC4242 inbound event auth")
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
+    def test_send_join_state_dag_ignores_partial_state(self) -> None:
+        room_version = RoomVersions.MSC4242v12.identifier
+        creator_user_id = self.register_user("kermit_msc4242", "test")
+        tok = self.login("kermit_msc4242", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=creator_user_id, tok=tok, room_version=room_version
+        )
+
+        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/make_join/{room_id}/{joining_user}?ver={room_version}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        join_event_dict = channel.json_body["event"]
+        self.add_hashes_and_signatures_from_other_server(
+            join_event_dict,
+            KNOWN_ROOM_VERSIONS[room_version],
+        )
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/send_join/{room_id}/x?omit_members=true",
+            content=join_event_dict,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["members_omitted"], False)
+        self.assertNotIn("servers_in_room", channel.json_body)
+        self.assertIn("state_dag", channel.json_body)
+
+        state_dag = channel.json_body["state_dag"]
+        create_event_ids = [
+            ev
+            for ev in state_dag
+            if (ev["type"], ev["state_key"]) == ("m.room.create", "")
+        ]
+        self.assertEqual(len(create_event_ids), 1)
 
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_make_join_state_dag(self) -> None:
@@ -1079,7 +1126,9 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertGreater(len(extremities), 0)
         self.assertCountEqual(event["prev_state_events"], extremities)
-        self.assertIncludes(set(event["prev_state_events"]), set(extremities), exact=True)
+        self.assertIncludes(
+            set(event["prev_state_events"]), set(extremities), exact=True
+        )
 
     def test_send_join_partial_state(self) -> None:
         """/send_join should return partial state, if requested"""

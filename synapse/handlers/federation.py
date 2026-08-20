@@ -1037,7 +1037,9 @@ class FederationHandler:
         prev_event_ids = None
         prev_state_events = None
         if room_version.msc4242_state_dags:
-            prev_state_events = list(await self.store.get_state_dag_extremities(room_id))
+            prev_state_events = list(
+                await self.store.get_state_dag_extremities(room_id)
+            )
         if room_version.restricted_join_rule:
             # Note that the room's state can change out from under us and render our
             # nice join rules-conformant event non-conformant by the time we build the
