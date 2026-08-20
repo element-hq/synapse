@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
-from synapse.appservice import SCOPE_QUERY_ROOM_MEMBERSHIP
+from synapse.appservice import Scopes
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_string
 from synapse.http.site import SynapseRequest
@@ -49,7 +49,7 @@ class AppserviceRoomMembershipRestServlet(RestServlet):
         self, request: SynapseRequest, room_id: str
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
-        self.auth.assert_requester_has_scope(requester, SCOPE_QUERY_ROOM_MEMBERSHIP)
+        self.auth.assert_requester_has_scope(requester, Scopes.QUERY_ROOM_MEMBERSHIP)
 
         if not RoomID.is_valid(room_id):
             raise SynapseError(

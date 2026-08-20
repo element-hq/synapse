@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
-from synapse.appservice import SCOPE_QUERY_ROOM_MEMBERSHIP, ApplicationService
+from synapse.appservice import ApplicationService, Scopes
 from synapse.rest import admin
 from synapse.rest.client import login, room, room_membership
 from synapse.server import HomeServer
@@ -84,7 +84,7 @@ class AppserviceRoomMembershipRestServletTestCase(unittest.HomeserverTestCase):
                 AS_TOKEN,
                 id="as_with_scope",
                 sender=UserID.from_string("@as:test"),
-                scopes=[SCOPE_QUERY_ROOM_MEMBERSHIP],
+                scopes=[Scopes.QUERY_ROOM_MEMBERSHIP],
             )
         )
         main_store.services_cache.append(
@@ -212,7 +212,7 @@ class AppserviceRoomMembershipRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(body["errcode"], Codes.FORBIDDEN)
 
     def test_user_with_oauth_scope_allowed(self) -> None:
-        requester = create_requester(self.creator, scope={SCOPE_QUERY_ROOM_MEMBERSHIP})
+        requester = create_requester(self.creator, scope={Scopes.QUERY_ROOM_MEMBERSHIP})
         with patch.object(
             self.hs.get_auth(), "get_user_by_req", AsyncMock(return_value=requester)
         ):

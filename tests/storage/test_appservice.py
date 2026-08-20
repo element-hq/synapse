@@ -30,9 +30,9 @@ from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
 from synapse.appservice import (
-    SCOPE_QUERY_ROOM_MEMBERSHIP,
     ApplicationService,
     ApplicationServiceState,
+    Scopes,
 )
 from synapse.config._base import ConfigError
 from synapse.events import EventBase
@@ -595,7 +595,7 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
 
     def test_known_scope_works(self) -> None:
         f = self._write_config(
-            suffix="1", **{"io.element.msc4502.scopes": [SCOPE_QUERY_ROOM_MEMBERSHIP]}
+            suffix="1", **{"io.element.msc4502.scopes": [Scopes.QUERY_ROOM_MEMBERSHIP]}
         )
 
         self.hs.config.appservice.app_service_config_files = [f]

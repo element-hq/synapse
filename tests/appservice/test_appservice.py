@@ -25,9 +25,9 @@ from unittest.mock import AsyncMock, Mock
 from twisted.internet import defer
 
 from synapse.appservice import (
-    SCOPE_QUERY_ROOM_MEMBERSHIP,
     ApplicationService,
     Namespace,
+    Scopes,
 )
 from synapse.types import UserID
 
@@ -271,17 +271,17 @@ class ApplicationServiceScopesTestCase(unittest.TestCase):
             token="some_token",
         )
         self.assertEqual(len(service.scopes), 0)
-        self.assertFalse(service.has_scope(SCOPE_QUERY_ROOM_MEMBERSHIP))
+        self.assertFalse(service.has_scope(Scopes.QUERY_ROOM_MEMBERSHIP))
 
     def test_has_valid_scope_if_specified(self) -> None:
         service = ApplicationService(
             id="unique_identifier",
             sender=UserID.from_string("@as:test"),
             token="some_token",
-            scopes=[SCOPE_QUERY_ROOM_MEMBERSHIP],
+            scopes=[Scopes.QUERY_ROOM_MEMBERSHIP],
         )
         self.assertEqual(len(service.scopes), 1)
-        self.assertTrue(service.has_scope(SCOPE_QUERY_ROOM_MEMBERSHIP))
+        self.assertTrue(service.has_scope(Scopes.QUERY_ROOM_MEMBERSHIP))
 
     def test_unknown_scope_raises(self) -> None:
         with self.assertRaises(ValueError):
