@@ -909,10 +909,16 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                 )
             )
 
-    # TODO use parametrize with lists
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_full_profile_even_if_no_events_if_otherwise_included(
         self,
+        use_room_subsciptions: bool,
     ) -> None:
         """
         Test that when lazy loading, if a user is in both a lazy loading room
@@ -942,8 +948,14 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         )
         # Make an initial Sliding Sync request with the profiles extension enabled
         sync_body: dict[str, dict] = {
-            "lists": {},
-            "room_subscriptions": {
+            "extensions": {
+                "org.matrix.msc4262.profiles": {
+                    "enabled": True,
+                },
+            },
+        }
+        if use_room_subsciptions:
+            sync_body["room_subscriptions"] = {
                 self.joined_room: {
                     "required_state": [
                         ["m.room.member", "$LAZY"],
@@ -959,13 +971,30 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                     "required_state": [],
                     "timeline_limit": 10,
                 },
-            },
-            "extensions": {
-                "org.matrix.msc4262.profiles": {
-                    "enabled": True,
+            }
+        else:
+            sync_body["lists"] = {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        ["m.room.member", "$LAZY"],
+                        # Don't request any events for this room
+                        # ["*", "*"],
+                    ],
+                    # Force zero timeline events in the response, otherwise
+                    # this test wont work, as the timeline_events in the room
+                    # response will contain all the create/join etc events too.
+                    "timeline_limit": 0,
+                }
+            }
+            # We also need to specifically request the non-lazy room, otherwise
+            # our test to see if non-lazy members are also included will fail
+            sync_body["room_subscriptions"] = {
+                new_room: {
+                    "required_state": [],
+                    "timeline_limit": 10,
                 },
-            },
-        }
+            }
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
         self.assertIsNotNone(
             response_body["extensions"].get("org.matrix.msc4262.profiles")
@@ -984,10 +1013,16 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
         )
 
-    # TODO use parametrize with lists
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_full_profile_for_required_state_member_events(
         self,
+        use_room_subsciptions: bool,
     ) -> None:
         """
         Test that when lazy loading for lazy rooms, even without timeline events,
@@ -1010,24 +1045,39 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         )
         # Make an initial Sliding Sync request with the profiles extension enabled
         sync_body: dict[str, dict] = {
-            "lists": {},
-            "room_subscriptions": {
-                self.joined_room: {
-                    "required_state": [
-                        ["m.room.member", "$LAZY"],
-                        ["*", "*"],
-                    ],
-                    # Force zero timeline events in the response, as we're
-                    # testing that required state membership events are caught.
-                    "timeline_limit": 0,
-                },
-            },
             "extensions": {
                 "org.matrix.msc4262.profiles": {
                     "enabled": True,
                 },
             },
         }
+        if use_room_subsciptions:
+            sync_body["room_subscriptions"] = {
+                self.joined_room: {
+                    "required_state": [
+                        ["m.room.member", "$LAZY"],
+                        ["*", "*"],
+                    ],
+                    # Force zero timeline events in the response, otherwise
+                    # this test wont work, as the timeline_events in the room
+                    # response will contain all the create/join etc events too.
+                    "timeline_limit": 0,
+                },
+            }
+        else:
+            sync_body["lists"] = {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        ["m.room.member", "$LAZY"],
+                        ["*", "*"],
+                    ],
+                    # Force zero timeline events in the response, otherwise
+                    # this test wont work, as the timeline_events in the room
+                    # response will contain all the create/join etc events too.
+                    "timeline_limit": 0,
+                }
+            }
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
         self.assertIsNotNone(
             response_body["extensions"].get("org.matrix.msc4262.profiles")
@@ -1046,10 +1096,16 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
         )
 
-    # TODO use parametrize with lists
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
     @override_config({"include_profile_updates_in_sync": True})
     def test_lazy_loading_sends_full_profile_for_heroes(
         self,
+        use_room_subsciptions: bool,
     ) -> None:
         """
         Test that when lazy loading for lazy rooms, even without timeline events or
@@ -1073,26 +1129,41 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
 
         # Make an initial Sliding Sync request with the profiles extension enabled
         sync_body: dict[str, dict] = {
-            "lists": {},
-            "room_subscriptions": {
-                self.joined_room: {
-                    "required_state": [
-                        ["m.room.member", "$LAZY"],
-                        # We must not request any state, as this test checks
-                        # that we're pulling profiles for heroes.
-                        # ["*", "*"],
-                    ],
-                    # Force zero timeline events in the response, as we're
-                    # testing that room heroes are caught.
-                    "timeline_limit": 0,
-                },
-            },
             "extensions": {
                 "org.matrix.msc4262.profiles": {
                     "enabled": True,
                 },
             },
         }
+        if use_room_subsciptions:
+            sync_body["room_subscriptions"] = {
+                self.joined_room: {
+                    "required_state": [
+                        ["m.room.member", "$LAZY"],
+                        # Don't request any events for this room
+                        # ["*", "*"],
+                    ],
+                    # Force zero timeline events in the response, otherwise
+                    # this test wont work, as the timeline_events in the room
+                    # response will contain all the create/join etc events too.
+                    "timeline_limit": 0,
+                },
+            }
+        else:
+            sync_body["lists"] = {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        ["m.room.member", "$LAZY"],
+                        # Don't request any events for this room
+                        # ["*", "*"],
+                    ],
+                    # Force zero timeline events in the response, otherwise
+                    # this test wont work, as the timeline_events in the room
+                    # response will contain all the create/join etc events too.
+                    "timeline_limit": 0,
+                }
+            }
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
         self.assertIsNotNone(
             response_body["extensions"].get("org.matrix.msc4262.profiles")
