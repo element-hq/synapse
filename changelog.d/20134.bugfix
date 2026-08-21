@@ -1,0 +1,1 @@
+Fix sync stream not being woken up when a user updates a profile field without belonging to any rooms.
