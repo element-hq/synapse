@@ -156,6 +156,7 @@ async fn build_versions_response(
             "v1.11".to_string(),
             "v1.12".to_string(),
             "v1.13".to_string(),
+            "v1.14".to_string(),
         ]),
         unstable_features: unstable_feature_map,
     })
