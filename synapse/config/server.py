@@ -659,6 +659,15 @@ class ServerConfig(Config):
         else:
             self.redaction_retention_period = None
 
+        # How long to allow event redactions for on `m.room.message`
+        redaction_allowed_period = config.get("redaction_allowed_period", None)
+        if redaction_allowed_period is not None:
+            self.redaction_allowed_period: int | None = self.parse_duration(
+                redaction_allowed_period
+            )
+        else:
+            self.redaction_allowed_period = None
+
         # How long to keep locally forgotten rooms before purging them from the DB.
         forgotten_room_retention_period = config.get(
             "forgotten_room_retention_period", None

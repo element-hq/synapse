@@ -105,6 +105,8 @@ class Codes(str, Enum):
     # https://github.com/matrix-org/matrix-spec-proposals/pull/3823
     USER_ACCOUNT_SUSPENDED = "M_USER_SUSPENDED"
 
+    ALLOWED_REDACTION_PERIOD_PASSED = "M_ALLOWED_REDACTION_PERIOD_PASSED"
+
     BAD_ALIAS = "M_BAD_ALIAS"
     # For restricted join rules.
     UNABLE_AUTHORISE_JOIN = "M_UNABLE_TO_AUTHORISE_JOIN"
