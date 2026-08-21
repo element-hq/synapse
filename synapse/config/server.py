@@ -176,7 +176,7 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fec0::/10",
 ]
 
-DEFAULT_ROOM_VERSION = "10"
+DEFAULT_ROOM_VERSION = "11"
 
 # Defaults for the presence state machine timers, in milliseconds. Overridden
 # by the corresponding options in the `presence` config section.
@@ -585,6 +585,12 @@ class ServerConfig(Config):
                 " 'allow_public_rooms_over_federation' is set."
             )
 
+        # Whether to support MSC4429 profile updates down legacy /sync
+        self.include_profile_updates_in_sync = config.get(
+            "include_profile_updates_in_sync",
+            False,
+        )
+
         # Check if the legacy "restrict_public_rooms_to_local_users" flag is set. This
         # flag is now obsolete but we need to check it for backward-compatibility.
         if config.get("restrict_public_rooms_to_local_users", False):
@@ -966,9 +972,10 @@ class ServerConfig(Config):
 
         # The maximum number of delayed events a user may have scheduled at a time.
         # (Defined here despite being experimental to be near the other MSC4140 config)
-        self.max_delayed_events_per_user: int = config.get(
-            "experimental_features", {}
-        ).get("msc4140_max_delayed_events_per_user", 100)
+        experimental = config.get("experimental_features") or {}
+        self.max_delayed_events_per_user: int = experimental.get(
+            "msc4140_max_delayed_events_per_user", 100
+        )
         if (
             not isinstance(self.max_delayed_events_per_user, int)
             or self.max_delayed_events_per_user < 0

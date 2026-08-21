@@ -63,6 +63,14 @@ TransactionOneTimeKeysCount = dict[str, dict[str, dict[str, int]]]
 TransactionUnusedFallbackKeys = dict[str, dict[str, list[str]]]
 
 
+class Scopes(str, Enum):
+    """
+    All known scopes assignable to application services for extended privileges.
+    """
+
+    QUERY_ROOM_MEMBERSHIP = "urn:matrix:client:io.element.msc4502:rooms:is_joined"
+
+
 class ApplicationServiceState(Enum):
     DOWN = "down"
     UP = "up"
@@ -109,6 +117,7 @@ class ApplicationService:
         supports_unstable_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
         msc4190_device_management: bool = False,
+        scopes: Iterable[str] = frozenset(),
         proxy_prefix: str | None = None,
         proxy_url: str | None = None,
     ):
@@ -158,6 +167,11 @@ class ApplicationService:
             self.protocols = set(protocols)
         else:
             self.protocols = set()
+
+        self.scopes = set(scopes)
+        unknown_scopes = self.scopes - frozenset(Scopes)
+        if unknown_scopes:
+            raise ValueError(f"Unknown application service scope(s): {unknown_scopes}")
 
         self.rate_limited = rate_limited
 
@@ -403,6 +417,9 @@ class ApplicationService:
 
     def is_interested_in_protocol(self, protocol: str) -> bool:
         return protocol in self.protocols
+
+    def has_scope(self, scope: Scopes) -> bool:
+        return scope in self.scopes
 
     def is_exclusive_alias(self, alias: str) -> bool:
         return self._is_exclusive(ApplicationService.NS_ALIASES, alias)

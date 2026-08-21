@@ -13,6 +13,7 @@
 #
 import logging
 from typing import Any
+from unittest.mock import patch
 
 from parameterized import parameterized, parameterized_class
 
@@ -26,7 +27,11 @@ from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
-from tests.test_utils.event_injection import create_event
+from tests.test_utils.event_injection import (
+    create_event,
+    inject_event,
+    inject_member_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1407,3 +1412,239 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             }
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+    @parameterized.expand(((True,), (None,), ({"a": "dict"},), (["a list"],), (42,)))
+    def test_rooms_meta_non_string_name(self, non_string_name: object) -> None:
+        """
+        Test that when the room name is not a string, it gets
+        treated the same as if there is no room name set;
+        the `name` field is omitted and `heroes` are populated instead.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # For heroes to be emitted, we need a second user
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+
+        # Set the room name to a non-string
+        # Need to patch out our client-sent event checks to do this.
+        # (We don't apply these same out-of-spec checks to events
+        # received through federation.
+        # Could have instead set up the test to receive the event over federation.)
+        with patch("synapse.events.validator.EventValidator.validate_new"):
+            self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=room_id,
+                    sender=user1_id,
+                    type=EventTypes.Name,
+                    state_key="",
+                    content={"name": non_string_name},
+                )
+            )
+
+        sync_body = {
+            "lists": {
+                "wombat": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Sanity check that the room is included with an initial snapshot
+        self.assertEqual(response_body["rooms"][room_id]["initial"], True)
+
+        # The name should be omitted (non-string value treated as unset).
+        self.assertNotIn(
+            "name",
+            response_body["rooms"][room_id],
+            response_body["rooms"][room_id],
+        )
+
+        # Since there is no name, heroes should be populated.
+        self.assertEqual(
+            response_body["rooms"][room_id]["heroes"],
+            [{"displayname": "user2", "user_id": "@user2:test"}],
+        )
+
+    @parameterized.expand(((True,), (None,), ({"a": "dict"},), (["a list"],), (42,)))
+    def test_rooms_meta_non_string_avatar(self, non_string_avatar: str) -> None:
+        """
+        Test that when the room avatar is not a string, it gets
+        treated the same as if there is no room avatar set;
+        the `avatar` field is omitted.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Set the room avatar to a dict (non-string) instead of a URL string.
+        # Need to patch out our client-sent event checks to do this
+        # (We don't apply these same out-of-spec checks to events
+        # received through federation.
+        # Could have instead set up the test to receive the event over federation.)
+        with patch("synapse.events.validator.EventValidator.validate_new"):
+            self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=room_id,
+                    sender=user1_id,
+                    type=EventTypes.RoomAvatar,
+                    state_key="",
+                    content={"url": non_string_avatar},
+                )
+            )
+
+        sync_body = {
+            "lists": {
+                "wombat": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Sanity check that the room is included with an initial snapshot
+        self.assertEqual(response_body["rooms"][room_id]["initial"], True)
+
+        # The avatar should be omitted (non-string value treated as unset).
+        self.assertNotIn(
+            "avatar",
+            response_body["rooms"][room_id],
+            response_body["rooms"][room_id],
+        )
+
+    @parameterized.expand(((True,), (None,), ({"a": "dict"},), (["a list"],), (42,)))
+    def test_rooms_meta_heroes_non_string_displayname(
+        self, non_string_name: str
+    ) -> None:
+        """
+        Test that when a hero's displayname is not a string, it gets
+        treated the same as if there is no displayname set:
+        the `displayname` field is omitted from the hero entry.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+
+        # Create a room with no name so heroes are populated.
+        room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Inject a membership event for user2 with a non-string displayname.
+        self.get_success(
+            inject_member_event(
+                self.hs,
+                room_id,
+                sender=user2_id,
+                target=user2_id,
+                membership=Membership.JOIN,
+                extra_content={
+                    "displayname": non_string_name,
+                    "avatar_url": "mxc://example.org/a-real-mxc",
+                },
+            )
+        )
+
+        sync_body = {
+            "lists": {
+                "wombat": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Sanity check that the room is included with an initial snapshot
+        self.assertEqual(response_body["rooms"][room_id]["initial"], True)
+        self.assertNotIn(
+            "name", response_body["rooms"][room_id], response_body["rooms"][room_id]
+        )
+
+        # user2 should be in the heroes list, but without a displayname
+        self.assertEqual(
+            response_body["rooms"][room_id]["heroes"],
+            [
+                {
+                    "avatar_url": "mxc://example.org/a-real-mxc",
+                    "user_id": "@user2:test",
+                }
+            ],
+        )
+
+    @parameterized.expand(((True,), (None,), ({"a": "dict"},), (["a list"],), (42,)))
+    def test_rooms_meta_heroes_non_string_avatar_url(
+        self, non_string_avatar: str
+    ) -> None:
+        """
+        Test that when a hero's avatar URL is not a string, it gets
+        treated the same as if there is no avatar URL set:
+        the `avatar_url` field is omitted from the hero entry.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room with no name so heroes are populated.
+        room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+        )
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Inject a membership event for user2 with a non-string avatar_url.
+        self.get_success(
+            inject_member_event(
+                self.hs,
+                room_id,
+                sender=user2_id,
+                target=user2_id,
+                membership=Membership.JOIN,
+                extra_content={
+                    "displayname": "second user",
+                    "avatar_url": non_string_avatar,
+                },
+            )
+        )
+
+        sync_body = {
+            "lists": {
+                "wombat": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Sanity check that the room is included with an initial snapshot
+        self.assertEqual(response_body["rooms"][room_id]["initial"], True)
+        self.assertNotIn("name", response_body["rooms"][room_id])
+
+        # user2 should be in the heroes list, but without an avatar
+        self.assertEqual(
+            response_body["rooms"][room_id]["heroes"],
+            [{"displayname": "second user", "user_id": "@user2:test"}],
+        )

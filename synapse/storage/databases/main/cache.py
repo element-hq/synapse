@@ -70,6 +70,10 @@ GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME = (
     "_get_e2e_cross_signing_signatures_for_device"
 )
 
+# As above: this cache takes a single argument which is itself a tuple, which
+# requires special handling.
+GET_SERVER_KEYS_JSON_CACHE_NAME = "_get_server_keys_json"
+
 # How long between cache invalidation table cleanups, once we have caught up
 # with the backlog.
 REGULAR_CLEANUP_INTERVAL = Duration(hours=1)
@@ -304,6 +308,24 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                         # to nest our tuple in another tuple.
                         self._get_e2e_cross_signing_signatures_for_device.invalidate(  # type: ignore[attr-defined]
                             ((user_id, device_id),)
+                        )
+                elif row.cache_func == GET_SERVER_KEYS_JSON_CACHE_NAME:
+                    # As above: each entry in "keys" is a JSON-encoded
+                    # (server_name, key_id) pair, since the cache takes a single
+                    # argument which is itself a tuple and we cannot send nested
+                    # information over replication.
+                    for json_str in row.keys:
+                        try:
+                            server_name, key_id = json.loads(json_str)
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            logger.error(
+                                "Failed to deserialise cache key as valid JSON: %s",
+                                json_str,
+                            )
+                            continue
+
+                        self._get_server_keys_json.invalidate(  # type: ignore[attr-defined]
+                            ((server_name, key_id),)
                         )
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)

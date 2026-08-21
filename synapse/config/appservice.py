@@ -207,6 +207,14 @@ def _load_appservice(
             "The `io.element.msc4190` option should be true or false if specified."
         )
 
+    # Opt-in list of scopes granted to this appservice for restricted C-S API
+    # functionality.
+    scopes = as_info.get("io.element.msc4502.scopes", [])
+    if not isinstance(scopes, list) or not all(isinstance(s, str) for s in scopes):
+        raise ValueError(
+            "The `io.element.msc4502.scopes` option should be a list of strings if specified."
+        )
+
     # Opt-in setting to enable proxying C-S and S-S API endpoints.
     # When set, Synapse will reverse-proxy requests under the prefix to the appservice:
     proxy_prefix = as_info.get("io.element.msc4512.proxy_prefix")
@@ -237,6 +245,7 @@ def _load_appservice(
         supports_ephemeral=supports_ephemeral,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
         msc4190_device_management=msc4190_enabled,
+        scopes=scopes,
         proxy_prefix=proxy_prefix,
         proxy_url=proxy_url,
     )
