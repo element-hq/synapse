@@ -919,6 +919,7 @@ class PerConnectionState:
         receipts: The status of each room for the receipts stream.
         room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
+        account_data: The status of each room for the account_data stream.
     """
 
     last_used_ts: int | None = None
