@@ -186,6 +186,31 @@ mod tests {
     }
 
     #[test]
+    fn block_on_handles_ready_future() {
+        Python::initialize();
+        let rt = test_runtime();
+        Python::attach(|py| {
+            // A future that returns ready on the first poll.
+            let fut = std::future::ready(9);
+            assert_eq!(fut.block_on(py, rt.handle()), 9);
+        });
+    }
+
+    #[test]
+    fn block_on_handles_not_ready_future() {
+        Python::initialize();
+        let rt = test_runtime();
+        Python::attach(|py| {
+            // A future that requires polling multiple times to complete.
+            let fut = async {
+                tokio::task::yield_now().await;
+                9
+            };
+            assert_eq!(fut.block_on(py, rt.handle()), 9);
+        });
+    }
+
+    #[test]
     fn block_on_pg_result_maps_ok_through() {
         Python::initialize();
         let rt = test_runtime();
