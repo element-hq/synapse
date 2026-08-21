@@ -670,14 +670,13 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             },
         )
 
-    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_updated_key_only_present_if_updates(self) -> None:
         """
         > The updated field SHOULD only be present if there are changes to existing fields on a user's profile.
         """
+        self.skipTest("Not yet implemented")
 
-    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_rooms_subset_changing_includes_full_profile(self) -> None:
         """
@@ -688,8 +687,8 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > already received them, likewise repeat profiles MAY be sent down based on homeserver
         > implementation.
         """
+        self.skipTest("Not yet implemented")
 
-    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_fields_subset_changing_sends_down_field_even_if_not_changed(self) -> None:
         """
@@ -697,6 +696,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > be sent down for all users that are within the current room subset. Future incremental
         > updates will then include changes to this field.
         """
+        self.skipTest("Not yet implemented")
 
     @parameterized.expand(
         [
@@ -1116,7 +1116,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             )
         )
 
-    # FIXME implement this code and test
     @override_config({"include_profile_updates_in_sync": True})
     def test_repeat_of_sync_correctly_includes_profile_information_again(self) -> None:
         """
@@ -1125,3 +1124,4 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         > NOT just after sending down the profile update. The client may never receive
         > response due to network conditions, or a bug in the client implementation.
         """
+        self.skipTest("Not yet implemented")
