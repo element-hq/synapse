@@ -1,0 +1,1 @@
+Speed up the conversion of device list changes into outbound federation pokes, and add a metric for how far behind the conversion is.

@@ -1,3 +1,8 @@
+# Synapse 1.159.0 (2026-08-18)
+
+No significant changes since 1.159.0rc1.
+
+
 # Synapse 1.159.0rc1 (2026-08-11)
 
 Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
