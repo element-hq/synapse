@@ -235,8 +235,7 @@ mod tests {
             let stream = stream::once(async {
                 tokio::task::yield_now().await;
                 Ok::<i32, ()>(7)
-            })
-            .fuse();
+            });
             let mut stream = pin!(stream);
 
             assert_eq!(stream.as_mut().next().now_or_never(), None);
@@ -252,8 +251,7 @@ mod tests {
             let stream = stream::once(async {
                 tokio::task::yield_now().await;
                 Ok::<i32, ()>(8)
-            })
-            .fuse();
+            });
             let mut stream = pin!(stream);
             assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), Some(Ok(8)));
         });
