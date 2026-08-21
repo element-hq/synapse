@@ -224,7 +224,6 @@ impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
         // only caller) already runs under it, so this attach is cheap. This
         // also only runs on the python thread and *not* the tokio runtime's
         // worker threads, so we don't need to blocking wait for the GIL.
-        Python::initialize();
         Python::attach(|py| Self::from_sql_with_py(py, ty, raw))
     }
 
