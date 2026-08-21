@@ -483,7 +483,7 @@ class TestTransactionStore(ApplicationServiceTransactionStore, ApplicationServic
 
 
 class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
-    def _write_config(self, suffix: str, **kwargs: str | None) -> str:
+    def _write_config(self, suffix: str, **kwargs: str | list[str] | None) -> str:
         vals: dict[str, Any] = {
             "id": "id" + suffix,
             "url": "url" + suffix,
