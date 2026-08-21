@@ -42,7 +42,7 @@ from synapse.storage.databases.main.appservice import (
     ApplicationServiceStore,
     ApplicationServiceTransactionStore,
 )
-from synapse.types import DeviceListUpdates, JsonDict
+from synapse.types import DeviceListUpdates
 from synapse.util.clock import Clock
 
 from tests import unittest
