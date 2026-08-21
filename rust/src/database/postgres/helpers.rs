@@ -68,8 +68,8 @@ where
         let mut pin_self = pin!(self);
         {
             let _guard = handle.enter();
-            let noop_waker = futures::task::noop_waker();
-            let mut cx = futures::task::Context::from_waker(&noop_waker);
+            let noop_waker = std::task::Waker::noop();
+            let mut cx = std::task::Context::from_waker(noop_waker);
             match pin_self.poll_unpin(&mut cx) {
                 std::task::Poll::Ready(val) => return val,
                 std::task::Poll::Pending => (),
