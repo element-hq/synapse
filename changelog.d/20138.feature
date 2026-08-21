@@ -1,0 +1,1 @@
+restricts events (specifically of type m.room.message) from being redacted by local users
