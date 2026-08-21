@@ -85,7 +85,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
         )
 
         headers: Headers = kwargs["headers"]
-        self.assertIsNone(headers.getRawHeaders(b"Authorization"))
+        self.assertEqual(headers.getRawHeaders(b"Authorization"), [b"Bearer hs_token"])
         self.assertEqual(
             headers.getRawHeaders(b"X-Matrix-Origin"),
             [self.OTHER_SERVER_NAME.encode("ascii")],
@@ -114,7 +114,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
         )
 
         headers: Headers = kwargs["headers"]
-        self.assertIsNone(headers.getRawHeaders(b"Authorization"))
+        self.assertEqual(headers.getRawHeaders(b"Authorization"), [b"Bearer hs_token"])
         self.assertEqual(
             headers.getRawHeaders(b"X-Matrix-Origin"),
             [self.OTHER_SERVER_NAME.encode("ascii")],
@@ -146,7 +146,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
         )
 
         headers: Headers = kwargs["headers"]
-        self.assertIsNone(headers.getRawHeaders(b"Authorization"))
+        self.assertEqual(headers.getRawHeaders(b"Authorization"), [b"Bearer hs_token"])
         self.assertEqual(
             headers.getRawHeaders(b"X-Matrix-Origin"),
             [self.OTHER_SERVER_NAME.encode("ascii")],

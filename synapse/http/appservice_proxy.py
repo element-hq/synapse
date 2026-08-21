@@ -51,12 +51,13 @@ async def proxy_request_to_appservice(
         request: The inbound request to forward.
         hs: The homeserver.
         appservice: The application service to forward the request to. Must have
-            `proxy_url` set.
+            `proxy_url` and `hs_token` set.
         body_producer: A producer for the request body to forward.
         extra_request_headers: Additional headers to set on the outbound request,
             beyond those copied from the original request.
     """
     assert appservice.proxy_url is not None
+    assert appservice.hs_token is not None
     target_uri = appservice.proxy_url.encode("ascii") + request.uri
 
     # Only forward the bare minimum of request headers an application service could
@@ -69,6 +70,11 @@ async def proxy_request_to_appservice(
             "accept-language",
         }:
             headers.setRawHeaders(header_name, header_values)
+
+    headers.setRawHeaders(
+        b"Authorization", [b"Bearer " + appservice.hs_token.encode("ascii")]
+    )
+
     if extra_request_headers:
         for header_name, header_value in extra_request_headers.items():
             headers.setRawHeaders(header_name, [header_value])

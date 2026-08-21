@@ -102,7 +102,7 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
         )
 
         headers: Headers = kwargs["headers"]
-        self.assertIsNone(headers.getRawHeaders(b"Authorization"))
+        self.assertEqual(headers.getRawHeaders(b"Authorization"), [b"Bearer hs_token"])
         self.assertEqual(
             headers.getRawHeaders(b"X-Matrix-User-Identifier"),
             [self.user_id.encode("ascii")],
@@ -134,7 +134,7 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
         )
 
         headers: Headers = kwargs["headers"]
-        self.assertIsNone(headers.getRawHeaders(b"Authorization"))
+        self.assertEqual(headers.getRawHeaders(b"Authorization"), [b"Bearer hs_token"])
         self.assertEqual(
             headers.getRawHeaders(b"X-Matrix-User-Identifier"),
             [self.user_id.encode("ascii")],
@@ -167,7 +167,7 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
         )
 
         headers: Headers = kwargs["headers"]
-        self.assertIsNone(headers.getRawHeaders(b"Authorization"))
+        self.assertEqual(headers.getRawHeaders(b"Authorization"), [b"Bearer hs_token"])
         self.assertEqual(
             headers.getRawHeaders(b"X-Matrix-User-Identifier"),
             [self.user_id.encode("ascii")],
