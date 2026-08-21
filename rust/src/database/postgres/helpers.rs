@@ -142,21 +142,6 @@ where
 
         self.next().block_on(py, handle)
     }
-
-    /// Get the next item from the stream if it's ready, without blocking.
-    ///
-    /// Returns `None` if the stream is not ready to yield an item. Returns
-    /// `Some(None)` if the stream is exhausted.
-    fn get_next_if_ready(&mut self) -> Option<Option<Self::Item>> {
-        if self.is_terminated() {
-            return Some(None);
-        }
-
-        // Note it is safe to call `now_or_never` here as it's fine to
-        // repeatedly call `next()` (as it's a thin wrapper that simply calls
-        // `poll_next` on the underlying stream).
-        self.next().now_or_never()
-    }
 }
 
 // Blanket impl over any pinned, fused stream, not just `RowStream`, so the
@@ -214,40 +199,14 @@ mod tests {
     }
 
     #[test]
-    fn get_next_if_ready_returns_buffered_rows_then_signals_end() {
-        Python::initialize();
-        let rt = test_runtime();
-        Python::attach(|py| {
-            // `stream::iter` yields each item immediately, so every poll is
-            // ready: we get the items, then a `Some(None)` end-of-stream once
-            // it's drained, without ever needing to block.
-            let stream = stream::iter(vec![Ok::<i32, ()>(1), Ok(2)]).fuse();
-            let mut stream = pin!(stream);
-
-            assert_eq!(stream.as_mut().get_next_if_ready(), Some(Some(Ok(1))));
-            assert_eq!(stream.as_mut().get_next_if_ready(), Some(Some(Ok(2))));
-            // Exhausted: the item is "ready" and is `None`.
-            assert_eq!(stream.as_mut().get_next_if_ready(), Some(None));
-            // A fused stream keeps reporting end-of-stream rather than panicking.
-            assert_eq!(stream.as_mut().get_next_if_ready(), Some(None));
-
-            // `block_on_next` takes the same already-ready value.
-            let stream = stream::iter(vec![Ok::<i32, ()>(9)]).fuse();
-            let mut stream = pin!(stream);
-            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), Some(Ok(9)));
-            assert_eq!(stream.as_mut().block_on_next(py, rt.handle()), None);
-        });
-    }
-
-    #[test]
     fn block_on_next_blocks_when_first_poll_is_pending() {
         Python::initialize();
         let rt = test_runtime();
         Python::attach(|py| {
             // A stream whose first poll is `Pending` (it yields back to the
-            // runtime before producing the value). `get_next_if_ready` /
-            // `now_or_never` polls exactly once and so sees `Pending` and gives
-            // up, forcing `block_on_next` down its blocking path.
+            // runtime before producing the value). `now_or_never` polls exactly
+            // once and so sees `Pending` and gives up, forcing `block_on_next`
+            // down its blocking path.
             let stream = stream::once(async {
                 tokio::task::yield_now().await;
                 Ok::<i32, ()>(7)
@@ -255,8 +214,8 @@ mod tests {
             .fuse();
             let mut stream = pin!(stream);
 
-            assert_eq!(stream.as_mut().get_next_if_ready(), None);
-            // `get_next_if_ready` above polled (and so advanced) the *same*
+            assert_eq!(stream.as_mut().next().now_or_never(), None);
+            // `next().now_or_never()` above polled (and so advanced) the *same*
             // pinned stream; `block_on_next` re-polls that same stream via
             // `&mut self`, resuming the yielded future rather than restarting
             // it, so it still resolves to 7.
