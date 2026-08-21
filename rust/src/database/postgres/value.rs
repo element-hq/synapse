@@ -214,8 +214,14 @@ pub fn pg_row_to_py<'py>(
     PyTuple::new(py, output_row)
 }
 
-/// A decoded column value, ready to drop into a Python tuple. `None`
-/// represents SQL `NULL`; otherwise it holds the corresponding Python object.
+/// A decoded column value, ready to drop into a Python tuple. `None` represents
+/// SQL `NULL`; otherwise it holds the corresponding Python object.
+///
+/// Must only be used on a blocking thread (i.e. not on a tokio runtime worker
+/// thread) because it attaches to the Python interpreter to build the Python
+/// object. Hence why it is private.
+///
+/// Use [`pg_row_to_py`] directly.
 struct PythonPgFromSql(pub Option<Py<PyAny>>);
 
 impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
@@ -224,6 +230,9 @@ impl<'a> tokio_postgres::types::FromSql<'a> for PythonPgFromSql {
         // only caller) already runs under it, so this attach is cheap. This
         // also only runs on the python thread and *not* the tokio runtime's
         // worker threads, so we don't need to blocking wait for the GIL.
+        //
+        // Ideally we'd assert that we already hold the GIL, but PyO3 doesn't
+        // expose that.
         Python::attach(|py| Self::from_sql_with_py(py, ty, raw))
     }
 
