@@ -261,6 +261,8 @@ class ApplicationServiceTestCase(unittest.TestCase):
                 )
             )
         )
+
+
 class ApplicationServiceScopesTestCase(unittest.TestCase):
     def test_has_no_scopes_by_default(self) -> None:
         service = ApplicationService(
@@ -289,6 +291,7 @@ class ApplicationServiceScopesTestCase(unittest.TestCase):
                 token="some_token",
                 scopes=["does:not:exist"],
             )
+
 
 class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
     def _make_service(self, **kwargs: Any) -> ApplicationService:
