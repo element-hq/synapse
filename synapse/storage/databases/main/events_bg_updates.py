@@ -280,11 +280,6 @@ class EventsBackgroundUpdatesStore(
 
         ################################################################################
 
-        self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.EVENT_EDGES_DROP_INVALID_ROWS,
-            self._background_drop_invalid_event_edges_rows,
-        )
-
         self.db_pool.updates.register_background_index_update(
             _BackgroundUpdates.EVENT_EDGES_REPLACE_INDEX,
             index_name="event_edges_event_id_prev_event_id_idx",
@@ -1496,102 +1491,6 @@ class EventsBackgroundUpdatesStore(
         )
 
         return 0
-
-    async def _background_drop_invalid_event_edges_rows(
-        self, progress: JsonDict, batch_size: int
-    ) -> int:
-        """Drop invalid rows from event_edges
-
-        This only runs for postgres. For SQLite, it all happens synchronously.
-
-        Firstly, drop any rows with is_state=True. These may have been added a long time
-        ago, but they are no longer used.
-
-        We also drop rows that do not correspond to entries in `events`, and add a
-        foreign key.
-        """
-
-        last_event_id = progress.get("last_event_id", "")
-
-        def drop_invalid_event_edges_txn(txn: LoggingTransaction) -> bool:
-            """Returns True if we're done."""
-
-            # first we need to find an endpoint.
-            txn.execute(
-                """
-                SELECT event_id FROM event_edges
-                WHERE event_id > ?
-                ORDER BY event_id
-                LIMIT 1 OFFSET ?
-                """,
-                (last_event_id, batch_size),
-            )
-
-            endpoint = None
-            row = txn.fetchone()
-
-            if row:
-                endpoint = row[0]
-
-            where_clause = "ee.event_id > ?"
-            args = [last_event_id]
-            if endpoint:
-                where_clause += " AND ee.event_id <= ?"
-                args.append(endpoint)
-
-            # now delete any that:
-            #   - have is_state=TRUE, or
-            #   - do not correspond to a row in `events`
-            txn.execute(
-                f"""
-                DELETE FROM event_edges
-                WHERE event_id IN (
-                   SELECT ee.event_id
-                   FROM event_edges ee
-                     LEFT JOIN events ev USING (event_id)
-                   WHERE ({where_clause}) AND
-                     (is_state OR ev.event_id IS NULL)
-                )""",
-                args,
-            )
-
-            logger.info(
-                "cleaned up event_edges up to %s: removed %i/%i rows",
-                endpoint,
-                txn.rowcount,
-                batch_size,
-            )
-
-            if endpoint is not None:
-                self.db_pool.updates._background_update_progress_txn(
-                    txn,
-                    _BackgroundUpdates.EVENT_EDGES_DROP_INVALID_ROWS,
-                    {"last_event_id": endpoint},
-                )
-                return False
-
-            # if that was the final batch, we validate the foreign key.
-            #
-            # The constraint should have been in place and enforced for new rows since
-            # before we started deleting invalid rows, so there's no chance for any
-            # invalid rows to have snuck in the meantime. In other words, this really
-            # ought to succeed.
-            logger.info("cleaned up event_edges; enabling foreign key")
-            txn.execute(
-                "ALTER TABLE event_edges VALIDATE CONSTRAINT event_edges_event_id_fkey"
-            )
-            return True
-
-        done = await self.db_pool.runInteraction(
-            desc="drop_invalid_event_edges", func=drop_invalid_event_edges_txn
-        )
-
-        if done:
-            await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.EVENT_EDGES_DROP_INVALID_ROWS
-            )
-
-        return batch_size
 
     async def _background_events_populate_state_key_rejections(
         self, progress: JsonDict, batch_size: int
