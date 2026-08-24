@@ -1479,11 +1479,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             sql = """
                 SELECT stream_ordering, topological_ordering, event_id
                 FROM events
-                LEFT JOIN rejections USING (event_id)
                 WHERE room_id = ?
                     AND stream_ordering <= ?
                     AND NOT outlier
-                    AND rejections.event_id IS NULL
+                    AND rejection_reason IS NULL
                 ORDER BY stream_ordering DESC
                 LIMIT 1
             """
@@ -1553,11 +1552,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             sql = f"""
             SELECT event_id, stream_ordering, instance_name
             FROM events
-            LEFT JOIN rejections USING (event_id)
             WHERE room_id = ?
                 {event_type_clause}
                 AND NOT outlier
-                AND rejections.event_id IS NULL
+                AND rejection_reason IS NULL
             ORDER BY stream_ordering DESC
             LIMIT 1
             """
@@ -1637,24 +1635,22 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 SELECT * FROM (
                     SELECT instance_name, stream_ordering, topological_ordering, event_id
                     FROM events
-                    LEFT JOIN rejections USING (event_id)
                     WHERE room_id = ?
                         %s
                         AND ? < stream_ordering AND stream_ordering <= ?
                         AND NOT outlier
-                        AND rejections.event_id IS NULL
+                        AND rejection_reason IS NULL
                     ORDER BY stream_ordering DESC
                 ) AS a
                 UNION ALL
                 SELECT * FROM (
                     SELECT instance_name, stream_ordering, topological_ordering, event_id
                     FROM events
-                    LEFT JOIN rejections USING (event_id)
                     WHERE room_id = ?
                         %s
                         AND stream_ordering <= ?
                         AND NOT outlier
-                        AND rejections.event_id IS NULL
+                        AND rejection_reason IS NULL
                     ORDER BY stream_ordering DESC
                     LIMIT 1
                 ) AS b
@@ -1782,7 +1778,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             sql = f"""
                 SELECT room_id, (
                     SELECT stream_ordering FROM events AS e
-                    LEFT JOIN rejections USING (event_id)
                     WHERE e.room_id = r.room_id
                         AND e.stream_ordering <= ?
                         AND NOT outlier

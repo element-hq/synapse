@@ -207,7 +207,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         logger.info("[purge] looking for events to delete")
 
-        should_delete_expr = "state_events.state_key IS NULL"
+        should_delete_expr = "e.state_key IS NULL"
         should_delete_params: tuple[Any, ...] = ()
         if not delete_local_events:
             should_delete_expr += " AND sender NOT LIKE ?"
@@ -222,7 +222,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         txn.execute(
             "INSERT INTO events_to_purge"
             " SELECT event_id, %s"
-            " FROM events AS e LEFT JOIN state_events USING (event_id)"
+            " FROM events AS e"
             " WHERE (NOT outlier OR (%s)) AND e.room_id = ? AND topological_ordering < ?"
             % (should_delete_expr, should_delete_expr),
             should_delete_params,

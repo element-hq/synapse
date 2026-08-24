@@ -1620,12 +1620,11 @@ class EventsWorkerStore(SQLBaseStore):
                   ej.json,
                   ej.format_version,
                   r.room_version,
-                  rej.reason,
+                  e.rejection_reason,
                   e.outlier
                 FROM events AS e
                   JOIN event_json AS ej USING (event_id)
                   LEFT JOIN rooms r ON r.room_id = e.room_id
-                  LEFT JOIN rejections as rej USING (event_id)
                 WHERE """
 
             clause, args = make_in_list_sql_clause(
@@ -1963,14 +1962,12 @@ class EventsWorkerStore(SQLBaseStore):
         ) -> list[tuple[int, str, str, str, str, str, str, str, bool, bool]]:
             sql = (
                 "SELECT e.stream_ordering, e.event_id, e.room_id, e.type,"
-                " se.state_key, redacts, relates_to_id, membership, rejections.reason IS NOT NULL,"
+                " e.state_key, redacts, relates_to_id, membership, e.rejection_reason IS NOT NULL,"
                 " e.outlier"
                 " FROM events AS e"
                 " LEFT JOIN redactions USING (event_id)"
-                " LEFT JOIN state_events AS se USING (event_id)"
                 " LEFT JOIN event_relations USING (event_id)"
                 " LEFT JOIN room_memberships USING (event_id)"
-                " LEFT JOIN rejections USING (event_id)"
                 " WHERE ? < stream_ordering AND stream_ordering <= ?"
                 " AND instance_name = ?"
                 " ORDER BY stream_ordering ASC"
@@ -2006,17 +2003,15 @@ class EventsWorkerStore(SQLBaseStore):
         ) -> list[tuple[int, str, str, str, str, str, str, str, bool, bool]]:
             sql = (
                 "SELECT out.event_stream_ordering, e.event_id, e.room_id, e.type,"
-                " se.state_key, redacts, relates_to_id, membership, rejections.reason IS NOT NULL,"
+                " e.state_key, redacts, relates_to_id, membership, e.rejection_reason IS NOT NULL,"
                 " e.outlier"
                 " FROM events AS e"
                 # NB: the next line (inner join) is what makes this query different from
                 # get_all_new_forward_event_rows.
                 " INNER JOIN ex_outlier_stream AS out USING (event_id)"
                 " LEFT JOIN redactions USING (event_id)"
-                " LEFT JOIN state_events AS se USING (event_id)"
                 " LEFT JOIN event_relations USING (event_id)"
                 " LEFT JOIN room_memberships USING (event_id)"
-                " LEFT JOIN rejections USING (event_id)"
                 " WHERE ? < out.event_stream_ordering"
                 " AND out.event_stream_ordering <= ?"
                 " AND out.instance_name = ?"
@@ -2068,10 +2063,9 @@ class EventsWorkerStore(SQLBaseStore):
         ) -> tuple[list[tuple[int, tuple[str, str, str, str, str, str]]], int, bool]:
             sql = (
                 "SELECT -e.stream_ordering, e.event_id, e.room_id, e.type,"
-                " se.state_key, redacts, relates_to_id"
+                " e.state_key, redacts, relates_to_id"
                 " FROM events AS e"
                 " LEFT JOIN redactions USING (event_id)"
-                " LEFT JOIN state_events AS se USING (event_id)"
                 " LEFT JOIN event_relations USING (event_id)"
                 " WHERE ? > stream_ordering AND stream_ordering >= ?"
                 "  AND instance_name = ?"
@@ -2098,11 +2092,10 @@ class EventsWorkerStore(SQLBaseStore):
 
             sql = (
                 "SELECT -event_stream_ordering, e.event_id, e.room_id, e.type,"
-                " se.state_key, redacts, relates_to_id"
+                " e.state_key, redacts, relates_to_id"
                 " FROM events AS e"
                 " INNER JOIN ex_outlier_stream AS out USING (event_id)"
                 " LEFT JOIN redactions USING (event_id)"
-                " LEFT JOIN state_events AS se USING (event_id)"
                 " LEFT JOIN event_relations USING (event_id)"
                 " WHERE ? > event_stream_ordering"
                 " AND event_stream_ordering >= ?"
@@ -2476,13 +2469,13 @@ class EventsWorkerStore(SQLBaseStore):
             forward_edge_query = """
                 SELECT 1 FROM event_edges
                 /* Check to make sure the event referencing our event in question is not rejected */
-                LEFT JOIN rejections ON event_edges.event_id = rejections.event_id
+                LEFT JOIN events ON event_edges.event_id = events.event_id
                 WHERE
                     event_edges.prev_event_id = ?
                     /* It's not a valid edge if the event referencing our event in
                      * question is rejected.
                      */
-                    AND rejections.event_id IS NULL
+                    AND events.rejection_reason IS NULL
                 LIMIT 1
             """
 
@@ -2531,7 +2524,6 @@ class EventsWorkerStore(SQLBaseStore):
 
         sql_template = f"""
             SELECT event_id FROM events
-            LEFT JOIN rejections USING (event_id)
             WHERE
                 room_id = ?
                 AND origin_server_ts {comparison_operator} ?
@@ -2544,7 +2536,7 @@ class EventsWorkerStore(SQLBaseStore):
                  */
                 AND NOT outlier
                 /* Make sure event is not rejected */
-                AND rejections.event_id IS NULL
+                AND rejection_reason IS NULL
             /**
              * First sort by the message timestamp. If the message timestamps are the
              * same, we want the message that logically comes "next" (before/after

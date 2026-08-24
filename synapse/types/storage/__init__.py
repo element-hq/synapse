@@ -34,8 +34,6 @@ class _BackgroundUpdates:
     EVENT_EDGES_DROP_INVALID_ROWS = "event_edges_drop_invalid_rows"
     EVENT_EDGES_REPLACE_INDEX = "event_edges_replace_index"
 
-    EVENTS_POPULATE_STATE_KEY_REJECTIONS = "events_populate_state_key_rejections"
-
     EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
 
     CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME = (

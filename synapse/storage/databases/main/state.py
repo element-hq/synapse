@@ -201,10 +201,8 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             )
 
             sql = f"""
-                SELECT e.event_id, e.room_id, e.type, se.state_key, r.reason
+                SELECT e.event_id, e.room_id, e.type, e.state_key, e.rejection_reason
                 FROM events AS e
-                LEFT JOIN state_events se USING (event_id)
-                LEFT JOIN rejections r USING (event_id)
                 WHERE {clause}
             """
 

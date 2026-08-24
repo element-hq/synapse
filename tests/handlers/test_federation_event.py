@@ -917,10 +917,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             )
             self.assertEqual(
                 self.get_success(
-                    main_store.get_rejection_reason(
-                        rejected_power_levels_event.event_id
+                    main_store.get_event(
+                        rejected_power_levels_event.event_id, allow_rejected=True
                     )
-                ),
+                ).rejected_reason,
                 "auth_error",
             )
 
@@ -1000,8 +1000,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             )
             self.assertEqual(
                 self.get_success(
-                    main_store.get_rejection_reason(rejected_kick_event.event_id)
-                ),
+                    main_store.get_event(
+                        rejected_kick_event.event_id, allow_rejected=True
+                    )
+                ).rejected_reason,
                 "auth_error",
             )
 
@@ -1160,8 +1162,8 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             )
             self.assertIsNone(
                 self.get_success(
-                    main_store.get_rejection_reason(pulled_event.event_id)
-                ),
+                    main_store.get_event(pulled_event.event_id, allow_rejected=True)
+                ).rejected_reason,
                 "Pulled event was unexpectedly rejected, likely due to a problem with "
                 "the test setup.",
             )

@@ -37,7 +37,7 @@ from synapse.crypto.event_signing import (
     event_needs_resigning,
     resign_event,
 )
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -208,11 +208,6 @@ class EventsBackgroundUpdatesStore(
         )
 
         self.db_pool.updates.register_background_update_handler(
-            "rejected_events_metadata",
-            self._rejected_events_metadata,
-        )
-
-        self.db_pool.updates.register_background_update_handler(
             "chain_cover",
             self._chain_cover_index,
         )
@@ -293,11 +288,6 @@ class EventsBackgroundUpdatesStore(
             unique=True,
             # the old index which just covered event_id is now redundant.
             replaces_index="ev_edges_id",
-        )
-
-        self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.EVENTS_POPULATE_STATE_KEY_REJECTIONS,
-            self._background_events_populate_state_key_rejections,
         )
 
         # Add an index that would be useful for jumping to date using
@@ -566,7 +556,7 @@ class EventsBackgroundUpdatesStore(
             # rejection status.
             txn.execute(
                 """SELECT prev_event_id, event_id, internal_metadata,
-                    rejections.event_id IS NOT NULL, events.outlier
+                    events.rejection_reason IS NOT NULL, events.outlier
                 FROM (
                     SELECT event_id AS prev_event_id
                     FROM _extremities_to_check
@@ -575,7 +565,6 @@ class EventsBackgroundUpdatesStore(
                 LEFT JOIN event_edges USING (prev_event_id)
                 LEFT JOIN events USING (event_id)
                 LEFT JOIN event_json USING (event_id)
-                LEFT JOIN rejections USING (event_id)
                 """,
                 (batch_size,),
             )
@@ -610,11 +599,10 @@ class EventsBackgroundUpdatesStore(
                 soft_failed_events_to_lookup = set(to_defer)
 
                 sql = """SELECT prev_event_id, event_id, internal_metadata,
-                    rejections.event_id IS NOT NULL
+                    events.rejection_reason IS NOT NULL
                     FROM event_edges
                     INNER JOIN events USING (event_id)
                     INNER JOIN event_json USING (event_id)
-                    LEFT JOIN rejections USING (event_id)
                     WHERE
                         NOT events.outlier
                         AND
@@ -923,123 +911,6 @@ class EventsBackgroundUpdatesStore(
 
         return num_rows
 
-    async def _rejected_events_metadata(self, progress: dict, batch_size: int) -> int:
-        """Adds rejected events to the `state_events` and `event_auth` metadata
-        tables.
-        """
-
-        last_event_id = progress.get("last_event_id", "")
-
-        def get_rejected_events(
-            txn: Cursor,
-        ) -> list[tuple[str, str, JsonDict, bool, bool]]:
-            # Fetch rejected event json, their room version and whether we have
-            # inserted them into the state_events or auth_events tables.
-            #
-            # Note we can assume that events that don't have a corresponding
-            # room version are V1 rooms.
-            sql = """
-                SELECT DISTINCT
-                    event_id,
-                    COALESCE(room_version, '1'),
-                    json,
-                    state_events.event_id IS NOT NULL,
-                    event_auth.event_id IS NOT NULL
-                FROM rejections
-                INNER JOIN event_json USING (event_id)
-                LEFT JOIN rooms USING (room_id)
-                LEFT JOIN state_events USING (event_id)
-                LEFT JOIN event_auth USING (event_id)
-                WHERE event_id > ?
-                ORDER BY event_id
-                LIMIT ?
-            """
-
-            txn.execute(
-                sql,
-                (
-                    last_event_id,
-                    batch_size,
-                ),
-            )
-
-            return cast(
-                list[tuple[str, str, JsonDict, bool, bool]],
-                [(row[0], row[1], db_to_json(row[2]), row[3], row[4]) for row in txn],
-            )
-
-        results = await self.db_pool.runInteraction(
-            desc="_rejected_events_metadata_get", func=get_rejected_events
-        )
-
-        if not results:
-            await self.db_pool.updates._end_background_update(
-                "rejected_events_metadata"
-            )
-            return 0
-
-        state_events = []
-        auth_events = []
-        for event_id, room_version, event_json, has_state, has_event_auth in results:
-            last_event_id = event_id
-
-            if has_state and has_event_auth:
-                continue
-
-            room_version_obj = KNOWN_ROOM_VERSIONS.get(room_version)
-            if not room_version_obj:
-                # We no longer support this room version, so we just ignore the
-                # events entirely.
-                logger.info(
-                    "Ignoring event with unknown room version %r: %r",
-                    room_version,
-                    event_id,
-                )
-                continue
-
-            event = make_event_from_dict(event_json, room_version_obj)
-
-            if not event.is_state():
-                continue
-
-            if not has_state:
-                state_events.append(
-                    (event.event_id, event.room_id, event.type, event.state_key)
-                )
-
-            if not has_event_auth:
-                # Old, dodgy, events may have duplicate auth events, which we
-                # need to deduplicate as we have a unique constraint.
-                for auth_id in set(event.auth_event_ids()):
-                    auth_events.append((event.event_id, event.room_id, auth_id))
-
-        if state_events:
-            await self.db_pool.simple_insert_many(
-                table="state_events",
-                keys=("event_id", "room_id", "type", "state_key"),
-                values=state_events,
-                desc="_rejected_events_metadata_state_events",
-            )
-
-        if auth_events:
-            await self.db_pool.simple_insert_many(
-                table="event_auth",
-                keys=("event_id", "room_id", "auth_id"),
-                values=auth_events,
-                desc="_rejected_events_metadata_event_auth",
-            )
-
-        await self.db_pool.updates._background_update_progress(
-            "rejected_events_metadata", {"last_event_id": last_event_id}
-        )
-
-        if len(results) < batch_size:
-            await self.db_pool.updates._end_background_update(
-                "rejected_events_metadata"
-            )
-
-        return len(results)
-
     async def _chain_cover_index(self, progress: dict, batch_size: int) -> int:
         """A background updates that iterates over all rooms and generates the
         chain cover index for them.
@@ -1155,14 +1026,14 @@ class EventsBackgroundUpdatesStore(
 
         sql = """
             SELECT
-                event_id, state_events.type, state_events.state_key,
+                event_id, events.type, events.state_key,
                 topological_ordering, stream_ordering,
                 events.room_id
             FROM events
-            INNER JOIN state_events USING (event_id)
             LEFT JOIN event_auth_chains USING (event_id)
             LEFT JOIN event_auth_chain_to_calculate USING (event_id)
-            WHERE event_auth_chains.event_id IS NULL
+            WHERE events.state_key IS NOT NULL
+                AND event_auth_chains.event_id IS NULL
                 AND event_auth_chain_to_calculate.event_id IS NULL
                 AND %(tuple_cmp)s
                 %(extra)s
@@ -1589,86 +1460,6 @@ class EventsBackgroundUpdatesStore(
         if done:
             await self.db_pool.updates._end_background_update(
                 _BackgroundUpdates.EVENT_EDGES_DROP_INVALID_ROWS
-            )
-
-        return batch_size
-
-    async def _background_events_populate_state_key_rejections(
-        self, progress: JsonDict, batch_size: int
-    ) -> int:
-        """Back-populate `events.state_key` and `events.rejection_reason"""
-
-        min_stream_ordering_exclusive = progress["min_stream_ordering_exclusive"]
-        max_stream_ordering_inclusive = progress["max_stream_ordering_inclusive"]
-
-        def _populate_txn(txn: LoggingTransaction) -> bool:
-            """Returns True if we're done."""
-
-            # first we need to find an endpoint.
-            # we need to find the final row in the batch of batch_size, which means
-            # we need to skip over (batch_size-1) rows and get the next row.
-            txn.execute(
-                """
-                SELECT stream_ordering FROM events
-                WHERE stream_ordering > ? AND stream_ordering <= ?
-                ORDER BY stream_ordering
-                LIMIT 1 OFFSET ?
-                """,
-                (
-                    min_stream_ordering_exclusive,
-                    max_stream_ordering_inclusive,
-                    batch_size - 1,
-                ),
-            )
-
-            row = txn.fetchone()
-            if row:
-                endpoint = row[0]
-            else:
-                # if the query didn't return a row, we must be almost done. We just
-                # need to go up to the recorded max_stream_ordering.
-                endpoint = max_stream_ordering_inclusive
-
-            where_clause = "stream_ordering > ? AND stream_ordering <= ?"
-            args = [min_stream_ordering_exclusive, endpoint]
-
-            # now do the updates.
-            txn.execute(
-                f"""
-                UPDATE events
-                SET state_key = (SELECT state_key FROM state_events se WHERE se.event_id = events.event_id),
-                    rejection_reason = (SELECT reason FROM rejections rej WHERE rej.event_id = events.event_id)
-                WHERE ({where_clause})
-                """,
-                args,
-            )
-
-            logger.info(
-                "populated new `events` columns up to %i/%i: updated %i rows",
-                endpoint,
-                max_stream_ordering_inclusive,
-                txn.rowcount,
-            )
-
-            if endpoint >= max_stream_ordering_inclusive:
-                # we're done
-                return True
-
-            progress["min_stream_ordering_exclusive"] = endpoint
-            self.db_pool.updates._background_update_progress_txn(
-                txn,
-                _BackgroundUpdates.EVENTS_POPULATE_STATE_KEY_REJECTIONS,
-                progress,
-            )
-            return False
-
-        done = await self.db_pool.runInteraction(
-            desc="events_populate_state_key_rejections", func=_populate_txn
-        )
-
-        if done:
-            await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.EVENTS_POPULATE_STATE_KEY_REJECTIONS
             )
 
         return batch_size
