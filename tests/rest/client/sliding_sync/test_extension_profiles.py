@@ -515,21 +515,19 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
 
     @parameterized.expand(
         [
-            [True, False],
-            [True, True],
-            [False, False],
-            [False, True],
+            True,
+            False,
         ]
     )
     @override_config({"include_profile_updates_in_sync": True})
     def test_null_profile_returned_if_user_left_all_rooms(
-        self, request_fields: bool, is_lazy: bool
+        self,
+        request_fields: bool,
     ) -> None:
         """
         Test that profile extension response returns a null for the user in
         incremental sync.
         """
-        # TODO handle is_lazy
         # Make an initial Sliding Sync request with the profiles extension enabled
         profiles_config: dict = {
             "enabled": True,
