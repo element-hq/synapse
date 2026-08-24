@@ -1160,6 +1160,13 @@ class SlidingSyncExtensionHandler:
         # If we still have non-lazy rooms, get their members.
         if non_lazy_rooms:
             non_lazy_profile_user_ids = (
+                # TODO we should consider adding a limit to how many profiles
+                # of room members we push down the line. However, this produces
+                # a problem for clients in that they won't know which users
+                # just don't have any profile information, and which users were limited
+                # out. If we had an endpoint to fetch a list of profiles at once,
+                # we could have a hard limit here and clients could fetch the missing
+                # profiles separately for non-lazy initial sync cases.
                 await self.store.get_local_users_who_share_room_with_user(
                     user_id,
                     limit_to_rooms=non_lazy_rooms,
