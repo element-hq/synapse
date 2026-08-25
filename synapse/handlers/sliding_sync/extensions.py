@@ -1384,9 +1384,10 @@ class SlidingSyncExtensionHandler:
                 continue
             profile_data = profile_data_by_user.get(profile_user_id)
             if profile_data is None:
-                # No profile data for this user, just return a blank dictionary
-                # in incremental sync, telling the clients to remove all profile
-                # information for this user.
+                # We don't have profile data for this user
+                # (This is different from having an empty profile)
+                # Return a null in incremental sync, telling the client to
+                # remove all profile information for this user.
                 response[profile_user_id] = None
                 continue
 
