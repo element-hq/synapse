@@ -1977,8 +1977,10 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            set(incremental_result.profile_updates["@other_user:test"].keys()),
-            {"avatar_url", "displayname"},
+            incremental_result.profile_updates["@other_user:test"],
+            # FIXME: As we don't track what users already got sent down, absent fields (even ones that were never set
+            # in the first place) are reported as `None`.
+            {"avatar_url": None, "displayname": "other_user", "m.status": None},
         )
 
         # If we have more events from the other_user, and do another lazy sync,
@@ -2009,9 +2011,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
-        self.assertCountEqual(
-            incremental_result.profile_updates.keys(),
-            [],
+        self.assertEqual(
+            incremental_result.profile_updates,
+            {},
         )
         # However, if we again add an event, we do expect any fields the client didn't
         # previously ask for to be there.
