@@ -1573,17 +1573,20 @@ properties:
         - myCA2.pem
         - myCA3.pem
   federation_domain_whitelist:
-    type: array
+    type: ["null", "array"]
     description: >-
       Restrict federation to the given whitelist of domains. N.B. we recommend
       also firewalling your federation listener to limit inbound federation
       traffic as early as possible, rather than relying purely on this
       application-layer restriction.
 
+
       If specified as an empty list (`[]`), federation will be denied with all servers.
       Specifying an empty list (`[]`) here is the recommended way of disabling federation.
 
-      If not specified, the default is to allow federation with all servers.
+
+      If unset or null, allows federation with all servers.
+
 
       Note: this does not stop a server from joining rooms that servers not on
       the whitelist are in. As such, this option is really only useful to
@@ -1591,6 +1594,7 @@ properties:
       each other and have the same whitelist.
     items:
       type: string
+    default: null
     examples:
       - - lon.example.com
         - nyc.example.com
