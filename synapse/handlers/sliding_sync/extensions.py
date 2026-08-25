@@ -1266,8 +1266,9 @@ class SlidingSyncExtensionHandler:
                 Sliding Sync response.
 
         Returns:
-            A SlidingSyncResult.Extensions.ProfilesExtension object containing
+            - A SlidingSyncResult.Extensions.ProfilesExtension object containing
             all the users who have profile updates.
+            - None if the extension is disabled.
         """
         if not profiles_request.enabled:
             return None
@@ -1310,28 +1311,36 @@ class SlidingSyncExtensionHandler:
             field_names=fields,
         )
 
-        # Add any newly joined users to our list of users
-        joined_room_user_ids = {
-            update.user_id
-            for update in updates
-            if update.action == ProfileUpdateAction.JOINED_ROOM
-        }
+        # Set of users that just joined their first room that we share with them
+        joined_room_user_ids: set[str] = set()
+        # Set of tracked users that have updated their profile
+        updated_user_ids: set[str] = set()
+        # Set of tracked users that just left their last room that we share with them
+        left_room_user_ids: set[str] = set()
+
+        # Process updates in stream order
+        # We need to be careful of users that have multiple types of updates
+        # within this sequence of stream rows.
+        for update in updates:
+            if update.action == ProfileUpdateAction.JOINED_ROOM:
+                joined_room_user_ids.add(update.user_id)
+                # If the user joins a shared room, that overrides
+                # the fact that they previously left the last shared room
+                left_room_user_ids.discard(update.user_id)
+            elif update.action == ProfileUpdateAction.UPDATE:
+                updated_user_ids.add(update.user_id)
+            elif update.action == ProfileUpdateAction.LEFT_ROOM:
+                left_room_user_ids.add(update.user_id)
+                # If the user leaves their last shared room, that overrides
+                # the fact that they previously joined a shared room
+                # and perhaps updated their profile whilst they were in it
+                joined_room_user_ids.discard(update.user_id)
+                updated_user_ids.discard(update.user_id)
+
+        # Add the users who joined a shared room or updated their profile to the set of
+        # users we will serialise profiles for
         profile_user_ids.update(joined_room_user_ids)
-
-        # Add any users from field updates
-        updated_user_ids = {
-            update.user_id
-            for update in updates
-            if update.action == ProfileUpdateAction.UPDATE
-        }
         profile_user_ids.update(updated_user_ids)
-
-        # Collect users who left rooms
-        left_room_user_ids = {
-            update.user_id
-            for update in updates
-            if update.action == ProfileUpdateAction.LEFT_ROOM
-        }
 
         # Process left rooms
         for other_user_id in left_room_user_ids:
