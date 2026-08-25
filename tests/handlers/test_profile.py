@@ -261,10 +261,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         ]
     )
     @override_config({"include_profile_updates_in_sync": True})
-    def test_update_profile_does_not_notify_notifier_on_set_field_if_user_not_in_rooms(
+    def test_update_profile_does_notify_notifier_on_set_field_if_user_not_in_rooms(
         self, field_name: str, new_value: str
     ) -> None:
-        """Test that profile updates do not cause the profile updates stream notifier
+        """Test that profile updates does cause the profile updates stream notifier
         to wake up if the user is not in any rooms, if `include_profile_updates_in_sync`
         is enabled."""
         self.get_success(
@@ -280,7 +280,37 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             for call in self.on_new_event.mock_calls
             if call.args[0] == StreamKeyType.PROFILE_UPDATES
         ]
-        self.assertEqual(len(calls_found), 0)
+        self.assertEqual(len(calls_found), 1)
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_update_profile_does_notify_notifier_on_delete_profile_field_if_user_not_in_rooms(
+        self,
+    ) -> None:
+        """Test that profile updates does cause the profile updates stream notifier
+        to wake up if the user is not in any rooms, if `include_profile_updates_in_sync`
+        is enabled."""
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        self.on_new_event.reset_mock()
+        self.get_success(
+            self.handler.delete_profile_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="field",
+            )
+        )
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 1)
 
     @parameterized.expand(
         [
