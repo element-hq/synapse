@@ -1187,7 +1187,7 @@ class SlidingSyncExtensionHandler:
         user_id: UserID,
         fields: set[str] | None,
         profile_user_ids: set[str],
-    ) -> dict[str, JsonDict | None]:
+    ) -> dict[str, JsonDict]:
         """
         Build an initial sync response for the profiles extension.
 
@@ -1198,9 +1198,22 @@ class SlidingSyncExtensionHandler:
             profile_user_ids: Set of user IDs whose profiles are related to this sync response.
 
         Returns:
-            A dictionary containing the profile updates in an `updated` dictionary.
+            A dictionary (in API response format) mapping users to their
+            profile updates in an `updated` dictionary.
+
+            {
+                "@user:example.org": {
+                    "updated": {
+                        "displayname": "Somebody",
+                        "avatar_url": "mxc://example.org/123123123",
+                        "org.example.field": "hiss",
+                        ...
+                    }
+                },
+                ...
+            }
         """
-        response: dict[str, JsonDict | None] = {}
+        response: dict[str, JsonDict] = {}
 
         # This doesn't return entries for the users with no profile data,
         # which is good as we don't want to generate anything for users
