@@ -1115,8 +1115,9 @@ class SlidingSyncExtensionHandler:
                 Sliding Sync response.
 
         Returns:
-            Tuple containing two sets, first including all found user IDs,
-            second containing user IDs calculated via lazy configured rooms.
+            Tuple containing two sets:
+               - first including all found user IDs,
+               - second containing user IDs calculated via lazy configured rooms.
         """
         lazy_profile_user_ids = set()
         non_lazy_profile_user_ids = set()
