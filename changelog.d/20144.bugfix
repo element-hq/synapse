@@ -1,0 +1,1 @@
+Fix deleted profile fields not being communicated to clients in oldschool `/sync`.
