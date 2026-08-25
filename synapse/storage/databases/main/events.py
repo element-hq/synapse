@@ -269,7 +269,9 @@ class PersistEventsStore:
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
-        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -2121,7 +2123,7 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
-        if self._msc4429_enabled:
+        if self._include_profile_updates_in_sync:
             # Handle changes to the profile updates stream.
             # We've already done a bunch of work calculating the changes needed
             # for the sliding sync tables, so we may as well re-use that information
