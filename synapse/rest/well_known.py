@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 from twisted.web.resource import Resource
 from twisted.web.server import Request
 
-from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import NotFoundError
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
