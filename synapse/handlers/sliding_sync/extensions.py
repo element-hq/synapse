@@ -1390,9 +1390,6 @@ class SlidingSyncExtensionHandler:
                 response[profile_user_id] = None
                 continue
 
-            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
-            per_user_removals: set[str] = set()
-
             # Calculate which fields had updates
             updated_fields: set[str] = updated_user_fields.get(profile_user_id, set())
             # Calculate the full available field list
@@ -1420,6 +1417,8 @@ class SlidingSyncExtensionHandler:
             if not user_fields:
                 continue
 
+            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
+            per_user_removals: set[str] = set()
             for field_name in user_fields:
                 field_value: JsonValue | dict[str, JsonValue] | AbsentType = (
                     profile_data.get(field_name, Absent)
