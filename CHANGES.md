@@ -15,7 +15,7 @@
 
 ## Improved Documentation
 
-- Document lighttpd reverse proxy configuration example from matrix.jaxlug.ngo, a contribution from the JaxLUG, the Jacksonville Linux Users Group Inc.. ([\#19875](https://github.com/element-hq/synapse/issues/19875))
+- Document lighttpd reverse proxy configuration example from matrix.jaxlug.ngo. Contributed by JaxLUG from the Jacksonville Linux Users Group Inc.. ([\#19875](https://github.com/element-hq/synapse/issues/19875))
 - Fix the documentation on the `federation_domain_whitelist` config option. ([\#20089](https://github.com/element-hq/synapse/issues/20089))
 
 ## Internal Changes
