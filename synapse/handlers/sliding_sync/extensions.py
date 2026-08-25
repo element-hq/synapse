@@ -1138,7 +1138,7 @@ class SlidingSyncExtensionHandler:
             for list_name, list_data in sync_config.lists.items():
                 if (EventTypes.Member, StateValues.LAZY) in list_data.required_state:
                     for op in actual_lists[list_name].ops:
-                        lazy_rooms.update(set(op.room_ids))
+                        lazy_rooms.update(op.room_ids)
 
         if lazy_rooms:
             # For rooms configured as lazy, include users based on room response.
