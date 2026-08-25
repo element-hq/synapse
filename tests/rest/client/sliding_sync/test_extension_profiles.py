@@ -480,7 +480,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                 ],
                 {
                     "updated": {
-                        "avatar_url": None,
                         "displayname": "other_user",
                         "field": "value",
                     }
@@ -590,7 +589,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
 
         expectation = {
             "updated": {
-                "avatar_url": None,
                 "displayname": "third_user",
             }
         }

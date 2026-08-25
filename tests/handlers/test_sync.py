@@ -26,7 +26,7 @@ from parameterized import parameterized, parameterized_class
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
+from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, ProfileFields
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -1177,6 +1177,13 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.joined_room = self.helper.create_room_as(self.user, tok=self.tok)
         self.get_success(
             self.store.set_profile_field(
+                UserID.from_string(self.user),
+                ProfileFields.AVATAR_URL,
+                "mxc://example.invalid/abcdef",
+            )
+        )
+        self.get_success(
+            self.store.set_profile_field(
                 user_id=UserID.from_string(self.user),
                 field_name="m.status",
                 new_value={"text": "Swimming in the Great Lakes!", "emoji": "🏊"},
@@ -1978,8 +1985,11 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@other_user:test"] is not None
         self.assertEqual(
-            set(incremental_result.profile_updates["@other_user:test"].keys()),
-            {"avatar_url", "displayname"},
+            incremental_result.profile_updates["@other_user:test"],
+            {
+                "displayname": "other_user",
+                # avatar_url unset (user doesn't have one)
+            },
         )
 
         # If we have more events from the other_user, and do another lazy sync,
@@ -2161,7 +2171,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             user=third_user,
             tok=third_tok,
         )
-        # Set a status field we don't except to see in sync
+        # Set a status field we don't expect to see in sync
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(third_user),
@@ -2194,14 +2204,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             [third_user],
         )
         self.assertEqual(
-            incremental_result.profile_updates["@third_user:test"]["displayname"],
-            "third_user",
-        )
-        self.assertIsNone(
-            incremental_result.profile_updates["@third_user:test"]["avatar_url"],
-        )
-        self.assertFalse(
-            "m.status" in incremental_result.profile_updates["@third_user:test"].keys(),
+            incremental_result.profile_updates["@third_user:test"],
+            {
+                "displayname": "third_user",
+                # avatar_url unset (user doesn't have one)
+                # m.status unset (not requested in sync)
+            },
         )
 
     @parameterized.expand(
@@ -2261,12 +2269,12 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         assert incremental_result.profile_updates["@user:test"] is not None
         self.assertEqual(
-            incremental_result.profile_updates["@user:test"]["m.status"],
-            {"text": "On holiday", "emoji": "🏖"},
-        )
-        # We didn't ask for displayname
-        self.assertFalse(
-            "displayname" in incremental_result.profile_updates["@user:test"].keys(),
+            incremental_result.profile_updates["@user:test"],
+            {
+                "m.status": {"text": "On holiday", "emoji": "🏖"},
+                # avatar_url unset (user doesn't have one)
+                # displayname unset (we didn't request it in sync)
+            },
         )
 
     @parameterized.expand([[True, False], [True, True], [False, False], [False, True]])
