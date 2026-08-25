@@ -86,7 +86,9 @@ class ProfileWorkerStore(SQLBaseStore):
             "populate_full_user_id_profiles", self.populate_full_user_id_profiles
         )
 
-        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
         self._is_events_writer = self._instance_name in hs.config.worker.writers.events
         self._profile_updates_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
             db_conn=db_conn,
@@ -403,6 +405,7 @@ class ProfileWorkerStore(SQLBaseStore):
             "get_updated_profile_updates", _get_updated_profile_updates_txn
         )
 
+    # FIXME this function should be deleted, it's not used.
     async def get_profile_updates_for_fields(
         self,
         *,
@@ -500,7 +503,7 @@ class ProfileWorkerStore(SQLBaseStore):
         from_id: int,
         to_id: int,
         user_id: str,
-        field_names: Set[str],
+        field_names: Set[str] | None,
         include_users: set[str] | None = None,
     ) -> list[ProfileUpdate]:
         """Get profile update markers for a user in a stream range.
@@ -515,15 +518,16 @@ class ProfileWorkerStore(SQLBaseStore):
             to_id: The ending stream ID (inclusive).
             user_id: The full user ID to filter on.
             field_names: Set of field names to filter update actions against.
+                `None` means "include all fields".
             include_users: If given, only include updates for these user IDs.
 
         Returns:
-            A list of ProfileUpdates update rows.
+            A list of ProfileUpdate update rows, in stream order
         """
         if from_id >= to_id:
             return []
 
-        if len(field_names) == 0:
+        if field_names is not None and len(field_names) == 0:
             return []
 
         if include_users is not None and len(include_users) == 0:
@@ -533,22 +537,27 @@ class ProfileWorkerStore(SQLBaseStore):
         def _get_profile_updates_for_user_and_fields_txn(
             txn: LoggingTransaction,
         ) -> list[ProfileUpdate]:
-            wanted_field_in_elems_clause, wanted_field_in_elems_args = (
-                make_in_list_sql_clause(
+            # Build a `field_clause` that matches updates containing the fields we are interested in
+            if field_names is None:
+                # We are interested in all fields, so match any update with fields
+                field_clause = "pu.affected_fields IS NOT NULL"
+                field_args: list[str] = []
+            else:
+                wanted_field_in_elems_clause, field_args = make_in_list_sql_clause(
                     txn.database_engine, "field_names.value", field_names
                 )
-            )
 
-            if isinstance(txn.database_engine, PostgresEngine):
-                # Note that if we had a GIN index on `affected_fields`, this would defeat it.
-                # If we decide we want one, we should consider using the `?|` operator or its
-                # clearer-named `jsonb_exists_any` equivalent.
-                all_field_names_table_expression = "jsonb_array_elements_text(pu.affected_fields) AS field_names(value)"
-            else:
-                # json_each is a table-valued function that gives `value` as one of its column names
-                all_field_names_table_expression = (
-                    "json_each(pu.affected_fields) AS field_names"
-                )
+                if isinstance(txn.database_engine, PostgresEngine):
+                    # Note that if we had a GIN index on `affected_fields`, this would defeat it.
+                    # If we decide we want one, we should consider using the `?|` operator or its
+                    # clearer-named `jsonb_exists_any` equivalent.
+                    all_field_names_table_expression = "jsonb_array_elements_text(pu.affected_fields) AS field_names(value)"
+                else:
+                    # json_each is a table-valued function that gives `value` as one of its column names
+                    all_field_names_table_expression = (
+                        "json_each(pu.affected_fields) AS field_names"
+                    )
+                field_clause = f"(EXISTS (SELECT 1 FROM {all_field_names_table_expression} WHERE {wanted_field_in_elems_clause}))"
 
             user_clause = ""
             user_args: list[str] = []
@@ -573,7 +582,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     AND puf.user_id = ?
                     {user_clause}
                     AND (
-                        (EXISTS (SELECT 1 FROM {all_field_names_table_expression} WHERE {wanted_field_in_elems_clause}))
+                        {field_clause}
                         OR pu.action != ?
                     )
                 ORDER BY pu.stream_id ASC
@@ -583,7 +592,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     to_id,
                     user_id,
                     *user_args,
-                    *wanted_field_in_elems_args,
+                    *field_args,
                     ProfileUpdateAction.UPDATE.value,
                 ),
             )
@@ -591,18 +600,20 @@ class ProfileWorkerStore(SQLBaseStore):
 
             updates: list[ProfileUpdate] = []
             for stream_id, updated_user_id, action, affected_fields_dbjson in rows:
+                if affected_fields_dbjson is not None:
+                    # Get the field names that were affected by this update
+                    affected_fields = frozenset(db_to_json(affected_fields_dbjson))
+                    if field_names is not None:
+                        # Only include the field names that we care about
+                        affected_fields &= field_names
+                else:
+                    affected_fields = None
                 updates.append(
                     ProfileUpdate(
                         stream_id=stream_id,
                         user_id=updated_user_id,
                         action=action,
-                        affected_fields=(
-                            # Get the field names that were affected by this update
-                            # and intersect with the field names we care about
-                            frozenset(db_to_json(affected_fields_dbjson)) & field_names
-                        )
-                        if affected_fields_dbjson is not None
-                        else None,
+                        affected_fields=affected_fields,
                     )
                 )
 
@@ -755,7 +766,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             The profile updates stream ID that was created in this transaction
         """
-        if self._msc4429_enabled:
+        if self._include_profile_updates_in_sync:
             assert self._is_events_writer
 
         self._check_profile_size(txn, user_id, field_name, new_value)
@@ -818,7 +829,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     ),
                 )
 
-        if not self._msc4429_enabled:
+        if not self._include_profile_updates_in_sync:
             return None
 
         # Record updates in the profile updates stream
@@ -847,7 +858,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 users profile should be pushed to the client, should they need it
                 already even if the user hasn't actually joined the room.
         """
-        if not self._msc4429_enabled:
+        if not self._include_profile_updates_in_sync:
             return
 
         assert self._is_events_writer
@@ -884,7 +895,7 @@ class ProfileWorkerStore(SQLBaseStore):
             txn: Transaction to use
             user_id: User ID that made the profile update
             action: The profile update action, either `update`, `left_room` or
-                `joined_room`
+                `joined_room`.
             field_names: A list of fields that were set, if ProfileUpdateAction.UPDATE
             user_rooms: Optionally, a set of rooms that the update concerns. If not
                 given, a database lookup will be done to fetch all the users rooms.
@@ -895,7 +906,7 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             The latest stream ID created in this transaction
         """
-        if not self._msc4429_enabled:
+        if not self._include_profile_updates_in_sync:
             return None
 
         if action == ProfileUpdateAction.UPDATE:
@@ -1010,7 +1021,7 @@ class ProfileWorkerStore(SQLBaseStore):
             field_name: The name of the custom profile field.
         """
 
-        if self._msc4429_enabled:
+        if self._include_profile_updates_in_sync:
             assert self._is_events_writer
 
         def delete_profile_field(txn: LoggingTransaction) -> int | None:
@@ -1032,7 +1043,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     (f'$."{field_name}"', user_id.localpart),
                 )
 
-            if not self._msc4429_enabled:
+            if not self._include_profile_updates_in_sync:
                 return None
 
             stream_id = self.record_profile_updates_txn(
