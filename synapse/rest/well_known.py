@@ -53,14 +53,6 @@ class WellKnownBuilder:
                 "base_url": self._config.registration.default_identity_server
             }
 
-        if self._config.mas.enabled:
-            assert isinstance(self._auth, MasDelegatedAuth)
-
-            result["org.matrix.msc2965.authentication"] = {
-                "issuer": await self._auth.issuer(),
-                "account": await self._auth.account_management_url(),
-            }
-
         if self._config.server.extra_well_known_client_content:
             for (
                 key,
