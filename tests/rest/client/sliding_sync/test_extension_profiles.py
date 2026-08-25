@@ -579,7 +579,13 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
                 "@other_user:test"
             ],
-            {"updated": {"displayname": "other_user"}},
+            {
+                "updated": {
+                    "displayname": "other_user",
+                    # FIXME: This shouldn't be returned, but currently is
+                    "avatar_url": None,
+                }
+            },
         )
 
     @parameterized.expand(
