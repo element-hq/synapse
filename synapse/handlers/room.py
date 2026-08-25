@@ -1530,7 +1530,7 @@ class RoomCreationHandler:
             power_level_content_override:
                 The power level content to override in the default power level event.
                 `power_level_content_override` doesn't apply when `initial_state` has
-                power level state event content (i.e. `EventTypes.PowerLevels`).
+                a power level state event content (i.e. `EventTypes.PowerLevels`).
             creator_join_profile:
                 Set to override the displayname and avatar for the creating
                 user in this room.
@@ -1725,8 +1725,7 @@ class RoomCreationHandler:
                     power_level_content["users"][invitee] = 100
 
             # If the user supplied a preset name e.g. "private_chat", apply that
-            # preset's power level content. This is not replacing the `events`` field,
-            # it is deep-merging.
+            # preset's power level content.
             power_level_content = self._deepmerge_power_level_content(
                 power_level_content, preset_config["power_level_content_override"]
             )
@@ -1879,18 +1878,30 @@ class RoomCreationHandler:
     def _deepmerge_power_level_content(
         self, power_level_content: JsonDict, override: JsonDict
     ) -> JsonDict:
-        """Deep-merge a power level content override, so that the `events` field is not
-        replaced but merged with the existing `events` field."""
-        if "events" in override:
-            events_override = override["events"]
-            if events_override:
-                for event, value in events_override.items():
-                    power_level_content["events"][event] = value
+        """Deep-merge `override` into `power_level_content`.
 
-        non_events_override = {k: v for k, v in override.items() if k != "events"}
-        if non_events_override:
-            power_level_content.update(non_events_override)
+        Nested dicts (e.g. events, users) are merged recursively. All other values from
+        `override` replace those in `power_level_content`.
 
+        Args:
+            power_level_content: The base power level content to update.
+            override: Values to merge on top of `power_level_content`.
+
+        Returns:
+            The updated power level content.
+        """
+        for key, value in override.items():
+            existing = power_level_content.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                power_level_content[key] = self._deepmerge_power_level_content(
+                    dict(existing), value
+                )
+            elif isinstance(value, dict):
+                # Copy so we don't share nested dicts with the override source
+                # (e.g. preset config reused across room creations).
+                power_level_content[key] = dict(value)
+            else:
+                power_level_content[key] = value
         return power_level_content
 
     def _room_preset_config(self, room_config: JsonDict) -> tuple[str, dict]:

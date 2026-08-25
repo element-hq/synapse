@@ -1,0 +1,1 @@
+Fix `m.call.invite` state events not being given the proper power level on rooms created with the `public_chat` preset. Contributed by @famedly @itsoyou.

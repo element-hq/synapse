@@ -508,6 +508,7 @@ class RoomPermissionsTestCase(RoomBase):
         )
         assert pl_event is not None
         self.assertEqual(50, pl_event.content.get("events", {}).get("m.call.invite"))
+        self.assertEqual(50, pl_event.content.get("events", {}).get("m.room.name"))
 
         private_pl_event = self.get_success(
             self.store_controllers.state.get_current_state_event(
