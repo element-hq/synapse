@@ -4,7 +4,7 @@
 
 - Add experimental support for [MSC4502](https://github.com/matrix-org/matrix-spec-proposals/pull/4502): Targeted and unrestricted room member queries. ([\#19974](https://github.com/element-hq/synapse/issues/19974))
 - Add optional support for [MSC4262: Profile Updates for Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4262).
-  Currently defaults to not enabled, and is limited to local users only for the sync results. ([\#20003](https://github.com/element-hq/synapse/issues/20003))
+  Currently defaults to disabled, and is limited to local users only for the sync results. ([\#20003](https://github.com/element-hq/synapse/issues/20003))
 - Allow specifying multiple `action_name` and `status` query parameters when listing scheduled tasks via the admin API. ([\#20067](https://github.com/element-hq/synapse/issues/20067))
 
 ## Bugfixes
