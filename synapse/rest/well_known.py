@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
 class WellKnownBuilder:
     def __init__(self, hs: "HomeServer"):
         self._config = hs.config
-        self._auth = hs.get_auth()
 
     async def get_well_known(self) -> JsonDict | None:
         if not self._config.server.serve_client_wellknown:
