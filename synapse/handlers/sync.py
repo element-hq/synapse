@@ -345,6 +345,7 @@ class SyncHandler:
         )
 
         # ExpiringCache((User, Device)) -> LruCache(user_id => event_id)
+        # FIXME: This makes sync non-idempotent. See: https://github.com/element-hq/synapse/issues/19978
         self.lazy_loaded_members_cache: ExpiringCache[
             tuple[str, str | None], LruCache[str, str]
         ] = ExpiringCache(
@@ -359,6 +360,7 @@ class SyncHandler:
         #   -> LruCache(
         #       blake2b(Other User ID + Field Name) -> blake2b(Field value)
         #   )
+        # FIXME: This makes sync non-idempotent. See: https://github.com/element-hq/synapse/issues/19978
         self.lazy_loaded_profile_fields_cache: ExpiringCache[
             tuple[str, str | None], LruCache[bytes, bytes]
         ] = ExpiringCache(
@@ -2368,7 +2370,7 @@ class SyncHandler:
             return
 
         # Serialise the profile updates into the sync response format.
-        # user ID -> {profile field -> value | null if unset }
+        # user ID -> { profile field -> value | null if unset }
         profile_updates: dict[
             str, dict[str, JsonValue | dict[str, JsonValue]] | None
         ] = {}
@@ -2421,8 +2423,17 @@ class SyncHandler:
                     # Include all the fields the client asked for, as this user
                     # has events in a lazy loaded sync response, except for
                     # fields we've recently sent in a previous lazy loaded sync response
-                    fields = set(profile_data.keys()).intersection(profile_fields)
-                    for field_name in fields:
+                    for field_name in profile_fields:
+                        # FIXME: We turn removals into `null` here, but this is currently under consideration on the MSC.
+                        # See: https://github.com/matrix-org/matrix-spec-proposals/pull/4429/files#r3512513534
+                        # FIXME: Arbitrary absent fields are also turned into `null` here, even if the user never had such a field.
+                        # This is necessary because we don't know what we previously sent down to the client.
+                        # It would be better to:
+                        # - For empty cache, signal 'here is a complete profile' instead:
+                        #   See: https://github.com/matrix-org/matrix-spec-proposals/pull/4429/files#r3602866074
+                        # - For non-empty cache, track a profile updates stream position and use it to only emit
+                        #   fields that actually changed since the last notified position.
+                        field_value = profile_data.get(field_name, None)
                         cache_key = (
                             sync_config.user.to_string(),
                             sync_config.device_id,
@@ -2441,7 +2452,7 @@ class SyncHandler:
                         value_hash = hashlib.blake2b(
                             json.dumps(
                                 [
-                                    profile_data.get(field_name),
+                                    field_value,
                                 ],
                                 sort_keys=True,
                                 separators=(",", ":"),
@@ -2451,7 +2462,7 @@ class SyncHandler:
                             digest_size=LAZY_LOADED_PROFILE_FIELDS_CACHE_DIGEST_SIZE,
                         ).digest()
                         if cache.get(cache_value) != value_hash:
-                            per_user_updates[field_name] = profile_data.get(field_name)
+                            per_user_updates[field_name] = field_value
                             # Update our cache to indicate this user/field combo
                             # has been recently sent.
                             cache.set(
@@ -2467,11 +2478,19 @@ class SyncHandler:
                     fields = (
                         profile_fields
                         if other_user_id in joined_room_user_ids
-                        else set(updated_user_fields.get(other_user_id, []))
+                        else updated_user_fields.get(other_user_id, set())
                     )
-                    fields = set(profile_data.keys()).intersection(fields)
                     for field_name in fields:
-                        per_user_updates[field_name] = profile_data[field_name]
+                        # FIXME: We turn removals into `null` here, but this is currently under consideration on the MSC.
+                        # See: https://github.com/matrix-org/matrix-spec-proposals/pull/4429/files#r3512513534
+                        # FIXME: If the user is in `joined_room_user_ids`, this will produce a `null` for every field
+                        # that we are interested in, even if the user never had such a field.
+                        # This is necessary because we don't know what we previously sent down to the client.
+                        # It would be better to signal 'here is a complete profile' instead:
+                        # See: https://github.com/matrix-org/matrix-spec-proposals/pull/4429/files#r3602866074
+                        per_user_updates[field_name] = profile_data.get(
+                            field_name, None
+                        )
 
                 if per_user_updates:
                     profile_updates[other_user_id] = per_user_updates
