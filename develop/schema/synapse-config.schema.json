@@ -221,7 +221,7 @@
     },
     "include_profile_updates_in_sync": {
       "type": "boolean",
-      "description": "Use this option to include updates of other users' profiles in sync responses, for users who share rooms.\nRequires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatible client, and is currently limited to legacy sync and local users only.\nThis feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms.",
+      "description": "Use this option to include updates of other users' profiles in sync responses, for users who share rooms.\nFor legacy sync clients, requires [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatibility. For sliding sync clients, requires [MSC4262](https://github.com/matrix-org/matrix-spec-proposals/pull/4262) compatibility. Note, profile updates via sync are currently limited to local users only.\nThis feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms.",
       "default": false,
       "examples": [
         true
