@@ -522,7 +522,7 @@ class ProfileWorkerStore(SQLBaseStore):
             include_users: If given, only include updates for these user IDs.
 
         Returns:
-            A list of ProfileUpdates update rows.
+            A list of ProfileUpdate update rows, in stream order
         """
         if from_id >= to_id:
             return []
