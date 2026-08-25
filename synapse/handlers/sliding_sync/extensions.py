@@ -29,7 +29,6 @@ from synapse.api.constants import (
     AccountDataTypes,
     EduTypes,
     EventTypes,
-    ProfileFields,
     ProfileUpdateAction,
     StickyEvent,
 )
@@ -1421,19 +1420,8 @@ class SlidingSyncExtensionHandler:
             per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
             per_user_removals: set[str] = set()
             for field_name in user_fields:
-                # For custom fields the lack of a field means it will be `Absent`,
-                # for displayname/avatar_url it will be `None`, due to way we store
-                # things differently.
-                # FIXME: I intend to simplify this by pushing the special-case logic
-                # for these 'original' profile fields into the storage layer instead.
-                absent_type = (
-                    Absent
-                    if field_name
-                    not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
-                    else None
-                )
                 field_value: JsonValue | dict[str, JsonValue] | AbsentType = (
-                    profile_data.get(field_name, absent_type)
+                    profile_data.get(field_name, Absent)
                 )
                 if (
                     # If the field isn't found on the profile and it is present in
@@ -1442,7 +1430,7 @@ class SlidingSyncExtensionHandler:
                     # are `None` by default, for example each and every user created
                     # by Synapse will have `avatar_url: None`, and we don't want to
                     # constantly send that to the clients.
-                    field_value is absent_type and field_name in updated_fields
+                    field_value is Absent and field_name in updated_fields
                 ):
                     per_user_removals.add(field_name)
                 else:
