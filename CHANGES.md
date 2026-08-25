@@ -1,3 +1,49 @@
+# Synapse 1.159.0 (2026-08-18)
+
+No significant changes since 1.159.0rc1.
+
+
+# Synapse 1.159.0rc1 (2026-08-11)
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
+[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.159/docs/upgrade.md#upgrading-to-v11590)
+as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2027-03-15`.
+
+## Features
+
+- Add optional support for [MSC4429: Profile Updates for Legacy Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4429).
+  Currently defaults to not enabled, and is limited to local users only for the sync results. ([\#19556](https://github.com/element-hq/synapse/issues/19556))
+
+## Bugfixes
+
+- Fix thumbnail generation failing for MPO images. Animations that cannot be decoded now fall back to a static thumbnail. ([\#20025](https://github.com/element-hq/synapse/issues/20025))
+- Fix the `quarantined_media` replication stream never being sent when the configured `quarantined_media_changes` stream writer is a worker. Introduced in v1.152.0. ([\#20085](https://github.com/element-hq/synapse/issues/20085))
+
+## Updates to the Docker image
+
+- Run with `PYTHONUNBUFFERED=1` to ensure that we can always see log output when things go wrong. ([\#20075](https://github.com/element-hq/synapse/issues/20075))
+
+## Improved Documentation
+
+- Correct the documentation for the `on_media_upload_limit_exceeded` module callback with regards to where it is called from. ([\#20018](https://github.com/element-hq/synapse/issues/20018))
+- Add upgrade notes to point out updated Debian package signing key. ([\#20066](https://github.com/element-hq/synapse/issues/20066))
+- Update stream cheatsheet docs to re-link `synapse/config/workers.py` which has more references. ([\#20086](https://github.com/element-hq/synapse/issues/20086))
+
+## Internal Changes
+
+- Fix tests that use `homeserver_to_use=GenericWorkerServer` not being able to be run standalone. ([\#20017](https://github.com/element-hq/synapse/issues/20017))
+- Fix `RemoteJoinHelper` test helper to handle room version "12" rooms. Contributed by @famedly @jason-famedly. ([\#20021](https://github.com/element-hq/synapse/issues/20021))
+- Fix release script announcement to link to correct release branch of changelog. ([\#20023](https://github.com/element-hq/synapse/issues/20023))
+- Dust off `make_full_schema` and add CI using it to show schema diffs. ([\#20027](https://github.com/element-hq/synapse/issues/20027))
+- Remove broken `DROP` statements for SQLite in `make_full_schema` script. ([\#20028](https://github.com/element-hq/synapse/issues/20028))
+- Document how to capture a JSON snapshot of a Grafana dashboard to aid in debugging. ([\#20048](https://github.com/element-hq/synapse/issues/20048))
+- Routinely purge old cancelled tasks from the database. ([\#20068](https://github.com/element-hq/synapse/issues/20068))
+- Introduce an `RdataSafeValue` type and correct some minor type annotation mistakes. ([\#20071](https://github.com/element-hq/synapse/issues/20071))
+- Set `idle_in_transaction_session_timeout` (default 30 minutes) on new PostgreSQL connections, so that wedged connections don't hold locks or block vacuum indefinitely. ([\#20077](https://github.com/element-hq/synapse/issues/20077))
+
+
+
+
 # Synapse 1.158.0 (2026-08-04)
 
 ## Deprecations and Removals
