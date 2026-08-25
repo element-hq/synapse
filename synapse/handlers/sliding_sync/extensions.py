@@ -1424,6 +1424,8 @@ class SlidingSyncExtensionHandler:
                 # For custom fields the lack of a field means it will be `Absent`,
                 # for displayname/avatar_url it will be `None`, due to way we store
                 # things differently.
+                # FIXME: I intend to simplify this by pushing the special-case logic
+                # for these 'original' profile fields into the storage layer instead.
                 absent_type = (
                     Absent
                     if field_name
