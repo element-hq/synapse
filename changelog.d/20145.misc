@@ -1,0 +1,1 @@
+Stop treating unset display names and avatar URLs as profile fields with a `null` value.
