@@ -27,8 +27,8 @@
 - Reduce database CPU usage when marking device list changes as sent over federation. ([\#20120](https://github.com/element-hq/synapse/issues/20120))
 - Fix cache `__len__` of Sliding Sync `PerConnectionState` ignoring account data entries. ([\#20124](https://github.com/element-hq/synapse/issues/20124))
 - Update Synapse repo link in inconsistent stream error. ([\#20128](https://github.com/element-hq/synapse/issues/20128))
-- Update rustls-webpki to address GHSA-82j2-j2ch-gfr8. ([\#20131](https://github.com/element-hq/synapse/issues/20131))
-- Update pyo3 to address GHSA-36hh-v3qg-5jq4 and GHSA-chgr-c6px-7xpp. ([\#20131](https://github.com/element-hq/synapse/issues/20131))
+- Update rustls-webpki to address [GHSA-82j2-j2ch-gfr8](https://github.com/advisories/GHSA-82j2-j2ch-gfr8). ([\#20131](https://github.com/element-hq/synapse/issues/20131))
+- Update pyo3 to address [GHSA-36hh-v3qg-5jq4](https://github.com/advisories/GHSA-36hh-v3qg-5jq4) and [GHSA-chgr-c6px-7xpp](https://github.com/advisories/GHSA-chgr-c6px-7xpp). ([\#20131](https://github.com/element-hq/synapse/issues/20131))
 
 
 
