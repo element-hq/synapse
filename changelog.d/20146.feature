@@ -1,1 +1,1 @@
-Add support for specifying the SFU WebSocket URL together with configured LiveKit transports.
+Deprecate `livekit_service_url` and add support for specifying the SFU WebSocket URL for configured LiveKit transports. Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11600).

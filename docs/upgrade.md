@@ -118,6 +118,18 @@ stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 
+# Upgrading to v1.160.0
+
+## Deprecation of `livekit_service_url`
+
+When configuring the MatrixRTC LiveKit transport, the `livekit_service_url` is now
+deprecated but should continue to be listed to ensure backwards compatibility with
+older clients. A new sibling `url` config property is added that should be set to
+your SFU's WebSocket URL. Clients that support `url` will use the Client-Server API
+to (indirectly) interact with the LiveKit authorization service. The service needs
+to be set up as an application service in order to support these endpoints. See
+https://github.com/element-hq/lk-jwt-service for further details.
+
 # Upgrading to v1.159.0
 
 ## Change of signing key expiry date for the Debian/Ubuntu package repository (2026)
