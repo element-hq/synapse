@@ -277,11 +277,22 @@ class StateDeletionDataStore:
                 f"state groups have been deleted: {shortstr(missing_state_groups)}"
             )
 
-        self.db_pool.simple_insert_many_txn(
+        # We upsert here, as it may be possible for a row for this state group to
+        # already exist. This can happen in an edge case, where the connection to the DB
+        # is lost between inserting the row and finally deleting it. This has been
+        # observed in the wild on EMS with a flaky RDS.
+        #
+        # State groups persistence rows are fine to re-use, so it's OK for this to be
+        # idempotent.
+        self.db_pool.simple_upsert_many_txn(
             txn,
             table="state_groups_persisting",
-            keys=("state_group", "instance_name"),
-            values=[(state_group, self._instance_name) for state_group in state_groups],
+            key_names=("state_group", "instance_name"),
+            key_values=[
+                (state_group, self._instance_name) for state_group in state_groups
+            ],
+            value_names=(),
+            value_values=(),
         )
 
     def _finish_persisting_txn(
