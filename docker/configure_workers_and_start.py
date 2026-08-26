@@ -517,6 +517,7 @@ def add_worker_roles_to_shared_config(
         "typing",
         "push_rules",
         "thread_subscriptions",
+        "quarantined_media_changes",
     }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple
