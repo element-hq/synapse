@@ -149,7 +149,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(delay_id, event["delay_id"])
 
         # Test that the list lookup retrieves the same item
-        events = self._get_delayed_events()
         self.assertEqual(self._get_delayed_events(), [event])
 
         # Test that a non-existent delayed event cannot be found
