@@ -291,11 +291,14 @@ class ProfileWorkerStore(SQLBaseStore):
                     (field_path, field_name, user_id.localpart),
                 )
 
+                row = txn.fetchone()
+                if row is None:
+                    # The user has no profile at all.
+                    raise StoreError(404, "No row found")
+
                 # Test exists first since value being None is used for both
                 # missing and a null JSON value.
-                exists, value = cast(
-                    tuple[bool, JsonValue | dict[str, JsonValue]], txn.fetchone()
-                )
+                exists, value = cast(tuple[bool, JsonValue | dict[str, JsonValue]], row)
                 if not exists:
                     raise StoreError(404, "No row found")
                 return value
@@ -310,9 +313,14 @@ class ProfileWorkerStore(SQLBaseStore):
                     (field_path, field_path, user_id.localpart),
                 )
 
+                row = txn.fetchone()
+                if row is None:
+                    # The user has no profile at all.
+                    raise StoreError(404, "No row found")
+
                 # If value_type is None, then the value did not exist.
                 value_type, value = cast(
-                    tuple[str | None, JsonValue | dict[str, JsonValue]], txn.fetchone()
+                    tuple[str | None, JsonValue | dict[str, JsonValue]], row
                 )
                 if not value_type:
                     raise StoreError(404, "No row found")
