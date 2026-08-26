@@ -2662,13 +2662,20 @@ This setting has the following sub-options:
 
   * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
 
-  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+  * `url` (string): The WebSocket url of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+
+    Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
+
+  * `livekit_service_url` (string): The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+
+    Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
 Example configuration:
 ```yaml
 matrix_rtc:
   transports:
   - type: livekit
+    url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
