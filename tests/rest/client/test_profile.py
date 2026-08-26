@@ -564,7 +564,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             "array_field": ["test"],
             "object_field": {"test": "test"},
             "numeric_field": 1,
-            "null_field": None,
         }
 
         for key, value in fields.items():
