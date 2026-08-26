@@ -1541,7 +1541,9 @@ class MediaRepository:
 
             async with self.remote_media_linearizer.queue(key):
                 file_info = FileInfo(origin, file_id)
-                thumbnails = await self.store.get_remote_media_thumbnails(origin, media_id)
+                thumbnails = await self.store.get_remote_media_thumbnails(
+                    origin, media_id
+                )
                 thumbnails_ok = True
                 for thumbnail_info in thumbnails:
                     file = FileInfo(origin, file_id, thumbnail=thumbnail_info)
