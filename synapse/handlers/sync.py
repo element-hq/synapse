@@ -2420,8 +2420,7 @@ class SyncHandler:
                 if include_users and other_user_id in include_users:
                     # Include all the fields the client asked for, as this user
                     # has events in a lazy loaded sync response, except for
-                    # fields we've recently sent in a previous lazy loaded sync response
-                    fields = set(profile_data.keys()).intersection(profile_fields)
+                    # fields we've recently sent in a previous lazy loaded sync response.
                     # We must include _updated_ fields even if the profile doesn't have
                     # this field. The value will be sent down as `None`. We must do
                     # this as currently legacy sync delivers field removals by
@@ -2430,8 +2429,13 @@ class SyncHandler:
                     # a `ProfileUpdateAction.UPDATE` is enough to tell us it should
                     # be sent down.
                     # TODO once removals are sent down in a dedicated key instead of
-                    # null values, this can be removed.
-                    fields.update(set(updated_user_fields.get(other_user_id, [])))
+                    # null values, the `.union(updated_user_fields.get(other_user_id, []))`
+                    # part here can be removed.
+                    fields = (
+                        set(profile_data.keys())
+                        .union(updated_user_fields.get(other_user_id, []))
+                        .intersection(profile_fields)
+                    )
                     for field_name in fields:
                         cache_key = (
                             sync_config.user.to_string(),
@@ -2479,7 +2483,6 @@ class SyncHandler:
                         if other_user_id in joined_room_user_ids
                         else set(updated_user_fields.get(other_user_id, []))
                     )
-                    fields = set(profile_data.keys()).intersection(fields)
                     # We must include _updated_ fields even if the profile doesn't have
                     # this field. The value will be sent down as `None`. We must do
                     # this as currently legacy sync delivers field removals by
@@ -2488,8 +2491,14 @@ class SyncHandler:
                     # a `ProfileUpdateAction.UPDATE` is enough to tell us it should
                     # be sent down.
                     # TODO once removals are sent down in a dedicated key instead of
-                    # null values, this can be removed.
-                    fields.update(set(updated_user_fields.get(other_user_id, [])))
+                    # null values, the `.union(updated_user_fields.get(other_user_id, []))`
+                    # part here can be removed.
+                    fields = (
+                        set(profile_data.keys())
+                        .union(updated_user_fields.get(other_user_id, []))
+                        .intersection(fields)
+                    )
+                    # fields.update(set(updated_user_fields.get(other_user_id, [])))
                     for field_name in fields:
                         per_user_updates[field_name] = profile_data.get(field_name)
 
