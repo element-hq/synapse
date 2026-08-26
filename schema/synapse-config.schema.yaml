@@ -3025,7 +3025,7 @@ properties:
             url:
               type: string
               description: >-
-                The WebSocket url of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is
+                The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is
                 required.
 
 
