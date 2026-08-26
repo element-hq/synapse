@@ -1,3 +1,38 @@
+# Synapse 1.160.0rc1 (2026-08-25)
+
+## Features
+
+- Add experimental support for [MSC4502](https://github.com/matrix-org/matrix-spec-proposals/pull/4502): Targeted and unrestricted room member queries. ([\#19974](https://github.com/element-hq/synapse/issues/19974))
+- Add optional support for [MSC4262: Profile Updates for Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4262).
+  Currently defaults to disabled, and is limited to local users only for the sync results. ([\#20003](https://github.com/element-hq/synapse/issues/20003))
+- Allow specifying multiple `action_name` and `status` query parameters when listing scheduled tasks via the admin API. ([\#20067](https://github.com/element-hq/synapse/issues/20067))
+
+## Bugfixes
+
+- Fix a bug where stream positions (presence, to-device message, etc.) could stop being sent to clients if a request was cancelled while a write was allocating a stream ID. Contributed by @FrenchGithubUser @Famedly. ([\#20090](https://github.com/element-hq/synapse/issues/20090))
+- Thumbnail WebP images that use transparency as PNG rather than JPEG, to preserve transparency during thumbnailing. Contributed by @catfromplan9. ([\#20094](https://github.com/element-hq/synapse/issues/20094))
+- Fix sync stream not being woken up when a user updates a profile field without belonging to any rooms. ([\#20135](https://github.com/element-hq/synapse/issues/20135))
+
+## Improved Documentation
+
+- Document lighttpd reverse proxy configuration example. Contributed by JaxLUG from the Jacksonville Linux Users Group Inc.. ([\#19875](https://github.com/element-hq/synapse/issues/19875))
+- Fix the documentation on the `federation_domain_whitelist` config option. ([\#20089](https://github.com/element-hq/synapse/issues/20089))
+
+## Internal Changes
+
+- Update release script to check more often for actions being completed so you don't have to wait around as much. ([\#20093](https://github.com/element-hq/synapse/issues/20093))
+- Speed up the conversion of device list changes into outbound federation pokes, and add a metric for how far behind the conversion is. ([\#20098](https://github.com/element-hq/synapse/issues/20098))
+- Fix the schema diff CI not using `faketime` for SQLite. ([\#20099](https://github.com/element-hq/synapse/issues/20099))
+- Fix the schema diff CI breaking when the Rust module was changed. ([\#20117](https://github.com/element-hq/synapse/issues/20117), [\#20129](https://github.com/element-hq/synapse/issues/20129))
+- Reduce database CPU usage when marking device list changes as sent over federation. ([\#20120](https://github.com/element-hq/synapse/issues/20120))
+- Fix cache `__len__` of Sliding Sync `PerConnectionState` ignoring account data entries. ([\#20124](https://github.com/element-hq/synapse/issues/20124))
+- Update Synapse repo link in inconsistent stream error. ([\#20128](https://github.com/element-hq/synapse/issues/20128))
+- Update rustls-webpki to address [GHSA-82j2-j2ch-gfr8](https://github.com/advisories/GHSA-82j2-j2ch-gfr8). ([\#20131](https://github.com/element-hq/synapse/issues/20131))
+- Update pyo3 to address [GHSA-36hh-v3qg-5jq4](https://github.com/advisories/GHSA-36hh-v3qg-5jq4) and [GHSA-chgr-c6px-7xpp](https://github.com/advisories/GHSA-chgr-c6px-7xpp). ([\#20131](https://github.com/element-hq/synapse/issues/20131))
+
+
+
+
 # Synapse 1.159.0 (2026-08-18)
 
 No significant changes since 1.159.0rc1.
