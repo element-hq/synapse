@@ -128,10 +128,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertListEqual([], self._get_delayed_events())
 
     def test_delayed_event_lookup(self) -> None:
+        delay = 100000
+        content: JsonDict = {}
+        request_time_msec = self.hs.get_clock().time_msec()
         channel = self.make_request(
             "POST",
-            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
-            {},
+            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay),
+            content,
             self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
@@ -146,7 +149,17 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
         event = channel.json_body
-        self.assertEqual(delay_id, event["delay_id"])
+        self.assertDictEqual(
+            event,
+            {
+                "delay_id": delay_id,
+                "room_id": self.room_id,
+                "type": _EVENT_TYPE,
+                "delay": delay,
+                "running_since": request_time_msec,
+                "content": content,
+            },
+        )
 
         # Test that the list lookup retrieves the same item
         self.assertEqual(self._get_delayed_events(), [event])
