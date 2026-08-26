@@ -23,7 +23,7 @@ import abc
 import logging
 import os
 import shutil
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from synapse.config._base import Config
 from synapse.logging.context import defer_to_thread, run_in_background
@@ -179,11 +179,10 @@ class FileStorageProviderBackend(StorageProvider):
         os.makedirs(dirname, exist_ok=True)
 
         # mypy needs help inferring the type of the second parameter, which is generic
-        shutil_copyfile: Callable[[str, str], str] = shutil.copyfile
         with start_active_span("shutil_copyfile"):
             await defer_to_thread(
                 self.reactor,
-                shutil_copyfile,
+                shutil.copyfile,
                 primary_fname,
                 backup_fname,
             )
@@ -218,9 +217,8 @@ class FileStorageProviderBackend(StorageProvider):
         # Convert to an absolute path.
         fn = os.path.join(self.base_directory, path)
         if os.path.isfile(fn):
-            os_remove: Callable[[str], None] = os.remove
             await defer_to_thread(
                 self.reactor,
-                os_remove,
+                os.remove,
                 fn,
             )
