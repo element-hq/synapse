@@ -48,6 +48,7 @@ from synapse.types import (
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
+    StreamToken,
     UserID,
     create_requester,
 )
@@ -2780,6 +2781,148 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self.assertEqual(
             incremental_result.profile_updates["@other_user:test"]["field"],
             "value",
+        )
+
+    def _profile_sync(
+        self,
+        *,
+        fields: list[str],
+        lazy: bool = False,
+        since: StreamToken | None = None,
+    ) -> SyncResult:
+        """Run a sync as `self.user`, asking for the given profile fields."""
+        filter_json: dict = {
+            "org.matrix.msc4429.profile_fields": {"ids": fields},
+        }
+        if lazy:
+            filter_json["room"] = {"state": {"lazy_load_members": True}}
+        return self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                create_requester(self.user),
+                since_token=since,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs, filter_json=filter_json
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_fields_a_user_never_had_are_not_sent_as_null(self) -> None:
+        """Fields the user has never set should be absent, not `null`.
+
+        `null` means "this field was removed"; sending it for a field that never
+        existed is both misleading and wasted bandwidth. Checked in the two places
+        where we send a user's whole requested field set: a lazy loaded sync where
+        the user has an event, and a user who newly shares a room with us.
+        """
+        # other_user has a displayname but has never had `m.status`.
+        initial = self._profile_sync(fields=["displayname", "m.status"], lazy=True)
+
+        # 1) Lazy loaded sync, other_user has an event in the timeline.
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        incremental = self._profile_sync(
+            fields=["displayname", "m.status"], lazy=True, since=initial.next_batch
+        )
+        self.assertEqual(
+            incremental.profile_updates,
+            {"@other_user:test": {"displayname": "other_user"}},
+        )
+
+        # 2) A user who newly shares a room with us.
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        self.helper.join(room=self.joined_room, user=third_user, tok=third_tok)
+        incremental = self._profile_sync(
+            fields=["displayname", "m.status"], since=incremental.next_batch
+        )
+        self.assertEqual(
+            incremental.profile_updates,
+            {"@third_user:test": {"displayname": "third_user"}},
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_initial_and_incremental_sync_agree_on_never_set_fields(self) -> None:
+        """Initial and incremental sync must describe an unset field the same way.
+
+        A client can't tell which kind of sync it is looking at when applying
+        profile updates, so if one omits a never-set field and the other sends
+        `null`, the two disagree about a profile that hasn't changed at all.
+        """
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        initial = self._profile_sync(fields=["displayname", "m.status"])
+
+        # third_user joins, so an incremental sync sends us their whole profile...
+        self.helper.join(room=self.joined_room, user=third_user, tok=third_tok)
+        incremental = self._profile_sync(
+            fields=["displayname", "m.status"], since=initial.next_batch
+        )
+        # ...as does a fresh initial sync.
+        second_initial = self._profile_sync(fields=["displayname", "m.status"])
+
+        self.assertEqual(
+            incremental.profile_updates["@third_user:test"],
+            second_initial.profile_updates["@third_user:test"],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_field_change_is_not_suppressed_by_a_stale_lazy_loading_cache(self) -> None:
+        """A real change must not be swallowed by the lazy loading cache.
+
+        The cache records what the lazy loading path sent, but the plain diff path
+        sends values without updating it. So a value can be cached as "X", changed
+        to "Y" over the diff path, then changed back to "X" -- at which point the
+        stale cache entry still says "X" and suppresses the update, leaving the
+        client stuck on "Y".
+        """
+
+        def set_status(text: str) -> None:
+            self.get_success(
+                self.profile_handler.set_field(
+                    target_user=UserID.from_string(self.other_user),
+                    requester=create_requester(self.other_user),
+                    field_name="m.status",
+                    new_value={"text": text},
+                )
+            )
+
+        set_status("X")
+        result = self._profile_sync(fields=["m.status"], lazy=True)
+
+        # A sync with an event from other_user caches "X" as recently sent.
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        result = self._profile_sync(
+            fields=["m.status"], lazy=True, since=result.next_batch
+        )
+        self.assertEqual(
+            result.profile_updates.get("@other_user:test"),
+            {"m.status": {"text": "X"}},
+        )
+
+        # Change to "Y" with no event from other_user: this goes down the plain
+        # diff path, which doesn't touch the cache.
+        set_status("Y")
+        result = self._profile_sync(
+            fields=["m.status"], lazy=True, since=result.next_batch
+        )
+        self.assertEqual(
+            result.profile_updates.get("@other_user:test"),
+            {"m.status": {"text": "Y"}},
+        )
+
+        # Change back to "X", with an event so we take the lazy loading path.
+        set_status("X")
+        self.helper.send(self.joined_room, "Foo", tok=self.other_tok)
+        result = self._profile_sync(
+            fields=["m.status"], lazy=True, since=result.next_batch
+        )
+        self.assertEqual(
+            result.profile_updates.get("@other_user:test"),
+            {"m.status": {"text": "X"}},
         )
 
 
