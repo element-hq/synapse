@@ -21,6 +21,7 @@
 
 """Contains functions for performing actions on rooms."""
 
+import copy
 import itertools
 import logging
 import math
@@ -1896,12 +1897,9 @@ class RoomCreationHandler:
                 power_level_content[key] = self._deepmerge_power_level_content(
                     dict(existing), value
                 )
-            elif isinstance(value, dict):
-                # Copy so we don't share nested dicts with the override source
-                # (e.g. preset config reused across room creations).
-                power_level_content[key] = dict(value)
             else:
-                power_level_content[key] = value
+                # Copy so we don't accidentally modify the preset config.
+                power_level_content[key] = copy.deepcopy(value)
         return power_level_content
 
     def _room_preset_config(self, room_config: JsonDict) -> tuple[str, dict]:
