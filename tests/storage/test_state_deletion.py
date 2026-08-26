@@ -14,12 +14,15 @@
 
 
 import logging
+from collections.abc import Collection
+from unittest.mock import patch
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.storage.database import LoggingTransaction
 from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
@@ -48,8 +51,20 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         self.purge_events._delete_state_loop_call.stop()
 
         self.user_id = self.register_user("test", "password")
-        tok = self.login("test", "password")
-        self.room_id = self.helper.create_room_as(self.user_id, tok=tok)
+        self.tok = self.login("test", "password")
+        self.room_id = self.helper.create_room_as(self.user_id, tok=self.tok)
+
+    def get_persisting_marker_rows(self) -> list[tuple[int, str, int | None]]:
+        """Return the contents of the `state_groups_persisting` table."""
+
+        return self.get_success(
+            self.state_deletion_store.db_pool.simple_select_list(
+                table="state_groups_persisting",
+                keyvalues=None,
+                retcols=("state_group", "instance_name", "inserted_ts"),
+                desc="get_persisting_marker_rows",
+            )
+        )
 
     def check_if_can_be_deleted(self, state_group: int) -> bool:
         """Check if the state group is pending deletion."""
@@ -106,6 +121,39 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
 
         self.get_success(ctx_mgr.__aenter__())
         self.get_success(ctx_mgr.__aexit__(Exception, Exception("test"), None))
+
+    def test_retry_send_after_failed_clean_up(self) -> None:
+        """Test that we can retry sending an event after the clean up of the
+        `state_groups_persisting` rows failed, as it does when the database goes
+        away while we're persisting."""
+
+        fail_clean_up = True
+        orig_finish_persisting_txn = self.state_deletion_store._finish_persisting_txn
+
+        def _finish_persisting_txn(
+            txn: LoggingTransaction, state_groups: Collection[int], error: bool
+        ) -> None:
+            if fail_clean_up:
+                raise Exception("Database has gone away")
+
+            orig_finish_persisting_txn(txn, state_groups, error)
+
+        with patch.object(
+            self.state_deletion_store,
+            "_finish_persisting_txn",
+            new=_finish_persisting_txn,
+        ):
+            self.helper.send(self.room_id, body="first", tok=self.tok, expect_code=500)
+
+            # The rows are still in place, as the transaction that would have
+            # removed them was rolled back.
+            self.assertNotEqual(self.get_persisting_marker_rows(), [])
+
+            # The database has come back, so the retry should now go through.
+            fail_clean_up = False
+            self.helper.send(self.room_id, body="second", tok=self.tok)
+
+        self.assertEqual(self.get_persisting_marker_rows(), [])
 
     def test_existing_pending_deletion_is_cleared(self) -> None:
         """Test that the pending deletion flag gets cleared when the state group
