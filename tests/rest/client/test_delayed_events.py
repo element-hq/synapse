@@ -150,8 +150,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Test that the list lookup retrieves the same item
         events = self._get_delayed_events()
-        self.assertEqual(1, len(events), events)
-        self.assertDictEqual(events[0], event)
+        self.assertEqual(self._get_delayed_events(), [event])
 
         # Test that a non-existent delayed event cannot be found
         channel = self.make_request(
