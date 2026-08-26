@@ -52,6 +52,8 @@ class MatrixRtcConfigModel(ParseModel):
     def validate_transports(
         cls, transports: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
+        """Validate each transport by attempting to construct a `TransportConfigModel`
+        from it, raising a `ValidationError` if construction fails."""
         for transport in transports:
             TransportConfigModel(**transport)
         return transports

@@ -17,8 +17,13 @@
 
 """Tests REST events for /rtc/endpoints path."""
 
+import unittest as stdlib_unittest
+
+from pydantic import ValidationError
+
 from twisted.internet.testing import MemoryReactor
 
+from synapse.config.matrixrtc import TransportConfigModel
 from synapse.rest import admin
 from synapse.rest.client import login, matrixrtc, register, room, versions
 from synapse.server import HomeServer
@@ -190,3 +195,23 @@ class MatrixRtcVersionsTestCase(HomeserverTestCase):
         channel = self.make_request("GET", "/_matrix/client/versions")
         self.assertEqual(channel.code, 200, channel.result)
         self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc4143"])
+
+
+class TransportConfigModelTestCase(stdlib_unittest.TestCase):
+    """Tests validation of the `TransportConfigModel` pydantic model."""
+
+    def test_livekit_transport_requires_url_or_livekit_service_url(self) -> None:
+        with self.assertRaises(ValidationError):
+            TransportConfigModel(type="livekit")
+
+    def test_livekit_transport_with_only_url(self) -> None:
+        TransportConfigModel(type="livekit", url="wss://livekit.example.com")
+
+    def test_livekit_transport_with_only_livekit_service_url(self) -> None:
+        TransportConfigModel(
+            type="livekit", livekit_service_url="https://livekit.example.com"
+        )
+
+    def test_invalid_field_type(self) -> None:
+        with self.assertRaises(ValidationError):
+            TransportConfigModel(type="livekit", url=1234)
