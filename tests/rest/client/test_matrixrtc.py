@@ -214,4 +214,4 @@ class TransportConfigModelTestCase(stdlib_unittest.TestCase):
 
     def test_invalid_field_type(self) -> None:
         with self.assertRaises(ValidationError):
-            TransportConfigModel(type="livekit", url=1234)
+            TransportConfigModel(type="livekit", url=1234)  # type: ignore[arg-type]
