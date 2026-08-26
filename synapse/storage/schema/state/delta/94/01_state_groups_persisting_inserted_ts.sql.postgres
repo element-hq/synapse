@@ -14,6 +14,9 @@
 -- Record when we marked a state group as being persisted, so that we can clear
 -- out rows left behind by a persist that never finished.
 --
--- Nullable, as rows written by an instance that predates this column have no
--- timestamp.
-ALTER TABLE state_groups_persisting ADD COLUMN inserted_ts BIGINT;
+-- The rows already in the table are stamped with the time this runs, so they get
+-- the same grace period as a new row before we treat them as stale. The default
+-- covers instances that haven't been upgraded yet, which insert without the
+-- column, and is what lets the column be NOT NULL during a rolling upgrade.
+ALTER TABLE state_groups_persisting
+    ADD COLUMN inserted_ts BIGINT NOT NULL DEFAULT extract(epoch from now()) * 1000;

@@ -54,7 +54,7 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         self.tok = self.login("test", "password")
         self.room_id = self.helper.create_room_as(self.user_id, tok=self.tok)
 
-    def get_persisting_marker_rows(self) -> list[tuple[int, str, int | None]]:
+    def get_persisting_marker_rows(self) -> list[tuple[int, str, int]]:
         """Return the contents of the `state_groups_persisting` table."""
 
         return self.get_success(
