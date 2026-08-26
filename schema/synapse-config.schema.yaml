@@ -3037,7 +3037,7 @@ properties:
             livekit_service_url:
               type: string
               description: >-
-                The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is
+                Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is
                 required.
 
 
