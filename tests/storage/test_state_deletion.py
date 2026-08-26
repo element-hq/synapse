@@ -87,6 +87,89 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         self.get_success(ctx_mgr.__aenter__())
         self.get_success(ctx_mgr.__aexit__(None, None, None))
 
+    def test_existing_persisting_marker(self) -> None:
+        """
+        When persisting an event, Synapse will:
+
+            * Confirm the reference state group exists.
+            * Insert (state_group, instance_name) into the state_groups_persisting table.
+            * Persist the event.
+            * Delete the temp. row in a `finally` block.
+
+        Previously, a well-timed DB connection loss could cause the row in
+        state_groups_persisting to stick around. The next time an event was to be
+        persisted, failing to re-insert the same row would fail with a 500. This
+        was fixed by switching the insert to an upsert.
+
+        Regression test for https://github.com/element-hq/synapse/pull/20150.
+        """
+        # Establish the current state group of the room.
+        event, context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.test",
+                sender=self.user_id,
+            )
+        )
+        assert context.state_group is not None
+
+        # Simulate a transaction which committed the marker before the database
+        # connection was lost, causing Synapse to retry the transaction.
+        self.get_success(
+            self.state_deletion_store.db_pool.simple_insert(
+                table="state_groups_persisting",
+                values={
+                    "state_group": context.state_group,
+                    "instance_name": self.hs.get_instance_name(),
+                },
+                desc="test_existing_persisting_marker",
+            )
+        )
+
+        # Try to mark the state group as persisting.
+        #
+        # Previously this would fail with a 500 due to the pre-existing row.
+        ctx_mgr = self.state_deletion_store.persisting_state_group_references(
+            [(event, context)]
+        )
+
+        # Start persisting the event.
+        self.get_success(ctx_mgr.__aenter__())
+
+        # Double check that a marker is in fact in there.
+        marker = self.get_success(
+            self.state_deletion_store.db_pool.simple_select_one_onecol(
+                table="state_groups_persisting",
+                keyvalues={
+                    "state_group": context.state_group,
+                    "instance_name": self.hs.get_instance_name(),
+                },
+                retcol="1",
+                allow_none=True,
+                desc="test_existing_persisting_marker",
+            )
+        )
+        self.assertEqual(marker, 1)
+
+        # Finish persisting the event.
+        self.get_success(ctx_mgr.__aexit__(None, None, None))
+
+        # Check that the marker was deleted successfully.
+        marker = self.get_success(
+            self.state_deletion_store.db_pool.simple_select_one_onecol(
+                table="state_groups_persisting",
+                keyvalues={
+                    "state_group": context.state_group,
+                    "instance_name": self.hs.get_instance_name(),
+                },
+                retcol="1",
+                allow_none=True,
+                desc="test_existing_persisting_marker",
+            )
+        )
+        self.assertIsNone(marker)
+
     def test_no_deletion_error(self) -> None:
         """Test that calling persisting_state_group_references is fine if
         nothing is pending deletion, but an error occurs."""
