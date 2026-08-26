@@ -1544,11 +1544,11 @@ class MediaRepository:
                 thumbnails = await self.store.get_remote_media_thumbnails(origin, media_id)
                 thumbnails_ok = True
                 for thumbnail_info in thumbnails:
+                    file = FileInfo(origin, file_id, thumbnail=thumbnail_info)
                     try:
-                        file = FileInfo(origin, file_id, thumbnail=thumbnail_info)
                         await self.media_storage.remove_file(file)
                     except OSError as e:
-                        logger.warning("Failed to remove file: %r", file_info)
+                        logger.warning("Failed to remove file: %r", file)
                         if thumbnails_ok:
                             thumbnails_ok = e.errno == errno.ENOENT
                 if not thumbnails_ok:
@@ -1634,6 +1634,21 @@ class MediaRepository:
         removed_media = []
         for media_id in media_ids:
             file_info = FileInfo(None, media_id)
+            thumbnails = await self.store.get_local_media_thumbnails(media_id)
+            thumbnails_ok = True
+            for thumbnail in thumbnails:
+                file = FileInfo(None, media_id, thumbnail=thumbnail)
+                try:
+                    await self.media_storage.remove_file(file)
+                except OSError as e:
+                    logger.warning("Failed to remove file: %r", file)
+                    if thumbnails_ok:
+                        thumbnails_ok = e.errno == errno.ENOENT
+            if not thumbnails_ok:
+                # Don't leave dangling thumbnails
+                continue
+            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
+            shutil.rmtree(thumbnail_dir, ignore_errors=True)
             logger.info("Deleting media with ID '%s'", media_id)
             try:
                 await self.media_storage.remove_file(file_info)
@@ -1643,9 +1658,6 @@ class MediaRepository:
                     pass
                 else:
                     continue
-
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
-            shutil.rmtree(thumbnail_dir, ignore_errors=True)
 
             await self.store.delete_remote_media(self.server_name, media_id)
 
