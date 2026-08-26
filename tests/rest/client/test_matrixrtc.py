@@ -113,7 +113,7 @@ class MatrixRtcTestCase(HomeserverTestCase):
             "matrix_rtc": {"transports": [LIVEKIT_TRANSPORT]},
         }
     )
-    def test_matrixrtc_endpoint_backwards_livekit_transport(self) -> None:
+    def test_matrixrtc_endpoint_livekit_transport(self) -> None:
         channel = self.make_request(
             "GET", f"{PATH_PREFIX}/rtc/transports", access_token=self._alice_tok
         )
