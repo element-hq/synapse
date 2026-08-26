@@ -33,7 +33,7 @@ class TransportConfigModel(ParseModel):
     """An optional WebSocket URL pointing to the LiveKit SFU. If type is "livekit", either this or livekit_service_url is required."""
 
     livekit_service_url: StrictStr | None = Field(default=None)
-    """An optional HTTP URL pointing to the LiveKit authorization service. If type is "livekit", either this or url is required."""
+    """Deprecated. An optional HTTP URL pointing to the LiveKit authorization service. If type is "livekit", either this or url is required."""
 
     @model_validator(mode="after")
     def validate_livekit_transport(self) -> Self:
