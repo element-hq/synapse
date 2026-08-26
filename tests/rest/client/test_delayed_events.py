@@ -128,8 +128,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertListEqual([], self._get_delayed_events())
 
     def test_delayed_event_lookup(self) -> None:
+        # Schedule a message event
         delay = 100000
-        content: JsonDict = {}
+        content: JsonDict = {"message": "hello"}
         request_time_msec = self.hs.get_clock().time_msec()
         channel = self.make_request(
             "POST",
@@ -148,6 +149,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
+        # Assert the stored properties of the delayed event
         event = channel.json_body
         self.assertDictEqual(
             event,
@@ -179,6 +181,48 @@ class DelayedEventsTestCase(HomeserverTestCase):
             access_token=self.user2_access_token,
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+
+        # Now schedule a state event.
+        # Do it in this test, as opposed to a new one, to confirm that the correct delayed event
+        # is retrieved when multiple delayed events have been scheduled.
+        delay += 2000
+        state_key = ""
+        state_event_type = _EVENT_TYPE + "_state"
+        content = {"state_message": "greetings"}
+        request_time_msec = self.hs.get_clock().time_msec()
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(self.room_id, state_event_type, state_key, delay),
+            content,
+            self.user1_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        delay_id_2 = channel.json_body["delay_id"]
+
+        # Test that the new delayed event has a different ID from the previous one
+        self.assertNotEqual(delay_id, delay_id_2)
+
+        # Test that the scheduled delayed event can be retrieved
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id_2}",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # Assert the stored properties of the delayed event
+        self.assertDictEqual(
+            channel.json_body,
+            {
+                "delay_id": delay_id_2,
+                "room_id": self.room_id,
+                "type": state_event_type,
+                "state_key": state_key,
+                "delay": delay,
+                "running_since": request_time_msec,
+                "content": content,
+            },
+        )
 
     def test_delayed_state_events_are_sent_on_timeout(self) -> None:
         state_key = "to_send_on_timeout"
