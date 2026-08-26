@@ -137,7 +137,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             content,
             self.user1_access_token,
         )
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
         delay_id = channel.json_body["delay_id"]
 
         # Test that the scheduled delayed event can be retrieved
@@ -146,7 +146,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             f"{PATH_PREFIX}/{delay_id}",
             access_token=self.user1_access_token,
         )
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
         event = channel.json_body
         self.assertDictEqual(
@@ -170,7 +170,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             f"{PATH_PREFIX}/{delay_id}-fake",
             access_token=self.user1_access_token,
         )
-        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
 
         # Test that other users cannot access this delayed event
         channel = self.make_request(
@@ -178,7 +178,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
             f"{PATH_PREFIX}/{delay_id}",
             access_token=self.user2_access_token,
         )
-        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
 
     def test_delayed_state_events_are_sent_on_timeout(self) -> None:
         state_key = "to_send_on_timeout"
