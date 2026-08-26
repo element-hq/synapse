@@ -189,6 +189,18 @@ class ProfileFieldRestServlet(RestServlet):
         except KeyError:
             raise SynapseError(
                 400, f"Missing key '{field_name}'", errcode=Codes.MISSING_PARAM
+
+        if new_value is None:
+            # > Servers MAY reject null values.
+            # — https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
+            #
+            # Although we can safely handle nulls internally, for interoperability reasons it is preferable if we
+            # reject them.
+            # That way, clients don't accidentally rely on being able to send them.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"'{field_name}' can not be `null`.",
+                Codes.INVALID_PARAM,
             )
 
         propagate = _read_propagate(self.hs, request)
