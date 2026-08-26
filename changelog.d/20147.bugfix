@@ -1,0 +1,1 @@
+Fix sending custom profile field removals to legacy sync clients when the field is deleted using the profile field delete endpoint.
