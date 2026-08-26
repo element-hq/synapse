@@ -2666,7 +2666,7 @@ This setting has the following sub-options:
 
     Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
 
-  * `livekit_service_url` (string): The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
 
     Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
