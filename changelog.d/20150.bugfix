@@ -1,0 +1,1 @@
+Prevent 500's on event sending when the connection to the database has previously been lost since startup.
