@@ -150,7 +150,10 @@ class DelayedEventServlet(RestServlet):
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        return 200, await self.delayed_events_handler.get_for_user(requester, delay_id)
+        delayed_event = await self.delayed_events_handler.get_for_user(
+            requester, delay_id
+        )
+        return 200, delayed_event.asdict()
 
 
 class DelayedEventsServlet(RestServlet):
@@ -169,9 +172,11 @@ class DelayedEventsServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         # TODO: Support Pagination stream API ("from" query parameter)
         delayed_events = await self.delayed_events_handler.get_all_for_user(requester)
-
-        ret = {"delayed_events": delayed_events}
-        return 200, ret
+        return 200, {
+            "delayed_events": [
+                delayed_event.asdict() for delayed_event in delayed_events
+            ]
+        }
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

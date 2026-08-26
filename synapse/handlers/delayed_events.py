@@ -30,6 +30,7 @@ from synapse.replication.http.delayed_events import (
 )
 from synapse.storage.databases.main.delayed_events import (
     DelayedEventDetails,
+    DelayedEventResponse,
     EventType,
     StateKey,
     Timestamp,
@@ -530,7 +531,9 @@ class DelayedEventsHandler:
         else:
             self._next_delayed_event_call.reset(delay_duration.as_secs())
 
-    async def get_for_user(self, requester: Requester, delay_id: str) -> JsonDict:
+    async def get_for_user(
+        self, requester: Requester, delay_id: str
+    ) -> DelayedEventResponse:
         """
         Return the specified pending delayed event requested by the given user.
 
@@ -543,7 +546,9 @@ class DelayedEventsHandler:
             requester.user.localpart,
         )
 
-    async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
+    async def get_all_for_user(
+        self, requester: Requester
+    ) -> list[DelayedEventResponse]:
         """Return all pending delayed events requested by the given user."""
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         return await self._store.get_all_delayed_events_for_user(

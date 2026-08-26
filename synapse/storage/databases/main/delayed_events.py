@@ -63,6 +63,23 @@ class DelayedEventDetails(EventDetails):
     user_localpart: UserLocalpart
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class DelayedEventResponse:
+    """The representation of a delayed event in API format."""
+
+    # Implementation detail: use converters to normalize untyped values read from the database
+    delay_id: str = attr.ib(converter=str)
+    room_id: str = attr.ib(converter=str)
+    type: str = attr.ib(converter=str)
+    state_key: str | None = attr.ib(converter=attr.converters.optional(str))
+    delay: int = attr.ib(converter=int)
+    running_since: int = attr.ib(converter=int)
+    content: JsonDict = attr.ib(converter=db_to_json)
+
+    def asdict(self) -> JsonDict:
+        return attr.asdict(self, filter=lambda _attr, v: v is not None)
+
+
 class DelayedEventsStore(SQLBaseStore):
     def __init__(
         self,
@@ -229,7 +246,7 @@ class DelayedEventsStore(SQLBaseStore):
         self,
         delay_id: str,
         user_localpart: str,
-    ) -> JsonDict:
+    ) -> DelayedEventResponse:
         """
         Returns the specified pending delayed event owned by the given user.
 
@@ -248,7 +265,7 @@ class DelayedEventsStore(SQLBaseStore):
                 "event_type",
                 "state_key",
                 "delay",
-                "send_ts",
+                "send_ts - delay",
                 "content",
             ),
             allow_none=True,
@@ -256,12 +273,12 @@ class DelayedEventsStore(SQLBaseStore):
         )
         if row is None:
             raise NotFoundError("Delayed event not found")
-        return _row_to_delayed_event_dict((delay_id, *row))
+        return DelayedEventResponse(delay_id, *row)
 
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,
-    ) -> list[JsonDict]:
+    ) -> list[DelayedEventResponse]:
         """Returns all pending delayed events owned by the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
         rows = await self.db_pool.execute(
@@ -273,7 +290,7 @@ class DelayedEventsStore(SQLBaseStore):
                 event_type,
                 state_key,
                 delay,
-                send_ts,
+                send_ts - delay,
                 content
             FROM delayed_events
             WHERE user_localpart = ? AND NOT is_processed
@@ -281,7 +298,7 @@ class DelayedEventsStore(SQLBaseStore):
             """,
             user_localpart,
         )
-        return [_row_to_delayed_event_dict(row) for row in rows]
+        return [DelayedEventResponse(*row) for row in rows]
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp, reprocess_events: bool = False
@@ -593,18 +610,6 @@ class DelayedEventsStore(SQLBaseStore):
             allow_none=True,
         )
         return Timestamp(result) if result is not None else None
-
-
-def _row_to_delayed_event_dict(row: tuple) -> JsonDict:
-    return {
-        "delay_id": DelayID(row[0]),
-        "room_id": str(RoomID.from_string(row[1])),
-        "type": EventType(row[2]),
-        **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
-        "delay": Delay(row[4]),
-        "running_since": Timestamp(row[5] - row[4]),
-        "content": db_to_json(row[6]),
-    }
 
 
 def _generate_delay_id() -> DelayID:
