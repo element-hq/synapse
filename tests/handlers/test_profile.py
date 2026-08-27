@@ -199,13 +199,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
         ]
     )
-    def test_update_profile_does_not_update_stream_on_set_field_if_msc4429_not_enabled(
+    def test_update_profile_does_not_update_stream_on_set_field_if_include_profile_updates_in_sync_not_enabled(
         self,
         field_name: str,
         new_value: str,
     ) -> None:
         """Test that profile updates don't get recorded in the profile updates stream
-        if MSC4429 is not enabled."""
+        if `include_profile_updates_in_sync` is not enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -230,13 +230,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ["m.status", '{"text": "Holiday", "emoji": "🏖"}'],
         ]
     )
-    def test_update_profile_does_not_notify_notifier_on_set_field_if_msc4429_not_enabled(
+    def test_update_profile_does_not_notify_notifier_on_set_field_if_include_profile_updates_in_sync_not_enabled(
         self,
         field_name: str,
         new_value: str,
     ) -> None:
         """Test that profile updates do not cause the profile updates stream notifier
-        to wake up if MSC4429 is not enabled."""
+        to wake up if `include_profile_updates_in_sync` is not enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -261,11 +261,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         ]
     )
     @override_config({"include_profile_updates_in_sync": True})
-    def test_update_profile_does_not_notify_notifier_on_set_field_if_user_not_in_rooms(
+    def test_update_profile_does_notify_notifier_on_set_field_if_user_not_in_rooms(
         self, field_name: str, new_value: str
     ) -> None:
-        """Test that profile updates do not cause the profile updates stream notifier
-        to wake up if the user is not in any rooms, if MSC4429 is enabled."""
+        """Test that profile updates does cause the profile updates stream notifier
+        to wake up if the user is not in any rooms, if `include_profile_updates_in_sync`
+        is enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -279,7 +280,37 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             for call in self.on_new_event.mock_calls
             if call.args[0] == StreamKeyType.PROFILE_UPDATES
         ]
-        self.assertEqual(len(calls_found), 0)
+        self.assertEqual(len(calls_found), 1)
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_update_profile_does_notify_notifier_on_delete_profile_field_if_user_not_in_rooms(
+        self,
+    ) -> None:
+        """Test that profile updates does cause the profile updates stream notifier
+        to wake up if the user is not in any rooms, if `include_profile_updates_in_sync`
+        is enabled."""
+        self.get_success(
+            self.handler.set_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="field",
+                new_value="value",
+            )
+        )
+        self.on_new_event.reset_mock()
+        self.get_success(
+            self.handler.delete_profile_field(
+                target_user=self.frank,
+                requester=synapse.types.create_requester(self.frank),
+                field_name="field",
+            )
+        )
+        calls_found = [
+            call
+            for call in self.on_new_event.mock_calls
+            if call.args[0] == StreamKeyType.PROFILE_UPDATES
+        ]
+        self.assertEqual(len(calls_found), 1)
 
     @parameterized.expand(
         [
@@ -293,7 +324,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self, field_name: str, new_value: str
     ) -> None:
         """Test that profile updates get recorded in the profile updates stream if
-        MSC4429 is enabled."""
+        `include_profile_updates_in_sync` is enabled."""
         self.get_success(
             self.handler.set_field(
                 target_user=self.frank,
@@ -320,6 +351,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
         fields_updates = self.get_success(
+            # FIXME this function should be deleted, it's not used.
+            # Adapt this test to use the right one.
             self.store.get_profile_updates_for_fields(
                 from_id=1,
                 to_id=2,
@@ -361,7 +394,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self,
     ) -> None:
         """Test that profiles updates get recorded in the 'per user' profile updates
-        stream tracking table, if MSC4429 is enabled."""
+        stream tracking table, if `include_profile_updates_in_sync` is enabled."""
         self.register_user("roger", "password")
         roger_token = self.login("roger", "password")
         self.register_user("millie", "password")
@@ -501,7 +534,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self,
     ) -> None:
         """Test that previous profile update stream rows are removed for a user if
-        the user no longer shares rooms with another user, if MSC4429 is enabled.
+        the user no longer shares rooms with another user, if
+        `include_profile_updates_in_sync` is enabled.
 
         This test ensures that when a user leaves a room, we clear all old profile
         update rows of users who the user no longer shares rooms with, to avoid
@@ -668,7 +702,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         new_value: str,
     ) -> None:
         """Test that profile updates wake up the profile updates stream on profile
-        field updates, if MSC4429 is enabled."""
+        field updates, if `include_profile_updates_in_sync` is enabled."""
         self.helper.create_room_as(
             room_creator=self.frank.to_string(),
             tok=self.frank_token,
