@@ -34,6 +34,8 @@ VERSIONED_PREFIX = f"v1/{APPSERVICE_PREFIX}"
 
 
 class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTestCase):
+    """Tests the proxying of federation requests to application services from MSC4512."""
+
     def default_config(self) -> JsonDict:
         config = super().default_config()
         _, path = tempfile.mkstemp(prefix="as_fed_proxy_config")

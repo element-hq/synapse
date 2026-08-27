@@ -294,6 +294,8 @@ class ApplicationServiceScopesTestCase(unittest.TestCase):
 
 
 class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
+    """Tests the proxying configuration for application services from MSC4512."""
+
     def _make_service(self, **kwargs: Any) -> ApplicationService:
         kwargs.setdefault("id", "unique_identifier")
         kwargs.setdefault("sender", UserID.from_string("@as:test"))

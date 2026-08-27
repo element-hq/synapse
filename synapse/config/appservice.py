@@ -115,8 +115,7 @@ def load_appservices(
 
 
 def _proxy_prefixes_overlap(prefix_a: str, prefix_b: str) -> bool:
-    """Returns whether two proxy prefixes overlap by sharing a common path prefix.
-    """
+    """Returns whether two proxy prefixes overlap by sharing a common path prefix."""
     return (
         prefix_a == prefix_b
         or prefix_a.startswith(prefix_b + "/")
