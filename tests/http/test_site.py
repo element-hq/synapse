@@ -192,6 +192,71 @@ class SynapseRequestTestCase(HomeserverTestCase):
         self.assertRegex(response, r"^HTTP/1\.1 413 ")
         self.assertSubstring("M_TOO_LARGE", response)
 
+    def _send_raw_request(self, target: bytes) -> str:
+        """Send a bare GET with the given request-target and return the raw response."""
+        self.hs.start_listening()
+
+        (port, factory, _backlog, interface) = self.reactor.tcpServers[0]
+        self.assertEqual(interface, "::")
+        self.assertEqual(port, 0)
+
+        client_address = IPv6Address("TCP", "::1", 2345)
+        protocol = factory.buildProtocol(client_address)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
+
+        protocol.dataReceived(
+            b"GET " + target + b" HTTP/1.1\r\nConnection: close\r\n\r\n"
+        )
+
+        while not transport.disconnecting:
+            self.reactor.advance(1)
+
+        return transport.value().decode()
+
+    @parameterized.expand(
+        [
+            (b"/_matrix/client/versions/..",),
+            (b"/_matrix/client/../../etc/passwd",),
+            (b"/_matrix/client/versions/.",),
+            (b"/..",),
+            (b"/_matrix/client/versions/%2e%2e",),
+            (b"/_matrix/client/versions/%2E%2E",),
+            # An encoded separator hides a dot segment from a naive split.
+            (b"/_matrix/client/versions/a%2f..%2fb",),
+            # Dot segments anywhere in the path, not just at the end.
+            (b"/_matrix/../client/versions",),
+            # The query string must not save an otherwise-bad path.
+            (b"/_matrix/client/versions/..?foo=bar",),
+        ]
+    )
+    def test_dot_segments_rejected(self, target: bytes) -> None:
+        """Request paths containing "." or ".." segments should be rejected with 400"""
+        response = self._send_raw_request(target)
+
+        self.assertRegex(response, r"^HTTP/1\.1 400 ")
+        self.assertSubstring("M_INVALID_PARAM", response)
+
+    @parameterized.expand(
+        [
+            # Dots that are not a whole segment are fine.
+            (b"/_matrix/client/versions",),
+            (b"/_matrix/client/v3/rooms/%21a%3Ab/state/m.room.name/..suffix",),
+            (b"/_matrix/client/v3/rooms/%21a%3Ab/state/m.room.name/a..b",),
+            (b"/_matrix/client/v3/rooms/%21a%3Ab/state/m.room.name/...",),
+            # Only one round of decoding, so this is a literal "%2e%2e" segment.
+            (b"/_matrix/client/v3/rooms/%21a%3Ab/state/m.room.name/%252e%252e",),
+            # Dot segments in the query string are none of our business.
+            (b"/_matrix/client/versions?redirectUrl=../../foo",),
+        ]
+    )
+    def test_paths_without_dot_segments_allowed(self, target: bytes) -> None:
+        """Paths that merely contain dots should be routed as normal"""
+        response = self._send_raw_request(target)
+
+        self.assertNotRegex(response, r"^HTTP/1\.1 400 ")
+        self.assertNotIn("M_INVALID_PARAM", response)
+
     def test_too_many_content_length_headers(self) -> None:
         """HTTP requests with multiple Content-Length headers should be rejected with 400"""
         self.hs.start_listening()

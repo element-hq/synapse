@@ -24,6 +24,7 @@ import logging
 import time
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generator
+from urllib.parse import unquote_to_bytes
 
 import attr
 from zope.interface import implementer
@@ -63,6 +64,10 @@ _next_request_seq = 0
 
 class ContentLengthError(SynapseError):
     """Raised when content-length validation fails."""
+
+
+class DotSegmentError(SynapseError):
+    """Raised when the request path contains "." or ".." segments."""
 
 
 class SynapseRequest(Request):
@@ -196,6 +201,39 @@ class SynapseRequest(Request):
                 Codes.UNKNOWN,
             )
 
+    def _validate_path(self) -> None:
+        """Reject request paths containing "." or ".." segments.
+
+        No Matrix endpoint needs them, and forwarding such a path on to
+        something that resolves it (e.g. an application service we reverse-proxy
+        to) lets a caller escape the path it was supposed to be confined to.
+        Rejecting here means no individual handler has to remember.
+
+        We reject rather than normalise on purpose. Routing matches the raw path
+        and federation signatures cover the raw URI, so rewriting one would
+        break both.
+
+        Raises:
+            DotSegmentError: If the path contains dot segments.
+        """
+
+        # `self.path` is not populated until `Request.process` runs, so split the
+        # query string off ourselves.
+        path = self.uri.split(b"?", 1)[0]
+
+        if has_dot_segments(path):
+            logger.info(
+                "Rejecting request from %s because the path contains dot segments: %s %s",
+                self.client,
+                self.get_method(),
+                self.get_redacted_uri(),
+            )
+            raise DotSegmentError(
+                HTTPStatus.BAD_REQUEST,
+                "Path must not contain '.' or '..' segments",
+                Codes.INVALID_PARAM,
+            )
+
     def _validate_content_length(self) -> None:
         """Validate Content-Length header and actual content size.
 
@@ -261,8 +299,9 @@ class SynapseRequest(Request):
         self.clientproto = version
 
         try:
+            self._validate_path()
             self._validate_content_length()
-        except ContentLengthError as e:
+        except (DotSegmentError, ContentLengthError) as e:
             self._respond_with_error(e)
             return
 
@@ -952,3 +991,21 @@ class SynapseSite(ProxySite):
 class RequestInfo:
     user_agent: str | None
     ip: str
+
+
+def has_dot_segments(path: bytes) -> bool:
+    """Whether the given request path contains any "." or ".." segments.
+
+    The path is percent-decoded before it is split, since `%2e%2e` and `..` are
+    equivalent to anything that resolves the path, and `%2f` hides a separator that
+    would otherwise not be seen. Note that a single decode is deliberate: it matches
+    the single decode that route arguments get in `JsonResource._async_render`, so
+    `%252e%252e` is left alone rather than being treated as a dot segment.
+
+    The caller is expected to reject such a path rather than rewrite it. Synapse
+    routes on the raw path, and federation request signatures cover the raw URI, so
+    normalising a path in place would break both.
+    """
+    return any(
+        segment in (b".", b"..") for segment in unquote_to_bytes(path).split(b"/")
+    )
