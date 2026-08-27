@@ -359,6 +359,26 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
 
         self._validate_token(link, next_link)
 
+    def test_password_reset_invalid_email(self) -> None:
+        """A malformed email address is reported with M_INVALID_PARAM, as on
+        /account/3pid/email/requestToken (the two endpoints share the request
+        body model).
+        """
+        channel = self.make_request(
+            "POST",
+            b"account/password/email/requestToken",
+            {
+                "client_secret": "foobar",
+                "email": "address-without-at.bar",
+                "send_attempt": 1,
+            },
+        )
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+        self.assertIn("Unable to parse email address", channel.json_body["error"])
+
     def _request_token(
         self,
         email: str,
