@@ -1,0 +1,1 @@
+Change default room version to 12, implementing [MSC4291](https://github.com/matrix-org/matrix-spec-proposals/pull/4291) and [MSC4289](https://github.com/matrix-org/matrix-spec-proposals/pull/4289) as part of Matrix v1.16.

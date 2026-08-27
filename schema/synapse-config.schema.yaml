@@ -328,7 +328,11 @@ properties:
       _Changed in Synapse 1.157:_ the default version room version was increased
       from [10](https://spec.matrix.org/v1.12/rooms/v10/) to
       [11](https://spec.matrix.org/v1.12/rooms/v11/).
-    default: "11"
+
+      _Changed in Synapse 1.160:_ the default version room version was increased
+      from [11](https://spec.matrix.org/v1.16/rooms/v11/) to
+      [12](https://spec.matrix.org/v1.16/rooms/v12/).
+    default: "12"
     examples:
       - "8"
   gc_thresholds:

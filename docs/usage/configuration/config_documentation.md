@@ -375,8 +375,9 @@ For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
 _Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
+_Changed in Synapse 1.160:_ the default version room version was increased from [11](https://spec.matrix.org/v1.16/rooms/v11/) to [12](https://spec.matrix.org/v1.16/rooms/v12/).
 
-Defaults to `"11"`.
+Defaults to `"12"`.
 
 Example configuration:
 ```yaml
