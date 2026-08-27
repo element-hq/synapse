@@ -72,12 +72,23 @@ class DelayedEventResponse:
     room_id: str = attr.ib(converter=str)
     type: str = attr.ib(converter=str)
     state_key: str | None = attr.ib(converter=attr.converters.optional(str))
-    delay: int = attr.ib(converter=int)
-    running_since: int = attr.ib(converter=int)
+    delay_ms: int = attr.ib(converter=int)
+    delayed_since_ts: int = attr.ib(converter=int)
     content: JsonDict = attr.ib(converter=db_to_json)
 
     def asdict(self) -> JsonDict:
         return attr.asdict(self, filter=lambda _attr, v: v is not None)
+
+
+# TODO: Remove this class once the response format is stable
+class DelayedEventResponseLegacyCompat(DelayedEventResponse):
+    """For backwards compatibility with field names from earlier revisions of MSC4140."""
+
+    def asdict(self) -> JsonDict:
+        return super().asdict() | {
+            "delay": self.delay_ms,
+            "running_since": self.delayed_since_ts,
+        }
 
 
 class DelayedEventsStore(SQLBaseStore):
@@ -278,8 +289,13 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,
-    ) -> list[DelayedEventResponse]:
-        """Returns all pending delayed events owned by the given user."""
+    ) -> list[DelayedEventResponseLegacyCompat]:
+        """
+        Return all pending delayed events owned by the given user.
+        Includes fields from earlier revisions of MSC4140 for
+        compatibility with clients that still expect them.
+        """
+        # TODO: Remove legacy fields once stable
         # TODO: Support Pagination stream API ("next_batch" field)
         rows = await self.db_pool.execute(
             "get_all_delayed_events_for_user",
@@ -298,7 +314,7 @@ class DelayedEventsStore(SQLBaseStore):
             """,
             user_localpart,
         )
-        return [DelayedEventResponse(*row) for row in rows]
+        return [DelayedEventResponseLegacyCompat(*row) for row in rows]
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp, reprocess_events: bool = False

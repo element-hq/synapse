@@ -31,6 +31,7 @@ from synapse.replication.http.delayed_events import (
 from synapse.storage.databases.main.delayed_events import (
     DelayedEventDetails,
     DelayedEventResponse,
+    DelayedEventResponseLegacyCompat,
     EventType,
     StateKey,
     Timestamp,
@@ -548,8 +549,13 @@ class DelayedEventsHandler:
 
     async def get_all_for_user(
         self, requester: Requester
-    ) -> list[DelayedEventResponse]:
-        """Return all pending delayed events requested by the given user."""
+    ) -> list[DelayedEventResponseLegacyCompat]:
+        """
+        Return all pending delayed events owned by the given user.
+        Includes fields from earlier revisions of MSC4140 for
+        compatibility with clients that still expect them.
+        """
+        # TODO: Remove legacy fields once stable
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
         return await self._store.get_all_delayed_events_for_user(
             requester.user.localpart

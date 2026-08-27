@@ -129,12 +129,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
     def test_delayed_event_lookup(self) -> None:
         # Schedule a message event
-        delay = 100000
+        delay_ms = 100000
         content: JsonDict = {"message": "hello"}
-        request_time_msec = self.hs.get_clock().time_msec()
+        delayed_since_ts = self.hs.get_clock().time_msec()
         channel = self.make_request(
             "POST",
-            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay),
+            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay_ms),
             content,
             self.user1_access_token,
         )
@@ -157,14 +157,11 @@ class DelayedEventsTestCase(HomeserverTestCase):
                 "delay_id": delay_id,
                 "room_id": self.room_id,
                 "type": _EVENT_TYPE,
-                "delay": delay,
-                "running_since": request_time_msec,
+                "delay_ms": delay_ms,
+                "delayed_since_ts": delayed_since_ts,
                 "content": content,
             },
         )
-
-        # Test that the list lookup retrieves the same item
-        self.assertEqual(self._get_delayed_events(), [event])
 
         # Test that a non-existent delayed event cannot be found
         channel = self.make_request(
@@ -185,15 +182,15 @@ class DelayedEventsTestCase(HomeserverTestCase):
         # Now schedule a state event.
         # Do it in this test, as opposed to a new one, to confirm that the correct delayed event
         # is retrieved when multiple delayed events have been scheduled.
-        delay += 2000
+        delay_ms += 2000
         state_key = ""
         state_event_type = _EVENT_TYPE + "_state"
         content = {"state_message": "greetings"}
-        request_time_msec = self.hs.get_clock().time_msec()
+        delayed_since_ts = self.hs.get_clock().time_msec()
         channel = self.make_request(
             "PUT",
             _get_path_for_delayed_state(
-                self.room_id, state_event_type, state_key, delay
+                self.room_id, state_event_type, state_key, delay_ms
             ),
             content,
             self.user1_access_token,
@@ -213,17 +210,35 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
         # Assert the stored properties of the delayed event
+        state_event = channel.json_body
         self.assertDictEqual(
-            channel.json_body,
+            state_event,
             {
                 "delay_id": delay_id_2,
                 "room_id": self.room_id,
                 "type": state_event_type,
                 "state_key": state_key,
-                "delay": delay,
-                "running_since": request_time_msec,
+                "delay_ms": delay_ms,
+                "delayed_since_ts": delayed_since_ts,
                 "content": content,
             },
+        )
+
+        # Test that the list lookup retrieves the same items (with legacy fields included)
+        self.assertEqual(
+            self._get_delayed_events(),
+            [
+                event
+                | {
+                    "delay": event["delay_ms"],
+                    "running_since": event["delayed_since_ts"],
+                },
+                state_event
+                | {
+                    "delay": state_event["delay_ms"],
+                    "running_since": state_event["delayed_since_ts"],
+                },
+            ],
         )
 
     def test_delayed_state_events_are_sent_on_timeout(self) -> None:
