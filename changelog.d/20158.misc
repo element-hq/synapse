@@ -1,0 +1,1 @@
+Fail early upon receipts of a request with a path segment of `.` or `..`.
