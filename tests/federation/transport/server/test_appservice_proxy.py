@@ -271,6 +271,32 @@ class ApplicationServiceFederationProxyTestCase(unittest.FederatingHomeserverTes
         self.assertEqual(channel.code, 500)
         self.agent.request.assert_called()
 
+    def test_path_with_dot_segment_is_rejected(self) -> None:
+        self.agent.request = Mock(
+            return_value=defer.succeed(FakeResponse.json(code=200, payload={}))
+        )
+
+        channel = self.make_signed_federation_request(
+            "GET", f"/_matrix/federation/{VERSIONED_PREFIX}/some/../path"
+        )
+
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+        self.agent.request.assert_not_called()
+
+    def test_path_with_encoded_dot_segment_is_rejected(self) -> None:
+        self.agent.request = Mock(
+            return_value=defer.succeed(FakeResponse.json(code=200, payload={}))
+        )
+
+        channel = self.make_signed_federation_request(
+            "GET", f"/_matrix/federation/{VERSIONED_PREFIX}/some/%2e%2e/path"
+        )
+
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+        self.agent.request.assert_not_called()
+
     def test_unregistered_prefix_is_rejected(self) -> None:
         channel = self.make_signed_federation_request(
             "GET", "/_matrix/federation/not_a_registered_prefix/some/path"

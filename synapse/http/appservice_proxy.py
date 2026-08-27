@@ -13,12 +13,15 @@
 #
 
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, cast
+from urllib.parse import unquote_to_bytes
 
 from twisted.python import failure
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IBodyProducer, IResponse
 
+from synapse.api.errors import Codes, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.http.proxy import (
     HOP_BY_HOP_HEADERS_LOWERCASE,
@@ -34,6 +37,24 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+def has_dot_segments(path: bytes) -> bool:
+    """Whether the given request path contains any "." or ".." segments.
+
+    The path is percent-decoded before it is split, since `%2e%2e` and `..` are
+    equivalent to anything that resolves the path, and `%2f` hides a separator that
+    would otherwise not be seen. Note that a single decode is deliberate: it matches
+    the single decode that route arguments get in `JsonResource._async_render`, so
+    `%252e%252e` is left alone rather than being treated as a dot segment.
+
+    The caller is expected to reject such a path rather than rewrite it. Synapse
+    routes on the raw path, and federation request signatures cover the raw URI, so
+    normalising a path in place would break both.
+    """
+    return any(
+        segment in (b".", b"..") for segment in unquote_to_bytes(path).split(b"/")
+    )
 
 
 async def proxy_request_to_appservice(
@@ -58,6 +79,22 @@ async def proxy_request_to_appservice(
     """
     assert appservice.proxy_url is not None
     assert appservice.hs_token is not None
+
+    request_path = request.uri.split(b"?", 1)[0]
+    if has_dot_segments(request_path):
+        return_json_error(
+            failure.Failure(
+                SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "Request path is not allowed",
+                    Codes.INVALID_PARAM,
+                )
+            ),
+            request,
+            None,
+        )
+        return
+
     target_uri = appservice.proxy_url.encode("ascii") + request.uri
 
     # Only forward the bare minimum of request headers an application service could

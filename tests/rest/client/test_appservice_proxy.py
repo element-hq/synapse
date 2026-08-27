@@ -322,6 +322,38 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 429)
         self.agent.request.assert_not_called()
 
+    def test_path_with_dot_segment_is_rejected(self) -> None:
+        self.agent.request = Mock(
+            return_value=defer.succeed(FakeResponse.json(code=200, payload={}))
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/{VERSIONED_PREFIX}/some/../path",
+            shorthand=False,
+            access_token=self.access_token,
+        )
+
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+        self.agent.request.assert_not_called()
+
+    def test_path_with_encoded_dot_segment_is_rejected(self) -> None:
+        self.agent.request = Mock(
+            return_value=defer.succeed(FakeResponse.json(code=200, payload={}))
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/{VERSIONED_PREFIX}/some/%2e%2e/path",
+            shorthand=False,
+            access_token=self.access_token,
+        )
+
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+        self.agent.request.assert_not_called()
+
     def test_unregistered_prefix_is_rejected(self) -> None:
         channel = self.make_request(
             "GET",
