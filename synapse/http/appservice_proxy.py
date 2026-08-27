@@ -12,21 +12,20 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-import json
 import logging
 from typing import TYPE_CHECKING, cast
 
+from twisted.python import failure
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IBodyProducer, IResponse
 
-from synapse.api.errors import Codes
 from synapse.appservice import ApplicationService
 from synapse.http.proxy import (
     HOP_BY_HOP_HEADERS_LOWERCASE,
     _ProxyResponseBody,
     parse_connection_header_value,
 )
-from synapse.http.server import set_cors_headers
+from synapse.http.server import return_json_error, set_cors_headers
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.util.async_helpers import timeout_deferred
@@ -102,7 +101,7 @@ async def proxy_request_to_appservice(
             target_uri,
             exc_info=True,
         )
-        _send_error_response(request)
+        return_json_error(failure.Failure(), request, None)
         return
 
     _send_response(request, response)
@@ -130,13 +129,3 @@ def _send_response(request: SynapseRequest, response: IResponse) -> None:
         request.responseHeaders.setRawHeaders(header_name, header_values)
 
     response.deliverBody(_ProxyResponseBody(request))
-
-
-def _send_error_response(request: SynapseRequest) -> None:
-    request.setResponseCode(500)
-    set_cors_headers(request)
-    request.setHeader(b"Content-Type", b"application/json")
-    request.write(
-        json.dumps({"errcode": Codes.UNKNOWN, "error": "Unrecognized request"}).encode()
-    )
-    request.finish()
