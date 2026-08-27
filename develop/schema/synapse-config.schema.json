@@ -2604,9 +2604,14 @@
                 "description": "The type of transport to use to connect to the selective forwarding unit (SFU).",
                 "example": "livekit"
               },
+              "url": {
+                "type": "string",
+                "description": "The WebSocket URL of the LiveKit SFU. If type is \"livekit\", either this or `livekit_service_url` is required.\n\nClients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.",
+                "example": "wss://livekit.example.com"
+              },
               "livekit_service_url": {
                 "type": "string",
-                "description": "The base URL of the LiveKit service. Should only be used with LiveKit-based transports.",
+                "description": "Deprecated. The HTTP URL of the LiveKit authorization service. If type is \"livekit\", either this or `url` is required.\n\nClients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.",
                 "example": "https://matrix-rtc.example.com/livekit/jwt"
               }
             }
@@ -2621,6 +2626,7 @@
           "transports": [
             {
               "type": "livekit",
+              "url": "wss://livekit.example.com",
               "livekit_service_url": "https://matrix-rtc.example.com/livekit/jwt"
             }
           ]

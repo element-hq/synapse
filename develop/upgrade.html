@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-aa48831a.js";
+            window.path_to_searchindex_js = "searchindex-276d8b54.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -330,6 +330,17 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11610"><a class="header" href="#upgrading-to-v11610">Upgrading to v1.161.0</a></h1>
+<h2 id="deprecation-of-matrix_rtclivekit_service_url"><a class="header" href="#deprecation-of-matrix_rtclivekit_service_url">Deprecation of <code>matrix_rtc.livekit_service_url</code></a></h2>
+<p>When configuring the MatrixRTC LiveKit transport, the <code>livekit_service_url</code> is now
+deprecated but should continue to be listed to ensure backwards compatibility with
+older clients. A new sibling <code>url</code> config property is added that should be set to
+your SFU’s WebSocket URL. Clients that support <code>url</code> will use the Client-Server API
+to (indirectly) interact with the LiveKit authorization service. The service needs
+to be set up as an application service in order to support these endpoints. See
+https://github.com/element-hq/lk-jwt-service and
+https://element-hq.github.io/synapse/v1.161/usage/configuration/config_documentation.html#matrix_rtc
+for further details.</p>
 <h1 id="upgrading-to-v11590"><a class="header" href="#upgrading-to-v11590">Upgrading to v1.159.0</a></h1>
 <h2 id="change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository-2026"><a class="header" href="#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository-2026">Change of signing key expiry date for the Debian/Ubuntu package repository (2026)</a></h2>
 <p>Administrators using the Debian/Ubuntu packages from <code>packages.matrix.org</code>,

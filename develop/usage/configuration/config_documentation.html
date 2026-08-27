@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-aa48831a.js";
+            window.path_to_searchindex_js = "../../searchindex-276d8b54.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -2472,7 +2472,12 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <p><code>type</code> (string): The type of transport to use to connect to the selective forwarding unit (SFU).</p>
 </li>
 <li>
-<p><code>livekit_service_url</code> (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.</p>
+<p><code>url</code> (string): The WebSocket URL of the LiveKit SFU. If type is “livekit”, either this or <code>livekit_service_url</code> is required.</p>
+<p>Clients that support <code>url</code> will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.</p>
+</li>
+<li>
+<p><code>livekit_service_url</code> (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is “livekit”, either this or <code>url</code> is required.</p>
+<p>Clients that don’t support <code>url</code> will use <code>livekit_service_url</code> to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.</p>
 </li>
 </ul>
 </li>
@@ -2481,6 +2486,7 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <pre><code class="language-yaml">matrix_rtc:
   transports:
   - type: livekit
+    url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 </code></pre>
 <hr>
