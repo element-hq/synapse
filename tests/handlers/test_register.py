@@ -477,6 +477,11 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
             "auto_join_rooms": ["#room:test"],
             "autocreate_auto_join_room_preset": "private_chat",
             "auto_join_mxid_localpart": "support",
+            # This test demotes the room creator's power level, which is not
+            # possible in room version 12 and later (MSC4289: creators have
+            # infinite power level and must not appear in
+            # `m.room.power_levels`'s `users`), so pin the room version to 11.
+            "default_room_version": "11",
         }
     )
     def test_auto_create_auto_join_room_preset_invalid_permissions(self) -> None:
