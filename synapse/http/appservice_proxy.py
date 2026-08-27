@@ -15,7 +15,7 @@
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, cast
-from urllib.parse import unquote_to_bytes
+from urllib.parse import parse_qs, unquote_to_bytes, urlencode, urlsplit
 
 from twisted.python import failure
 from twisted.web.http_headers import Headers
@@ -57,6 +57,29 @@ def has_dot_segments(path: bytes) -> bool:
     )
 
 
+def strip_access_token_from_uri(uri: bytes) -> bytes:
+    """Remove any `access_token` query parameter from the given request URI.
+
+    Clients are not supposed to authenticate with an `access_token` query
+    parameter, but some might do so anyway. Since the URI is forwarded to the
+    application service verbatim, strip it out just in case, so that it isn't
+    inadvertently leaked to the application service.
+    """
+    split_uri = urlsplit(uri)
+    if not split_uri.query:
+        return uri
+
+    args = parse_qs(split_uri.query, keep_blank_values=True)
+    for key in list(args.keys()):
+        if key.lower() == b"access_token":
+            del args[key]
+
+    if not args:
+        return split_uri.path
+
+    return split_uri.path + b"?" + urlencode(args, doseq=True).encode("ascii")
+
+
 async def proxy_request_to_appservice(
     request: SynapseRequest,
     hs: "HomeServer",
@@ -95,7 +118,9 @@ async def proxy_request_to_appservice(
         )
         return
 
-    target_uri = appservice.proxy_url.encode("ascii") + request.uri
+    target_uri = appservice.proxy_url.encode("ascii") + strip_access_token_from_uri(
+        request.uri
+    )
 
     # Only forward the bare minimum of request headers an application service could
     # plausibly need.

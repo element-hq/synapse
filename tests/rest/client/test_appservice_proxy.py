@@ -108,6 +108,30 @@ class ApplicationServiceClientProxyTestCase(unittest.HomeserverTestCase):
             [self.user_id.encode("ascii")],
         )
 
+    def test_access_token_query_param_is_stripped(self) -> None:
+        self.agent.request = Mock(
+            return_value=defer.succeed(
+                FakeResponse.json(code=200, payload={"hello": "world"})
+            )
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/{VERSIONED_PREFIX}/some/path?access_token={self.access_token}&foo=bar",
+            shorthand=False,
+        )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {"hello": "world"})
+
+        ((method, uri), _kwargs) = self.agent.request.call_args
+
+        self.assertEqual(method, b"GET")
+        self.assertEqual(
+            uri,
+            f"{APPSERVICE_URL}/_matrix/client/{VERSIONED_PREFIX}/some/path?foo=bar".encode(),
+        )
+
     def test_get_is_proxied_at_root_path(self) -> None:
         self.agent.request = Mock(
             return_value=defer.succeed(
