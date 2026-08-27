@@ -128,7 +128,9 @@ older clients. A new sibling `url` config property is added that should be set t
 your SFU's WebSocket URL. Clients that support `url` will use the Client-Server API
 to (indirectly) interact with the LiveKit authorization service. The service needs
 to be set up as an application service in order to support these endpoints. See
-https://github.com/element-hq/lk-jwt-service for further details.
+https://github.com/element-hq/lk-jwt-service and 
+https://element-hq.github.io/synapse/v1.161/usage/configuration/config_documentation.html#matrix_rtc
+for further details.
 
 # Upgrading to v1.159.0
 
