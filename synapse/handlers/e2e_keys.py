@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Iterable, Mapping
+from typing import TYPE_CHECKING, Awaitable, Callable, Iterable, Mapping
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -124,6 +124,9 @@ class E2eKeysHandler:
 
         self._task_scheduler.register_action(
             self._delete_old_one_time_keys_task, "delete_old_otks"
+        )
+        self._task_scheduler.register_action(
+            self._trim_one_time_keys_task, "trim_one_time_keys"
         )
 
     @trace
@@ -1607,19 +1610,50 @@ class E2eKeysHandler:
         that it could still have old OTKs that the client has dropped. This task is scheduled exactly once
         by a database schema delta file, and it clears out old one-time-keys that look like they came from libolm.
         """
+        return await self._process_one_time_keys_in_user_batches(
+            task, self.store.delete_old_otks_for_next_user_batch, "old"
+        )
+
+    async def _trim_one_time_keys_task(
+        self, task: ScheduledTask
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
+        """Scheduler task to trim the one-time keys of devices holding more than the configured maximum.
+
+        Before the maximum was introduced, a client bug could cause a device to upload a fresh batch of one-time
+        keys on every sync, leaving tens of thousands of keys on the server, most of which the client had already
+        forgotten. This task is scheduled exactly once by a database schema delta file, and trims such devices
+        down to the maximum; uploads are trimmed as they arrive from then on.
+        """
+        return await self._process_one_time_keys_in_user_batches(
+            task, self.store.trim_otks_for_next_user_batch, "surplus"
+        )
+
+    async def _process_one_time_keys_in_user_batches(
+        self,
+        task: ScheduledTask,
+        process_batch: Callable[[str, int], Awaitable[tuple[list[str], int]]],
+        description: str,
+    ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
+        """Run a one-time key clean-up over all users, a batch at a time, recording progress on the task.
+
+        Args:
+            task: the scheduled task, whose result records the last user processed
+            process_batch: called with `(last_user_id, batch_size)`; returns `(users, deleted_rows)`, with
+                `users` empty once there is nothing left to process
+            description: the kind of keys being deleted, for logging
+        """
         last_user = task.result.get("from_user", "") if task.result else ""
         while True:
             # We process users in batches of 100
-            users, rowcount = await self.store.delete_old_otks_for_next_user_batch(
-                last_user, 100
-            )
+            users, rowcount = await process_batch(last_user, 100)
             if len(users) == 0:
                 # We're done!
                 return TaskStatus.COMPLETE, None, None
 
             logger.debug(
-                "Deleted %i old one-time-keys for users '%s'..'%s'",
+                "Deleted %i %s one-time-keys for users '%s'..'%s'",
                 rowcount,
+                description,
                 users[0],
                 users[-1],
             )

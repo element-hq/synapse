@@ -114,6 +114,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         self._allow_device_name_lookup_over_federation = (
             self.hs.config.federation.allow_device_name_lookup_over_federation
         )
+        self._max_one_time_keys_per_device = (
+            self.hs.config.server.max_one_time_keys_per_device
+        )
 
         self._cross_signing_id_gen = MultiWriterIdGenerator(
             db_conn=db_conn,
@@ -655,9 +658,54 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 for algorithm, key_id, json_bytes in new_keys
             ],
         )
+        for algorithm in {algorithm for algorithm, _, _ in new_keys}:
+            self._trim_e2e_one_time_keys_txn(txn, user_id, device_id, algorithm)
         self._invalidate_cache_and_stream(
             txn, self.count_e2e_one_time_keys, (user_id, device_id)
         )
+
+    def _trim_e2e_one_time_keys_txn(
+        self, txn: LoggingTransaction, user_id: str, device_id: str, algorithm: str
+    ) -> int:
+        """Delete all but the newest `max_one_time_keys_per_device` one-time keys of
+        the given algorithm for a device.
+
+        Clients only retain a bounded number of private one-time keys, discarding the
+        oldest first, so keys beyond that bound can never be used. Keeping only the
+        newest keys mirrors that, and protects against clients that keep uploading
+        keys regardless of how many the server already holds.
+
+        For reference, vodozemac (and so the matrix-rust-sdk) publishes 50 keys at a
+        time (`PUBLIC_MAX_ONE_TIME_KEYS`) and retains 5000 private keys before
+        evicting the oldest (`OneTimeKeys::MAX_ONE_TIME_KEYS`). The default limit sits
+        between the two: comfortably above what a client publishes, so we never trim
+        keys a well-behaved client is still waiting to have claimed, and well below
+        what it retains, so we never hold a key the client has already discarded.
+
+        Returns:
+            The number of deleted keys.
+        """
+        txn.execute(
+            """
+            DELETE FROM e2e_one_time_keys_json
+            WHERE user_id = ? AND device_id = ? AND algorithm = ? AND key_id NOT IN (
+                SELECT key_id FROM e2e_one_time_keys_json
+                WHERE user_id = ? AND device_id = ? AND algorithm = ?
+                ORDER BY ts_added_ms DESC
+                LIMIT ?
+            )
+            """,
+            (
+                user_id,
+                device_id,
+                algorithm,
+                user_id,
+                device_id,
+                algorithm,
+                self._max_one_time_keys_per_device,
+            ),
+        )
+        return txn.rowcount
 
     @cached(max_entries=10000, tree=True)
     async def count_e2e_one_time_keys(
@@ -1566,6 +1614,61 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         return await self.db_pool.runInteraction(
             "delete_old_otks_for_next_user_batch", impl
         )
+
+    async def trim_otks_for_next_user_batch(
+        self, after_user_id: str, number_of_users: int
+    ) -> tuple[list[str], int]:
+        """Trims the one-time keys of any devices which hold more than
+        `max_one_time_keys_per_device`, for the next batch of users.
+
+        Returns:
+            `(users, rows)`, where:
+             * `users` is the user IDs of the processed users. An empty list if we are done.
+             * `rows` is the number of deleted rows
+        """
+
+        def impl(txn: LoggingTransaction) -> tuple[list[str], int]:
+            # Find a batch of users
+            txn.execute(
+                """
+                SELECT DISTINCT(user_id) FROM e2e_one_time_keys_json
+                    WHERE user_id > ?
+                    ORDER BY user_id
+                    LIMIT ?
+                """,
+                (after_user_id, number_of_users),
+            )
+            users = [row[0] for row in txn.fetchall()]
+            if len(users) == 0:
+                return users, 0
+
+            # Find the devices (and algorithms) of those users which are over the limit.
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "user_id", users
+            )
+            txn.execute(
+                f"""
+                SELECT user_id, device_id, algorithm FROM e2e_one_time_keys_json
+                    WHERE {clause}
+                    GROUP BY user_id, device_id, algorithm
+                    HAVING COUNT(*) > ?
+                """,
+                args + [self._max_one_time_keys_per_device],
+            )
+            over_limit = txn.fetchall()
+
+            deleted = 0
+            for user_id, device_id, algorithm in over_limit:
+                deleted += self._trim_e2e_one_time_keys_txn(
+                    txn, user_id, device_id, algorithm
+                )
+                self._invalidate_cache_and_stream(
+                    txn, self.count_e2e_one_time_keys, (user_id, device_id)
+                )
+
+            return users, deleted
+
+        return await self.db_pool.runInteraction("trim_otks_for_next_user_batch", impl)
 
     async def allow_master_cross_signing_key_replacement_without_uia(
         self, user_id: str, duration_ms: int

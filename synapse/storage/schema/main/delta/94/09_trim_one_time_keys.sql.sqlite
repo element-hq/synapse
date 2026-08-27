@@ -1,0 +1,19 @@
+--
+-- This file is licensed under the Affero General Public License (AGPL) version 3.
+--
+-- Copyright (C) 2026 Element Creations Ltd
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- See the GNU Affero General Public License for more details:
+-- <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+-- Before Synapse limited the number of one-time keys held per device, a client bug could
+-- leave tens of thousands of keys on the server, most of which the client had already forgotten.
+--
+-- We create a scheduled task which trims any such devices down to the configured maximum.
+INSERT INTO scheduled_tasks(id, action, status, timestamp)
+    VALUES ('trim_one_time_keys_task', 'trim_one_time_keys', 'scheduled', strftime('%s', 'now') * 1000);
