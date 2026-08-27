@@ -25,20 +25,31 @@ from typing import (
 
 from typing_extensions import TypeAlias, assert_never
 
-from synapse.api.constants import AccountDataTypes, EduTypes, StickyEvent
+from synapse.api.constants import (
+    AccountDataTypes,
+    EduTypes,
+    EventTypes,
+    ProfileFields,
+    ProfileUpdateAction,
+    StickyEvent,
+)
 from synapse.events.utils import FilteredEvent
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.types import (
     Absent,
+    AbsentType,
     DeviceListUpdates,
+    JsonDict,
     JsonMapping,
+    JsonValue,
     MultiWriterStreamToken,
     SlidingSyncStreamToken,
     StrCollection,
     StreamToken,
     ThreadSubscriptionsToken,
+    UserID,
 )
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
@@ -47,6 +58,7 @@ from synapse.types.handlers.sliding_sync import (
     PerConnectionState,
     SlidingSyncConfig,
     SlidingSyncResult,
+    StateValues,
 )
 from synapse.types.rest.client import SlidingSyncStickyEventsToken
 from synapse.util.async_helpers import (
@@ -80,6 +92,7 @@ class SlidingSyncExtensionHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
         self._enable_sticky_events = hs.config.experimental.msc4354_enabled
+        self._enable_profiles = hs.config.server.include_profile_updates_in_sync
 
     @trace
     async def get_extensions_response(
@@ -197,6 +210,18 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
+        profiles_coro = None
+        if sync_config.extensions.profiles is not Absent and self._enable_profiles:
+            profiles_coro = self.get_profiles_extension_response(
+                sync_config=sync_config,
+                profiles_request=sync_config.extensions.profiles,
+                actual_room_ids=actual_room_ids,
+                to_token=to_token,
+                from_token=from_token,
+                actual_room_response_map=actual_room_response_map,
+                actual_lists=actual_lists,
+            )
+
         (
             to_device_response,
             e2ee_response,
@@ -205,6 +230,7 @@ class SlidingSyncExtensionHandler:
             typing_response,
             thread_subs_response,
             sticky_events_response,
+            profiles_response,
         ) = await gather_optional_coroutines(
             to_device_coro,
             e2ee_coro,
@@ -213,6 +239,7 @@ class SlidingSyncExtensionHandler:
             typing_coro,
             thread_subs_coro,
             sticky_events_coro,
+            profiles_coro,
         )
 
         return SlidingSyncResult.Extensions(
@@ -223,6 +250,7 @@ class SlidingSyncExtensionHandler:
             typing=typing_response,
             thread_subscriptions=thread_subs_response,
             sticky_events=sticky_events_response,
+            profiles=profiles_response,
         )
 
     def find_relevant_room_ids_for_extension(
@@ -1054,4 +1082,380 @@ class SlidingSyncExtensionHandler:
             next_batch=SlidingSyncStickyEventsToken(
                 sticky_events_stream_id=sticky_events_to_id
             ),
+        )
+
+    async def _get_profile_ids_for_profiles_extension(
+        self,
+        user_id: str,
+        actual_room_ids: set[str],
+        sync_config: SlidingSyncConfig,
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+    ) -> tuple[set[str], set[str]]:
+        """
+        Calculate target user profiles as candiates to include in the profile
+        extension sync response.
+
+        This function looks at both the sync config and the already calculated
+        rooms response, and pieces together the full set of user IDs to include
+        profiles for, based on sync config rooms being lazy loading or not.
+
+        For rooms with lazy loading, only profiles for those users who have sent events
+        into the timeline will be included, unless they would be included otherwise.
+        For other rooms, all members of the room will be included as candidates.
+
+        Note, this does not collect user IDs from the profile updates stream.
+
+        Args:
+            user_id: The full user ID syncing.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
+            sync_config: The Sliding Sync config object.
+            actual_room_response_map: A calculated map of responses per room.
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
+
+        Returns:
+            Tuple containing two sets:
+               - first including all found user IDs,
+               - second containing user IDs calculated via lazy configured rooms.
+        """
+        lazy_profile_user_ids = set()
+        non_lazy_profile_user_ids = set()
+
+        # Separate rooms into lazy and non-lazy based on sync config.
+        # Look at subscriptions first
+        lazy_rooms = (
+            {
+                room_id
+                for room_id, room_config in sync_config.room_subscriptions.items()
+                if (EventTypes.Member, StateValues.LAZY) in room_config.required_state
+            }
+            if sync_config.room_subscriptions
+            else set()
+        )
+        # Iterate lists to find lazy rooms
+        if sync_config.lists:
+            for list_name, list_data in sync_config.lists.items():
+                if (EventTypes.Member, StateValues.LAZY) in list_data.required_state:
+                    for op in actual_lists[list_name].ops:
+                        lazy_rooms.update(op.room_ids)
+
+        if lazy_rooms:
+            # For rooms configured as lazy, include users based on room response.
+            for room_id, room_data in actual_room_response_map.items():
+                if room_id not in lazy_rooms:
+                    continue
+                # Include users from timeline events
+                for timeline_event in room_data.timeline_events:
+                    lazy_profile_user_ids.add(timeline_event.event.sender)
+                # Include users from required state
+                for state_event in room_data.required_state:
+                    if state_event.type == EventTypes.Member:
+                        lazy_profile_user_ids.add(state_event.state_key)
+                # Include heroes
+                if room_data.heroes:
+                    for hero in room_data.heroes:
+                        lazy_profile_user_ids.add(hero.user_id)
+
+        non_lazy_rooms = actual_room_ids.difference(lazy_rooms)
+        # If we still have non-lazy rooms, get their members.
+        if non_lazy_rooms:
+            non_lazy_profile_user_ids = (
+                # TODO we should consider adding a limit to how many profiles
+                # of room members we push down the line. However, this produces
+                # a problem for clients in that they won't know which users
+                # just don't have any profile information, and which users were limited
+                # out. If we had an endpoint to fetch a list of profiles at once,
+                # we could have a hard limit here and clients could fetch the missing
+                # profiles separately for non-lazy initial sync cases.
+                await self.store.get_local_users_who_share_room_with_user(
+                    user_id,
+                    limit_to_rooms=non_lazy_rooms,
+                )
+            )
+
+        # Unify the two lists
+        profile_user_ids = lazy_profile_user_ids.union(non_lazy_profile_user_ids)
+
+        # Return a tuple containing the full list of user IDs and the lazy subset.
+        return (
+            profile_user_ids,
+            lazy_profile_user_ids,
+        )
+
+    async def _get_profiles_extension_initial_sync_response(
+        self,
+        user_id: UserID,
+        fields: set[str] | None,
+        profile_user_ids: set[str],
+    ) -> dict[str, JsonDict]:
+        """
+        Build an initial sync response for the profiles extension.
+
+        Args:
+            user_id: The syncing user UserID
+            fields: A set of fields to include in the response.
+                `None` means all fields.
+            profile_user_ids: Set of user IDs whose profiles are related to this sync response.
+
+        Returns:
+            A dictionary (in API response format) mapping users to their
+            profile updates in an `updated` dictionary.
+
+            {
+                "@user:example.org": {
+                    "updated": {
+                        "displayname": "Somebody",
+                        "avatar_url": "mxc://example.org/123123123",
+                        "org.example.field": "hiss",
+                        ...
+                    }
+                },
+                ...
+            }
+        """
+        response: dict[str, JsonDict] = {}
+
+        # This doesn't return entries for the users with no profile data,
+        # which is good as we don't want to generate anything for users
+        # with no profile data in initial sync.
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            # Force our own user to be in the set, as we should
+            # always watch our own profile updates
+            profile_user_ids | {user_id.to_string()}
+        )
+
+        # Serialise the profile updates into the sync response format.
+        for profile_user_id, profile_data in profile_data_by_user.items():
+            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]]
+            # Include the fields the client asked for, or all, if not specified
+            if fields is not None:
+                per_user_updates = {
+                    k: v for k, v in profile_data.items() if k in fields
+                }
+            else:
+                per_user_updates = profile_data
+
+            if per_user_updates:
+                response[profile_user_id] = {
+                    "updated": per_user_updates,
+                }
+
+        return response
+
+    async def get_profiles_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        profiles_request: SlidingSyncConfig.Extensions.ProfilesExtension,
+        actual_room_ids: set[str],
+        to_token: StreamToken,
+        from_token: SlidingSyncStreamToken | None,
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+    ) -> SlidingSyncResult.Extensions.ProfilesExtension | None:
+        """
+        Generate a response for the profiles extension.
+
+        Args:
+            sync_config: The Sliding Sync config.
+            profiles_request: The profiles extension request.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
+            to_token: The stream token to generate a response until.
+            from_token: The stream token to generate a response from.
+            actual_room_response_map: A calculated map of responses per room.
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
+
+        Returns:
+            - A SlidingSyncResult.Extensions.ProfilesExtension object containing
+            all the users who have profile updates.
+            - None if the extension is disabled.
+        """
+        if not profiles_request.enabled:
+            return None
+
+        user_id = sync_config.user.to_string()
+        fields = (
+            set(profiles_request.fields)
+            if profiles_request.fields is not Absent
+            else None
+        )
+
+        response: dict[str, JsonDict | None] = {}
+
+        (
+            profile_user_ids,
+            lazy_profile_user_ids,
+        ) = await self._get_profile_ids_for_profiles_extension(
+            user_id=user_id,
+            actual_room_ids=actual_room_ids,
+            sync_config=sync_config,
+            actual_room_response_map=actual_room_response_map,
+            actual_lists=actual_lists,
+        )
+
+        if from_token is None:
+            # Initial sync
+            return SlidingSyncResult.Extensions.ProfilesExtension(
+                users=await self._get_profiles_extension_initial_sync_response(
+                    user_id=sync_config.user,
+                    fields=fields,
+                    profile_user_ids=profile_user_ids,
+                ),
+            )
+
+        # Incremental sync
+        updates = await self.store.get_profile_updates_for_user_and_fields(
+            from_id=from_token.stream_token.profile_updates_key,
+            to_id=to_token.profile_updates_key,
+            user_id=user_id,
+            field_names=fields,
+        )
+
+        # Set of users that just joined their first room that we share with them
+        joined_room_user_ids: set[str] = set()
+        # Set of tracked users that have updated their profile
+        updated_user_ids: set[str] = set()
+        # Set of tracked users that just left their last room that we share with them
+        left_room_user_ids: set[str] = set()
+
+        # Process updates in stream order
+        # We need to be careful of users that have multiple types of updates
+        # within this sequence of stream rows.
+        for update in updates:
+            if update.action == ProfileUpdateAction.JOINED_ROOM:
+                joined_room_user_ids.add(update.user_id)
+                # If the user joins a shared room, that overrides
+                # the fact that they previously left the last shared room
+                left_room_user_ids.discard(update.user_id)
+            elif update.action == ProfileUpdateAction.UPDATE:
+                updated_user_ids.add(update.user_id)
+            elif update.action == ProfileUpdateAction.LEFT_ROOM:
+                left_room_user_ids.add(update.user_id)
+                # If the user leaves their last shared room, that overrides
+                # the fact that they previously joined a shared room
+                # and perhaps updated their profile whilst they were in it
+                joined_room_user_ids.discard(update.user_id)
+                updated_user_ids.discard(update.user_id)
+
+        # Add the users who joined a shared room or updated their profile to the set of
+        # users we will serialise profiles for
+        profile_user_ids.update(joined_room_user_ids)
+        profile_user_ids.update(updated_user_ids)
+
+        # Process left rooms
+        for other_user_id in left_room_user_ids:
+            # Return a null response to the client
+            # This tells the client that it will no longer receive updates for the user
+            response[other_user_id] = None
+
+        updated_user_fields: dict[str, set[str]] = {}
+        # Set fields from updates
+        for update in updates:
+            if (
+                update.action != ProfileUpdateAction.UPDATE
+                or not update.affected_fields
+                or update.user_id in left_room_user_ids
+                # Skip if not interested in this user
+                or update.user_id not in profile_user_ids
+            ):
+                continue
+            interesting_changed_fields: set[str]
+            if fields is not None:
+                interesting_changed_fields = set(update.affected_fields) & fields
+            else:
+                interesting_changed_fields = set(update.affected_fields)
+
+            if not interesting_changed_fields:
+                # Skip the update as the client is not interested in these fields
+                continue
+
+            updated_user_fields.setdefault(update.user_id, set()).update(
+                interesting_changed_fields
+            )
+
+        profile_data_by_user = await self.store.get_profile_data_for_users(
+            profile_user_ids,
+        )
+
+        # Serialise the profile updates into the sync response format.
+        for profile_user_id in profile_user_ids:
+            if profile_user_id in left_room_user_ids:
+                continue
+            profile_data = profile_data_by_user.get(profile_user_id)
+            if profile_data is None:
+                # We don't have profile data for this user
+                # (This is different from having an empty profile)
+                # Return a null in incremental sync, telling the client to
+                # remove all profile information for this user.
+                response[profile_user_id] = None
+                continue
+
+            # Calculate which fields had updates
+            updated_fields: set[str] = updated_user_fields.get(profile_user_id, set())
+            # Calculate the full available field list
+            user_fields = set(profile_data.keys()).union(updated_fields)
+
+            # If the user joined the room or is included via lazy loading events,
+            # include all fields the client wants. This happens because when lazy
+            # a room, clients will not necessarily have the profile for the user that
+            # sent an event in the room, and thus we deliver all the fields. The same
+            # is true if another user joins the room - we need to deliver an initial
+            # state for clients to work on.
+            # For non-lazy-loaded users, include only updated fields. We assume clients
+            # with non-lazy loaded rooms have received the profiles for all the members
+            # in the room, and thus only need updates.
+            user_fields = (
+                user_fields
+                if profile_user_id in joined_room_user_ids
+                or profile_user_id in lazy_profile_user_ids
+                else updated_fields
+            )
+            # Filter down if the client only wants a subset
+            if fields:
+                user_fields = user_fields.intersection(fields)
+
+            if not user_fields:
+                continue
+
+            per_user_updates: dict[str, JsonValue | dict[str, JsonValue]] = {}
+            per_user_removals: set[str] = set()
+            for field_name in user_fields:
+                # For custom fields the lack of a field means it will be `Absent`,
+                # for displayname/avatar_url it will be `None`, due to way we store
+                # things differently.
+                # FIXME: I intend to simplify this by pushing the special-case logic
+                # for these 'original' profile fields into the storage layer instead.
+                absent_type = (
+                    Absent
+                    if field_name
+                    not in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
+                    else None
+                )
+                field_value: JsonValue | dict[str, JsonValue] | AbsentType = (
+                    profile_data.get(field_name, absent_type)
+                )
+                if (
+                    # If the field isn't found on the profile and it is present in
+                    # `updated_fields`, that means an existing field has been removed.
+                    # We need the check against `updated_fields` as some profile fields
+                    # are `None` by default, for example each and every user created
+                    # by Synapse will have `avatar_url: None`, and we don't want to
+                    # constantly send that to the clients.
+                    field_value is absent_type and field_name in updated_fields
+                ):
+                    per_user_removals.add(field_name)
+                else:
+                    per_user_updates[field_name] = cast(JsonValue, field_value)
+
+            if per_user_updates or per_user_removals:
+                entry: dict[str, JsonValue | JsonDict] = {}
+                response[profile_user_id] = entry
+                if per_user_updates:
+                    entry["updated"] = per_user_updates
+                if per_user_removals:
+                    entry["removed"] = list(per_user_removals)
+
+        return SlidingSyncResult.Extensions.ProfilesExtension(
+            users=response,
         )
