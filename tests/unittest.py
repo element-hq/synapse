@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import copy
 import functools
 import gc
 import hashlib
@@ -148,8 +149,14 @@ def deepcopy_config(config: _TConfig) -> _TConfig:
         if attr_name.startswith("__") or attr_name == "root":
             continue
         attr = getattr(config, attr_name)
+        new_attr: Any
         if isinstance(attr, Config):
             new_attr = deepcopy_config(attr)
+        elif isinstance(attr, (list, dict, set)):
+            # Copy mutable containers so that tests which modify config values
+            # in place (e.g. appending to a list) don't leak those changes into
+            # the cached config object, and thus into every other test.
+            new_attr = copy.deepcopy(attr)
         else:
             new_attr = attr
 
