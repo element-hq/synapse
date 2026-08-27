@@ -870,7 +870,8 @@ class RoomSummaryHandler:
         remote_room_hosts: list[str] | None = None,
     ) -> JsonDict:
         """
-        Implementation of the room summary C-S API from MSC3266
+        Implementation of the room summary C-S API, see
+        https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1room_summaryroomidoralias
 
         Args:
             requester:  user id of the user making this request, will be None

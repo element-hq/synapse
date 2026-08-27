@@ -490,8 +490,10 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
     def test_summary_fields(self) -> None:
         """
         The room entries returned to clients include the `room_version`,
-        `encryption` and `allowed_room_ids` fields, which Matrix 1.15 (MSC3266)
-        added to the client `/hierarchy` API.
+        `encryption` and `allowed_room_ids` fields, added to the client
+        `/hierarchy` API in Matrix 1.15.
+
+        See https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1roomsroomidhierarchy
         """
         restricted_room = self._create_room_with_join_rule(
             JoinRules.RESTRICTED,
