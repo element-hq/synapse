@@ -729,6 +729,21 @@ Example configuration:
 delete_stale_devices_after: 1y
 ```
 ---
+### `max_one_time_keys_per_device`
+
+*(integer)* The maximum number of end-to-end encryption one-time keys, per key algorithm, to keep for each device. When a device uploads more than this, the oldest keys are discarded.
+
+Clients only retain a bounded number of their private one-time keys (discarding the oldest first), so keys beyond that bound could never be used anyway. This limit protects against clients that keep uploading keys regardless of how many the server already holds, which would otherwise leave the server handing out keys the device has forgotten.
+
+Take care not to set this below the number of keys clients upload at a time — 50, for clients built on the matrix-rust-sdk — as they would then re-upload keys on every sync, which is the very behaviour this limit exists to contain.
+
+Defaults to `500`.
+
+Example configuration:
+```yaml
+max_one_time_keys_per_device: 1000
+```
+---
 ### `email`
 
 *(object)* Configuration for sending emails from Synapse.
