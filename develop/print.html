@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-276d8b54.js";
+            window.path_to_searchindex_js = "searchindex-484fa0f4.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -5376,10 +5376,11 @@ For more details, see the <a href="#using-a-forward-proxy-with-synapse">forward 
 <p>Options related to federation.</p>
 <hr>
 <h3 id="federation_domain_whitelist"><a class="header" href="#federation_domain_whitelist"><code>federation_domain_whitelist</code></a></h3>
-<p><em>(array)</em> Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
-If specified as an empty list (<code>[]</code>), federation will be denied with all servers. Specifying an empty list (<code>[]</code>) here is the recommended way of disabling federation.
-If not specified, the default is to allow federation with all servers.
-Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a “private federation”, where a group of servers all whitelist each other and have the same whitelist. There is no default for this option.</p>
+<p><em>(null|array)</em> Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.</p>
+<p>If specified as an empty list (<code>[]</code>), federation will be denied with all servers. Specifying an empty list (<code>[]</code>) here is the recommended way of disabling federation.</p>
+<p>If unset or null, allows federation with all servers.</p>
+<p>Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a “private federation”, where a group of servers all whitelist each other and have the same whitelist.</p>
+<p>Defaults to <code>null</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">federation_domain_whitelist:
 - lon.example.com
