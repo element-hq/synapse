@@ -208,9 +208,7 @@ class SearchBackgroundUpdateStore(SearchWorkerStore):
                         value = content["body"]
                     elif etype == "m.room.topic":
                         key = "content.topic"
-                        value = (
-                            get_plain_text_topic_from_event_content(content) or ""
-                        )
+                        value = get_plain_text_topic_from_event_content(content) or ""
                     elif etype == "m.room.name":
                         key = "content.name"
                         value = content["name"]

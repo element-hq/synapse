@@ -265,9 +265,7 @@ class EventSearchInsertionTest(HomeserverTestCase):
         self._rebuild_search_index()
 
         message_results = self.get_success(
-            store.search_msgs(
-                [room_id], "searchable message keyword", ["content.body"]
-            )
+            store.search_msgs([room_id], "searchable message keyword", ["content.body"])
         )
         self.assertEqual(message_results["count"], 1, "message was not reindexed")
 
@@ -277,9 +275,7 @@ class EventSearchInsertionTest(HomeserverTestCase):
         self.assertEqual(name_results["count"], 1, "name was not reindexed")
 
         topic_results = self.get_success(
-            store.search_msgs(
-                [room_id], "searchable topic keyword", ["content.topic"]
-            )
+            store.search_msgs([room_id], "searchable topic keyword", ["content.topic"])
         )
         self.assertEqual(
             topic_results["count"],
