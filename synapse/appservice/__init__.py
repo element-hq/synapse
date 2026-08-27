@@ -128,6 +128,9 @@ class ApplicationService:
         self.proxy_url = (
             proxy_url.rstrip("/") if isinstance(proxy_url, str) else None
         )  # proxy_url must not end with a slash
+        self.proxy_prefix = (
+            proxy_prefix.rstrip("/") if isinstance(proxy_prefix, str) else None
+        )  # proxy_prefix must not end with a slash
         self.hs_token = hs_token
         # The full Matrix ID for this application service's sender.
         self.sender = sender
@@ -149,7 +152,6 @@ class ApplicationService:
         self.supports_ephemeral = supports_ephemeral
         self.msc3202_transaction_extensions = msc3202_transaction_extensions
         self.msc4190_device_management = msc4190_device_management
-        self.proxy_prefix = proxy_prefix
 
         if "|" in self.id:
             raise Exception("application service ID cannot contain '|' character")

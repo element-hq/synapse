@@ -348,3 +348,10 @@ class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
         service = self._make_service()
         self.assertIsNone(service.proxy_prefix)
         self.assertIsNone(service.proxy_url)
+
+    def test_trailing_slash_on_proxy_prefix_is_stripped(self) -> None:
+        service = self._make_service(
+            proxy_url="http://proxy.example.com",
+            proxy_prefix="rtc/livekit/foo/",
+        )
+        self.assertEqual(service.proxy_prefix, "rtc/livekit/foo")
