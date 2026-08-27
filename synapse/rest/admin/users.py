@@ -23,7 +23,7 @@ import hmac
 import logging
 import secrets
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import attr
 from pydantic import StrictBool, StrictInt, StrictStr
@@ -185,7 +185,10 @@ class UsersRestServletV2(RestServlet):
         if not self._msc3866_enabled:
             users_filter = attr.filters.exclude("approved")
 
-        ret = {"users": [attr.asdict(u, filter=users_filter) for u in users], "total": total}
+        ret = {
+            "users": [attr.asdict(u, filter=users_filter) for u in users],
+            "total": total,
+        }
         if (start + limit) < total:
             ret["next_token"] = str(start + len(users))
 
