@@ -192,7 +192,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         request_time_msec = self.hs.get_clock().time_msec()
         channel = self.make_request(
             "PUT",
-            _get_path_for_delayed_state(self.room_id, state_event_type, state_key, delay),
+            _get_path_for_delayed_state(
+                self.room_id, state_event_type, state_key, delay
+            ),
             content,
             self.user1_access_token,
         )
