@@ -5192,11 +5192,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def test_redaction_flag_ignored_for_user_if_banner_lacks_redaction_power(
         self,
     ) -> None:
-        # change power levels so creator can ban but not redact
+        # Create a moderator that can ban but not redact.
+        moderator = self.register_user("moderator", "test")
+        moderator_tok = self.login("moderator", "test")
+        self.helper.join(self.room_id, moderator, tok=moderator_tok)
+
+        # change power levels so the moderator can ban but not redact
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
-            {"events_default": 0, "redact": 100, "users": {self.creator: 75}},
+            {"events_default": 0, "redact": 100, "users": {moderator: 75}},
             tok=self.creator_tok,
         )
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
@@ -5213,18 +5218,18 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         # grab original events before ban
         originals = [self.get_success(self.store.get_event(x)) for x in original_ids]
 
-        # creator bans bad user with redaction flag
+        # moderator bans bad user with redaction flag
         content = {
             "reason": "flooding",
             "org.matrix.msc4293.redact_events": True,
         }
         self.helper.change_membership(
             self.room_id,
-            self.creator,
+            moderator,
             self.bad_user_id,
             "ban",
             content,
-            self.creator_tok,
+            moderator_tok,
         )
 
         filter = json.dumps({"types": [EventTypes.Message]})
@@ -5549,11 +5554,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def test_redaction_flag_ignored_for_user_if_kicker_lacks_redaction_power(
         self,
     ) -> None:
-        # change power levels so creator can kick but not redact
+        # Create a moderator that can kick but not redact.
+        moderator = self.register_user("moderator", "test")
+        moderator_tok = self.login("moderator", "test")
+        self.helper.join(self.room_id, moderator, tok=moderator_tok)
+
+        # change power levels so the moderator can kick but not redact
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
-            {"events_default": 0, "redact": 100, "users": {self.creator: 75}},
+            {"events_default": 0, "redact": 100, "users": {moderator: 75}},
             tok=self.creator_tok,
         )
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
@@ -5570,18 +5580,18 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         # grab original events before ban
         originals = [self.get_success(self.store.get_event(x)) for x in original_ids]
 
-        # creator kicks bad user with redaction flag
+        # moderator kicks bad user with redaction flag
         content = {
             "reason": "flooding",
             "org.matrix.msc4293.redact_events": True,
         }
         self.helper.change_membership(
             self.room_id,
-            self.creator,
+            moderator,
             self.bad_user_id,
             "kick",
             content,
-            self.creator_tok,
+            moderator_tok,
         )
 
         filter = json.dumps({"types": [EventTypes.Message]})
