@@ -1436,7 +1436,11 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
 
 
 class ThreepidMsisdnRestTestCase(unittest.HomeserverTestCase):
-    """Tests the error codes of /account/3pid/msisdn/requestToken. (MSC4178)"""
+    """Tests the error codes of /account/3pid/msisdn/requestToken.
+
+    See https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3account3pidmsisdnrequesttoken
+    (error codes added in Matrix v1.13 by MSC4178).
+    """
 
     servlets = [
         account.register_servlets,

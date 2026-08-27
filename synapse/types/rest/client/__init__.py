@@ -92,8 +92,11 @@ class EmailRequestTokenBody(ThreepidRequestTokenBody):
     # know the exact spelling (eg. upper and lower case) of address in the database.
     # Without this, an email stored in the database as "foo@bar.com" would cause
     # user requests for "FOO@bar.com" to raise a Not Found error.
-    # A ValueError produces a Pydantic error of type "value_error", which is
-    # translated to the M_INVALID_PARAM errcode named by MSC4178.
+    #
+    # A ValueError produces a Pydantic error of type "value_error", which
+    # validate_json_object translates to M_INVALID_PARAM, the errcode the spec
+    # lists for an invalid address on /account/3pid/email/requestToken:
+    # https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3account3pidemailrequesttoken
     @field_validator("email")
     @classmethod
     def _email_validator(cls, email: StrictStr) -> StrictStr:
