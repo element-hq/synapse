@@ -3315,7 +3315,14 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
     def test_not_enough_power(self) -> None:
         """Test that we get a sensible error if there are no local room admins."""
         room_id = self.helper.create_room_as(
-            self.creator, tok=self.creator_tok, is_public=True
+            self.creator,
+            tok=self.creator_tok,
+            is_public=True,
+            # Pin to v11: in room version 12+ the creator has infinite power and
+            # cannot drop their admin rights, so the "no local room admins"
+            # scenario tested here is only possible in older room versions (the
+            # v12 behaviour is covered by the `test_v12_room*` tests below).
+            room_version=RoomVersions.V11.identifier,
         )
 
         # The creator drops admin rights in the room.
@@ -3343,6 +3350,28 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
             channel.json_body["error"],
             "No local admin user in room with power to update power levels.",
         )
+
+    def test_v12_room_creator_left(self) -> None:
+        """Test that a v12 room whose only creator has left has no local admin to
+        grant power from: creators are the only implicit admins in v12 rooms."""
+        room_id = self.helper.create_room_as(
+            self.creator,
+            tok=self.creator_tok,
+            room_version=RoomVersions.V12.identifier,
+            is_public=True,
+        )
+        # Keep the server in the room once the creator leaves.
+        self.helper.join(room_id, self.second_user_id, tok=self.second_tok)
+        self.helper.leave(room_id, self.creator, tok=self.creator_tok)
+
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/rooms/{room_id}/make_room_admin",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(channel.json_body["error"], "No local admin user in room")
 
     def test_v12_room(self) -> None:
         """Test that you can be promoted to admin in v12 rooms which won't have the admin the PL event."""
