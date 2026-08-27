@@ -120,7 +120,7 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.161.0
 
-## Deprecation of `livekit_service_url`
+## Deprecation of `matrix_rtc.livekit_service_url`
 
 When configuring the MatrixRTC LiveKit transport, the `livekit_service_url` is now
 deprecated but should continue to be listed to ensure backwards compatibility with
