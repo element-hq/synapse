@@ -707,9 +707,11 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
     def test_application_services_receive_private_read_receipts_of_namespaced_users_only(
         self,
     ) -> None:
-        """Tests that, as per MSC2409, private read receipts are only sent to an
-        application service for users within the appservice's namespaces, while
-        public read receipts are sent regardless of the sending user.
+        """Tests that private read receipts are only sent to an application
+        service for users within the appservice's namespaces, while public read
+        receipts are sent regardless of the sending user.
+
+        See https://spec.matrix.org/v1.19/application-service-api/#pushing-ephemeral-data
         """
         # Register an application service that's interested in a certain user
         # and room prefix
