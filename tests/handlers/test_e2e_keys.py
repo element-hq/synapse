@@ -36,6 +36,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
+from synapse.util.task_scheduler import TaskScheduler, TaskStatus
 
 from tests import unittest
 from tests.unittest import override_config
@@ -404,6 +405,74 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(claimed_keys), 2)
         for key_id in claimed_keys.keys():
             self.assertIn(key_id, ["alg1:k20", "alg1:k21", "alg1:k22"])
+
+    @override_config({"max_one_time_keys_per_device": 5})
+    def test_upload_one_time_keys_over_limit_discards_oldest(self) -> None:
+        """Uploading more one-time keys than the limit discards the oldest ones"""
+        local_user = "@boris:" + self.hs.hostname
+        device_id = "xyz"
+
+        res = self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user,
+                device_id,
+                {"one_time_keys": {f"alg1:k{i}": f"key{i}" for i in range(1, 6)}},
+            )
+        )
+        self.assertEqual(res["one_time_key_counts"]["alg1"], 5)
+
+        # Advance time by 1s, to ensure that there is a difference in upload time.
+        self.reactor.advance(1)
+        res = self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user,
+                device_id,
+                {"one_time_keys": {f"alg1:k{i}": f"key{i}" for i in range(6, 9)}},
+            )
+        )
+        # The count reported back to the client reflects the trimmed set.
+        self.assertEqual(res["one_time_key_counts"]["alg1"], 5)
+
+        # The newest keys are all kept; the surplus came out of the older batch.
+        keys = self.get_success(
+            self.store.get_e2e_one_time_keys(
+                local_user, device_id, [f"k{i}" for i in range(1, 9)]
+            )
+        )
+        self.assertEqual(len(keys), 5)
+        for i in range(6, 9):
+            self.assertIn(("alg1", f"k{i}"), keys)
+
+    @override_config({"max_one_time_keys_per_device": 5})
+    def test_trim_one_time_keys_task(self) -> None:
+        """The one-off trim task brings devices which are over the limit back down to it"""
+        local_user = "@boris:" + self.hs.hostname
+        device_id = "xyz"
+
+        # Get a device over the limit, as a buggy client could have before the
+        # limit existed, by lifting the limit for the upload.
+        self.store._max_one_time_keys_per_device = 1000
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user,
+                device_id,
+                {"one_time_keys": {f"alg1:k{i}": f"key{i}" for i in range(1, 9)}},
+            )
+        )
+        self.store._max_one_time_keys_per_device = 5
+
+        task_scheduler = self.hs.get_task_scheduler()
+        task_id = self.get_success(task_scheduler.schedule_task("trim_one_time_keys"))
+        # Let the scheduler pick the task up, and the task sleep between batches.
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs() + 60)
+
+        task = self.get_success(task_scheduler.get_task(task_id))
+        assert task is not None
+        self.assertEqual(task.status, TaskStatus.COMPLETE)
+        counts = self.get_success(
+            self.store.count_e2e_one_time_keys(local_user, device_id)
+        )
+        self.assertEqual(counts["alg1"], 5)
 
     def test_fallback_key(self) -> None:
         local_user = "@boris:" + self.hs.hostname

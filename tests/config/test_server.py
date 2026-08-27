@@ -229,6 +229,21 @@ class ServerConfigTestCase(unittest.TestCase):
             with self.assertRaises(ConfigError):
                 _read_config(generate_config(disallowed_value))
 
+    def test_max_one_time_keys_per_device_enforces_positive_int(self) -> None:
+        """
+        Test that the configured maximum number of one-time keys must be a positive
+        value, as a device can never hold fewer than one key
+        """
+
+        def generate_config(value: Any) -> JsonDict:
+            return {"max_one_time_keys_per_device": value}
+
+        _read_config(generate_config(1))
+
+        for disallowed_value in (-1, 0, 0.5):
+            with self.assertRaises(ConfigError):
+                _read_config(generate_config(disallowed_value))
+
     @parameterized.expand(
         [
             [
