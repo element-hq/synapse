@@ -1289,7 +1289,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.helper.send_state(
             room_id1,
             event_type=EventTypes.PowerLevels,
-            body={"users": {user1_id: 50, user2_id: 100}},
+            body={"users": {user1_id: 50}},
             tok=user2_tok,
         )
         self.helper.send_state(
