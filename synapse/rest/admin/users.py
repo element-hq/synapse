@@ -181,13 +181,13 @@ class UsersRestServletV2(RestServlet):
         )
 
         # If support for MSC3866 is not enabled, don't show the approval flag.
-        _filter = None
+        users_filter = None
         if not self._msc3866_enabled:
 
-            def _filter(a: attr.Attribute, _v: Any) -> bool:
+            def users_filter(a: attr.Attribute, _v: Any) -> bool:
                 return a.name != "approved"
 
-        ret = {"users": [attr.asdict(u, filter=_filter) for u in users], "total": total}
+        ret = {"users": [attr.asdict(u, filter=users_filter) for u in users], "total": total}
         if (start + limit) < total:
             ret["next_token"] = str(start + len(users))
 
