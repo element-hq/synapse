@@ -118,7 +118,7 @@ stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 
-# Upgrading to v1.160.0
+# Upgrading to v1.161.0
 
 ## Deprecation of `livekit_service_url`
 
