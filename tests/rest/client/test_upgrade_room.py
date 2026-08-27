@@ -128,13 +128,31 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
         channel = self._upgrade_room(self.other_token)
         self.assertEqual(403, channel.code, channel.result)
 
-        # Increase the power levels so that this user can upgrade.
+        # Raising the power level to 100 (enough to send a tombstone in room
+        # versions before 12) is not sufficient: in room version 12 sending the
+        # tombstone event requires PL 150 by default.
         power_levels = self.helper.get_state(
             self.room_id,
             "m.room.power_levels",
             tok=self.creator_token,
         )
         power_levels["users"][self.other] = 100
+        self.helper.send_state(
+            self.room_id,
+            "m.room.power_levels",
+            body=power_levels,
+            tok=self.creator_token,
+        )
+        channel = self._upgrade_room(self.other_token)
+        self.assertEqual(403, channel.code, channel.result)
+
+        # Increase the power levels so that this user can upgrade.
+        power_levels = self.helper.get_state(
+            self.room_id,
+            "m.room.power_levels",
+            tok=self.creator_token,
+        )
+        power_levels["users"][self.other] = 150
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
@@ -154,13 +172,31 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
         channel = self._upgrade_room(self.other_token)
         self.assertEqual(403, channel.code, channel.result)
 
-        # Increase the power levels so that this user can upgrade.
+        # Raising the power level to 100 (enough to send a tombstone in room
+        # versions before 12) is not sufficient: in room version 12 sending the
+        # tombstone event requires PL 150 by default.
         power_levels = self.helper.get_state(
             self.room_id,
             "m.room.power_levels",
             tok=self.creator_token,
         )
         power_levels["users_default"] = 100
+        self.helper.send_state(
+            self.room_id,
+            "m.room.power_levels",
+            body=power_levels,
+            tok=self.creator_token,
+        )
+        channel = self._upgrade_room(self.other_token)
+        self.assertEqual(403, channel.code, channel.result)
+
+        # Increase the power levels so that this user can upgrade.
+        power_levels = self.helper.get_state(
+            self.room_id,
+            "m.room.power_levels",
+            tok=self.creator_token,
+        )
+        power_levels["users_default"] = 150
         self.helper.send_state(
             self.room_id,
             "m.room.power_levels",
