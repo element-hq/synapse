@@ -250,6 +250,11 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         tok = self.login("summer", "monkey")
         room_id = self.helper.create_room_as(user_id, tok=tok)
 
+        # A second user to assign a power level to. (The room creator must not
+        # appear in the power levels `users` map in room version 12+, as
+        # creators have infinite power.)
+        other_user_id = self.register_user("autumn", "monkey")
+
         # Create and send a non-state event
         content: JsonDict = {"body": "I am a puppet", "msgtype": "m.text"}
         event_dict = {
@@ -282,7 +287,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         # Create and send a state event
         content = {
             "events_default": 0,
-            "users": {user_id: 100},
+            "users": {other_user_id: 100},
             "state_default": 50,
             "users_default": 0,
             "events": {"test.event.type": 25},
