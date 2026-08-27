@@ -374,9 +374,9 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
 
             events.append(event)
 
-        # As per MSC2409, only send private read receipts of users within the
-        # appservice's namespaces (or its sender user).
-        # See https://github.com/matrix-org/matrix-spec-proposals/pull/2409
+        # Private read receipts must only be sent for users matching one of the
+        # appservice's namespaces (or its sender user). See
+        # https://spec.matrix.org/v1.19/application-service-api/#pushing-ephemeral-data
         events = self._filter_private_receipts(events, service.is_interested_in_user)
 
         return events, to_key
