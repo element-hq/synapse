@@ -163,6 +163,10 @@ class _EventRow:
     Properties:
         event_id: The event ID of the event.
 
+        room_id: The ID of the room the event belongs to, as recorded in the
+            `events` table. (The event JSON itself does not necessarily include
+            it: create events in room version 12 and later have no `room_id`.)
+
         stream_ordering: stream ordering for this event
 
         json: json-encoded event structure
@@ -190,6 +194,7 @@ class _EventRow:
     """
 
     event_id: str
+    room_id: str
     stream_ordering: int
     instance_name: str
     json: str
@@ -1468,7 +1473,7 @@ class EventsWorkerStore(SQLBaseStore):
                 #
                 if d["type"] != EventTypes.Member:
                     raise InvalidEventError(
-                        "Room %s for event %s is unknown" % (d["room_id"], event_id)
+                        "Room %s for event %s is unknown" % (row.room_id, event_id)
                     )
 
                 # so, assuming this is an out-of-band-invite that arrived before
@@ -1499,7 +1504,7 @@ class EventsWorkerStore(SQLBaseStore):
                     logger.warning(
                         "Event %s in room %s has unknown room version %s",
                         event_id,
-                        d["room_id"],
+                        row.room_id,
                         room_version_id,
                     )
                     continue
@@ -1509,7 +1514,7 @@ class EventsWorkerStore(SQLBaseStore):
                         "Event %s in room %s with version %s has wrong format: "
                         "expected %s, was %s",
                         event_id,
-                        d["room_id"],
+                        row.room_id,
                         room_version_id,
                         room_version.event_format,
                         format_version,
@@ -1538,7 +1543,7 @@ class EventsWorkerStore(SQLBaseStore):
                 # it's difficult to see what to do here. Pretty much all bets are off
                 # if Synapse cannot rely on the consistency of its database.
                 raise DatabaseCorruptionError(
-                    d["room_id"], event_id, original_ev.event_id
+                    row.room_id, event_id, original_ev.event_id
                 )
 
             event_map[event_id] = original_ev
@@ -1621,7 +1626,8 @@ class EventsWorkerStore(SQLBaseStore):
                   ej.format_version,
                   r.room_version,
                   rej.reason,
-                  e.outlier
+                  e.outlier,
+                  e.room_id
                 FROM events AS e
                   JOIN event_json AS ej USING (event_id)
                   LEFT JOIN rooms r ON r.room_id = e.room_id
@@ -1649,6 +1655,7 @@ class EventsWorkerStore(SQLBaseStore):
                     unconfirmed_redactions=[],
                     confirmed_redactions=[],
                     outlier=bool(row[8]),  # This is an int in SQLite3
+                    room_id=row[9],
                 )
 
             # check for redactions
