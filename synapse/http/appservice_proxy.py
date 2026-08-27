@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from twisted.python import failure
 from twisted.web.http_headers import Headers
@@ -40,7 +40,7 @@ async def proxy_request_to_appservice(
     request: SynapseRequest,
     hs: "HomeServer",
     appservice: ApplicationService,
-    body_producer: IBodyProducer,
+    body_producer: Optional[IBodyProducer],
     extra_request_headers: dict[bytes, bytes] | None = None,
 ) -> None:
     """Forward the given request to an application service's proxy URL and stream
@@ -51,7 +51,8 @@ async def proxy_request_to_appservice(
         hs: The homeserver.
         appservice: The application service to forward the request to. Must have
             `proxy_url` and `hs_token` set.
-        body_producer: A producer for the request body to forward.
+        body_producer: A producer for the request body to forward, or None if the
+            request has no body to forward.
         extra_request_headers: Additional headers to set on the outbound request,
             beyond those copied from the original request.
     """

@@ -46,16 +46,18 @@ def _make_proxy_callback(
     """
 
     async def _proxy(request: SynapseRequest, **kwargs: str) -> None:
-        raw_body = request.content.read()  # type: ignore[union-attr]
-
+        body_producer = None
         content = None
+
         if request.method in (b"PUT", b"POST"):
+            raw_body = request.content.read()  # type: ignore[union-attr]
             try:
                 content = json_decoder.decode(raw_body.decode("utf-8"))
             except Exception:
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST, "Content not JSON.", Codes.NOT_JSON
                 )
+            body_producer = QuieterFileBodyProducer(BytesIO(raw_body))
 
         origin = await authenticator.authenticate_request(request, content)
 
@@ -72,7 +74,7 @@ def _make_proxy_callback(
                 request,
                 hs,
                 appservice,
-                QuieterFileBodyProducer(BytesIO(raw_body)),
+                body_producer,
                 extra_request_headers={b"X-Matrix-Origin": origin.encode("ascii")},
             )
 
