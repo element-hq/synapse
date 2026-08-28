@@ -576,7 +576,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         # Check if the room_id is in `get_partial_current_state_ids` cache, if
         # so, we can use that to avoid a DB query.
         room_state = self.get_partial_current_state_ids.cache.get_immediate(
-            (room_id,), None, update_metrics=False
+            room_id, None, update_metrics=False
         )
         if room_state is not None:
             return {

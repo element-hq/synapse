@@ -36,6 +36,7 @@ from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
+from tests.storage.databases.main.test_events_worker import LoggingContext
 from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
@@ -715,6 +716,41 @@ class StateStoreTestCase(HomeserverTestCase):
             self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
         )
         self.assertEqual(dict(state), {(EventTypes.Name, ""): name2.event_id})
+
+    def test_get_partial_filtered_current_state_ids_uses_full_cache(self) -> None:
+        """Test that fetching a single state key from a room with a full cache
+        hits the full cache and does not go to the database."""
+
+        room_id = self.room.to_string()
+
+        create = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Create, "", {}
+        )
+        name = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Name, "", {"name": "test room"}
+        )
+
+        # prime the full cache
+        state_filter = StateFilter.all()
+        state = self.get_success(
+            self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+        )
+        self.assertEqual(
+            dict(state),
+            {
+                (EventTypes.Create, ""): create.event_id,
+                (EventTypes.Name, ""): name.event_id,
+            },
+        )
+
+        # now fetch a single key and check that it hits the full cache
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
+            state_filter = StateFilter.from_types([(EventTypes.Name, "")])
+            state = self.get_success(
+                self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+            )
+            self.assertEqual(dict(state), {(EventTypes.Name, ""): name.event_id})
+            self.assertEqual(ctx.get_resource_usage().db_txn_count, 0)
 
 
 class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
