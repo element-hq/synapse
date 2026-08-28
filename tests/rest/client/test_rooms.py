@@ -2566,9 +2566,9 @@ class RoomDelayedEventTestCase(RoomBase):
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            Codes.FORBIDDEN,
+            "ORG.MATRIX.MSC4140_DELAY_TOO_LARGE",
             channel.json_body.get("errcode"),
             channel.json_body,
         )

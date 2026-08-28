@@ -33,6 +33,12 @@ def run_make_full_schema(output_dir: Path) -> None:
         sys.exit(1)
 
     cmd: list[str] = [
+        # Use faketime here for schema deltas that are wall-clock sensitive under SQLite
+        # We must only use faketime at this level because freezing the clock
+        # seems to cause `poetry install` to hang when recompiling our Rust module
+        "faketime",
+        "-f",
+        "2001-05-25 12:42:42",
         "poetry",
         "run",
         str(MAKE_FULL_SCHEMA_SCRIPT),
