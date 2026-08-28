@@ -49,6 +49,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
     make_in_list_sql_clause,
+    make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
@@ -536,7 +537,84 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return frozenset(event_id for (event_id,) in rows)
 
-    # FIXME: how should this be cached?
+    @cached(max_entries=100000, tree=True)
+    async def _get_current_state_event_id(
+        self, room_id: str, event_type_and_state_key: tuple[str, str]
+    ) -> str | None:
+        """Get the event ID of the given piece of current state in the room.
+
+        Returns None if there is no such event in the current state.
+        """
+        return await self.db_pool.simple_select_one_onecol(
+            table="current_state_events",
+            keyvalues={
+                "room_id": room_id,
+                "type": event_type_and_state_key[0],
+                "state_key": event_type_and_state_key[1],
+            },
+            retcol="event_id",
+            allow_none=True,
+            desc="_get_current_state_event_id",
+        )
+
+    @cachedList(
+        cached_method_name="_get_current_state_event_id",
+        list_name="event_types_and_state_keys",
+        num_args=2,
+    )
+    async def _get_current_state_event_ids(
+        self, room_id: str, event_types_and_state_keys: Collection[tuple[str, str]]
+    ) -> Mapping[tuple[str, str], str | None]:
+        """Bulk version of `_get_current_state_event_id`.
+
+        Types/state keys that aren't in the room's current state map to None, so
+        that their absence gets cached too.
+        """
+        if not event_types_and_state_keys:
+            return {}
+
+        # Check if the room_id is in `get_partial_current_state_ids` cache, if
+        # so, we can use that to avoid a DB query.
+        room_state = self.get_partial_current_state_ids.cache.get_immediate(
+            (room_id,), None, update_metrics=False
+        )
+        if room_state is not None:
+            return {
+                (intern_string(typ), intern_string(state_key)): room_state.get(
+                    (typ, state_key)
+                )
+                for typ, state_key in event_types_and_state_keys
+            }
+
+        def _get_current_state_event_ids_txn(
+            txn: LoggingTransaction,
+        ) -> dict[tuple[str, str], str | None]:
+            results: dict[tuple[str, str], str | None] = {
+                (intern_string(typ), intern_string(state_key)): None
+                for typ, state_key in event_types_and_state_keys
+            }
+
+            for batch in batch_iter(event_types_and_state_keys, 500):
+                clause, args = make_tuple_in_list_sql_clause(
+                    self.database_engine, ("type", "state_key"), batch
+                )
+
+                sql = f"""
+                    SELECT type, state_key, event_id FROM current_state_events
+                    WHERE room_id = ? AND {clause}
+                """
+
+                txn.execute(sql, [room_id, *args])
+
+                for typ, state_key, event_id in txn:
+                    results[(intern_string(typ), intern_string(state_key))] = event_id
+
+            return results
+
+        return await self.db_pool.runInteraction(
+            "_get_current_state_event_ids", _get_current_state_event_ids_txn
+        )
+
     @cancellable
     async def get_partial_filtered_current_state_ids(
         self, room_id: str, state_filter: StateFilter | None = None
@@ -558,11 +636,25 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         if state_filter is None:
             state_filter = StateFilter.all()
 
-        where_clause, where_args = (state_filter).make_sql_filter_clause()
-
-        if not where_clause:
-            # We delegate to the cached version
+        # First we check if we can delegate to one of the cached functions.
+        if state_filter.is_full():
             return await self.get_partial_current_state_ids(room_id)
+
+        if not state_filter.has_wildcards():
+            results = StateMapWrapper(state_filter=state_filter)
+
+            concrete_types = state_filter.concrete_types()
+            if not concrete_types:
+                # The filter matches nothing.
+                return results
+
+            ids = await self._get_current_state_event_ids(room_id, concrete_types)
+            results.update(
+                (key, event_id) for key, event_id in ids.items() if event_id is not None
+            )
+            return results
+
+        where_clause, where_args = (state_filter).make_sql_filter_clause()
 
         def _get_filtered_current_state_ids_txn(
             txn: LoggingTransaction,
