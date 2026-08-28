@@ -5005,6 +5005,15 @@ properties:
 
       Note that this option will only affect rooms created after it is set. It
       will also not affect rooms created by other servers.
+
+
+      A client may supply its own `m.room.encryption` event in the
+      `initial_state` of its `/createRoom` request. If that event is valid (it
+      specifies an `algorithm` as a string), it takes precedence and this option
+      will not overwrite it, allowing the client to, for example, choose a
+      different encryption algorithm. An empty or otherwise invalid
+      `m.room.encryption` event does not disable forced encryption: the default
+      will still be applied on top of it.
     enum:
       - all
       - invite

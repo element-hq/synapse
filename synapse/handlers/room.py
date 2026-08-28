@@ -1786,10 +1786,20 @@ class RoomCreationHandler:
             )
             events_to_send.append((event, context))
 
+        # If the client supplied its own `m.room.encryption` event in the
+        # initial state, only let it take precedence over the forced default
+        # if it is valid (i.e. specifies an `algorithm` as a string, as
+        # required by the spec). This prevents a client from bypassing forced
+        # encryption entirely by supplying an empty or malformed event.
+        supplied_encryption = initial_state.get((EventTypes.RoomEncryption, ""))
+        supplied_encryption_is_valid = isinstance(supplied_encryption, dict) and (
+            isinstance(supplied_encryption.get("algorithm"), str)
+        )
+
         if (
             preset_config["encrypted"]
             and not ignore_forced_encryption
-            and (EventTypes.RoomEncryption, "") not in initial_state
+            and not supplied_encryption_is_valid
         ):
             encryption_event, encryption_context = await create_event(
                 EventTypes.RoomEncryption,
