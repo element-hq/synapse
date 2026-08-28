@@ -830,7 +830,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(create_event.user_id, user_id)  # type: ignore[attr-defined]
 
         # The event supports looking up keys via `__getitem__` although deprecated
-        self.assertEqual(create_event["room_id"], room_id)  # type: ignore[index]
+        self.assertEqual(create_event["sender"], user_id)  # type: ignore[index]
 
 
 class ModuleApiWorkerTestCase(BaseModuleApiTestCase, BaseMultiWorkerStreamTestCase):
