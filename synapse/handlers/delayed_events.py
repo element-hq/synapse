@@ -373,7 +373,7 @@ class DelayedEventsHandler:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 f"The requested delay ({requested_delay}ms) exceeds the allowed maximum ({max_delay}ms)",
-                "ORG.MATRIX.MSC4140_DELAY_TOO_LARGE",
+                Codes.DELAY_TOO_LARGE,
             )
 
         self._event_creation_handler.validator.validate_builder(
