@@ -11,11 +11,8 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Remove any rows `e2e_cross_signing_signatures` that have duplicate cross-signing signatures.
--- Ensures that rows are unique across `(user_id, target_user_id, target_device_id, key_id)`, so that
--- we can create an index on those columns. See
--- `./10_e2e_cross_signing_signatures_add_key_id_to_index.sql`, which adds said
--- index.
-        
+-- Adds the `key_id` to the e2e_cross_signing_signatures index, since the
+-- ("user_id", "key_id", "target_user_id", "target_device_id") should be
+-- unique.
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9409, 'e2e_cross_signing_signatures_remove_duplicates', '{}');
+  (9410, 'e2e_cross_signing_signatures_add_key_id_to_index', '{}');
