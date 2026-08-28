@@ -20,6 +20,8 @@
 #
 from unittest import mock
 
+from parameterized import parameterized
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import AuthError, StoreError
@@ -772,7 +774,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         # Make sure we processed and persisted the pulled event
         self.get_success(main_store.get_event(pulled_event.event_id, allow_none=False))
 
-    def test_process_pulled_event_with_rejected_missing_state(self) -> None:
+    @parameterized.expand([("v11", "11"), ("v12", "12")])
+    def test_process_pulled_event_with_rejected_missing_state(
+        self, _name: str, room_version_id: str
+    ) -> None:
         """Ensure that we correctly handle pulled events with missing state containing a
         rejected state event
 
@@ -822,13 +827,22 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         main_store = self.hs.get_datastores().main
         state_deletion_store = self.hs.get_datastores().state_deletion
 
-        # Create the room.
-        kermit_user_id = self.register_user("kermit", "test")
-        kermit_tok = self.login("kermit", "test")
+        # Create the room as a dedicated creator, so that kermit and the remote user
+        # can be given equal power levels below.
+        creator_user_id = self.register_user("creator", "test")
+        creator_tok = self.login("creator", "test")
         room_id = self.helper.create_room_as(
-            room_creator=kermit_user_id, tok=kermit_tok
+            room_creator=creator_user_id,
+            tok=creator_tok,
+            room_version=room_version_id,
+            is_public=True,
         )
         room_version = self.get_success(main_store.get_room_version(room_id))
+
+        # Add kermit, the local user who will send the "good" power levels event.
+        kermit_user_id = self.register_user("kermit", "test")
+        kermit_tok = self.login("kermit", "test")
+        self.helper.join(room_id, user=kermit_user_id, tok=kermit_tok)
 
         # Add another local user to the room. This user is going to be kicked in a
         # rejected event.
@@ -841,11 +855,15 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         # need state resolution to order it before another power levels event kermit is
         # going to send later on. Hence we give both users the same power level, so that
         # ties are broken by `origin_server_ts`.
+        pl_users = {kermit_user_id: 100, OTHER_USER: 100}
+        if not room_version.msc4289_creator_power_enabled:
+            # Older room versions list the creator's power level explicitly.
+            pl_users[creator_user_id] = 100
         self.helper.send_state(
             room_id,
             "m.room.power_levels",
-            {"users": {kermit_user_id: 100, OTHER_USER: 100}},
-            tok=kermit_tok,
+            {"users": pl_users},
+            tok=creator_tok,
         )
 
         # Add the remote user to the room.
@@ -858,6 +876,10 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
         create_event = self.get_success(
             main_store.get_event(initial_state_map[("m.room.create", "")])
+        )
+        # Only older room versions list the create event in `auth_events`.
+        create_event_auth = (
+            [] if room_version.msc4291_room_ids_as_hashes else [create_event.event_id]
         )
         bert_member_event = self.get_success(
             main_store.get_event(initial_state_map[("m.room.member", bert_user_id)])
@@ -883,7 +905,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [other_member_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
+                        *create_event_auth,
                         initial_state_map[("m.room.power_levels", "")],
                         # The event will be rejected because of the duplicated auth
                         # event.
@@ -932,7 +954,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_power_levels_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
+                        *create_event_auth,
                         rejected_power_levels_event.event_id,
                         initial_state_map[("m.room.member", bert_user_id)],
                         initial_state_map[("m.room.member", OTHER_USER)],
@@ -1010,7 +1032,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 self.helper.send_state(
                     room_id,
                     "m.room.power_levels",
-                    {"users": {kermit_user_id: 100, OTHER_USER: 100, bert_user_id: 1}},
+                    {"users": {**pl_users, bert_user_id: 1}},
                     tok=kermit_tok,
                 )["event_id"]
             )
@@ -1046,7 +1068,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_kick_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
+                        *create_event_auth,
                         initial_state_map[("m.room.power_levels", "")],
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],
@@ -1074,7 +1096,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         missing_event.event_id,
                     ],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
+                        *create_event_auth,
                         new_power_levels_event.event_id,
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],
