@@ -1,0 +1,1 @@
+Catch up [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) to remote homeservers that have missed them.
