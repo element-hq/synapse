@@ -33,7 +33,6 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, JoinRules, RoomEncryptionAlgorithms
 from synapse.api.errors import NotFoundError, SynapseError
-from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase, make_event_from_dict
@@ -671,22 +670,17 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
     def _build_public_room(self) -> StateMap[EventBase]:
         """Build a public room DAG that has REMOTE1 in it"""
 
-        room_id = f"!room:{self.REMOTE1_SERVER_NAME}"
-        room_version = RoomVersions.V10
+        room_version = self.hs.config.server.default_room_version
 
         events: list[EventBase] = []
 
         # First we make the create event
         create_event_dict: JsonDict = {
             "auth_events": [],
-            "content": {
-                "creator": self.REMOTE1_USER,
-                "room_version": room_version.identifier,
-            },
+            "content": {"room_version": room_version.identifier},
             "depth": 0,
             "origin_server_ts": 0,
             "prev_events": [],
-            "room_id": room_id,
             "sender": self.REMOTE1_USER,
             "state_key": "",
             "type": EventTypes.Create,
@@ -701,12 +695,11 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
 
         create_event = make_event_from_dict(create_event_dict, room_version)
         events.append(create_event)
+        # The room ID is derived from the create event.
+        room_id = create_event.room_id
 
-        room_version = self.hs.config.server.default_room_version
         join_event_dict: JsonDict = {
-            "auth_events": [
-                create_event.event_id,
-            ],
+            "auth_events": [],
             "content": {"membership": "join"},
             "depth": 1,
             "origin_server_ts": 100,
@@ -727,7 +720,7 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
 
         # Then set the join rules to public
         join_rules_event_dict: JsonDict = {
-            "auth_events": [create_event.event_id, join_event.event_id],
+            "auth_events": [join_event.event_id],
             "content": {"join_rule": JoinRules.PUBLIC},
             "depth": 2,
             "origin_server_ts": 200,
@@ -760,12 +753,9 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
 
         latest_event = max(state.values(), key=lambda e: e.depth)
 
-        room_version = self.hs.config.server.default_room_version
+        room_version = state[(EventTypes.Create, "")].room_version
         join_event_dict: JsonDict = {
-            "auth_events": [
-                state[(EventTypes.Create, "")].event_id,
-                state[(EventTypes.JoinRules, "")].event_id,
-            ],
+            "auth_events": [state[(EventTypes.JoinRules, "")].event_id],
             "content": {"membership": "join"},
             "depth": latest_event.depth + 1,
             "origin_server_ts": latest_event.origin_server_ts + 100,
