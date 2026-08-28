@@ -33,9 +33,13 @@ from synapse.api.constants import (
     ReceiptTypes,
     RelationTypes,
 )
+from synapse.events import EventBase
+from synapse.replication.tcp.resource import _batch_updates
+from synapse.replication.tcp.streams.events import EventsStream
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -44,6 +48,7 @@ from tests.federation.transport.test_knocking import (
 )
 from tests.rest.client.test_rooms import make_request_with_cancellation_test
 from tests.server import TimedOutException
+from tests.test_utils.event_injection import create_event, inject_event
 
 logger = logging.getLogger(__name__)
 
@@ -1272,3 +1277,411 @@ class SyncCancellationTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+
+class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
+    """Tests for the MSC4222 invariant that any state event served in a sync
+    response's *timeline* is reflected in `state_after` (unless it lost state
+    resolution): `state at since` + `state_after` must equal the state at the
+    end of the timeline. See
+    https://github.com/matrix-org/matrix-spec-proposals/pull/4222.
+
+    This breaks when the `since` token falls inside a persist batch: the
+    `current_state_delta_stream` row for a state event persisted in a batch is
+    stamped with the *minimum* stream ordering of the batch, so such a token
+    selects the event for the timeline but not its delta. A worker reading the
+    events stream from replication routinely observes such a token, which is
+    why this is seen on worker deployments and not on a single process.
+
+    The remaining tests guard that whatever repairs this reports the *resolved*
+    state at the end of the timeline rather than replaying the timeline.
+
+    The first two tests are storage- and replication-level and would normally
+    live under `tests/storage/` / `tests/replication/`; they are kept here
+    deliberately, as the documented preconditions of the end-to-end tests
+    beside them (with which they share the `_persist_batch` helper).
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.persistence = hs.get_storage_controllers().persistence
+        assert self.persistence is not None
+
+        self.alice = self.register_user("alice", "password")
+        self.alice_tok = self.login("alice", "password")
+        self.bob = self.register_user("bob", "password")
+        self.bob_tok = self.login("bob", "password")
+
+        self.get_success(
+            self.store.set_features_for_user(
+                self.alice, {ExperimentalFeature.MSC4222: True}
+            )
+        )
+
+        # Named room, so that hero calculation doesn't inject current
+        # membership state into the response and confuse the assertions.
+        self.room_id = self.helper.create_room_as(
+            self.alice, tok=self.alice_tok, extra_content={"name": "test room"}
+        )
+        self.helper.join(self.room_id, self.bob, tok=self.bob_tok)
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    def _sync_url(self, lazy_load_members: bool, timeline_limit: int = 10) -> str:
+        # The default `timeline_limit` of 10 is arbitrary: comfortably more
+        # events than any test here produces between syncs, so the timeline is
+        # never truncated unless a test passes a smaller limit on purpose.
+        sync_filter: JsonDict = {"room": {"timeline": {"limit": timeline_limit}}}
+        if lazy_load_members:
+            sync_filter["room"]["state"] = {"lazy_load_members": True}
+        return f"/sync?filter={json.dumps(sync_filter)}&org.matrix.msc4222.use_state_after=true"
+
+    def _sync(self, sync_url: str, since: str | None = None) -> JsonDict:
+        url = sync_url if since is None else f"{sync_url}&since={since}"
+        channel = self.make_request("GET", url, access_token=self.alice_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel.json_body
+
+    def _joined_room(self, response: JsonDict) -> JsonDict:
+        rooms = response["rooms"].get("join", {})
+        self.assertIn(self.room_id, rooms, f"room missing from sync: {response}")
+        return rooms[self.room_id]
+
+    def _timeline_ids(self, room: JsonDict) -> list[str]:
+        return [e["event_id"] for e in room["timeline"]["events"]]
+
+    def _state_after_ids(self, room: JsonDict) -> list[str]:
+        return [e["event_id"] for e in room["org.matrix.msc4222.state_after"]["events"]]
+
+    def _persist_batch(self) -> tuple[EventBase, EventBase]:
+        """Persist a message and a state event in a *single* persist batch
+        (a single `_persist_events_and_state_updates` call), with the message
+        first, so that the message's stream ordering is the batch minimum."""
+        assert self.persistence is not None
+        prev_event_ids = self.get_success(
+            self.store.get_prev_events_for_room(self.room_id)
+        )
+
+        message, message_ctx = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.room.message",
+                sender=self.alice,
+                content={"msgtype": "m.text", "body": "batched message"},
+                prev_event_ids=prev_event_ids,
+            )
+        )
+        state_event, state_ctx = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.call.member",
+                state_key=self.alice,
+                sender=self.alice,
+                content={"memberships": [{"device_id": "BATCHED"}]},
+                prev_event_ids=prev_event_ids,
+            )
+        )
+
+        self.get_success(
+            self.persistence.persist_events(
+                [(message, message_ctx), (state_event, state_ctx)]
+            )
+        )
+        return message, state_event
+
+    def _assert_state_after_is_current_state(self, room: JsonDict) -> None:
+        """For a joined room `end_token` is the global `now_token`, so every
+        entry in `state_after` must be the room's current state for that key.
+
+        This is the guard against "fix" shapes that seed `state_after` straight
+        from the timeline: a state event can be in the timeline and *not* be the
+        state at the end of it.
+        """
+        current_state = self.get_success(
+            self.store.get_partial_current_state_ids(self.room_id)
+        )
+        current_ids = set(current_state.values())
+        for event in room["org.matrix.msc4222.state_after"]["events"]:
+            self.assertIn(
+                event["event_id"],
+                current_ids,
+                f"state_after reports {event['type']}/{event['state_key']} = "
+                f"{event['event_id']}, which is not the current state "
+                f"({current_state.get((event['type'], event['state_key']))})",
+            )
+
+    # ------------------------------------------------------------------
+    # The persist-batch window
+    # ------------------------------------------------------------------
+
+    def test_state_delta_stream_id_of_batched_state_event(self) -> None:
+        """Documents that `current_state_delta_stream.stream_id` for a state
+        event persisted in a batch is the *minimum* stream ordering of the batch
+        (see `_persist_events_txn`: `min_stream_order`), not the state event's
+        own stream ordering.
+
+        This is the storage-level precondition for the "timeline has it,
+        state_after doesn't" symptom: any sync token that falls strictly between
+        the batch minimum and the state event's stream ordering will put the
+        state event in the timeline while excluding its delta.
+        """
+        message, state_event = self._persist_batch()
+
+        message_pos = message.internal_metadata.stream_ordering
+        state_pos = state_event.internal_metadata.stream_ordering
+        assert message_pos is not None and state_pos is not None
+        self.assertLess(message_pos, state_pos)
+
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="current_state_delta_stream",
+                keyvalues={"room_id": self.room_id, "type": "m.call.member"},
+                retcols=("stream_id", "event_id", "instance_name"),
+                desc="test_state_delta_stream_id",
+            )
+        )
+        self.assertEqual(len(rows), 1, rows)
+        delta_stream_id, delta_event_id, _instance_name = rows[0]
+        self.assertEqual(delta_event_id, state_event.event_id)
+
+        self.assertEqual(
+            delta_stream_id,
+            message_pos,
+            "expected the delta to be recorded at the batch minimum",
+        )
+
+        deltas = self.get_success(
+            self.store.get_current_state_deltas_for_room(
+                self.room_id,
+                from_token=RoomStreamToken(stream=message_pos),
+                to_token=RoomStreamToken(stream=state_pos),
+            )
+        )
+        self.assertEqual(
+            [d.event_id for d in deltas],
+            [],
+            "state delta unexpectedly visible in (message_pos, state_pos]",
+        )
+
+    def test_state_after_with_token_inside_persist_batch(self) -> None:
+        """The end-to-end consequence of the above: if a client's `since` token
+        lands strictly inside a persist batch (which a *reader* worker can
+        observe, because it advances its events-stream position from replication
+        RDATA batches that may split a persist batch), the state event is in the
+        timeline of the next sync and must also be in `state_after`.
+        """
+        sync_url = self._sync_url(lazy_load_members=False)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        # A token positioned just after the message but before the state event
+        # -- i.e. in the middle of the persist batch.
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+
+        deltas_up_to_split = self.get_success(
+            self.store.get_current_state_deltas_for_room(
+                self.room_id,
+                from_token=base_token.room_key,
+                to_token=RoomStreamToken(stream=message_pos),
+            )
+        )
+        self.assertIn(
+            state_event.event_id,
+            [d.event_id for d in deltas_up_to_split],
+            "expected the delta to be visible *before* its event",
+        )
+
+        split_since = self.get_success(split_token.to_string(self.store))
+        room = self._joined_room(self._sync(sync_url, split_since))
+        self.assertIn(state_event.event_id, self._timeline_ids(room))
+        self.assertIn(
+            state_event.event_id,
+            self._state_after_ids(room),
+            f"state event in timeline but missing from state_after when the "
+            f"since token splits a persist batch: {room}",
+        )
+
+    def test_events_replication_stream_splits_persist_batches(self) -> None:
+        """Shows that the `since` token used by
+        `test_state_after_with_token_inside_persist_batch` is one a real
+        deployment hands out.
+
+        The events replication stream emits a distinct token for every event
+        stream ordering (`_batch_updates` only collapses rows that share a
+        token), and `_process_rdata` calls `on_rdata` -- and hence
+        `process_replication_position` -- once per token. So a reader worker
+        (e.g. a sync worker) advances its events-stream position *through* the
+        middle of a persist batch, one event at a time, while reading
+        `current_state_delta_stream` straight from the database.
+        """
+        before = self.store.get_room_max_token().stream
+        message, state_event = self._persist_batch()
+        after = self.store.get_room_max_token().stream
+
+        message_pos = message.internal_metadata.stream_ordering
+        state_pos = state_event.internal_metadata.stream_ordering
+        assert message_pos is not None and state_pos is not None
+
+        stream = EventsStream(self.hs)
+        updates, _upto, _limited = self.get_success(
+            # A limit of 100 is comfortably more than the handful of rows this
+            # test persists, so the update batch is never truncated.
+            stream._update_function("master", before, after, 100)
+        )
+
+        # The tokens a reader will actually advance to, in order.
+        delivered = [token for token, _row in _batch_updates(updates) if token]
+
+        self.assertIn(
+            message_pos,
+            delivered,
+            "a reader worker advances to the batch minimum before it sees the "
+            "state event",
+        )
+        self.assertIn(state_pos, delivered)
+        self.assertLess(delivered.index(message_pos), delivered.index(state_pos))
+
+    # ------------------------------------------------------------------
+    # Guards: `state_after` must be the *resolved* state, not a replay of
+    # the timeline
+    # ------------------------------------------------------------------
+
+    def test_state_res_loser_alone_in_timeline(self) -> None:
+        """A state event that appears in the timeline but *loses* state
+        resolution must not be reported in `state_after` -- `state_after` is
+        the resolved state at the end of the timeline, not a replay of the
+        timeline.
+
+        Here the client has already synced past the first of two conflicting
+        events, so the second one arrives alone in the timeline with no delta of
+        its own.
+        """
+        sync_url = self._sync_url(lazy_load_members=False)
+
+        fork_point = self.get_success(self.store.get_prev_events_for_room(self.room_id))
+
+        # Pin the state resolution outcome: conflicted events at the same
+        # mainline position are applied in `(origin_server_ts, event_id)`
+        # order with the last application winning, so giving the first event
+        # the later timestamp makes it deterministically beat the second one.
+        now = self.clock.time_msec()
+
+        first = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.call.member",
+                state_key=self.alice,
+                sender=self.alice,
+                content={"memberships": [{"device_id": "FIRST"}]},
+                prev_event_ids=fork_point,
+                origin_server_ts=now + 1000,
+            )
+        )
+
+        # The client syncs past the first event.
+        since = self._sync(sync_url)["next_batch"]
+
+        # A conflicting event forked off the same point arrives afterwards.
+        second = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.call.member",
+                state_key=self.alice,
+                sender=self.alice,
+                content={"memberships": [{"device_id": "SECOND"}]},
+                prev_event_ids=fork_point,
+                origin_server_ts=now,
+            )
+        )
+
+        current_state = self.get_success(
+            self.store.get_partial_current_state_ids(self.room_id)
+        )
+        self.assertEqual(
+            current_state[("m.call.member", self.alice)],
+            first.event_id,
+            "test setup: expected the first event to win state resolution",
+        )
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self.assertIn(second.event_id, self._timeline_ids(room))
+        self._assert_state_after_is_current_state(room)
+        self.assertNotIn(
+            second.event_id,
+            self._state_after_ids(room),
+            "a state-res loser leaked into state_after",
+        )
+
+    def test_state_after_is_current_state_with_split_token(self) -> None:
+        """Whatever mechanism repairs the persist-batch window must not report
+        anything other than the state at the end of the timeline."""
+        sync_url = self._sync_url(lazy_load_members=False)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+        since = self.get_success(split_token.to_string(self.store))
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self._assert_state_after_is_current_state(room)
+        self.assertIn(state_event.event_id, self._state_after_ids(room))
+
+    def test_gappy_timeline_with_split_token(self) -> None:
+        """The gappy variant of the persist-batch window: the `since` token
+        splits a persist batch *and* the timeline is truncated so that the
+        state event falls outside the window. The state event is then in
+        neither the timeline nor the deltas, but it is a state change since
+        `since`, so `state_after` must still report it -- with `limited: true`
+        the client relies entirely on `state_after` to bridge the gap.
+        """
+        sync_url = self._sync_url(lazy_load_members=False, timeline_limit=3)
+        base = self._sync(sync_url)["next_batch"]
+        base_token = self.get_success(StreamToken.from_string(self.store, base))
+
+        message, state_event = self._persist_batch()
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        # Push the state event out of the timeline window.
+        for i in range(10):
+            self.helper.send(self.room_id, body=f"filler {i}", tok=self.bob_tok)
+
+        split_token = base_token.copy_and_replace(
+            StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+        )
+        since = self.get_success(split_token.to_string(self.store))
+
+        room = self._joined_room(self._sync(sync_url, since))
+        self.assertTrue(room["timeline"].get("limited"), room)
+        self.assertNotIn(state_event.event_id, self._timeline_ids(room))
+        self.assertIn(
+            state_event.event_id,
+            self._state_after_ids(room),
+            f"state event outside a truncated timeline is missing from "
+            f"state_after when the since token splits a persist batch: {room}",
+        )
