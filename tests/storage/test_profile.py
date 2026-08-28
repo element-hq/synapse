@@ -19,8 +19,12 @@
 #
 #
 
+from http import HTTPStatus
+
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import ProfileFields
+from synapse.api.errors import StoreError
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine
@@ -39,7 +43,13 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
     def test_displayname(self) -> None:
         self.get_success(self.store.create_profile(self.u_frank))
 
-        self.get_success(self.store.set_profile_displayname(self.u_frank, "Frank"))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Frank",
+            )
+        )
 
         self.assertEqual(
             "Frank",
@@ -47,7 +57,13 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         )
 
         # test set to None
-        self.get_success(self.store.set_profile_displayname(self.u_frank, None))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value=None,
+            )
+        )
 
         self.assertIsNone(
             self.get_success(self.store.get_profile_displayname(self.u_frank))
@@ -57,7 +73,11 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         self.get_success(self.store.create_profile(self.u_frank))
 
         self.get_success(
-            self.store.set_profile_avatar_url(self.u_frank, "http://my.site/here")
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://my.site/here",
+            )
         )
 
         self.assertEqual(
@@ -66,11 +86,31 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         )
 
         # test set to None
-        self.get_success(self.store.set_profile_avatar_url(self.u_frank, None))
+        self.get_success(
+            self.store.set_profile_field(
+                user_id=self.u_frank,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value=None,
+            )
+        )
 
         self.assertIsNone(
             self.get_success(self.store.get_profile_avatar_url(self.u_frank))
         )
+
+    def test_get_profile_field_without_profile(self) -> None:
+        """
+        Getting a custom profile field for a user that has no row in the
+        `profiles` table at all should raise a 404.
+
+        Regression test (we previously would trigger an unhandled exception).
+        Can happen for users whose profile was erased upon deactivation.
+        """
+        f = self.get_failure(
+            self.store.get_profile_field(self.u_frank, "org.example.field"),
+            StoreError,
+        )
+        self.assertEqual(f.value.code, HTTPStatus.NOT_FOUND)
 
     def test_profiles_bg_migration(self) -> None:
         """

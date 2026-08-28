@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, NewType
 
 import attr
 
-from synapse.api.errors import NotFoundError
+from synapse.api.errors import LimitExceededError, NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -28,6 +28,7 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
@@ -61,6 +62,33 @@ class EventDetails:
 class DelayedEventDetails(EventDetails):
     delay_id: DelayID
     user_localpart: UserLocalpart
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class DelayedEventResponse:
+    """The representation of a delayed event in API format."""
+
+    delay_id: str
+    room_id: str
+    type: str
+    state_key: str | None
+    delay_ms: int
+    delayed_since_ts: int
+    content: JsonDict = attr.ib(converter=db_to_json)
+
+    def asdict(self) -> JsonDict:
+        return attr.asdict(self, filter=lambda _attr, v: v is not None)
+
+
+# TODO: Remove this class once the response format is stable
+class DelayedEventResponseLegacyCompat(DelayedEventResponse):
+    """For backwards compatibility with field names from earlier revisions of MSC4140."""
+
+    def asdict(self) -> JsonDict:
+        return super().asdict() | {
+            "delay": self.delay_ms,
+            "running_since": self.delayed_since_ts,
+        }
 
 
 class DelayedEventsStore(SQLBaseStore):
@@ -122,20 +150,84 @@ class DelayedEventsStore(SQLBaseStore):
         state_key: str | None,
         origin_server_ts: int | None,
         content: JsonDict,
-        delay: int,
+        delay: Duration,
         sticky_duration_ms: int | None,
+        limit: int,
     ) -> tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
 
+        Args:
+            user_localpart: The localpart of the requester of the delayed event, who will be its owner.
+            device_id: The device ID of the requester.
+            creation_ts: The timestamp of when the request to add the delayed event was made.
+            room_id: The ID of the room where the event should be sent to.
+            event_type: The type of event to be sent.
+            state_key: The state key of the event to be sent, or None if it is not a state event.
+            origin_server_ts: The custom timestamp to send the event with.
+                If None, the timestamp will be the actual time when the event is sent.
+            content: The content of the event to be sent.
+            delay: How long to wait before automatically sending the event.
+            sticky_duration_ms: If an MSC4354 sticky event: the sticky duration (in milliseconds).
+                The event will be attempted to be reliably delivered to clients and remote servers
+                during its sticky period.
+            limit: The maximum number of delayed events the DB may store for the given requester.
+                Must be greater than 0.
         Returns: The generated ID assigned to the added delayed event,
             and the send time of the next delayed event to be sent,
             which is either the event just added or one added earlier.
+
+        Raises:
+            LimitExceededError: if the DB has reached the limit of
+                how many delayed events it may store for the given requester.
+            AssertionError: if the limit is not greater than 0.
         """
+        assert limit > 0, "limit must be greater than 0"
+
         delay_id = _generate_delay_id()
-        send_ts = Timestamp(creation_ts + delay)
+        delay_ms = delay.as_millis()
+        send_ts = creation_ts + delay_ms
 
         def add_delayed_event_txn(txn: LoggingTransaction) -> Timestamp:
+            num_existing: int = self.db_pool.simple_select_one_onecol_txn(
+                txn,
+                table="delayed_events",
+                keyvalues={"user_localpart": user_localpart},
+                retcol="COUNT(*)",
+            )
+            if num_existing >= limit:
+                # Find the send_ts threshold that will bring the queue back under the limit.
+                # When the amount of existing delayed events has reached the limit,
+                # this will be the send time of the next delayed event to be sent.
+                # When the amount has exceeded the limit (e.g., due to config changes),
+                # this will be the send time of the delayed event that will be sent
+                # once all earlier events that exceed the limit have been sent.
+                #
+                # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
+                txn.execute(
+                    """
+                    SELECT MAX(send_ts) FROM (
+                        SELECT * FROM delayed_events
+                        WHERE user_localpart = ?
+                        ORDER BY send_ts ASC
+                        LIMIT ?
+                    ) AS subquery
+                    """,
+                    (
+                        user_localpart,
+                        num_existing - limit + 1,
+                    ),
+                )
+                row = txn.fetchone()
+                assert row
+                retry_after_ms = row[0] - self.clock.time_msec()
+                err = LimitExceededError(
+                    limiter_name="add_delayed_event",
+                    retry_after_ms=retry_after_ms if retry_after_ms > 0 else None,
+                )
+                err.msg = "The maximum number of delayed events has been reached."
+                raise err
+
             self.db_pool.simple_insert_txn(
                 txn,
                 table="delayed_events",
@@ -143,7 +235,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "delay_id": delay_id,
                     "user_localpart": user_localpart,
                     "device_id": device_id,
-                    "delay": delay,
+                    "delay": delay_ms,
                     "send_ts": send_ts,
                     "room_id": room_id,
                     "event_type": event_type,
@@ -225,11 +317,49 @@ class DelayedEventsStore(SQLBaseStore):
             _get_count_of_delayed_events,
         )
 
+    async def get_delayed_event_for_user(
+        self,
+        delay_id: str,
+        user_localpart: str,
+    ) -> DelayedEventResponse:
+        """
+        Returns the specified pending delayed event owned by the given user.
+
+        Raises:
+            NotFoundError: if there is no matching delayed event.
+        """
+        row = await self.db_pool.simple_select_one(
+            table="delayed_events",
+            keyvalues={
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+                "is_processed": False,
+            },
+            retcols=(
+                "room_id",
+                "event_type",
+                "state_key",
+                "delay",
+                "send_ts - delay",
+                "content",
+            ),
+            allow_none=True,
+            desc="get_delayed_event_for_user",
+        )
+        if row is None:
+            raise NotFoundError("Delayed event not found")
+        return DelayedEventResponse(delay_id, *row)
+
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,
-    ) -> list[JsonDict]:
-        """Returns all pending delayed events owned by the given user."""
+    ) -> list[DelayedEventResponseLegacyCompat]:
+        """
+        Return all pending delayed events owned by the given user.
+        Includes fields from earlier revisions of MSC4140 for
+        compatibility with clients that still expect them.
+        """
+        # TODO: Remove legacy fields once stable
         # TODO: Support Pagination stream API ("next_batch" field)
         rows = await self.db_pool.execute(
             "get_all_delayed_events_for_user",
@@ -240,7 +370,7 @@ class DelayedEventsStore(SQLBaseStore):
                 event_type,
                 state_key,
                 delay,
-                send_ts,
+                send_ts - delay,
                 content
             FROM delayed_events
             WHERE user_localpart = ? AND NOT is_processed
@@ -248,18 +378,7 @@ class DelayedEventsStore(SQLBaseStore):
             """,
             user_localpart,
         )
-        return [
-            {
-                "delay_id": DelayID(row[0]),
-                "room_id": str(RoomID.from_string(row[1])),
-                "type": EventType(row[2]),
-                **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
-                "delay": Delay(row[4]),
-                "running_since": Timestamp(row[5] - row[4]),
-                "content": db_to_json(row[6]),
-            }
-            for row in rows
-        ]
+        return [DelayedEventResponseLegacyCompat(*row) for row in rows]
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp, reprocess_events: bool = False

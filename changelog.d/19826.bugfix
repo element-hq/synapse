@@ -1,1 +1,0 @@
-Lock Sliding Sync connections when inserting lazy members, to prevent repeated deadlocks.

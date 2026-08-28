@@ -1,1 +1,0 @@
-Change the [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814) dehydrated device `/events` endpoint from `POST` to `GET`.

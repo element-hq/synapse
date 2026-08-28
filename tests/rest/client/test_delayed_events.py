@@ -24,8 +24,10 @@ from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import delayed_events, login, room, sync, versions
 from synapse.server import HomeServer
+from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import FakeChannel
@@ -38,6 +40,34 @@ _EVENT_TYPE = "com.example.test"
 
 class DelayedEventsUnstableSupportTestCase(HomeserverTestCase):
     servlets = [versions.register_servlets]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+
+        # XXX: We must create the Rust HTTP client before we call `reactor.run()` below.
+        # Twisted's `MemoryReactor` doesn't invoke `callWhenRunning` callbacks if it's
+        # already running and we rely on that to start the Tokio thread pool in Rust. In
+        # the future, this may not matter, see https://github.com/twisted/twisted/pull/12514
+        self._http_client = hs.get_proxied_http_client()
+        _ = HttpClient(
+            reactor=hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
+        )
+
+        # This triggers the server startup hooks, which starts the Tokio thread pool
+        reactor.run()
+
+        return hs
+
+    def tearDown(self) -> None:
+        # MemoryReactor doesn't trigger the shutdown phases, and we want the
+        # Tokio thread pool to be stopped
+        # XXX: This logic should probably get moved somewhere else
+        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
+        for phase in ["before", "during", "after"]:
+            triggers = shutdown_triggers.get(phase, [])
+            for callbable, args, kwargs in triggers:
+                callbable(*args, **kwargs)
 
     def test_false_by_default(self) -> None:
         channel = self.make_request("GET", "/_matrix/client/versions")
@@ -90,8 +120,126 @@ class DelayedEventsTestCase(HomeserverTestCase):
             room=self.room_id, user=self.user2_user_id, tok=self.user2_access_token
         )
 
+        # Advance enough time where any requests we made during `prepare(...)` doesn't
+        # affect the rate-limits in the test itself
+        self.reactor.advance(Duration(days=1).as_secs())
+
     def test_delayed_events_empty_on_startup(self) -> None:
         self.assertListEqual([], self._get_delayed_events())
+
+    def test_delayed_event_lookup(self) -> None:
+        # Schedule a message event
+        delay_ms = 100000
+        content: JsonDict = {"message": "hello"}
+        delayed_since_ts = self.hs.get_clock().time_msec()
+        channel = self.make_request(
+            "POST",
+            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay_ms),
+            content,
+            self.user1_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        delay_id = channel.json_body["delay_id"]
+
+        # Test that the scheduled delayed event can be retrieved
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # Assert the stored properties of the delayed event
+        event = channel.json_body
+        self.assertDictEqual(
+            event,
+            {
+                "delay_id": delay_id,
+                "room_id": self.room_id,
+                "type": _EVENT_TYPE,
+                "delay_ms": delay_ms,
+                "delayed_since_ts": delayed_since_ts,
+                "content": content,
+            },
+        )
+
+        # Test that a non-existent delayed event cannot be found
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}-fake",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+
+        # Test that other users cannot access this delayed event
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}",
+            access_token=self.user2_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+
+        # Now schedule a state event.
+        # Do it in this test, as opposed to a new one, to confirm that the correct delayed event
+        # is retrieved when multiple delayed events have been scheduled.
+        delay_ms += 2000
+        state_key = ""
+        state_event_type = _EVENT_TYPE + "_state"
+        content = {"state_message": "greetings"}
+        delayed_since_ts = self.hs.get_clock().time_msec()
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(
+                self.room_id, state_event_type, state_key, delay_ms
+            ),
+            content,
+            self.user1_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        delay_id_2 = channel.json_body["delay_id"]
+
+        # Test that the new delayed event has a different ID from the previous one
+        self.assertNotEqual(delay_id, delay_id_2)
+
+        # Test that the scheduled delayed event can be retrieved
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id_2}",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # Assert the stored properties of the delayed event
+        state_event = channel.json_body
+        self.assertDictEqual(
+            state_event,
+            {
+                "delay_id": delay_id_2,
+                "room_id": self.room_id,
+                "type": state_event_type,
+                "state_key": state_key,
+                "delay_ms": delay_ms,
+                "delayed_since_ts": delayed_since_ts,
+                "content": content,
+            },
+        )
+
+        # Test that the list lookup retrieves the same items (with legacy fields included)
+        self.assertEqual(
+            self._get_delayed_events(),
+            [
+                event
+                | {
+                    "delay": event["delay_ms"],
+                    "running_since": event["delayed_since_ts"],
+                },
+                state_event
+                | {
+                    "delay": state_event["delay_ms"],
+                    "running_since": state_event["delayed_since_ts"],
+                },
+            ],
+        )
 
     def test_delayed_state_events_are_sent_on_timeout(self) -> None:
         state_key = "to_send_on_timeout"

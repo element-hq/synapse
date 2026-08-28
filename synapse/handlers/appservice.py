@@ -313,7 +313,10 @@ class ApplicationServicesHandler:
                     StreamKeyType.PRESENCE,
                     StreamKeyType.TO_DEVICE,
                 )
-                and service.supports_ephemeral
+                # Honour both the stable `receive_ephemeral` registration flag and the
+                # legacy `de.sorunome.msc2409.push_ephemeral` one, matching the
+                # transaction body built in `ApplicationServiceApi.push_bulk`.
+                and (service.supports_ephemeral or service.supports_unstable_ephemeral)
             )
             or (
                 stream_key == StreamKeyType.DEVICE_LIST

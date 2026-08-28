@@ -19,8 +19,12 @@
 #
 #
 
+from unittest import mock
+
+from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
+from synapse.logging.context import LoggingContext, make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.storage.database import (
     DatabasePool,
@@ -78,7 +82,7 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         writers: list[str] | None = None,
     ) -> MultiWriterIdGenerator:
         def _create(conn: LoggingDatabaseConnection) -> MultiWriterIdGenerator:
-            return MultiWriterIdGenerator(
+            id_gen = MultiWriterIdGenerator(
                 db_conn=conn,
                 db=self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
@@ -90,6 +94,15 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
                 writers=writers or ["master"],
                 positive=self.positive,
             )
+            # Constructing the generator prunes stale `stream_positions` rows
+            # (writers no longer in the config); commit so that persists for the
+            # next generator we create.
+            #
+            # Note we need to commit manually here as the generator is created
+            # in a `runWithConnection` call, which doesn't automatically
+            # commit/rollback.
+            conn.commit()
+            return id_gen
 
         self.instances[instance_name] = self.get_success_or_raise(
             self.db_pool.runWithConnection(_create)
@@ -215,6 +228,90 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         self.assertEqual(id_gen.get_positions(), {"master": 8})
         self.assertEqual(id_gen.get_current_token_for_writer("master"), 8)
+
+    def test_cancelled_enter_does_not_wedge_position(self) -> None:
+        """Reproduces presence getting stuck.
+
+        If the `get_next()` async context manager is cancelled while
+        `__aenter__` is allocating a stream ID, the DB interaction that runs the
+        sequence has already added the ID to `_unfinished_ids`, but `__aexit__`
+        is never called (Python only invokes `__aexit__` if `__aenter__`
+        returned). The abandoned ID is therefore leaked into `_unfinished_ids`
+        forever, which permanently pins the persisted stream position: new rows
+        keep getting higher IDs, but `get_current_token()` can never advance past
+        `leaked_id - 1` until the process restarts.
+
+        This mirrors a `/sync` request being cancelled part-way through
+        persisting a presence update. `/sync` became `@cancellable` in #19499,
+        and on a monolith the presence write in `PresenceStore.update_presence`
+        is awaited inside that cancellable request scope.
+        """
+        # Prefill table with 7 rows written by 'master'; position starts at 7.
+        self._insert_rows("master", 7)
+
+        id_gen = self._create_id_generator()
+        self.assertEqual(id_gen.get_current_token_for_writer("master"), 7)
+
+        # We model the cancellation at the seam it actually happens in
+        # production: `__aenter__` awaits `runInteraction("_load_next_mult_id")`,
+        # whose transaction runs in a thread pool and so *always* completes -
+        # allocating stream ID 8 and adding it to `_unfinished_ids` - but the
+        # awaiting coroutine is handed a `CancelledError` because the enclosing
+        # `/sync` request was cancelled. We reproduce that by letting the real
+        # interaction run (applying its side effects) and then failing the
+        # awaited deferred with `CancelledError`.
+        cancel_enter: "Deferred[None]" = Deferred()
+        original_run_interaction = id_gen._db.runInteraction
+
+        async def blocking_run_interaction(desc, func, *args, **kwargs):  # type: ignore[no-untyped-def]
+            result = await original_run_interaction(desc, func, *args, **kwargs)
+            if desc == "_load_next_mult_id":
+                # Stream ID 8 is now allocated and recorded in `_unfinished_ids`.
+                # Deliver the cancellation here, exactly as a cancelled `/sync`
+                # would land it on this `await`.
+                await make_deferred_yieldable(cancel_enter)
+            return result
+
+        async def presence_like_write() -> None:
+            # Mirrors `PresenceStore.update_presence`: allocate an ID and
+            # "persist" under the context manager.
+            with LoggingContext(name="sync", server_name=self.hs.hostname):
+                async with id_gen.get_next():
+                    pass
+
+        with mock.patch.object(
+            id_gen._db, "runInteraction", new=blocking_run_interaction
+        ):
+            write = ensureDeferred(presence_like_write())
+
+            # The write is now blocked inside `__aenter__`, i.e. after stream ID
+            # 8 has been allocated and added to `_unfinished_ids`.
+            self.assertNoResult(write)
+
+            # The client goes away and the `/sync` request is cancelled.
+            cancel_enter.errback(CancelledError())
+
+            # The cancellation must surface as a `CancelledError`.
+            self.get_failure(write, CancelledError)
+
+        # The cancelled write never persisted a row for ID 8, so the generator
+        # must not let that abandoned ID wedge the position. A subsequent
+        # *successful* write should be able to advance the persisted token.
+        async def _successful_write() -> None:
+            async with id_gen.get_next():
+                pass
+
+        self.get_success(_successful_write())
+
+        # On the buggy code the token is still stuck at 7 (ID 8 is leaked in
+        # `_unfinished_ids`, blocking everything behind it). Once the leak is
+        # fixed, the token advances to 9: ID 8 was allocated (and abandoned) by
+        # the cancelled write, so the successful write above takes ID 9.
+        self.assertEqual(
+            id_gen.get_current_token_for_writer("master"),
+            9,
+            "presence stream position is wedged by the cancelled allocation",
+        )
 
     def test_out_of_order_finish(self) -> None:
         """Test that IDs persisted out of order are correctly handled"""

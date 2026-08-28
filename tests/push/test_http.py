@@ -25,12 +25,13 @@ from parameterized import parameterized
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
-import synapse.rest.admin
 from synapse.logging.context import make_deferred_yieldable
 from synapse.push import PusherConfig, PusherConfigException
+from synapse.rest import admin
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import login, push_rule, pusher, receipts, room, versions
 from synapse.server import HomeServer
+from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
@@ -39,7 +40,7 @@ from tests.unittest import HomeserverTestCase, override_config
 
 class HTTPPusherTests(HomeserverTestCase):
     servlets = [
-        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        admin.register_servlets_for_client_rest_resource,
         room.register_servlets,
         login.register_servlets,
         receipts.register_servlets,
@@ -1024,33 +1025,6 @@ class HTTPPusherTests(HomeserverTestCase):
             lookup_result.device_id,
         )
 
-    def test_msc3881_client_versions_flag(self) -> None:
-        """Tests that MSC3881 only appears in /versions if user has it enabled."""
-
-        user_id = self.register_user("user", "pass")
-        access_token = self.login("user", "pass")
-
-        # Check feature is disabled in /versions
-        channel = self.make_request(
-            "GET", "/_matrix/client/versions", access_token=access_token
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertFalse(channel.json_body["unstable_features"]["org.matrix.msc3881"])
-
-        # Enable feature for user
-        self.get_success(
-            self.hs.get_datastores().main.set_features_for_user(
-                user_id, {ExperimentalFeature.MSC3881: True}
-            )
-        )
-
-        # Check feature is now enabled in /versions for user
-        channel = self.make_request(
-            "GET", "/_matrix/client/versions", access_token=access_token
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc3881"])
-
     @override_config({"push": {"jitter_delay": "10s"}})
     def test_jitter(self) -> None:
         """Tests that enabling jitter actually delays sending push."""
@@ -1245,3 +1219,71 @@ class HTTPPusherTests(HomeserverTestCase):
             self.push_attempts[3][2]["notification"]["content"]["body"], "Message 3"
         )
         self.push_attempts[3][0].callback({})
+
+
+class MSC3881VersionsTestCase(HomeserverTestCase):
+    """
+    Tests that MSC3881 (Remotely toggle push notifications for another client) support
+    is correctly advertised in /versions.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        versions.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        hs = self.setup_test_homeserver()
+
+        # XXX: We must create the Rust HTTP client before we call `reactor.run()` below.
+        # Twisted's `MemoryReactor` doesn't invoke `callWhenRunning` callbacks if it's
+        # already running and we rely on that to start the Tokio thread pool in Rust. In
+        # the future, this may not matter, see https://github.com/twisted/twisted/pull/12514
+        self._http_client = hs.get_proxied_http_client()
+        _ = HttpClient(
+            reactor=hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
+        )
+
+        # This triggers the server startup hooks, which starts the Tokio thread pool
+        reactor.run()
+
+        return hs
+
+    def tearDown(self) -> None:
+        # MemoryReactor doesn't trigger the shutdown phases, and we want the
+        # Tokio thread pool to be stopped
+        # XXX: This logic should probably get moved somewhere else
+        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
+        for phase in ["before", "during", "after"]:
+            triggers = shutdown_triggers.get(phase, [])
+            for callbable, args, kwargs in triggers:
+                callbable(*args, **kwargs)
+
+    def test_msc3881_client_versions_flag(self) -> None:
+        """Tests that MSC3881 only appears in /versions if user has it enabled."""
+
+        user_id = self.register_user("user", "pass")
+        access_token = self.login("user", "pass")
+
+        # Check feature is disabled in /versions
+        channel = self.make_request(
+            "GET", "/_matrix/client/versions", access_token=access_token
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertFalse(channel.json_body["unstable_features"]["org.matrix.msc3881"])
+
+        # Enable feature for user
+        self.get_success(
+            self.hs.get_datastores().main.set_features_for_user(
+                user_id, {ExperimentalFeature.MSC3881: True}
+            )
+        )
+
+        # Check feature is now enabled in /versions for user
+        channel = self.make_request(
+            "GET", "/_matrix/client/versions", access_token=access_token
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc3881"])

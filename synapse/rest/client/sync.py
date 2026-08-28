@@ -30,10 +30,9 @@ from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
+    EventFormat,
     FilteredEvent,
     SerializeEventConfig,
-    format_event_for_client_v2_without_room_id,
-    format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
@@ -56,7 +55,13 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
-from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    Requester,
+    SlidingSyncStreamToken,
+    StreamToken,
+)
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
@@ -124,6 +129,9 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
@@ -304,18 +312,18 @@ class SyncRestServlet(RestServlet):
     ) -> JsonDict:
         logger.debug("Formatting events in sync response")
         if filter.event_format == "client":
-            event_formatter = format_event_for_client_v2_without_room_id
+            event_formatter = EventFormat.ClientV2WithoutRoomId
         elif filter.event_format == "federation":
-            event_formatter = format_event_raw
+            event_formatter = EventFormat.Raw
         else:
             raise Exception("Unknown event format %s" % (filter.event_format,))
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self._event_serializer.create_config(
             event_format=event_formatter,
             requester=requester,
-            only_event_fields=filter.event_fields,
+            event_field_allowlist=filter.event_fields,
         )
-        stripped_serialize_options = SerializeEventConfig(
+        stripped_serialize_options = await self._event_serializer.create_config(
             event_format=event_formatter,
             requester=requester,
             include_stripped_room_state=True,
@@ -351,6 +359,15 @@ class SyncRestServlet(RestServlet):
 
         if sync_result.to_device:
             response["to_device"] = {"events": sync_result.to_device}
+
+        if self._include_profile_updates_in_sync and sync_result.profile_updates:
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
+            response["org.matrix.msc4429.users"] = {
+                user_id: {"profile_updates": updates}
+                for user_id, updates in sync_result.profile_updates.items()
+            }
 
         if sync_result.device_lists.changed:
             response["device_lists"]["changed"] = list(sync_result.device_lists.changed)
@@ -931,8 +948,8 @@ class SlidingSyncRestServlet(RestServlet):
     ) -> JsonDict:
         time_now = self.clock.time_msec()
 
-        serialize_options = SerializeEventConfig(
-            event_format=format_event_for_client_v2_without_room_id,
+        serialize_options = await self.event_serializer.create_config(
+            event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
 
@@ -1133,7 +1150,32 @@ class SlidingSyncRestServlet(RestServlet):
                 requester, extensions.sticky_events, ref_rooms_results
             )
 
+        if extensions.profiles:
+            serialized_extensions[
+                "org.matrix.msc4262.profiles"
+            ] = await self._serialise_profiles(
+                extensions.profiles,
+            )
+
         return serialized_extensions
+
+    async def _serialise_profiles(
+        self,
+        profiles: SlidingSyncResult.Extensions.ProfilesExtension,
+    ) -> JsonMapping:
+        """
+        Serialise the profiles extension response.
+
+        Args:
+            profiles: The generated profiles response object.
+
+        Returns:
+            A dictionary containing the response `users` with the
+            generated profile updates.
+        """
+        return {
+            "users": profiles.users,
+        }
 
     async def _serialise_sticky_events(
         self,
@@ -1158,8 +1200,8 @@ class SlidingSyncRestServlet(RestServlet):
         time_now = self.clock.time_msec()
         # Same as SSS timelines.
         #
-        serialize_options = SerializeEventConfig(
-            event_format=format_event_for_client_v2_without_room_id,
+        serialize_options = await self.event_serializer.create_config(
+            event_format=EventFormat.ClientV2WithoutRoomId,
             requester=requester,
         )
 

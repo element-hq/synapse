@@ -39,6 +39,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     LoginType,
+    ProfileFields,
     UserTypes,
 )
 from synapse.api.errors import Codes, HttpResponseException, ResourceLimitError
@@ -59,7 +60,7 @@ from synapse.rest.client import (
 from synapse.server import HomeServer
 from synapse.storage.databases.main.client_ips import LAST_SEEN_GRANULARITY
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util.clock import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -943,18 +944,24 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         # Set avatar URL to all users, that no user has a NULL value to avoid
         # different sort order between SQlite and PostreSQL
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user1:test"), "mxc://url3"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user1:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://url3",
             )
         )
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user2:test"), "mxc://url2"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user2:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://url2",
             )
         )
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@admin:test"), "mxc://url1"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@admin:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://url1",
             )
         )
 
@@ -1417,6 +1424,10 @@ class UsersListTestCase(unittest.HomeserverTestCase):
             self.assertIn("avatar_url", u)
             self.assertIn("creation_ts", u)
             self.assertIn("last_seen_ts", u)
+            if self.hs.config.experimental.msc3866.enabled:
+                self.assertIn("approved", u)
+            else:
+                self.assertNotIn("approved", u)
 
     def _create_users(self, number_users: int) -> None:
         """
@@ -1546,8 +1557,10 @@ class DeactivateAccountTestCase(unittest.HomeserverTestCase):
 
         # set attributes for user
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user:test"), "mxc://servername/mediaid"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://servername/mediaid",
             )
         )
         self.get_success(
@@ -1679,7 +1692,11 @@ class DeactivateAccountTestCase(unittest.HomeserverTestCase):
         """
         # Patch `self.other_user` to have an empty string as their avatar.
         self.get_success(
-            self.store.set_profile_avatar_url(UserID.from_string("@user:test"), "")
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="",
+            )
         )
 
         # Check we can still erase them.
@@ -2758,8 +2775,10 @@ class UserRestTestCase(unittest.HomeserverTestCase):
 
         # set attributes for user
         self.get_success(
-            self.store.set_profile_avatar_url(
-                UserID.from_string("@user:test"), "mxc://servername/mediaid"
+            self.store.set_profile_field(
+                user_id=UserID.from_string("@user:test"),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="mxc://servername/mediaid",
             )
         )
         self.get_success(
@@ -5850,10 +5869,16 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        # Need 1 tick as we send 1 replication request per original event
-        # and each wait must be >= `_EPSILON` from `http/client.py`
+        # `/redact` just schedules a background task that runs in the background
+        # (fire-and-forget) so we need to do the waiting here.
+        #
+        # Need 1 tick as we send 1 replication request for the redaction of each
+        # original event. The replication request body is streamed by a `Cooperator`
+        # that uses the clock to schedule each chunk at a tiny *non-zero* delay
+        # (`CLOCK_SCHEDULE_EPSILON`), so we need to actually advance the clock for it to
+        # fire.
         for _ in range(len(original_event_ids)):
-            self.reactor.advance(0.001)
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
 
         # Verify the HTTP `redact_status` endpoint reports completion.
         channel2 = self.make_request(

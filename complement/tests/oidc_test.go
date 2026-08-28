@@ -52,6 +52,10 @@ oidc_providers:
 // `/_matrix/client/v3/login/sso/redirect/oidc-test_provider` endpoint.
 func TestOIDCProviderUnavailable(t *testing.T) {
 	// Deploy a single homeserver
+	//
+	// FIXME: Since we're modifying the homeserver config, this should be using a clean
+	// deploy that won't affect subsequent tests because Complement will re-use the
+	// deployment, see https://github.com/element-hq/synapse/issues/19937
 	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
 

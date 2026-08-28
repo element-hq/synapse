@@ -1379,9 +1379,15 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             return True, list(servers_that_can_issue_invite)
 
         # Ensure the member should be allowed access via membership in a room.
-        await self.event_auth_handler.check_restricted_join_rules(
-            state_before_join, room_version, user_id, previous_membership
-        )
+        try:
+            await self.event_auth_handler.check_restricted_join_rules(
+                state_before_join, room_version, user_id, previous_membership
+            )
+        except SynapseError as e:
+            if e.errcode == Codes.UNABLE_AUTHORISE_JOIN:
+                servers_that_can_issue_invite.discard(self.hs.hostname)
+                return True, list(servers_that_can_issue_invite)
+            raise
 
         # If this is going to be a local join, additional information must
         # be included in the event content in order to efficiently validate
@@ -1536,7 +1542,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             prev_member_event_id = prev_state_ids.get(
                 (EventTypes.Member, event.state_key), None
             )
-
             if prev_member_event_id:
                 prev_member_event = await self.store.get_event(prev_member_event_id)
                 if prev_member_event.membership == Membership.JOIN:

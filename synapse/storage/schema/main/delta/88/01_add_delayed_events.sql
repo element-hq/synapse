@@ -22,6 +22,8 @@ CREATE TABLE delayed_events (
     state_key TEXT,
     origin_server_ts BIGINT,
     content bytea NOT NULL,
+    -- is_processed = TRUE means that the work of sending the delayed event has begun.
+    -- Once the send is complete, the delayed event is removed from this table.
     is_processed BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (user_localpart, delay_id)
 );

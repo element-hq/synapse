@@ -960,7 +960,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
         # advance the clock a bit before we start, so we aren't working with zero
         # timestamps.
         self.reactor.advance(1000)
-        start_time = self.reactor.seconds()
+        start_time_s = int(self.reactor.seconds())
         ret = self.get_success(self.provider._exchange_code(code, code_verifier=""))
 
         self.assertEqual(ret, token)
@@ -981,8 +981,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.assertEqual(claims["aud"], ISSUER)
         self.assertEqual(claims["iss"], "DEFGHI")
         self.assertEqual(claims["sub"], CLIENT_ID)
-        self.assertEqual(claims["iat"], start_time)
-        self.assertGreater(claims["exp"], start_time)
+        self.assertEqual(claims["iat"], start_time_s)
+        self.assertGreater(claims["exp"], start_time_s)
 
         # check the rest of the POSTed data
         self.assertEqual(args["grant_type"], ["authorization_code"])

@@ -86,6 +86,7 @@ class EventSources:
         thread_subscriptions_key = self.store.get_max_thread_subscriptions_stream_id()
         sticky_events_key = self.store.get_max_sticky_events_stream_id()
         quarantined_media_key = self.store.get_quarantined_media_stream_token()
+        profile_updates_key = self.store.get_max_profile_updates_stream_id()
 
         token = StreamToken(
             room_key=self.sources.room.get_current_key(),
@@ -102,6 +103,7 @@ class EventSources:
             thread_subscriptions_key=thread_subscriptions_key,
             sticky_events_key=sticky_events_key,
             quarantined_media_key=quarantined_media_key,
+            profile_updates_key=profile_updates_key,
         )
         return token
 
@@ -131,6 +133,7 @@ class EventSources:
             StreamKeyType.THREAD_SUBSCRIPTIONS: self.store.get_thread_subscriptions_stream_id_generator(),
             StreamKeyType.STICKY_EVENTS: self.store.get_sticky_events_stream_id_generator(),
             StreamKeyType.QUARANTINED_MEDIA: self.store.get_quarantined_media_stream_id_generator(),
+            StreamKeyType.PROFILE_UPDATES: self.store.get_profile_updates_stream_id_generator(),
         }
 
         for _, key in StreamKeyType.__members__.items():

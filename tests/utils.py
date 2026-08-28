@@ -318,20 +318,44 @@ class test_timeout:
             my_checking_func()
             time.sleep(0.1)
     ```
+
+    Args:
+        seconds: How long to allow the block to run for before raising
+            `TestTimeout`.
+        error_message: Extra text to append to the `TestTimeout` message.
+        cpu_time: If `True`, `seconds` is a budget of CPU time (user + system,
+            across all threads) consumed by the process rather than wall-clock
+            time. Useful for performance-regression tests, as time spent
+            blocked on I/O (e.g. waiting on the database) or lost to a loaded
+            CI machine doesn't count against the budget. Note that a block
+            which hangs while consuming *no* CPU will never trip this variant.
     """
 
-    def __init__(self, seconds: int, error_message: str | None = None) -> None:
-        self.error_message = f"Test timed out after {seconds}s"
+    def __init__(
+        self,
+        seconds: float,
+        error_message: str | None = None,
+        *,
+        cpu_time: bool = False,
+    ) -> None:
+        self.error_message = f"Test timed out after {seconds}s of {'CPU' if cpu_time else 'wall-clock'} time"
         if error_message is not None:
             self.error_message += f": {error_message}"
         self.seconds = seconds
+        self.cpu_time = cpu_time
 
     def handle_timeout(self, signum: int, frame: FrameType | None) -> None:
         raise TestTimeout(self.error_message)
 
     def __enter__(self) -> None:
-        signal.signal(signal.SIGALRM, self.handle_timeout)
-        signal.alarm(self.seconds)
+        if self.cpu_time:
+            # `ITIMER_PROF` counts down against process CPU time (user +
+            # system) and delivers `SIGPROF` when it expires.
+            signal.signal(signal.SIGPROF, self.handle_timeout)
+            signal.setitimer(signal.ITIMER_PROF, self.seconds)
+        else:
+            signal.signal(signal.SIGALRM, self.handle_timeout)
+            signal.setitimer(signal.ITIMER_REAL, self.seconds)
 
     def __exit__(
         self,
@@ -339,4 +363,4 @@ class test_timeout:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        signal.alarm(0)
+        signal.setitimer(signal.ITIMER_PROF if self.cpu_time else signal.ITIMER_REAL, 0)
