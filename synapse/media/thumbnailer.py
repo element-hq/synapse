@@ -23,7 +23,7 @@ import logging
 from collections.abc import Callable
 from io import BytesIO
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from PIL import Image, ImageSequence
 
@@ -173,6 +173,34 @@ class Thumbnailer:
         else:
             converted = image
         return converted.resize((width, height), Image.LANCZOS)
+
+    @property
+    def has_transparency(self) -> bool:
+        """Whether the current frame actually makes use of transparency.
+
+        Having an alpha channel isn't enough: fully opaque RGBA is common.
+
+        Note that this can block for a while on large images, as `getextrema()`
+        scans the entire alpha plane. Consider calling it via `defer_to_thread`.
+        """
+        image = self.image
+
+        if image.mode == "P" and "transparency" in image.info:
+            return True
+
+        if "A" not in image.getbands():
+            return False
+
+        try:
+            with image.getchannel("A") as alpha:
+                # Single band, so `getextrema` returns a plain (min, max) pair.
+                min_alpha = cast(float, alpha.getextrema()[0])
+        except Exception:
+            # Assume transparency, since dropping it is the destructive option.
+            logger.exception("Error inspecting image alpha channel")
+            return True
+
+        return min_alpha < 255
 
     @property
     def is_animated(self) -> bool:

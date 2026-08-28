@@ -585,7 +585,7 @@ class ServerConfig(Config):
                 " 'allow_public_rooms_over_federation' is set."
             )
 
-        # Whether to support MSC4429 profile updates down legacy /sync
+        # Whether to support MSC4429 and MSC4262 Profile updates down sync
         self.include_profile_updates_in_sync = config.get(
             "include_profile_updates_in_sync",
             False,
