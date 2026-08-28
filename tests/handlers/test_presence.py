@@ -2382,7 +2382,12 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
                 "origin_server_ts": 1,
                 "content": {"membership": Membership.JOIN},
                 "auth_events": [
-                    state_map[(EventTypes.Create, "")].event_id,
+                    # Older room versions list the create event in `auth_events`.
+                    *(
+                        [state_map[(EventTypes.Create, "")].event_id]
+                        if not room_version.msc4291_room_ids_as_hashes
+                        else []
+                    ),
                     state_map[(EventTypes.JoinRules, "")].event_id,
                 ],
                 "prev_events": list(forward_extremity_event_ids),
