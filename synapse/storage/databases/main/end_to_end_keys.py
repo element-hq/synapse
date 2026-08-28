@@ -112,7 +112,7 @@ class EndToEndKeyBackgroundStore(SQLBaseStore):
 
         self.db_pool.updates.register_background_index_update(
             update_name="e2e_cross_signing_signatures_add_key_id_to_index",
-            index_name="e2e_cross_signing_signatures3_idx",
+            index_name="e2e_cross_signing_signatures_idx3",
             table="e2e_cross_signing_signatures",
             columns=("user_id", "target_user_id", "target_device_id", "key_id"),
             unique=True,

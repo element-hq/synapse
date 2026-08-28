@@ -125,7 +125,7 @@ class EndToEndKeyStoreTestCase(HomeserverTestCase):
 
         # drop the constraint so we can insert duplicate signatures
         def f(txn: LoggingTransaction) -> None:
-            txn.execute("DROP INDEX e2e_cross_signing_signatures3_idx")
+            txn.execute("DROP INDEX e2e_cross_signing_signatures_idx3")
 
         self.get_success(self.store.db_pool.runInteraction("", f))
 

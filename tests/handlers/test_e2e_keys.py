@@ -20,7 +20,7 @@
 #
 #
 import time
-from typing import Any, Iterable
+from typing import Iterable
 from unittest import mock
 
 from parameterized import parameterized
@@ -820,7 +820,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
     def test_update_signature_master_key(self) -> None:
         """should be able to update a signature on the Master signing key with an unknown algorithm"""
         local_user = "@boris:" + self.hs.hostname
-        master_key: dict[str, Any] = {
+        master_key: JsonDict = {
             # private key: HvQBbU+hc2Zr+JP1sE0XwBe1pfZZEYtJNPJLZJtS+F8
             "user_id": local_user,
             "usage": ["master"],
@@ -869,7 +869,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # update the signature and upload it
+        # Update the signature and upload it.
         master_key["signatures"][local_user]["unknown:abcdefg"] = "ABCDEFG"
         self.get_success(
             self.handler.upload_signatures_for_device_keys(
@@ -891,7 +891,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             del devices["master_keys"][local_user]["unsigned"]
         self.assertDictEqual(devices["master_keys"][local_user], master_key)
 
-        # update the signature and upload it
+        # Update the signature again and upload it.
         master_key["signatures"][local_user]["unknown:abcdefg"] = "AbCdEfG"
         self.get_success(
             self.handler.upload_signatures_for_device_keys(
@@ -904,6 +904,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             )
         )
 
+        # Assert that we were able to update the signature.
         devices = self.get_success(
             self.handler.query_devices(
                 {"device_keys": {local_user: []}}, 0, local_user, "device123"
