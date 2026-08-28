@@ -67,13 +67,12 @@ class DelayedEventDetails(EventDetails):
 class DelayedEventResponse:
     """The representation of a delayed event in API format."""
 
-    # Implementation detail: use converters to normalize untyped values read from the database
-    delay_id: str = attr.ib(converter=str)
-    room_id: str = attr.ib(converter=str)
-    type: str = attr.ib(converter=str)
-    state_key: str | None = attr.ib(converter=attr.converters.optional(str))
-    delay_ms: int = attr.ib(converter=int)
-    delayed_since_ts: int = attr.ib(converter=int)
+    delay_id: str
+    room_id: str
+    type: str
+    state_key: str | None
+    delay_ms: int
+    delayed_since_ts: int
     content: JsonDict = attr.ib(converter=db_to_json)
 
     def asdict(self) -> JsonDict:
