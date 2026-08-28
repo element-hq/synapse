@@ -182,9 +182,7 @@ class EncryptedByDefaultTestCase(unittest.HomeserverTestCase):
             event_type=EventTypes.RoomEncryption,
             tok=user_token,
         )
-        self.assertEqual(
-            event_content, {"algorithm": RoomEncryptionAlgorithms.DEFAULT}
-        )
+        self.assertEqual(event_content, {"algorithm": RoomEncryptionAlgorithms.DEFAULT})
 
     @override_config({"encryption_enabled_by_default_for_room_type": "all"})
     def test_non_string_algorithm_does_not_bypass_forced_encryption(self) -> None:
@@ -219,9 +217,7 @@ class EncryptedByDefaultTestCase(unittest.HomeserverTestCase):
             event_type=EventTypes.RoomEncryption,
             tok=user_token,
         )
-        self.assertEqual(
-            event_content, {"algorithm": RoomEncryptionAlgorithms.DEFAULT}
-        )
+        self.assertEqual(event_content, {"algorithm": RoomEncryptionAlgorithms.DEFAULT})
 
 
 class RoomIDCollisionTestCase(unittest.HomeserverTestCase):
