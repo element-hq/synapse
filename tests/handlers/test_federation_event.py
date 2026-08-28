@@ -120,7 +120,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -416,7 +415,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -517,7 +515,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -714,7 +711,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
