@@ -46,8 +46,6 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
         # contributes to the rate limter's count of actions
         self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
 
-        self.intially_unjoined_room_id = f"!example:{self.OTHER_SERVER_NAME}"
-
     @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
     def test_local_user_local_joins_contribute_to_limit_and_are_limited(self) -> None:
         # The rate limiter has accumulated one token from Alice's join after the create
@@ -105,61 +103,42 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
         # We also patch out a bunch of event checks on our end. All we're really
         # trying to check here is that remote joins will bump the rate limter when
         # they are persisted.
+        room_version = self.hs.config.server.default_room_version
         create_event_source = {
             "auth_events": [],
-            "content": {
-                "creator": f"@creator:{self.OTHER_SERVER_NAME}",
-                "room_version": self.hs.config.server.default_room_version.identifier,
-            },
+            "content": {"room_version": room_version.identifier},
             "depth": 0,
             "origin_server_ts": 0,
             "prev_events": [],
-            "room_id": self.intially_unjoined_room_id,
             "sender": f"@creator:{self.OTHER_SERVER_NAME}",
             "state_key": "",
             "type": EventTypes.Create,
         }
         self.add_hashes_and_signatures_from_other_server(
-            create_event_source,
-            self.hs.config.server.default_room_version,
+            create_event_source, room_version
         )
-        create_event = make_event_from_dict(
-            create_event_source,
-            self.hs.config.server.default_room_version,
-            {},
-            None,
-        )
+        create_event = make_event_from_dict(create_event_source, room_version, {}, None)
+        # The room ID is derived from the create event.
+        room_id = create_event.room_id
 
         join_event_source = {
-            "auth_events": [create_event.event_id],
+            "auth_events": [],
             "content": {"membership": "join"},
             "depth": 1,
             "origin_server_ts": 100,
             "prev_events": [create_event.event_id],
             "sender": self.bob,
             "state_key": self.bob,
-            "room_id": self.intially_unjoined_room_id,
+            "room_id": room_id,
             "type": EventTypes.Member,
         }
         add_hashes_and_signatures(
-            self.hs.config.server.default_room_version,
-            join_event_source,
-            self.hs.hostname,
-            self.hs.signing_key,
+            room_version, join_event_source, self.hs.hostname, self.hs.signing_key
         )
-        join_event = make_event_from_dict(
-            join_event_source,
-            self.hs.config.server.default_room_version,
-            {},
-            None,
-        )
+        join_event = make_event_from_dict(join_event_source, room_version, {}, None)
 
         mock_make_membership_event = AsyncMock(
-            return_value=(
-                self.OTHER_SERVER_NAME,
-                join_event,
-                self.hs.config.server.default_room_version,
-            )
+            return_value=(self.OTHER_SERVER_NAME, join_event, room_version)
         )
         mock_send_join = AsyncMock(
             return_value=SendJoinResult(
@@ -196,7 +175,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 self.handler.update_membership(
                     requester=create_requester(self.bob),
                     target=UserID.from_string(self.bob),
-                    room_id=self.intially_unjoined_room_id,
+                    room_id=room_id,
                     action=Membership.JOIN,
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 )
@@ -207,7 +186,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 self.handler.update_membership(
                     requester=create_requester(self.chris),
                     target=UserID.from_string(self.chris),
-                    room_id=self.intially_unjoined_room_id,
+                    room_id=room_id,
                     action=Membership.JOIN,
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 ),
