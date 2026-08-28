@@ -67,6 +67,20 @@ Using direct TCP replication for workers is no longer supported.
 Please see https://element-hq.github.io/synapse/latest/upgrade.html#direct-tcp-replication-is-no-longer-supported-migrate-to-redis
 """
 
+# The number of one-time keys that clients built on the matrix-rust-sdk aim to keep on
+# the server (vodozemac's `PUBLIC_MAX_ONE_TIME_KEYS`), topping up to exactly this many
+# whenever they fall below it. Allowing fewer than this per device means every such
+# top-up is rejected, leaving those clients unable to publish any one-time keys at all.
+SENSIBLE_MIN_ONE_TIME_KEYS_PER_DEVICE = 50
+
+LOW_ONE_TIME_KEYS_PER_DEVICE_WARNING = """\
+WARNING: The 'max_one_time_keys_per_device' configuration setting is lower than the
+%i one-time keys that clients built on the matrix-rust-sdk keep on the server. Those
+clients will be unable to upload any one-time keys. See the config documentation at
+    https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#max_one_time_keys_per_device
+--------------------------------------------------------------------------------
+"""
+
 # by default, we attempt to listen on both '::' *and* '0.0.0.0' because some OSes
 # (Windows, macOS, other BSD/Linux where net.ipv6.bindv6only is set) will only listen
 # on IPv6 when '::' is set.
@@ -684,6 +698,26 @@ class ServerConfig(Config):
         # Admin uri to direct users at should their instance become blocked
         # due to resource constraints
         self.admin_contact = config.get("admin_contact", None)
+
+        # The maximum number of one-time keys of each algorithm to keep for a device.
+        # Uploads which would exceed it are rejected, which protects against clients
+        # that keep uploading keys they will never be able to use.
+        self.max_one_time_keys_per_device: int = config.get(
+            "max_one_time_keys_per_device", 500
+        )
+        if (
+            not isinstance(self.max_one_time_keys_per_device, int)
+            or self.max_one_time_keys_per_device < 1
+        ):
+            raise ConfigError(
+                "'max_one_time_keys_per_device' must be a positive integer",
+                ("max_one_time_keys_per_device",),
+            )
+        if self.max_one_time_keys_per_device < SENSIBLE_MIN_ONE_TIME_KEYS_PER_DEVICE:
+            logger.warning(
+                LOW_ONE_TIME_KEYS_PER_DEVICE_WARNING,
+                SENSIBLE_MIN_ONE_TIME_KEYS_PER_DEVICE,
+            )
 
         ip_range_blocklist = config.get(
             "ip_range_blacklist", DEFAULT_IP_RANGE_BLOCKLIST

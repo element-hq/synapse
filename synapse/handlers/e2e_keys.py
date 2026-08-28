@@ -20,6 +20,7 @@
 #
 #
 import logging
+from collections import Counter
 from typing import TYPE_CHECKING, Iterable, Mapping
 
 import attr
@@ -120,6 +121,9 @@ class E2eKeysHandler:
         )
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
+        )
+        self._max_one_time_keys_per_device = (
+            hs.config.server.max_one_time_keys_per_device
         )
 
         self._task_scheduler.register_action(
@@ -987,6 +991,28 @@ class E2eKeysHandler:
                 else:
                     new_keys.append(
                         (algorithm, key_id, encode_canonical_json(key).decode("ascii"))
+                    )
+
+            # Reject uploads which would take the device over the limit, rather than
+            # quietly discarding keys, so that a client which keeps uploading keys
+            # regardless of how many the server holds gets told about it.
+            counts = await self.store.count_e2e_one_time_keys(user_id, device_id)
+            for algorithm, new_count in Counter(
+                algorithm for algorithm, _, _ in new_keys
+            ).items():
+                total = counts.get(algorithm, 0) + new_count
+                if total > self._max_one_time_keys_per_device:
+                    raise SynapseError(
+                        400,
+                        "Uploading %i more %s one-time keys would leave the device "
+                        "holding %i, over the limit of %i"
+                        % (
+                            new_count,
+                            algorithm,
+                            total,
+                            self._max_one_time_keys_per_device,
+                        ),
+                        Codes.TOO_LARGE,
                     )
 
             log_kv({"message": "Inserting new one_time_keys.", "keys": new_keys})
