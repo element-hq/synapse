@@ -405,6 +405,55 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         for key_id in claimed_keys.keys():
             self.assertIn(key_id, ["alg1:k20", "alg1:k21", "alg1:k22"])
 
+    @mock.patch("synapse.handlers.e2e_keys.MAX_ONE_TIME_KEYS_PER_DEVICE", 5)
+    def test_upload_one_time_keys_over_limit_is_rejected(self) -> None:
+        """Uploading one-time keys which would take a device over the limit fails"""
+        local_user = "@boris:" + self.hs.hostname
+        device_id = "xyz"
+
+        # Uploading exactly up to the limit is fine.
+        res = self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user,
+                device_id,
+                {"one_time_keys": {f"alg1:k{i}": f"key{i}" for i in range(1, 6)}},
+            )
+        )
+        self.assertEqual(res["one_time_key_counts"]["alg1"], 5)
+
+        # Uploading any more is rejected, with a 400.
+        error = self.get_failure(
+            self.handler.upload_keys_for_user(
+                local_user,
+                device_id,
+                {"one_time_keys": {"alg1:k6": "key6"}},
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(error.code, 400)
+        self.assertEqual(error.errcode, Codes.TOO_LARGE)
+
+        # The limit is per algorithm, so keys of another algorithm are still accepted.
+        res = self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user,
+                device_id,
+                {"one_time_keys": {"alg2:k1": "key1"}},
+            )
+        )
+        self.assertEqual(res["one_time_key_counts"]["alg1"], 5)
+        self.assertEqual(res["one_time_key_counts"]["alg2"], 1)
+
+        # Nothing from the rejected upload was stored.
+        keys = self.get_success(
+            self.store.get_e2e_one_time_keys(
+                local_user, device_id, [f"k{i}" for i in range(1, 7)]
+            )
+        )
+        self.assertEqual(
+            set(keys), {("alg1", f"k{i}") for i in range(1, 6)} | {("alg2", "k1")}
+        )
+
     def test_fallback_key(self) -> None:
         local_user = "@boris:" + self.hs.hostname
         device_id = "xyz"
