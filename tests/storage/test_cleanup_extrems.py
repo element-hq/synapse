@@ -30,7 +30,7 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage import prepare_database
 from synapse.storage.types import Cursor
-from synapse.types import UserID, create_requester
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -283,11 +283,19 @@ class CleanupExtremDummyEventsTestCase(HomeserverTestCase):
         self.user = UserID.from_string(self.register_user("user1", "password"))
         self.token1 = self.login("user1", "password")
         self.requester = create_requester(self.user)
-        self.room_id, _, _ = self.get_success(
-            self.room_creator.create_room(self.requester, {"visibility": "public"})
-        )
+        self.room_id = self._create_room()
         self.event_creator = homeserver.get_event_creation_handler()
         homeserver.config.consent.user_consent_version = self.CONSENT_VERSION
+
+    def _create_room(self, room_version: str | None = None) -> str:
+        """Create a public room as the test user, optionally of a given room version."""
+        config: JsonDict = {"visibility": "public"}
+        if room_version is not None:
+            config["room_version"] = room_version
+        room_id, _, _ = self.get_success(
+            self.room_creator.create_room(self.requester, config)
+        )
+        return room_id
 
     def test_send_dummy_event(self) -> None:
         self._create_extremity_rich_graph()
@@ -303,6 +311,9 @@ class CleanupExtremDummyEventsTestCase(HomeserverTestCase):
 
     @patch("synapse.handlers.message._DUMMY_EVENT_ROOM_EXCLUSION_EXPIRY", new=0)
     def test_send_dummy_events_when_insufficient_power(self) -> None:
+        # Create the room as v11: the test cripples the creator's power level
+        # below, which requires the creator to be an ordinary user.
+        self.room_id = self._create_room(room_version="11")
         self._create_extremity_rich_graph()
         # Criple power levels
         self.helper.send_state(
