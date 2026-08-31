@@ -118,6 +118,24 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         res = self._get_displayname(self.other)
         self.assertEqual(res, "Bob")
 
+    def test_get_unset_displayname(self) -> None:
+        """Fetching an unset displayname should return 404, as per the spec:
+        https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3profileuseridkeyname
+        """
+        # The owner's displayname defaults to their localpart at registration;
+        # clear it.
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/displayname" % (self.owner,),
+            content={"displayname": ""},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request("GET", "/profile/%s/displayname" % (self.owner,))
+        self.assertEqual(channel.code, 404, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
     def test_set_displayname_other(self) -> None:
         channel = self.make_request(
             "PUT",
@@ -167,6 +185,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     def test_get_avatar_url_other(self) -> None:
         res = self._get_avatar_url(self.other)
         self.assertIsNone(res)
+
+    def test_get_unset_avatar_url(self) -> None:
+        """Fetching an unset avatar_url should return 404, as per the spec:
+        https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3profileuseridkeyname
+        """
+        channel = self.make_request("GET", "/profile/%s/avatar_url" % (self.owner,))
+        self.assertEqual(channel.code, 404, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
     def test_set_avatar_url_other(self) -> None:
         channel = self.make_request(
