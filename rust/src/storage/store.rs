@@ -27,8 +27,6 @@ pub enum PerUserExperimentalFeature {
     MSC3881,
     #[serde(rename = "msc3575")]
     MSC3575,
-    #[serde(rename = "msc4222")]
-    MSC4222,
 }
 
 impl std::fmt::Display for PerUserExperimentalFeature {
