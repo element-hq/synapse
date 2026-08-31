@@ -1,0 +1,1 @@
+Return a 404 error from `GET /_matrix/client/v3/profile/{userId}/displayname` and `GET /_matrix/client/v3/profile/{userId}/avatar_url` when the field is not set, as required by the spec, instead of a 200 response with a `null` value.

@@ -204,24 +204,24 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, channel.result)
 
     def _get_displayname(self, name: str | None = None) -> str | None:
+        """Fetch a user's displayname, returning None if it is unset (404)."""
         channel = self.make_request(
             "GET", "/profile/%s/displayname" % (name or self.owner,)
         )
+        if channel.code == 404:
+            return None
         self.assertEqual(channel.code, 200, channel.result)
-        # FIXME: If a user has no displayname set, Synapse returns 200 and omits a
-        # displayname from the response. This contradicts the spec, see
-        # https://github.com/matrix-org/synapse/issues/13137.
-        return channel.json_body.get("displayname")
+        return channel.json_body["displayname"]
 
     def _get_avatar_url(self, name: str | None = None) -> str | None:
+        """Fetch a user's avatar_url, returning None if it is unset (404)."""
         channel = self.make_request(
             "GET", "/profile/%s/avatar_url" % (name or self.owner,)
         )
+        if channel.code == 404:
+            return None
         self.assertEqual(channel.code, 200, channel.result)
-        # FIXME: If a user has no avatar set, Synapse returns 200 and omits an
-        # avatar_url from the response. This contradicts the spec, see
-        # https://github.com/matrix-org/synapse/issues/13137.
-        return channel.json_body.get("avatar_url")
+        return channel.json_body["avatar_url"]
 
     @unittest.override_config({"max_avatar_size": 50})
     def test_avatar_size_limit_global(self) -> None:
@@ -850,6 +850,16 @@ class ProfilesRestrictedTestCase(unittest.HomeserverTestCase):
         self.owner_tok = self.login("owner", "pass")
         self.profile_url = "/profile/%s" % (self.owner)
 
+        # Set an avatar for the owner, since fetching an unset avatar_url
+        # returns 404 rather than exercising the access checks.
+        channel = self.make_request(
+            "PUT",
+            f"{self.profile_url}/avatar_url",
+            content={"avatar_url": "mxc://test/pic"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
         # User requesting the profile.
         self.requester = self.register_user("requester", "pass")
         self.requester_tok = self.login("requester", "pass")
@@ -931,6 +941,16 @@ class OwnProfileUnrestrictedTestCase(unittest.HomeserverTestCase):
         """Tests that a user can lookup their own profile without having to be in a room
         if 'require_auth_for_profile_requests' is set to true in the server's config.
         """
+        # Set an avatar, since fetching an unset avatar_url returns 404 rather
+        # than exercising the access checks.
+        channel = self.make_request(
+            "PUT",
+            "/profile/" + self.requester + "/avatar_url",
+            content={"avatar_url": "mxc://test/pic"},
+            access_token=self.requester_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
         channel = self.make_request(
             "GET", "/profile/" + self.requester, access_token=self.requester_tok
         )

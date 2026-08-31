@@ -154,6 +154,18 @@ class ProfileFieldRestServlet(RestServlet):
         else:
             field_value = await self.profile_handler.get_profile_field(user, field_name)
 
+        if (
+            field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL)
+            and field_value is None
+        ):
+            # displayname and avatar_url cannot hold a JSON null (unlike custom
+            # fields), so None means the field is unset, for which the spec
+            # requires a 404:
+            # https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3profileuseridkeyname
+            raise SynapseError(
+                HTTPStatus.NOT_FOUND, "Profile was not found", Codes.NOT_FOUND
+            )
+
         return 200, {field_name: field_value}
 
     async def on_PUT(

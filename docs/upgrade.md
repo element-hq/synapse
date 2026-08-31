@@ -118,6 +118,18 @@ stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 
+# Upgrading to v1.160.0
+
+## Fetching an unset `displayname` or `avatar_url` now returns a 404 error
+
+`GET /_matrix/client/v3/profile/{userId}/displayname` and
+`GET /_matrix/client/v3/profile/{userId}/avatar_url` now return a 404 error with
+`M_NOT_FOUND` when the requested field is not set, as required by
+[the spec](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3profileuseridkeyname),
+instead of a 200 response with a `null` value. This matches the existing
+behaviour of custom profile fields on the same endpoint. Clients relying on the
+previous non-spec-compliant behaviour may need updating.
+
 # Upgrading to v1.159.0
 
 ## Change of signing key expiry date for the Debian/Ubuntu package repository (2026)
