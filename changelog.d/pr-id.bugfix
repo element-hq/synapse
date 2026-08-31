@@ -1,0 +1,1 @@
+Fix a bug where getting or setting a custom profile field for a user with no profile (e.g. a user that never existed, or was deactivated with erasure) returned a 500 error; getting such a field now returns a 404 error.
