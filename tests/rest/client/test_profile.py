@@ -35,7 +35,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
-from synapse.types import UserID
+from synapse.types import UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -492,6 +492,64 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+    def test_get_custom_field_missing_profile(self) -> None:
+        """Requesting a custom field for a local user with no profiles row
+        (e.g. a user that never existed, or was deactivated with erasure)
+        should return 404, not 500."""
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/profile/@no-profile:test/custom_field",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+    def _erase_user(self, user_id: str) -> None:
+        """Deactivate a user with erasure, which deletes their profiles row."""
+        deactivate_handler = self.hs.get_deactivate_account_handler()
+        self.get_success(
+            deactivate_handler.deactivate_account(
+                user_id,
+                erase_data=True,
+                requester=create_requester(user_id),
+            )
+        )
+
+    def test_get_custom_field_erased_user(self) -> None:
+        """Requesting a custom field for a user whose profiles row was deleted
+        by deactivation-with-erasure should return 404, not 500."""
+        self._erase_user(self.other)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/profile/{self.other}/custom_field",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+    def test_set_custom_field_erased_user(self) -> None:
+        """A server admin setting a custom field for a user with no profiles
+        row should recreate the row (upsert), not return a 500 from the
+        profile size check."""
+        self.register_user("admin", "pass", admin=True)
+        admin_tok = self.login("admin", "pass")
+
+        self._erase_user(self.other)
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.other}/custom_field",
+            content={"custom_field": "test"},
+            access_token=admin_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/profile/{self.other}/custom_field",
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.json_body, {"custom_field": "test"})
 
     def test_get_missing_custom_field_invalid_field_name(self) -> None:
         channel = self.make_request(
