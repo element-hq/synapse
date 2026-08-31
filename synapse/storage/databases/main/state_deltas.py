@@ -59,8 +59,9 @@ class StateDelta:
 
 class StateDeltasStore(SQLBaseStore):
     # This class must be mixed in with a child class which provides the following
-    # attribute. TODO: can we get static analysis to enforce this?
+    # attributes. TODO: can we get static analysis to enforce this?
     _curr_state_delta_stream_cache: StreamChangeCache
+    _events_stream_cache: StreamChangeCache
 
     def __init__(
         self,
@@ -75,6 +76,13 @@ class StateDeltasStore(SQLBaseStore):
             index_name="current_state_delta_stream_room_idx",
             table="current_state_delta_stream",
             columns=("room_id", "stream_id"),
+        )
+        self.db_pool.updates.register_background_index_update(
+            update_name="current_state_delta_stream_event_id_index",
+            index_name="current_state_delta_stream_event_id_idx",
+            table="current_state_delta_stream",
+            columns=("event_id",),
+            where_clause="event_id IS NOT NULL",
         )
 
     async def get_partial_current_state_deltas(
@@ -295,6 +303,218 @@ class StateDeltasStore(SQLBaseStore):
         return await self.db_pool.runInteraction(
             "get_current_state_deltas_for_room",
             self.get_current_state_deltas_for_room_txn,
+            room_id,
+            from_token=from_token,
+            to_token=to_token,
+        )
+
+    def get_current_state_deltas_for_room_by_event_position_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        *,
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
+    ) -> list[StateDelta]:
+        """
+        Get the state deltas between two tokens, bounding each delta on the
+        position of its state event in the events stream rather than on the
+        delta row's own `stream_id`.
+
+        (> `from_token` and <= `to_token`; results are ordered by that
+        effective position.)
+
+        `current_state_delta_stream` rows are stamped with the *minimum*
+        stream ordering of the persist batch of their event (see
+        `_update_current_state_txn`), so bounding on `stream_id` alone drops
+        the deltas of a batch's state events for any token that falls inside
+        the batch -- a position that a worker reading the events stream from
+        replication routinely observes, since RDATA advances the stream one
+        event at a time.
+
+        A delta's effective position is therefore taken to be the *maximum* of
+        the row's `stream_id` and its event's own stream ordering:
+
+        * for a state event persisted mid-batch, that is the event's own
+          position, so the delta tracks the event exactly;
+        * for rows with no event (e.g. the state clearance when the last
+          local user leaves), the row's `stream_id` stands;
+        * for rows stamped *after* their event (the partial-state room resync
+          in `update_current_state` re-announces existing state at a fresh
+          position), the row's `stream_id` stands, preserving the
+          re-announcement.
+
+        That maximum is not a bound an index can serve, so the window is
+        fetched as the union of two index-driven sets (with the exact
+        per-writer filtering done in Python, as for
+        `get_current_state_deltas_for_room_txn`):
+
+        * rows whose own `stream_id` is in the window -- an index range on
+          `current_state_delta_stream(room_id, stream_id)`, exactly like
+          `get_current_state_deltas_for_room_txn`; this is every row except
+          the mid-batch stragglers;
+        * rows whose *event* is in the window -- driven by the
+          `events(room_id, stream_ordering)` index over the events in the
+          window, joined back via the partial
+          `current_state_delta_stream(event_id)` index (only state events
+          find a delta row; we deliberately don't pre-filter on
+          `e.state_key`, which is only backfilled from schema version 76). A
+          row stamped below the window with an effective position inside it
+          must have its event inside the window, so this query is what recovers
+          the mid-batch stragglers, at a cost proportional to the number of
+          events in the window.
+        """
+        args: list[str | int] = [room_id]
+
+        stream_id_from_clause = ""
+        if from_token is not None:
+            stream_id_from_clause = "AND ? < d.stream_id"
+            args.append(from_token.stream)
+
+        stream_id_to_clause = ""
+        if to_token is not None:
+            stream_id_to_clause = "AND d.stream_id <= ?"
+            args.append(to_token.get_max_stream_pos())
+
+        # Rows below the window's lower bound can only have an effective
+        # position inside the window via their event, so the event-driven query is
+        # only needed when there is a lower bound at all.
+        by_event_position_sql = ""
+        if from_token is not None:
+            event_position_to_clause = ""
+            if to_token is not None:
+                event_position_to_clause = "AND e.stream_ordering <= ?"
+
+            by_event_position_sql = f"""
+                UNION
+                SELECT d.instance_name, d.stream_id, d.type, d.state_key,
+                    d.event_id, d.prev_event_id,
+                    e.instance_name, e.stream_ordering
+                FROM events AS e
+                INNER JOIN current_state_delta_stream AS d
+                    ON d.event_id = e.event_id AND d.room_id = e.room_id
+                WHERE e.room_id = ?
+                    AND ? < e.stream_ordering {event_position_to_clause}
+            """
+            args.extend([room_id, from_token.stream])
+            if to_token is not None:
+                args.append(to_token.get_max_stream_pos())
+
+        sql = f"""
+                SELECT d.instance_name, d.stream_id, d.type, d.state_key,
+                    d.event_id, d.prev_event_id,
+                    e.instance_name, e.stream_ordering
+                FROM current_state_delta_stream AS d
+                LEFT JOIN events AS e ON e.event_id = d.event_id
+                WHERE d.room_id = ? {stream_id_from_clause} {stream_id_to_clause}
+                {by_event_position_sql}
+            """
+        txn.execute(sql, args)
+
+        deltas = []
+        for row in txn:
+            (
+                row_instance,
+                row_stream,
+                event_type,
+                state_key,
+                event_id,
+                prev_event_id,
+                event_instance,
+                event_stream,
+            ) = row
+
+            # The effective position: the row's own stamp, unless the event
+            # sits later in the stream.
+            if event_stream is not None and event_stream > row_stream:
+                effective_instance, effective_stream = event_instance, event_stream
+            else:
+                effective_instance, effective_stream = row_instance, row_stream
+
+            if _filter_results_by_stream(
+                from_token, to_token, effective_instance, effective_stream
+            ):
+                deltas.append(
+                    (
+                        effective_stream,
+                        StateDelta(
+                            stream_id=row_stream,
+                            room_id=room_id,
+                            event_type=event_type,
+                            state_key=state_key,
+                            event_id=event_id,
+                            prev_event_id=prev_event_id,
+                        ),
+                    )
+                )
+
+        # Consumers rely on deltas being in stream order (the last delta for a
+        # given state key wins), which for this query means effective-position
+        # order.
+        deltas.sort(key=lambda t: t[0])
+        return [d for _, d in deltas]
+
+    @trace
+    async def get_current_state_deltas_for_room_by_event_position(
+        self,
+        room_id: str,
+        *,
+        from_token: RoomStreamToken | None,
+        to_token: RoomStreamToken | None,
+    ) -> list[StateDelta]:
+        """
+        Get the state deltas between two tokens, bounding each delta on the
+        position of its state event rather than on the delta row's `stream_id`.
+        See `get_current_state_deltas_for_room_by_event_position_txn`.
+
+        (> `from_token` and <= `to_token`)
+
+        Until the `current_state_delta_stream(event_id)` index has been built
+        (a background update), this falls back to bounding on the rows' own
+        `stream_id` -- the behaviour this method replaces, which can miss
+        mid-batch deltas but never scans beyond the index.
+        """
+        # We can bail early if the `from_token` is after the `to_token`
+        if (
+            to_token is not None
+            and from_token is not None
+            and to_token.is_before_or_eq(from_token)
+        ):
+            return []
+
+        # A delta's effective position is beyond `from_token` only if the row's
+        # `stream_id` is (the delta stream cache) or its event's stream
+        # ordering is (the events stream cache); if neither cache has seen the
+        # room change there is nothing to return.
+        if (
+            from_token is not None
+            and not self._curr_state_delta_stream_cache.has_entity_changed(
+                room_id, from_token.stream
+            )
+            and not self._events_stream_cache.has_entity_changed(
+                room_id, from_token.stream
+            )
+        ):
+            return []
+
+        # Without the `current_state_delta_stream(event_id)` index, the
+        # event-driven query of the union has no index to join through and would
+        # walk the room's entire delta history, so fall back to the plain
+        # `stream_id` bounds until the background update has completed.
+        if not await self.db_pool.updates.has_completed_background_update(
+            "current_state_delta_stream_event_id_index"
+        ):
+            return await self.db_pool.runInteraction(
+                "get_current_state_deltas_for_room_by_event_position_fallback",
+                self.get_current_state_deltas_for_room_txn,
+                room_id,
+                from_token=from_token,
+                to_token=to_token,
+            )
+
+        return await self.db_pool.runInteraction(
+            "get_current_state_deltas_for_room_by_event_position",
+            self.get_current_state_deltas_for_room_by_event_position_txn,
             room_id,
             from_token=from_token,
             to_token=to_token,

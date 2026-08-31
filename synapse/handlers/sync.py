@@ -1397,8 +1397,8 @@ class SyncHandler:
 
                 # Now roll back the state by looking at the state deltas between
                 # end_token and now.
-                deltas = await self.store.get_current_state_deltas_for_room(
-                    room_id,
+                deltas = await self.store.get_current_state_deltas_for_room_by_event_position(
+                    room_id=room_id,
                     from_token=end_token.room_key,
                     to_token=self.store.get_room_max_token(),
                 )
@@ -1536,10 +1536,12 @@ class SyncHandler:
             #
             # i.e. we return all state deltas, including membership changes that
             # we'd normally exclude due to LL.
-            deltas = await self.store.get_current_state_deltas_for_room(
-                room_id=room_id,
-                from_token=since_token.room_key,
-                to_token=end_token.room_key,
+            deltas = (
+                await self.store.get_current_state_deltas_for_room_by_event_position(
+                    room_id=room_id,
+                    from_token=since_token.room_key,
+                    to_token=end_token.room_key,
+                )
             )
             for delta in deltas:
                 if delta.event_id is None:
