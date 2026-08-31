@@ -166,11 +166,10 @@ class SyncRestServlet(RestServlet):
         filter_id = parse_string(request, "filter")
         full_state = parse_boolean(request, "full_state", default=False)
 
-        use_state_after = False
-        if await self.store.is_feature_enabled(
-            user.to_string(), ExperimentalFeature.MSC4222
-        ):
-            use_state_after = parse_boolean(
+        use_state_after = parse_boolean(request, "use_state_after", default=False)
+        use_unstable_state_after_name = False
+        if not use_state_after:
+            use_state_after = use_unstable_state_after_name = parse_boolean(
                 request, "org.matrix.msc4222.use_state_after", default=False
             )
 
@@ -207,6 +206,7 @@ class SyncRestServlet(RestServlet):
             device_id,
             last_ignore_accdata_streampos,
             use_state_after,
+            use_unstable_state_after_name,
         )
 
         if filter_id is None:
@@ -244,6 +244,7 @@ class SyncRestServlet(RestServlet):
             is_guest=requester.is_guest,
             device_id=device_id,
             use_state_after=use_state_after,
+            use_unstable_state_after_name=use_unstable_state_after_name,
         )
 
         since_token = None
@@ -625,7 +626,12 @@ class SyncRestServlet(RestServlet):
         # We either include a `state` or `state_after` field depending on
         # whether the client has opted in to the newer `state_after` behavior.
         if sync_config.use_state_after:
-            state_key_name = "org.matrix.msc4222.state_after"
+            # Clients which opted in via the unstable MSC4222 query parameter
+            # get the unstable field name back, for the transition period.
+            if sync_config.use_unstable_state_after_name:
+                state_key_name = "org.matrix.msc4222.state_after"
+            else:
+                state_key_name = "state_after"
         else:
             state_key_name = "state"
 

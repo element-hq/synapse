@@ -766,6 +766,68 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
+class SyncStateAfterTestCase(unittest.HomeserverTestCase):
+    """
+    Tests for the `use_state_after` opt-in on `/sync` (MSC4222, stable as of
+    Matrix v1.16): the name of the room state field in the response should
+    match the query parameter the client opted in with.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = self.register_user("user", "password")
+        self.access_token = self.login(self.user_id, "password")
+        self.room_id = self.helper.create_room_as(self.user_id, tok=self.access_token)
+
+    def _sync_room_keys(self, query_string: str) -> set[str]:
+        """Perform a sync with the given query string and return the keys of
+        our room's response object."""
+        channel = self.make_request(
+            "GET",
+            f"/sync{query_string}",
+            access_token=self.access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        return set(channel.json_body["rooms"]["join"][self.room_id].keys())
+
+    def test_state_without_opt_in(self) -> None:
+        """By default, room state comes down under the `state` key."""
+        room_keys = self._sync_room_keys("")
+        self.assertIn("state", room_keys)
+        self.assertNotIn("state_after", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+    def test_state_after_stable_name(self) -> None:
+        """Opting in with the stable query parameter gives the stable field name."""
+        room_keys = self._sync_room_keys("?use_state_after=true")
+        self.assertIn("state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+    def test_state_after_unstable_name(self) -> None:
+        """Opting in with the unstable query parameter gives the unstable field
+        name, for the transition period."""
+        room_keys = self._sync_room_keys("?org.matrix.msc4222.use_state_after=true")
+        self.assertIn("org.matrix.msc4222.state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("state_after", room_keys)
+
+    def test_state_after_both_names(self) -> None:
+        """If a client opts in with both query parameters, the stable field name wins."""
+        room_keys = self._sync_room_keys(
+            "?use_state_after=true&org.matrix.msc4222.use_state_after=true"
+        )
+        self.assertIn("state_after", room_keys)
+        self.assertNotIn("state", room_keys)
+        self.assertNotIn("org.matrix.msc4222.state_after", room_keys)
+
+
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device list (`device_lists`) changes.
