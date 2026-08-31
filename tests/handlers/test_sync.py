@@ -1248,6 +1248,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
                 end_token=end_stream_token,
                 members_to_fetch=None,
                 timeline_state={},
+                joined=True,
             )
         )
         self.assertEqual(state[("m.test_event", "")], second_state["event_id"])
@@ -1279,6 +1280,7 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
                 end_token=end_stream_token,
                 members_to_fetch=set(),
                 timeline_state={},
+                joined=True,
             )
         )
 
