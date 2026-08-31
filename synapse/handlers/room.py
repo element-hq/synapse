@@ -21,6 +21,7 @@
 
 """Contains functions for performing actions on rooms."""
 
+import copy
 import itertools
 import logging
 import math
@@ -165,7 +166,7 @@ class RoomCreationHandler:
                 "history_visibility": HistoryVisibility.SHARED,
                 "original_invitees_have_ops": False,
                 "guest_can_join": False,
-                "power_level_content_override": {EventTypes.CallInvite: 50},
+                "power_level_content_override": {"events": {EventTypes.CallInvite: 50}},
             },
         }
 
@@ -1529,6 +1530,8 @@ class RoomCreationHandler:
                 alias for the room
             power_level_content_override:
                 The power level content to override in the default power level event.
+                `power_level_content_override` doesn't apply when `initial_state` has
+                a power level state event content (i.e. `EventTypes.PowerLevels`).
             creator_join_profile:
                 Set to override the displayname and avatar for the creating
                 user in this room.
@@ -1608,7 +1611,7 @@ class RoomCreationHandler:
                 prev_state_events = [new_event.event_id]
             return new_event, new_unpersisted_context
 
-        preset_config, config = self._room_preset_config(room_config)
+        preset_name, preset_config = self._room_preset_config(room_config)
 
         if creation_event_with_context is None:
             # MSC2175 removes the creator field from the create event.
@@ -1674,6 +1677,7 @@ class RoomCreationHandler:
         events_to_send = []
         # We treat the power levels override specially as this needs to be one
         # of the first events that get sent into a room.
+        # If the `initial_state` has `EventTypes.PowerLevels` content, use it.
         pl_content = initial_state.pop((EventTypes.PowerLevels, ""), None)
         if pl_content is not None:
             power_event, power_context = await create_event(
@@ -1681,6 +1685,8 @@ class RoomCreationHandler:
             )
             events_to_send.append((power_event, power_context))
         else:
+            # If the `initial_state` does not have `EventTypes.PowerLevels` content,
+            # use the default power level content.
             # Please update the docs for `default_power_level_content_override` when
             # updating the `events` dict below
             power_level_content: JsonDict = {
@@ -1713,25 +1719,27 @@ class RoomCreationHandler:
             # have set these users as additional_creators, hence don't set the PL for creators as
             # that is invalid.
             if (
-                config["original_invitees_have_ops"]
+                preset_config["original_invitees_have_ops"]
                 and not room_version.msc4289_creator_power_enabled
             ):
                 for invitee in invite_list:
                     power_level_content["users"][invitee] = 100
 
-            # If the user supplied a preset name e.g. "private_chat",
-            # we apply that preset
-            power_level_content.update(config["power_level_content_override"])
+            # If the user supplied a preset name e.g. "private_chat", apply that
+            # preset's power level content.
+            power_level_content = self._deepmerge_power_level_content(
+                power_level_content, preset_config["power_level_content_override"]
+            )
 
             # If the server config contains default_power_level_content_override,
             # and that contains information for this room preset, apply it.
             if self._default_power_level_content_override:
-                override = self._default_power_level_content_override.get(preset_config)
+                override = self._default_power_level_content_override.get(preset_name)
                 if override is not None:
                     power_level_content.update(override)
 
             # Finally, if the user supplied specific permissions for this room,
-            # apply those.
+            # apply those. Supplied room override wins over server config.
             if power_level_content_override:
                 power_level_content.update(power_level_content_override)
             pl_event, pl_context = await create_event(
@@ -1750,7 +1758,7 @@ class RoomCreationHandler:
         if (EventTypes.JoinRules, "") not in initial_state:
             join_rules_event, join_rules_context = await create_event(
                 EventTypes.JoinRules,
-                {"join_rule": config["join_rules"]},
+                {"join_rule": preset_config["join_rules"]},
                 True,
             )
             events_to_send.append((join_rules_event, join_rules_context))
@@ -1758,12 +1766,12 @@ class RoomCreationHandler:
         if (EventTypes.RoomHistoryVisibility, "") not in initial_state:
             visibility_event, visibility_context = await create_event(
                 EventTypes.RoomHistoryVisibility,
-                {"history_visibility": config["history_visibility"]},
+                {"history_visibility": preset_config["history_visibility"]},
                 True,
             )
             events_to_send.append((visibility_event, visibility_context))
 
-        if config["guest_can_join"]:
+        if preset_config["guest_can_join"]:
             if (EventTypes.GuestAccess, "") not in initial_state:
                 guest_access_event, guest_access_context = await create_event(
                     EventTypes.GuestAccess,
@@ -1778,7 +1786,7 @@ class RoomCreationHandler:
             )
             events_to_send.append((event, context))
 
-        if config["encrypted"] and not ignore_forced_encryption:
+        if preset_config["encrypted"] and not ignore_forced_encryption:
             encryption_event, encryption_context = await create_event(
                 EventTypes.RoomEncryption,
                 {"algorithm": RoomEncryptionAlgorithms.DEFAULT},
@@ -1867,6 +1875,32 @@ class RoomCreationHandler:
                             403,
                             f"You cannot create an encrypted room. user_level ({room_admin_level}) < send_level ({encryption_level})",
                         )
+
+    def _deepmerge_power_level_content(
+        self, power_level_content: JsonDict, override: JsonDict
+    ) -> JsonDict:
+        """Deep-merge `override` into `power_level_content`.
+
+        Nested dicts (e.g. events, users) are merged recursively. All other values from
+        `override` replace those in `power_level_content`.
+
+        Args:
+            power_level_content: The base power level content to update.
+            override: Values to merge on top of `power_level_content`.
+
+        Returns:
+            The updated power level content.
+        """
+        for key, value in override.items():
+            existing = power_level_content.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                power_level_content[key] = self._deepmerge_power_level_content(
+                    dict(existing), value
+                )
+            else:
+                # Copy so we don't accidentally modify the preset config.
+                power_level_content[key] = copy.deepcopy(value)
+        return power_level_content
 
     def _room_preset_config(self, room_config: JsonDict) -> tuple[str, dict]:
         # The spec says rooms should default to private visibility if

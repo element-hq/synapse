@@ -47,7 +47,7 @@ class AuthRestServlet(RestServlet):
     Current use is for web fallback auth.
     """
 
-    PATTERNS = client_patterns(r"/auth/(?P<stagetype>[\w\.]*)/fallback/web")
+    PATTERNS = client_patterns(r"/auth/(?P<stagetype>[\w\.]*)/fallback/web$")
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()

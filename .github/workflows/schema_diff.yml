@@ -1,0 +1,103 @@
+name: Schema Diff
+
+on:
+  pull_request:
+    paths:
+      - synapse/storage/schema/*/delta/**
+      - synapse/storage/schema/*/full_schemas/**
+      - .github/workflows/schema_diff.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Posts a GitHub PR comment that shows what the effective change to the schema is.
+  # Provides an excuse to run the `make_full_schema.sh` script in CI (so we keep it working)
+  # and can act as a review aid for schema changes, letting you easily see the diff of the
+  # end result, even when background updates or complex schema deltas are present.
+  show-schema-diff:
+    name: Show schema diff
+    runs-on: ubuntu-latest
+
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Start postgres with a faked clock
+        background: true
+        id: postgres
+        # Use faketime here for schema deltas that are wall-clock sensitive under Postgres
+        # For SQLite, faketime is used when invoking `make_full_schema.sh` within the script
+        run: |
+          # Build a docker image with faketime
+          mkdir /tmp/postgres-faketime
+          cat > /tmp/postgres-faketime/Dockerfile <<'EOF'
+            FROM postgres:14-alpine
+            RUN apk add --no-cache libfaketime
+
+            # It seems like it could be harmful to fake the monotonic timer
+            # as it might prevent deadlock detection, etc.
+            # But not sure, just doing out of precaution.
+            ENV FAKETIME_DONT_FAKE_MONOTONIC=1
+            ENTRYPOINT ["faketime", "-f", "2001-05-25 12:42:42", "docker-entrypoint.sh"]
+            CMD ["postgres"]
+          EOF
+          docker build -t localhost/postgres-faketime /tmp/postgres-faketime
+
+          # Run it in the background
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
+            --health-cmd pg_isready --health-interval 10s \
+            --health-timeout 5s --health-retries 5 \
+            localhost/postgres-faketime
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Install PostgreSQL client and faketime
+        run: sudo apt-get -qq install postgresql-client faketime
+
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          poetry-version: "2.4.1"
+          extras: "postgres"
+          python-version: "3.x"
+
+      - name: Wait for Postgres to be up
+        run: |
+          until [ "$(docker inspect -f '{{.State.Health.Status}}' postgres)" = healthy ]; do sleep 2; done
+
+      - name: Generate schema diff
+        id: schema_diff
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          poetry run python .ci/scripts/schema_diff.py \
+            --base origin/develop \
+            > "${{ runner.temp }}/schema_diff.md"
+
+      - name: Stop postgres
+        cancel: postgres
+
+      # If the generation step failed, write an error message so the sticky
+      # comment step still has a file to read.
+      - name: Ensure output file exists on failure
+        if: always() && steps.schema_diff.outcome == 'failure'
+        run: |
+          echo "⚠️ Schema diff generation failed. See job logs for details." \
+            > "${{ runner.temp }}/schema_diff.md"
+
+      - name: Post sticky PR comment
+        uses: marocchino/sticky-pull-request-comment@3d7b8546315c63df45a03981d50a43ec19237f80 # v3
+        if: always()
+        with:
+          header: schema-diff
+          path: ${{ runner.temp }}/schema_diff.md
