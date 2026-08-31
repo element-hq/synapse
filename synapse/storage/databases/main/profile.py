@@ -729,9 +729,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 (f'$."{new_field_name}"', user_id.localpart),
             )
         row = cast("tuple[int | None, int | None, int | None] | None", txn.fetchone())
-        # The user may have no profile row at all, e.g. if they were
-        # deactivated with erasure. The profile is then empty and the upsert
-        # following this check will recreate the row.
+        # The user may have no profile row at all; treat as an empty profile.
         if row is None:
             row = (None, None, None)
 
