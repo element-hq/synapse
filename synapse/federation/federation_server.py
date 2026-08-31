@@ -81,6 +81,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.module_api.callbacks.federation import FederatedEventDeliveryMethod
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
 )
@@ -142,6 +143,7 @@ class FederationServer(FederationBase):
         self.server_name = hs.hostname
         self.handler = hs.get_federation_handler()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self._federation_callbacks = hs.get_module_api_callbacks().federation
         self._federation_event_handler = hs.get_federation_event_handler()
         self.state = hs.get_state_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
@@ -244,6 +246,10 @@ class FederationServer(FederationBase):
 
             res = self._transaction_dict_from_pdus(pdus)
 
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, pdus, FederatedEventDeliveryMethod.BACKFILL
+            )
+
         return 200, res
 
     async def on_timestamp_to_event_request(
@@ -265,6 +271,7 @@ class FederationServer(FederationBase):
             body including `event_id`.
         """
         async with self._server_linearizer.queue((origin, room_id)):
+            await self._event_auth_handler.assert_host_in_room(room_id, origin)
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
 
@@ -654,14 +661,27 @@ class FederationServer(FederationBase):
         # - but that's non-trivial to get right, and anyway somewhat defeats
         # the point of the linearizer.
         async with self._server_linearizer.queue((origin, room_id)):
-            resp = await self._state_resp_cache.wrap(
-                (room_id, event_id),
-                self._on_context_state_request_compute,
-                room_id,
-                event_id,
-            )
-
-        return 200, resp
+            if not self._federation_callbacks.interested_in_events_delivered_over_federation():
+                # In the usual case where no module is interested in tracking event deliveries,
+                # use the response cache.
+                resp = await self._state_resp_cache.wrap(
+                    (room_id, event_id),
+                    self._on_context_state_request_compute,
+                    room_id,
+                    event_id,
+                )
+                return 200, resp
+            else:
+                # When a module is interested in tracking event deliveries,
+                # we can't use the response cache that returns pre-serialised
+                # events, as we wouldn't have the raw events to track.
+                resp, events = await self._on_context_state_request_compute_with_events(
+                    room_id, event_id
+                )
+                await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                    origin, events, FederatedEventDeliveryMethod.STATE
+                )
+                return 200, resp
 
     @trace
     @tag_args
@@ -696,6 +716,28 @@ class FederationServer(FederationBase):
     async def _on_context_state_request_compute(
         self, room_id: str, event_id: str
     ) -> dict[str, list]:
+        """
+        Respond to a `/state` request, returning just the response.
+
+        This separation exists because we don't want to hold on to the underlying
+        events in the response cache, just the serialised JSON.
+        """
+        resp, _ = await self._on_context_state_request_compute_with_events(
+            room_id, event_id
+        )
+        return resp
+
+    async def _on_context_state_request_compute_with_events(
+        self, room_id: str, event_id: str
+    ) -> tuple[dict[str, list], list[EventBase]]:
+        """
+        Respond to a `/state` request.
+
+        Returns:
+            Tuple of:
+                1. the `/state` response
+                2. list of the events used to build that response
+        """
         pdus: Collection[EventBase]
         event_ids = await self.handler.get_state_ids_for_pdu(room_id, event_id)
         pdus = await self.store.get_events_as_list(event_ids)
@@ -704,10 +746,13 @@ class FederationServer(FederationBase):
             room_id, [pdu.event_id for pdu in pdus]
         )
 
-        return {
-            "pdus": serialize_and_filter_pdus(pdus),
-            "auth_chain": serialize_and_filter_pdus(auth_chain),
-        }
+        return (
+            {
+                "pdus": serialize_and_filter_pdus(pdus),
+                "auth_chain": serialize_and_filter_pdus(auth_chain),
+            },
+            [*pdus, *auth_chain],
+        )
 
     async def on_pdu_request(
         self, origin: str, event_id: str
@@ -715,6 +760,9 @@ class FederationServer(FederationBase):
         pdu = await self.handler.get_persisted_pdu(origin, event_id)
 
         if pdu:
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, [pdu], FederatedEventDeliveryMethod.EVENT
+            )
             return 200, self._transaction_dict_from_pdus([pdu])
         else:
             return 404, ""
@@ -891,6 +939,12 @@ class FederationServer(FederationBase):
 
         if servers_in_room is not None:
             resp["servers_in_room"] = list(servers_in_room)
+
+        await self._federation_callbacks.notify_on_event_delivered_over_federation(
+            origin,
+            [event, *state_events, *auth_chain_events],
+            FederatedEventDeliveryMethod.SEND_JOIN,
+        )
 
         return resp
 
@@ -1128,8 +1182,12 @@ class FederationServer(FederationBase):
             await self.check_server_matches_acl(origin_host, room_id)
 
             time_now = self._clock.time_msec()
-            auth_pdus = await self.handler.on_event_auth(event_id)
+            auth_pdus = await self.handler.on_event_auth(event_id, room_id)
             res = {"auth_chain": serialize_and_filter_pdus(auth_pdus, time_now)}
+
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, auth_pdus, FederatedEventDeliveryMethod.EVENT_AUTH
+            )
         return 200, res
 
     async def on_query_client_keys(
@@ -1211,6 +1269,10 @@ class FederationServer(FederationBase):
                 )
             else:
                 logger.debug("Returning %d events", len(missing_events))
+
+            await self._federation_callbacks.notify_on_event_delivered_over_federation(
+                origin, missing_events, FederatedEventDeliveryMethod.GET_MISSING_EVENTS
+            )
 
             time_now = self._clock.time_msec()
 

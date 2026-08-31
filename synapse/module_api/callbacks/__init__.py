@@ -21,6 +21,8 @@
 
 from typing import TYPE_CHECKING
 
+from synapse.module_api.callbacks.federation import FederationModuleApiCallbacks
+
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
@@ -44,6 +46,7 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
 class ModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
         self.account_validity = AccountValidityModuleApiCallbacks()
+        self.federation = FederationModuleApiCallbacks()
         self.media_repository = MediaRepositoryModuleApiCallbacks(hs)
         self.ratelimit = RatelimitModuleApiCallbacks(hs)
         self.spam_checker = SpamCheckerModuleApiCallbacks(hs)

@@ -117,6 +117,49 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+
+# Upgrading to v1.161.0
+
+## Deprecation of `matrix_rtc.livekit_service_url`
+
+When configuring the MatrixRTC LiveKit transport, the `livekit_service_url` is now
+deprecated but should continue to be listed to ensure backwards compatibility with
+older clients. A new sibling `url` config property is added that should be set to
+your SFU's WebSocket URL. Clients that support `url` will use the Client-Server API
+to (indirectly) interact with the LiveKit authorization service. The service needs
+to be set up as an application service in order to support these endpoints. See
+https://github.com/element-hq/lk-jwt-service and
+https://element-hq.github.io/synapse/v1.161/usage/configuration/config_documentation.html#matrix_rtc
+for further details.
+
+# Upgrading to v1.159.0
+
+## Change of signing key expiry date for the Debian/Ubuntu package repository (2026)
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`,
+please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+but this change must be imported into your keyring.
+
+If you have the `matrix-org-archive-keyring` package installed and it updates before the current key expires, this should
+happen automatically.
+
+Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
+will need to get a fresh copy of the keys. You can do so with:
+
+```sh
+sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+```
+
+The old version of the key will expire on `2027-03-15`.
+
+# Upgrading to v1.158.0
+
+## Drop support for Ubuntu 25.10 'Questing Quokka', add support for Ubuntu 26.04 'Resolute Raccoon'
+
+Ubuntu 25.10 'Questing Quokka' [is end-of-life as of
+2026-07-01](https://endoflife.date/ubuntu). This release drops support for Ubuntu 25.10,
+and in its place adds support for Ubuntu 26.04 'Resolute Raccoon'.
+
 # Upgrading to v1.157.0
 
 ## MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration

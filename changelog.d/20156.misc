@@ -1,0 +1,1 @@
+[MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Update the error response for requesting to schedule a delayed event with a delay that exceeds the server-enforced maximum delay.

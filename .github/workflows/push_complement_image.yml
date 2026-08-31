@@ -33,17 +33,17 @@ jobs:
       packages: write
     steps:
       - name: Checkout specific branch (debug build)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name == 'workflow_dispatch'
         with:
           ref: ${{ inputs.branch }}
       - name: Checkout clean copy of develop (scheduled build)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name == 'schedule'
         with:
           ref: develop
       - name: Checkout clean copy of master (on-push)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name == 'push'
         with:
           ref: master
@@ -52,7 +52,7 @@ jobs:
         with:
           poetry-version: "2.4.1"
       - name: Login to registry
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

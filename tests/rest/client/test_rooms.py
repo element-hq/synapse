@@ -26,12 +26,14 @@
 import json
 from http import HTTPStatus
 from typing import Any, Iterable, Literal
-from unittest.mock import AsyncMock, Mock, call, patch
+from unittest.mock import AsyncMock, Mock, call, create_autospec, patch
 from urllib import parse as urlparse
 
 from parameterized import param, parameterized
 
+from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
+from twisted.web.client import Agent
 
 import synapse.rest.admin
 from synapse.api.constants import (
@@ -67,6 +69,7 @@ from synapse.util.stringutils import random_string
 from tests import unittest
 from tests.http.server._base import make_request_with_cancellation_test
 from tests.storage.test_stream import PaginationTestCase
+from tests.test_utils import FakeResponse
 from tests.test_utils.event_injection import (
     create_event,
     inject_event,
@@ -504,7 +507,8 @@ class RoomPermissionsTestCase(RoomBase):
             )
         )
         assert pl_event is not None
-        self.assertEqual(50, pl_event.content.get("m.call.invite"))
+        self.assertEqual(50, pl_event.content.get("events", {}).get("m.call.invite"))
+        self.assertEqual(50, pl_event.content.get("events", {}).get("m.room.name"))
 
         private_pl_event = self.get_success(
             self.store_controllers.state.get_current_state_event(
@@ -512,7 +516,9 @@ class RoomPermissionsTestCase(RoomBase):
             )
         )
         assert private_pl_event is not None
-        self.assertEqual(None, private_pl_event.content.get("m.call.invite"))
+        self.assertEqual(
+            None, private_pl_event.content.get("events", {}).get("m.call.invite")
+        )
 
 
 class RoomStateTestCase(RoomBase):
@@ -1927,7 +1933,8 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
     def test_default_power_levels_with_room_override(self) -> None:
         """
         Create a room, providing power level overrides.
-        Confirm that the room's power levels reflect the overrides.
+        When the `power_level_content_override` was provided, it should replace the
+        default power levels.
 
         See https://github.com/matrix-org/matrix-spec/issues/492
         - currently we overwrite each key of power_level_content_override
@@ -1956,9 +1963,9 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
     )
     def test_power_levels_with_server_override(self) -> None:
         """
-        With a server configured to modify the room-level defaults,
-        Create a room, without providing any extra power level overrides.
-        Confirm that the room's power levels reflect the server-level overrides.
+        With a server configured `default_power_level_content_override`, creating a room
+        without `power_level_content_override` should result in the server-level overrides
+        being applied.
 
         Similar to https://github.com/matrix-org/matrix-spec/issues/492,
         we overwrite each key of power_level_content_override completely.
@@ -2249,7 +2256,7 @@ class RoomMessageListTestCase(RoomBase):
         self.room_id = self.helper.create_room_as(self.user_id)
 
     def test_topo_token_is_accepted(self) -> None:
-        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
@@ -2260,7 +2267,7 @@ class RoomMessageListTestCase(RoomBase):
         self.assertTrue("end" in channel.json_body)
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
-        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
@@ -2564,9 +2571,9 @@ class RoomDelayedEventTestCase(RoomBase):
             ).encode("ascii"),
             {"body": "test", "msgtype": "m.text"},
         )
-        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            Codes.FORBIDDEN,
+            "ORG.MATRIX.MSC4140_DELAY_TOO_LARGE",
             channel.json_body.get("errcode"),
             channel.json_body,
         )
@@ -5764,3 +5771,117 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             expect_redaction=True,
             reason="being disruptive",
         )
+
+
+class CreateRoomRemoteInviteTestCase(unittest.FederatingHomeserverTestCase):
+    """
+    Tests error propagation from remote invites during /createRoom.
+
+    Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq.
+    """
+
+    servlets = [
+        room.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        admin.register_servlets,
+    ]
+
+    hijack_auth = False
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = self.register_user("creator", "test")
+        self.token = self.login("creator", "test")
+
+    def _mock_remote_invite_http_error(
+        self,
+        status: int,
+        error_body: JsonDict,
+    ) -> None:
+        """
+        Make the remote homeserver reply to its `/invite` endpoint with an error.
+
+        Args:
+            status: the HTTP status to return
+            error_body: the JSON error body to return
+        """
+        federation_http_client = self.hs.get_federation_http_client()
+
+        fake_agent = create_autospec(Agent, spec_set=True)
+
+        def request(
+            method: bytes,
+            uri: bytes,
+            headers: object = None,
+            bodyProducer: object = None,
+        ) -> "defer.Deferred":
+            # For our test, we don't expect any other outbound request
+            assert b"/invite/" in uri, f"unexpected outbound request to {uri!r}"
+            return defer.succeed(
+                FakeResponse.json(
+                    code=status,
+                    payload=error_body,
+                )
+            )
+
+        fake_agent.request.side_effect = request
+        federation_http_client.agent = fake_agent
+
+    @parameterized.expand(
+        (
+            (
+                HTTPStatus.IM_A_TEAPOT,
+                {
+                    "errcode": "M_FORBIDDEN",
+                    "error": "You can't invite this user",
+                },
+                HTTPStatus.IM_A_TEAPOT,
+                {
+                    "errcode": "M_FORBIDDEN",
+                    "error": "You can't invite this user",
+                },
+            ),
+            # This case is https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq
+            # The error is rewritten for safety.
+            (
+                HTTPStatus.UNAUTHORIZED,
+                {"errcode": "M_UNKNOWN_TOKEN", "error": "unknown token"},
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "errcode": "M_UNKNOWN",
+                    "error": "unknown token",
+                },
+            ),
+        )
+    )
+    def test_remote_invite_bubbles_errors(
+        self,
+        policy_server_error_status: HTTPStatus,
+        policy_server_error_body: JsonDict,
+        expected_client_facing_error_status: HTTPStatus,
+        expected_client_facing_error_body: JsonDict,
+    ) -> None:
+        """
+        Test that, when creating a room involving a remote invite,
+        when the remote homeserver returns an error, we bubble it
+        to the client carefully.
+
+        Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq
+        """
+        # Mock the remote homeserver (at the HTTP level) to return the configured error
+        self._mock_remote_invite_http_error(
+            policy_server_error_status,
+            policy_server_error_body,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/createRoom",
+            {"invite": ["@alice:" + self.OTHER_SERVER_NAME]},
+            access_token=self.token,
+        )
+
+        self.assertEqual(
+            channel.code, expected_client_facing_error_status, channel.result
+        )
+        self.assertEqual(channel.json_body, expected_client_facing_error_body)

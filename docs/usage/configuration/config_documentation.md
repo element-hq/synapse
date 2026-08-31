@@ -336,6 +336,17 @@ Example configuration:
 include_profile_data_on_invite: false
 ```
 ---
+### `include_profile_updates_in_sync`
+
+*(boolean)* Use this option to include updates of other users' profiles in sync responses, for users who share rooms.
+For legacy sync clients, requires [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatibility. For sliding sync clients, requires [MSC4262](https://github.com/matrix-org/matrix-spec-proposals/pull/4262) compatibility. Note, profile updates via sync are currently limited to local users only.
+This feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms. Defaults to `false`.
+
+Example configuration:
+```yaml
+include_profile_updates_in_sync: true
+```
+---
 ### `allow_public_rooms_without_auth`
 
 *(boolean)* If set to true, removes the need for authentication to access the server's public rooms directory through the client API, meaning that anyone can query the room directory. Defaults to `false`.
@@ -1276,11 +1287,15 @@ Options related to federation.
 ---
 ### `federation_domain_whitelist`
 
-*(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.
+*(null|array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+
+If specified as an empty list (`[]`), federation will be denied with all servers. Specifying an empty list (`[]`) here is the recommended way of disabling federation.
+
+If unset or null, allows federation with all servers.
 
 Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
 
-Defaults to `[]`.
+Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -2652,13 +2667,20 @@ This setting has the following sub-options:
 
   * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
 
-  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+
+    Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
+
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+
+    Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
 Example configuration:
 ```yaml
 matrix_rtc:
   transports:
   - type: livekit
+    url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
@@ -3822,7 +3844,7 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Fields that will be synced:
     * displayname
     * picture - only if Synapse media repository is running in the main
        process (i.e. not workerized) and media is stored locally Defaults to `false`.
@@ -3951,6 +3973,25 @@ push:
   group_unread_count_by_room: false
   jitter_delay: 10s
 ```
+---
+### `push_rules`
+
+*(object)* Options for push rules
+
+This setting has the following sub-options:
+
+* `limits` (object): Limits on the size of push rules that users can have
+
+  This setting has the following sub-options:
+
+  * `rule_count` (integer): This is the total number of push rules that each user can have. Power users may expect to have one push rule per room. Defaults to `10000`.
+
+  * `rule_id_length` (integer): This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit. Defaults to `300`.
+
+  * `rule_size` (integer): This is the maximum size of a push rule's body, in bytes.
+    The exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it. Defaults to `1024`.
 ---
 ## Rooms
 
