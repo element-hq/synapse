@@ -315,6 +315,7 @@ class StateDeltasStore(SQLBaseStore):
         *,
         from_token: RoomStreamToken | None,
         to_token: RoomStreamToken | None,
+        events_state_key_populated: bool = True,
     ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens, bounding each delta on the
@@ -356,13 +357,11 @@ class StateDeltasStore(SQLBaseStore):
         * rows whose *event* is in the window -- driven by the
           `events(room_id, stream_ordering)` index over the events in the
           window, joined back via the partial
-          `current_state_delta_stream(event_id)` index (only state events
-          find a delta row; we deliberately don't pre-filter on
-          `e.state_key`, which is only backfilled from schema version 76). A
-          row stamped below the window with an effective position inside it
-          must have its event inside the window, so this query is what recovers
-          the mid-batch stragglers, at a cost proportional to the number of
-          events in the window.
+          `current_state_delta_stream(event_id)` index. A row stamped below
+          the window with an effective position inside it must have its event
+          inside the window, so this query is what recovers the mid-batch
+          stragglers, at a cost proportional to the number of state events in
+          the window.
         """
         args: list[str | int] = [room_id]
 
@@ -385,6 +384,13 @@ class StateDeltasStore(SQLBaseStore):
             if to_token is not None:
                 event_position_to_clause = "AND e.stream_ordering <= ?"
 
+            # Only state events can match the delta join, so once
+            # `events.state_key` is reliable we restrict the scan to them and
+            # spare one index probe per non-state event in the window.
+            event_state_key_clause = ""
+            if events_state_key_populated:
+                event_state_key_clause = "AND e.state_key IS NOT NULL"
+
             by_event_position_sql = f"""
                 UNION
                 SELECT d.instance_name, d.stream_id, d.type, d.state_key,
@@ -393,7 +399,7 @@ class StateDeltasStore(SQLBaseStore):
                 FROM events AS e
                 INNER JOIN current_state_delta_stream AS d
                     ON d.event_id = e.event_id AND d.room_id = e.room_id
-                WHERE e.room_id = ?
+                WHERE e.room_id = ? {event_state_key_clause}
                     AND ? < e.stream_ordering {event_position_to_clause}
             """
             args.extend([room_id, from_token.stream])
@@ -512,12 +518,24 @@ class StateDeltasStore(SQLBaseStore):
                 to_token=to_token,
             )
 
+        # `events.state_key` is back-populated by a schema-76 background
+        # update; until it has completed, old state events may have a NULL
+        # state_key and the event-driven query must not filter on it.
+        # (`has_completed_background_update` memoises completion, so this is
+        # only a query the first time.)
+        events_state_key_populated = (
+            await self.db_pool.updates.has_completed_background_update(
+                "events_populate_state_key_rejections"
+            )
+        )
+
         return await self.db_pool.runInteraction(
             "get_current_state_deltas_for_room_by_event_position",
             self.get_current_state_deltas_for_room_by_event_position_txn,
             room_id,
             from_token=from_token,
             to_token=to_token,
+            events_state_key_populated=events_state_key_populated,
         )
 
     @trace
