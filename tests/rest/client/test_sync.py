@@ -1310,18 +1310,14 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
             self.store.set_features_for_user(alice, {ExperimentalFeature.MSC4222: True})
         )
 
-        # Give the room a name so that `compute_summary` does not need to
-        # calculate heroes: hero membership events are injected into the
-        # room state from the *current* room summary, which would be a
-        # second, independent way for post-leave membership state to leak
-        # into the response. This test targets the lazy-loading member
-        # fetch in `_compute_state_delta_for_incremental_sync`.
+        # Name the room to avoid heroes: those come from the *current*
+        # summary — a separate leak path from the one under test.
         room_id = self.helper.create_room_as(
             alice, tok=alice_tok, extra_content={"name": "Some room name"}
         )
         self.helper.join(room_id, bob, tok=bob_tok)
 
-        # Bob's membership event as it will stand at Alice's leave point.
+        # Bob's membership as it will stand at Alice's leave point.
         channel = self.make_request(
             "GET",
             f"/_matrix/client/v3/rooms/{room_id}/state/m.room.member/{bob}?format=event",
@@ -1330,11 +1326,8 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
         bob_member_event_id_at_leave = channel.json_body["event_id"]
 
-        # Lazy-load member events, and use `state_after` (MSC4222).
-        # `include_redundant_members` disables the lazy-loaded members cache,
-        # which would otherwise strip Bob's membership from the incremental
-        # sync response below (his join was already sent in the initial sync),
-        # leaving nothing to assert on.
+        # Lazy-load members; `include_redundant_members` bypasses the members
+        # cache so Bob's membership appears in the incremental sync below.
         sync_filter = json.dumps(
             {
                 "room": {
@@ -1347,21 +1340,18 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         )
         sync_url = f"/sync?filter={sync_filter}&org.matrix.msc4222.use_state_after=true"
 
-        # Initial sync to get a `since` token.
+        # Initial sync.
         channel = self.make_request("GET", sync_url, access_token=alice_tok)
         self.assertEqual(channel.code, 200, channel.result)
         since = channel.json_body["next_batch"]
 
-        # Bob sends a message, so that he is a sender of a timeline event in
-        # Alice's next sync window (and hence subject to the lazy-loading
-        # member fetch).
+        # Bob becomes a timeline sender in the next sync window.
         self.helper.send(room_id, body="hello", tok=bob_tok)
 
         # Alice leaves the room.
         self.helper.leave(room_id, alice, tok=alice_tok)
 
-        # AFTER Alice's leave, Bob's membership state changes: he updates his
-        # per-room displayname (a new m.room.member event with a new event_id).
+        # Bob's membership changes AFTER Alice's leave.
         post_leave_member_event = self.helper.send_state(
             room_id,
             EventTypes.Member,
@@ -1371,9 +1361,7 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         )
         post_leave_member_event_id = post_leave_member_event["event_id"]
 
-        # Alice does an incremental sync. The room should show up in the
-        # `leave` section, with `state_after` reflecting the state at her
-        # leave point.
+        # Incremental sync: the room is in the `leave` section.
         channel = self.make_request(
             "GET", f"{sync_url}&since={since}", access_token=alice_tok
         )
@@ -1382,9 +1370,7 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         left_room = channel.json_body["rooms"]["leave"][room_id]
         state_after_events = left_room["org.matrix.msc4222.state_after"]["events"]
 
-        # The post-leave membership event must not be present anywhere in
-        # `state_after`: it happened after the end of this room's timeline
-        # (Alice's leave).
+        # Post-leave state must not appear in `state_after`.
         self.assertNotIn(
             post_leave_member_event_id,
             [e["event_id"] for e in state_after_events],
@@ -1392,9 +1378,7 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
             f"{state_after_events}",
         )
 
-        # Bob sent a timeline event in the sync window, so the lazy-loading
-        # member fetch must include his membership — as it stood at Alice's
-        # leave point.
+        # Bob's membership must be the one at the leave point.
         self.assertEqual(
             [
                 e["event_id"]
