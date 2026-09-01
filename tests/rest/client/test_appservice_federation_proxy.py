@@ -36,6 +36,7 @@ AS_TOKEN = "as_token"
 
 class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
     """Tests MSC4512 implementation of ASes sending federation requests"""
+
     servlets = [
         admin.register_servlets,
         login.register_servlets,
@@ -67,6 +68,8 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
     def _fed_proxy(
         self, content: dict, access_token: str | None = AS_TOKEN
     ) -> FakeChannel:
+        """Issues a /fed_proxy POST request with the supplied content and access token
+        and returns the result."""
         return self.make_request(
             "POST",
             "/_matrix/client/unstable/io.element.msc4512/appservice/fed_proxy",
@@ -75,6 +78,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         )
 
     def test_get_is_sent_and_relayed(self) -> None:
+        """A GET federation request is relayed to the destination server."""
         self.agent_request.return_value = FakeResponse.json(
             code=200, payload={"hello": "world"}
         )
@@ -111,6 +115,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(headers.getRawHeaders(b"Authorization"), expected_auth_headers)
 
     def test_delete_is_sent_and_relayed(self) -> None:
+        """A DELETE federation request is relayed to the destination server."""
         self.agent_request.return_value = FakeResponse.json(
             code=200, payload={"hello": "world"}
         )
@@ -147,6 +152,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(headers.getRawHeaders(b"Authorization"), expected_auth_headers)
 
     def test_post_with_body_is_sent_and_relayed(self) -> None:
+        """A POST federation request is relayed to the destination server."""
         self.agent_request.return_value = FakeResponse.json(
             code=200, payload={"hello": "world"}
         )
@@ -189,6 +195,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(headers.getRawHeaders(b"Authorization"), expected_auth_headers)
 
     def test_put_with_body_is_sent_and_relayed(self) -> None:
+        """A PUT federation request is relayed to the destination server."""
         self.agent_request.return_value = FakeResponse.json(
             code=200, payload={"hello": "world"}
         )
@@ -231,6 +238,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(headers.getRawHeaders(b"Authorization"), expected_auth_headers)
 
     def test_remote_error_response_is_relayed(self) -> None:
+        """An error response from the remote destination is relayed back to the caller."""
         self.agent_request.return_value = FakeResponse.json(
             code=400, payload={"errcode": "M_UNRECOGNIZED"}
         )
@@ -251,6 +259,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
 
     @unittest.override_config({"federation": {"max_short_retries": 0}})
     def test_connection_failure_causes_502(self) -> None:
+        """A failure to connect to the remote destination is relayed back to the caller as HTTP 502."""
         self.agent_request.side_effect = Exception("boom")
 
         channel = self._fed_proxy(
@@ -267,6 +276,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         )
 
     def test_denied_destination_is_rejected(self) -> None:
+        """An attempt to send a federation request to an invalid destination is rejected."""
         channel = self._fed_proxy(
             {
                 "destination": "not a valid server name",
@@ -282,6 +292,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_self_destination_is_rejected(self) -> None:
+        """An attempt to send a federation request to the local server is rejected."""
         channel = self._fed_proxy(
             {
                 "destination": self.hs.hostname,
@@ -297,6 +308,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_path_traversal_segment_is_rejected(self) -> None:
+        """Path traversal components in the path are rejected."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -312,6 +324,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_percent_encoded_path_traversal_segment_is_rejected(self) -> None:
+        """Percent-encoded path traversal components in the path are rejected."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -327,6 +340,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_get_with_body_is_rejected(self) -> None:
+        """GET requests with a body are rejected and not relayed to the destination."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -341,6 +355,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_delete_with_body_is_rejected(self) -> None:
+        """DELETE requests with a body are rejected and not relayed to the destination."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -355,6 +370,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_non_string_query_value_is_rejected(self) -> None:
+        """A request with a non-string query is rejected and not relayed to the destination."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -369,6 +385,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_path_outside_prefix_is_rejected(self) -> None:
+        """Requests to paths outside the proxy prefix are rejected and not relayed to the destination."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -384,6 +401,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_path_without_version_segment_is_rejected(self) -> None:
+        """Requests to paths that omit the version component are rejected and not relayed to the destination."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -399,6 +417,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_unstable_version_segment_is_sent_and_relayed(self) -> None:
+        """A GET federation request using an unstable version component is relayed to the destination server."""
         self.agent_request.return_value = FakeResponse.json(
             code=200, payload={"hello": "world"}
         )
@@ -424,6 +443,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         )
 
     def test_appservice_without_proxy_prefix_is_rejected(self) -> None:
+        """Requests from app services without a proxy prefix are rejected and not relayed to the destination."""
         other_token = "other_as_token"
         other_appservice = ApplicationService(
             other_token,
@@ -450,6 +470,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_unauthenticated_request_is_rejected(self) -> None:
+        """Unauthenticated requests are rejected and not relayed to the destination."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
@@ -463,6 +484,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         self.agent_request.assert_not_called()
 
     def test_non_appservice_token_is_rejected(self) -> None:
+        """Requests from regular, non-app-service, users are rejected and not relayed to the destination."""
         self.register_user("normal_user", "password")
         user_token = self.login("normal_user", "password")
 
@@ -480,6 +502,7 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
 
     @unittest.override_config({"experimental_features": {"msc4512_enabled": False}})
     def test_endpoint_not_registered_when_msc4512_disabled(self) -> None:
+        """The /fed_proxy endpoint 404s when the feature flag is off."""
         channel = self._fed_proxy(
             {
                 "destination": "remote.example.com",
