@@ -26,7 +26,7 @@ from parameterized import parameterized, parameterized_class
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
+from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, ProfileFields
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -2107,6 +2107,104 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         self.assertIsNone(
             incremental_result.profile_updates["@other_user:test"],
+        )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_deleted_fields(self, is_lazy: bool) -> None:
+        """
+        Tests that, with `include_profile_updates_in_sync` enabled,
+        an incremental sync returns deleted fields as a `null` value, both for
+        `displayname` (stored as its own column) and for
+        generic custom fields (stored as JSON).
+        """
+        # Set up a user with `displayname` and `m.status` profile fields
+        requester = create_requester(self.user)
+        other_requester = create_requester(self.other_user)
+        other_user = UserID.from_string(self.other_user)
+        filter_json: dict = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["displayname", "m.status"]},
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        sync_config = generate_sync_config(
+            user_id=self.user,
+            filter_collection=FilterCollection(
+                hs=self.hs,
+                filter_json=filter_json,
+            ),
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Bob",
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name="m.status",
+                new_value={"text": "On holiday"},
+            )
+        )
+
+        # Do an initial sync after the point of those fields being set
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=sync_config,
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@other_user:test"],
+            {"displayname": "Bob", "m.status": {"text": "On holiday"}},
+        )
+
+        # Delete the displayname and the `m.status` profile fields
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="",
+            )
+        )
+        self.get_success(
+            self.profile_handler.delete_profile_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name="m.status",
+            )
+        )
+
+        # Do an incremental sync.
+        # Expect the deletion of both fields to be communicated in it.
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=sync_config,
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            incremental_result.profile_updates,
+            # We currently represent deleted fields as `null`, even though
+            # it's ambiguous (TODO MSC change)
+            {"@other_user:test": {"displayname": None, "m.status": None}},
         )
 
     @override_config({"include_profile_updates_in_sync": True})
