@@ -1575,17 +1575,20 @@ properties:
         - myCA2.pem
         - myCA3.pem
   federation_domain_whitelist:
-    type: array
+    type: ["null", "array"]
     description: >-
       Restrict federation to the given whitelist of domains. N.B. we recommend
       also firewalling your federation listener to limit inbound federation
       traffic as early as possible, rather than relying purely on this
       application-layer restriction.
 
+
       If specified as an empty list (`[]`), federation will be denied with all servers.
       Specifying an empty list (`[]`) here is the recommended way of disabling federation.
 
-      If not specified, the default is to allow federation with all servers.
+
+      If unset or null, allows federation with all servers.
+
 
       Note: this does not stop a server from joining rooms that servers not on
       the whitelist are in. As such, this option is really only useful to
@@ -1593,6 +1596,7 @@ properties:
       each other and have the same whitelist.
     items:
       type: string
+    default: null
     examples:
       - - lon.example.com
         - nyc.example.com
@@ -3022,10 +3026,28 @@ properties:
               type: string
               description: The type of transport to use to connect to the selective forwarding unit (SFU).
               example: livekit
+            url:
+              type: string
+              description: >-
+                The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is
+                required.
+
+
+                Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit
+                authorization service. The service needs to be set up as an application service in order to support
+                these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
+              example:
+                wss://livekit.example.com
             livekit_service_url:
               type: string
               description: >-
-                The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+                Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is
+                required.
+
+
+                Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit
+                authorization service. This mode of operation is deprecated and should only be used for backwards
+                compatibility.
               example: https://matrix-rtc.example.com/livekit/jwt
         description: A list of transport types and arguments to use for MatrixRTC connections.
         default: []
@@ -3033,6 +3055,7 @@ properties:
     examples:
       - transports:
           - type: livekit
+            url: wss://livekit.example.com
             livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
   enable_registration:
     type: boolean
