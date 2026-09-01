@@ -1216,13 +1216,13 @@ class FederationClient(FederationBase):
 
             # Verify signatures/hashes on events, and make sure they all refer to the same room.
             if room_version.msc4242_state_dags:
-                if state or auth_chain:
+                if state or auth_chain or servers_in_room:
                     raise InvalidResponseError(
-                        "State DAG rooms must not set state or auth_chain fields"
+                        "State DAG rooms must not set servers_in_room, state or auth_chain fields"
                     )
                 await concurrently_execute(_execute, itertools.chain(state_dag), 10000)
-                # Copy valid PDUs along with internal metadata.
-                # It's unclear why this is needed but the code seems to expect it.
+                # NB: We *need* to copy to ensure that we don't have multiple
+                # references being passed on, as that causes... issues.
                 signed_state_dag = [
                     valid_pdus_map[p.event_id].deep_copy()
                     for p in state_dag
@@ -1242,8 +1242,10 @@ class FederationClient(FederationBase):
                     auth_chain=[],
                     state_dag=signed_state_dag,
                     origin=destination,
-                    partial_state=response.members_omitted,
-                    servers_in_room=servers_in_room or frozenset(),
+                    # The current Synapse implementation of MSC4242 does not support
+                    # faster remote room joins, so always set partial_state=False.
+                    partial_state=False,
+                    servers_in_room=frozenset(),
                 )
             else:
                 if state_dag:
