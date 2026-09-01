@@ -34,7 +34,7 @@ from synapse.appservice import ApplicationService
 from synapse.handlers.device import DeviceWriterHandler
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, LaxJsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -61,7 +61,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         """we should be able to re-upload the same keys"""
         local_user = "@boris:" + self.hs.hostname
         device_id = "xyz"
-        keys: JsonDict = {
+        keys: LaxJsonDict = {
             "alg1:k1": "key1",
             "alg2:k2": {"key": "key2", "signatures": {"k1": "sig1"}},
             "alg2:k3": {"key": "key3"},
@@ -747,7 +747,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.get_success(self.handler.upload_signing_keys_for_user(local_user, keys1))
 
         # upload two device keys, which will be signed later by the self-signing key
-        device_key_1: JsonDict = {
+        device_key_1: LaxJsonDict = {
             "user_id": local_user,
             "device_id": "abc",
             "algorithms": [
@@ -760,7 +760,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             },
             "signatures": {local_user: {"ed25519:abc": "base64+signature"}},
         }
-        device_key_2: JsonDict = {
+        device_key_2: LaxJsonDict = {
             "user_id": local_user,
             "device_id": "def",
             "algorithms": [
@@ -955,7 +955,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         device_id = "xyz"
         # private key: OMkooTr76ega06xNvXIGPbgvvxAOzmQncN8VObS7aBA
         device_pubkey = "NnHhnqiMFQkq969szYkooLaBAXW244ZOxgukCvm2ZeY"
-        device_key: JsonDict = {
+        device_key: LaxJsonDict = {
             "user_id": local_user,
             "device_id": device_id,
             "algorithms": [
@@ -977,7 +977,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
 
         # private key: 2lonYOM6xYKdEsO+6KrC766xBcHnYnim1x/4LFGF8B0
         master_pubkey = "nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unI9kDYcHwk"
-        master_key: JsonDict = {
+        master_key: LaxJsonDict = {
             "user_id": local_user,
             "usage": ["master"],
             "keys": {"ed25519:" + master_pubkey: master_pubkey},
@@ -1020,7 +1020,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         # the first user
         other_user = "@otherboris:" + self.hs.hostname
         other_master_pubkey = "fHZ3NPiKxoLQm5OoZbKa99SYxprOjNs4TwJUKP+twCM"
-        other_master_key: JsonDict = {
+        other_master_key: LaxJsonDict = {
             # private key: oyw2ZUx0O4GifbfFYM0nQvj9CL0b8B7cyN4FprtK8OI
             "user_id": other_user,
             "usage": ["master"],
@@ -1607,7 +1607,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         )
 
         # Setup a response.
-        response: dict[str, dict[str, dict[str, JsonDict]]] = {
+        response: dict[str, dict[str, dict[str, LaxJsonDict]]] = {
             local_user: {device_id_1: {**as_otk, **as_fallback_key}}
         }
         self.appservice_api.claim_client_keys.return_value = (response, [])

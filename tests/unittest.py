@@ -76,7 +76,14 @@ from synapse.logging.context import (
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
-from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
+from synapse.types import (
+    ISynapseReactor,
+    JsonDict,
+    LaxJsonDict,
+    Requester,
+    UserID,
+    create_requester,
+)
 from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
@@ -532,7 +539,7 @@ class HomeserverTestCase(TestCase):
             "/_synapse/admin": servlet_resource,
         }
 
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         """
         Get a default HomeServer config dict.
         """
@@ -565,7 +572,7 @@ class HomeserverTestCase(TestCase):
         self,
         method: bytes | str,
         path: bytes | str,
-        content: bytes | str | JsonDict = b"",
+        content: bytes | str | LaxJsonDict = b"",
         access_token: str | None = None,
         request: type[Request] = SynapseRequest,
         shorthand: bool = True,
@@ -627,7 +634,7 @@ class HomeserverTestCase(TestCase):
     def setup_test_homeserver(
         self,
         server_name: str | None = None,
-        config: JsonDict | None = None,
+        config: LaxJsonDict | None = None,
         reactor: Optional[ISynapseReactor] = None,
         clock: Clock | None = None,
         **extra_homeserver_attributes: Any,
@@ -1140,7 +1147,7 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
         self,
         method: str,
         path: str,
-        content: JsonDict | None = None,
+        content: LaxJsonDict | None = None,
         await_result: bool = True,
         custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
@@ -1184,9 +1191,9 @@ class FederatingHomeserverTestCase(HomeserverTestCase):
 
     def add_hashes_and_signatures_from_other_server(
         self,
-        event_dict: JsonDict,
+        event_dict: LaxJsonDict,
         room_version: RoomVersion = KNOWN_ROOM_VERSIONS[DEFAULT_ROOM_VERSION],
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """Adds hashes and signatures to the given event dict
 
         Returns:
@@ -1210,7 +1217,7 @@ def _auth_header_for_request(
     content: JsonDict | None,
 ) -> str:
     """Build a suitable Authorization header for an outgoing federation request"""
-    request_description: JsonDict = {
+    request_description: LaxJsonDict = {
         "method": method,
         "uri": path,
         "destination": destination,
@@ -1230,7 +1237,7 @@ def _auth_header_for_request(
     )
 
 
-def override_config(extra_config: JsonDict) -> Callable[[TV], TV]:
+def override_config(extra_config: LaxJsonDict) -> Callable[[TV], TV]:
     """A decorator which can be applied to test functions to give additional HS config
 
     For use

@@ -43,6 +43,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.types import (
     JsonDict,
+    LaxJsonDict,
     PersistedEventPosition,
     RoomStreamToken,
     UserID,
@@ -149,7 +150,7 @@ class PaginationTestCase(HomeserverTestCase):
         )
         self.event_id_none = res["event_id"]
 
-    def _filter_messages(self, filter: JsonDict) -> list[str]:
+    def _filter_messages(self, filter: LaxJsonDict) -> list[str]:
         """Make a request to /messages with a filter, returns the chunk of events."""
 
         events, next_key, _ = self.get_success(
@@ -323,7 +324,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
     def _send_event_on_instance(
         self, instance_name: str, room_id: str, access_token: str
-    ) -> tuple[JsonDict, PersistedEventPosition]:
+    ) -> tuple[LaxJsonDict, PersistedEventPosition]:
         """
         Send an event in a room and mimic that it was persisted by a specific
         instance/worker.

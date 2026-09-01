@@ -34,7 +34,7 @@ from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.synapse_rust.push import PushRuleEvaluator
-from synapse.types import JsonDict, JsonMapping, UserID
+from synapse.types import JsonDict, JsonMapping, LaxJsonDict, UserID
 from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
@@ -160,7 +160,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         self,
         content: JsonMapping,
         *,
-        related_events: JsonDict | None = None,
+        related_events: LaxJsonDict | None = None,
         msc4210: bool = False,
         msc4306: bool = False,
     ) -> PushRuleEvaluator:
@@ -217,13 +217,13 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         self.assertTrue(evaluator.matches(condition, "@user:test", "foo bar"))
 
     def _assert_matches(
-        self, condition: JsonDict, content: JsonMapping, msg: str | None = None
+        self, condition: LaxJsonDict, content: JsonMapping, msg: str | None = None
     ) -> None:
         evaluator = self._get_evaluator(content)
         self.assertTrue(evaluator.matches(condition, "@user:test", "display_name"), msg)
 
     def _assert_not_matches(
-        self, condition: JsonDict, content: JsonDict, msg: str | None = None
+        self, condition: LaxJsonDict, content: JsonDict, msg: str | None = None
     ) -> None:
         evaluator = self._get_evaluator(content)
         self.assertFalse(

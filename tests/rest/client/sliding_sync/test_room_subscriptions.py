@@ -22,7 +22,7 @@ import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -196,7 +196,7 @@ class SlidingSyncRoomSubscriptionsTestCase(SlidingSyncBase):
             user1_id, tok=user1_tok, extra_content={"name": "Foo"}
         )
 
-        sync_body: JsonDict = {
+        sync_body: LaxJsonDict = {
             "room_subscriptions": {
                 room_id1: {
                     "required_state": [

@@ -59,7 +59,7 @@ from synapse.rest.client import (
 )
 from synapse.server import HomeServer
 from synapse.storage.databases.main.client_ips import LAST_SEEN_GRANULARITY
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict, LaxJsonDict, UserID, create_requester
 from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 
 from tests import unittest
@@ -1523,7 +1523,7 @@ class UserDevicesTestCase(unittest.HomeserverTestCase):
         # Check that all the attributes of the device reported are as expected.
         self._validate_attributes_of_device_response(channel.json_body)
 
-    def _validate_attributes_of_device_response(self, response: JsonDict) -> None:
+    def _validate_attributes_of_device_response(self, response: LaxJsonDict) -> None:
         # Check that all device expected attributes are present
         self.assertEqual(response["user_id"], self.other_user_id)
         self.assertEqual(response["device_id"], self.other_user_device_id)

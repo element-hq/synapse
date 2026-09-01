@@ -35,7 +35,7 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
 from synapse.rest import admin
 from synapse.rest.client import account, login, profile, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, Requester, StateMap
+from synapse.types import JsonDict, LaxJsonDict, Requester, StateMap
 from synapse.util.clock import Clock
 from synapse.util.frozenutils import unfreeze
 
@@ -298,7 +298,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # first patch the event checker so that it will modify the event
         async def check(
             ev: EventBase, state: StateMap[EventBase]
-        ) -> tuple[bool, JsonDict | None]:
+        ) -> tuple[bool, LaxJsonDict | None]:
             d = ev.get_dict()
             d["content"] = {
                 "msgtype": "m.text",
@@ -446,7 +446,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         # Define a callback that sends a custom event on power levels update.
         async def test_fn(
             event: EventBase, state_events: StateMap[EventBase]
-        ) -> tuple[bool, JsonDict | None]:
+        ) -> tuple[bool, LaxJsonDict | None]:
             if event.is_state() and event.type == EventTypes.PowerLevels:
                 await api.create_and_send_event_into_room(
                     {

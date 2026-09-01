@@ -25,7 +25,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes, ReceiptTypes
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -333,7 +333,7 @@ class ReceiptsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(events, original_events)
 
     def _test_filters_private(
-        self, events: list[JsonDict], expected_output: list[JsonDict]
+        self, events: list[LaxJsonDict], expected_output: list[JsonDict]
     ) -> None:
         """Tests that the _filter_out_private returns the expected output"""
         filtered_events = self.event_source.filter_out_private_receipts(

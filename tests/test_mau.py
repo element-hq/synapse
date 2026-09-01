@@ -27,7 +27,7 @@ from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest.client import register, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.types import LaxJsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -38,7 +38,7 @@ from tests.utils import default_config
 class TestMauLimit(unittest.HomeserverTestCase):
     servlets = [register.register_servlets, sync.register_servlets]
 
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         config = default_config(server_name="test")
 
         config.update(

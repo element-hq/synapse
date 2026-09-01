@@ -35,7 +35,7 @@ from twisted.web.resource import Resource
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -160,7 +160,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         """
         return {"/_matrix/media": self.hs.get_media_repository_resource()}
 
-    def _assert_small_png(self, json_body: JsonDict) -> None:
+    def _assert_small_png(self, json_body: LaxJsonDict) -> None:
         """Assert properties from the SMALL_PNG test image."""
         self.assertTrue(json_body["og:image"].startswith("mxc://"))
         self.assertEqual(json_body["og:image:height"], 1)

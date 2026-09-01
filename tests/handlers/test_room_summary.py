@@ -40,7 +40,7 @@ from synapse.handlers.room_summary import _child_events_comparison_key, _RoomEnt
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict, LaxJsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -170,7 +170,9 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
 
     def _assert_hierarchy(
-        self, result: JsonDict, rooms_and_children: Iterable[tuple[str, Iterable[str]]]
+        self,
+        result: LaxJsonDict,
+        rooms_and_children: Iterable[tuple[str, Iterable[str]]],
     ) -> None:
         """
         Assert that the expected room IDs are in the response.
@@ -740,7 +742,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, LaxJsonDict], set[str]]:
             return requested_room_entry, {subroom: child_room}, set()
 
         # Add a room to the space which is on another server.
@@ -793,7 +795,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, LaxJsonDict], set[str]]:
             return requested_room_entry, {fed_subroom: child_room}, set()
 
         expected = [
@@ -921,7 +923,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, LaxJsonDict], set[str]]:
             return subspace_room_entry, dict(children_rooms), set()
 
         # Add a room to the space which is on another server.
@@ -1120,7 +1122,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
-        ) -> tuple[_RoomEntry | None, dict[str, JsonDict], set[str]]:
+        ) -> tuple[_RoomEntry | None, dict[str, LaxJsonDict], set[str]]:
             return requested_room_entry, {fed_subroom: child_room}, set()
 
         expected = [

@@ -18,7 +18,7 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -43,7 +43,7 @@ class ServerNoticesTests(unittest.HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         config = default_config(server_name="test")
 
         config.update({"server_notices": DEFAULT_SERVER_NOTICES_CONFIG})
@@ -77,7 +77,7 @@ class ServerNoticesTests(unittest.HomeserverTestCase):
         self,
         admin_access_token: str,
         target_user_id: str,
-        notice_content: JsonDict,
+        notice_content: LaxJsonDict,
     ) -> None:
         # Send a server notice.
         channel = self.make_request(
@@ -95,7 +95,7 @@ class ServerNoticesTests(unittest.HomeserverTestCase):
         self,
         target_user_id: str,
         target_access_token: str,
-        expected_content: JsonDict,
+        expected_content: LaxJsonDict,
         user_accepts_invite: bool,
     ) -> None:
         # Have the target user sync.

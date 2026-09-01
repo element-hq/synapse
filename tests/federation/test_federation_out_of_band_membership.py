@@ -43,7 +43,7 @@ from synapse.http.types import QueryParams
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, MutableStateMap, StateMap
+from synapse.types import JsonDict, LaxJsonDict, MutableStateMap, StateMap
 from synapse.types.handlers.sliding_sync import (
     StateValues,
 )
@@ -142,8 +142,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.storage_controllers = hs.get_storage_controllers()
 
     def do_sync(
-        self, sync_body: JsonDict, *, since: str | None = None, tok: str
-    ) -> tuple[JsonDict, str]:
+        self, sync_body: LaxJsonDict, *, since: str | None = None, tok: str
+    ) -> tuple[LaxJsonDict, str]:
         """Do a sliding sync request with given body.
 
         Asserts the request was successful.
@@ -349,7 +349,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             destination: str,
             path: str,
             args: QueryParams | None = None,
-            data: JsonDict | None = None,
+            data: LaxJsonDict | None = None,
             json_data_callback: Callable[[], JsonDict] | None = None,
             long_retries: bool = False,
             timeout: int | None = None,
@@ -502,7 +502,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             destination: str,
             path: str,
             args: QueryParams | None = None,
-            data: JsonDict | None = None,
+            data: LaxJsonDict | None = None,
             json_data_callback: Callable[[], JsonDict] | None = None,
             long_retries: bool = False,
             timeout: int | None = None,

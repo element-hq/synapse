@@ -2,7 +2,7 @@ from http import HTTPStatus
 
 from synapse.rest import admin
 from synapse.rest.client import directory, login, room
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 
 from tests import unittest
 from tests.utils import default_config
@@ -30,7 +30,7 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
         assert channel.code == HTTPStatus.OK, f"couldn't publish room: {channel.result}"
         return room_id
 
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         config = default_config(server_name="test")
         config["room_list_publication_rules"] = [{"action": "allow"}]
         return config

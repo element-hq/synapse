@@ -15,7 +15,7 @@ from synapse.federation.units import Edu, Transaction
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.retryutils import NotRetryingDestination
 
@@ -55,8 +55,8 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         )
 
         # whenever send_transaction is called, record the pdu data
-        self.pdus: list[JsonDict] = []
-        self.failed_pdus: list[JsonDict] = []
+        self.pdus: list[LaxJsonDict] = []
+        self.failed_pdus: list[LaxJsonDict] = []
         self.is_online = True
         self.federation_transport_client.send_transaction.side_effect = (
             self.record_transaction
@@ -72,7 +72,7 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         return config
 
     async def record_transaction(
-        self, txn: Transaction, json_cb: Callable[[], JsonDict] | None
+        self, txn: Transaction, json_cb: Callable[[], LaxJsonDict] | None
     ) -> JsonDict:
         if json_cb is None:
             # The tests seem to expect that this method raises in this situation.

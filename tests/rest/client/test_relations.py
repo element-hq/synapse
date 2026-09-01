@@ -29,7 +29,7 @@ from synapse.api.constants import AccountDataTypes, EventTypes, RelationTypes
 from synapse.rest import admin
 from synapse.rest.client import login, register, relations, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -136,7 +136,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, channel.json_body)
         return [ev["event_id"] for ev in channel.json_body["chunk"]]
 
-    def _get_bundled_aggregations(self) -> JsonDict:
+    def _get_bundled_aggregations(self) -> LaxJsonDict:
         """
         Requests /event on the parent ID and returns the m.relations field (from unsigned), if it exists.
         """
@@ -149,7 +149,7 @@ class BaseRelationsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, channel.json_body)
         return channel.json_body["unsigned"].get("m.relations", {})
 
-    def _find_event_in_chunk(self, events: list[JsonDict]) -> JsonDict:
+    def _find_event_in_chunk(self, events: list[JsonDict]) -> LaxJsonDict:
         """
         Find the parent event in a chunk of events and assert that it has the proper bundled aggregations.
         """
@@ -362,7 +362,10 @@ class RelationsTestCase(BaseRelationsTestCase):
         self.assertNotIn("m.relations", channel.json_body["unsigned"])
 
     def _assert_edit_bundle(
-        self, event_json: JsonDict, edit_event_id: str, edit_event_content: JsonDict
+        self,
+        event_json: LaxJsonDict,
+        edit_event_id: str,
+        edit_event_content: LaxJsonDict,
     ) -> None:
         """
         Assert that the given event has a correctly-serialised edit event in its
@@ -1101,7 +1104,7 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
         """
         access_token = access_token or self.user_token
 
-        def assert_bundle(event_json: JsonDict) -> None:
+        def assert_bundle(event_json: LaxJsonDict) -> None:
             """Assert the expected values of the bundled aggregations."""
             relations_dict = event_json["unsigned"].get("m.relations")
 
@@ -1200,7 +1203,7 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
         # the current_user_participated flag is True, create a factory for the
         # two versions.
         def _gen_assert(participated: bool) -> Callable[[JsonDict], None]:
-            def assert_thread(bundled_aggregations: JsonDict) -> None:
+            def assert_thread(bundled_aggregations: LaxJsonDict) -> None:
                 self.assertEqual(2, bundled_aggregations.get("count"))
                 self.assertEqual(
                     participated, bundled_aggregations.get("current_user_participated")
@@ -1256,7 +1259,7 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
         )
         reference_event_id = channel.json_body["event_id"]
 
-        def assert_thread(bundled_aggregations: JsonDict) -> None:
+        def assert_thread(bundled_aggregations: LaxJsonDict) -> None:
             self.assertEqual(2, bundled_aggregations.get("count"))
             self.assertTrue(bundled_aggregations.get("current_user_participated"))
             # The latest thread event has some fields that don't matter.
@@ -1486,7 +1489,7 @@ class RelationIgnoredUserTestCase(BaseRelationsTestCase):
         relation_type: str,
         allowed_event_ids: list[str],
         ignored_event_ids: list[str],
-    ) -> tuple[JsonDict, JsonDict]:
+    ) -> tuple[LaxJsonDict, LaxJsonDict]:
         """
         Fetch the relations and ensure they're all there, then ignore user2, and
         repeat.
@@ -1793,7 +1796,7 @@ class RelationRedactionTestCase(BaseRelationsTestCase):
 
 
 class ThreadsTestCase(BaseRelationsTestCase):
-    def _get_threads(self, body: JsonDict) -> list[tuple[str, str]]:
+    def _get_threads(self, body: LaxJsonDict) -> list[tuple[str, str]]:
         return [
             (
                 ev["event_id"],

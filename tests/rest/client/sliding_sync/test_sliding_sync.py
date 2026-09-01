@@ -37,7 +37,7 @@ from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import account_data, devices, login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import (
-    JsonDict,
+    LaxJsonDict,
     RoomStreamToken,
     SlidingSyncStreamToken,
     StreamKeyType,
@@ -77,7 +77,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             return_value=self.use_new_tables
         )
 
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         config = super().default_config()
         # Enable sliding sync
         config["experimental_features"] = {"msc3575_enabled": True}
@@ -85,7 +85,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
 
     def make_sync_request(
         self,
-        sync_body: JsonDict,
+        sync_body: LaxJsonDict,
         *,
         since: str | None = None,
         tok: str,
@@ -127,12 +127,12 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
 
     def do_sync(
         self,
-        sync_body: JsonDict,
+        sync_body: LaxJsonDict,
         *,
         since: str | None = None,
         tok: str,
         timeout: Duration | None = None,
-    ) -> tuple[JsonDict, str]:
+    ) -> tuple[LaxJsonDict, str]:
         """Do a sliding sync request with given body.
 
         Asserts the request was successful.

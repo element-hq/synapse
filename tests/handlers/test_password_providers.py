@@ -34,7 +34,7 @@ from synapse.handlers.account import AccountHandler
 from synapse.module_api import ModuleApi
 from synapse.rest.client import account, devices, login, logout, register
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, LaxJsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -895,7 +895,7 @@ class PasswordAuthProviderTests(unittest.HomeserverTestCase):
         client is trying to register.
         """
 
-        async def callback(uia_results: JsonDict, params: JsonDict) -> str:
+        async def callback(uia_results: JsonDict, params: LaxJsonDict) -> str:
             self.assertIn(LoginType.DUMMY, uia_results)
             username = params["username"]
             return username + "-foo"
@@ -907,7 +907,7 @@ class PasswordAuthProviderTests(unittest.HomeserverTestCase):
 
         return m
 
-    def _do_uia_assert_mock_not_called(self, username: str, m: Mock) -> JsonDict:
+    def _do_uia_assert_mock_not_called(self, username: str, m: Mock) -> LaxJsonDict:
         # Initiate the UIA flow.
         channel = self.make_request(
             "POST",
@@ -978,7 +978,7 @@ class PasswordAuthProviderTests(unittest.HomeserverTestCase):
         self,
         access_token: str,
         device: str,
-        body: JsonDict | bytes = b"",
+        body: LaxJsonDict | bytes = b"",
     ) -> FakeChannel:
         """Delete an individual device."""
         channel = self.make_request(

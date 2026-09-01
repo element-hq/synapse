@@ -35,7 +35,7 @@ from synapse.rest import admin
 from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventMetadata
-from synapse.types import JsonDict, ReadReceipt
+from synapse.types import JsonDict, LaxJsonDict, ReadReceipt
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -505,13 +505,13 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
         self.device_handler = device_handler
 
         # whenever send_transaction is called, record the edu data
-        self.edus: list[JsonDict] = []
+        self.edus: list[LaxJsonDict] = []
         self.federation_transport_client.send_transaction.side_effect = (
             self.record_transaction
         )
 
     async def record_transaction(
-        self, txn: Transaction, json_cb: Callable[[], JsonDict] | None = None
+        self, txn: Transaction, json_cb: Callable[[], LaxJsonDict] | None = None
     ) -> JsonDict:
         assert json_cb is not None
         data = json_cb()
@@ -885,7 +885,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
 
     def check_device_update_edu(
         self,
-        edu: JsonDict,
+        edu: LaxJsonDict,
         user_id: str,
         device_id: str,
         prev_stream_id: int | None,
@@ -909,7 +909,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
 
     def check_signing_key_update_txn(
         self,
-        txn: JsonDict,
+        txn: LaxJsonDict,
     ) -> None:
         """Check that the txn has an EDU with a signing key update."""
         edus = txn["edus"]

@@ -29,7 +29,7 @@ from synapse.module_api.callbacks.federation import (
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -314,7 +314,7 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
 
         async def _acknowledge_pdus(
             transaction: Transaction,
-            json_data_cb: Callable[[], JsonDict],
+            json_data_cb: Callable[[], LaxJsonDict],
         ) -> JsonDict:
             """
             Acknowledge the PDUs.
@@ -352,7 +352,7 @@ class FederationDeliveryCallbackTests(unittest.FederatingHomeserverTestCase):
 
         async def _error_pdus(
             transaction: Transaction,
-            json_data_cb: Callable[[], JsonDict],
+            json_data_cb: Callable[[], LaxJsonDict],
         ) -> JsonDict:
             """
             Return an error for the PDUs.

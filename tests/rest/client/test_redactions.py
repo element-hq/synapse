@@ -30,7 +30,7 @@ from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
 from synapse.storage.database import LoggingTransaction
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
@@ -91,7 +91,7 @@ class RedactionsTestCase(HomeserverTestCase):
         expect_code: int = 200,
         with_relations: list[str] | None = None,
         content: JsonDict | None = None,
-    ) -> JsonDict:
+    ) -> LaxJsonDict:
         """Helper function to send a redaction event.
 
         Returns the json body.
@@ -108,7 +108,7 @@ class RedactionsTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, expect_code)
         return channel.json_body
 
-    def _sync_room_timeline(self, access_token: str, room_id: str) -> list[JsonDict]:
+    def _sync_room_timeline(self, access_token: str, room_id: str) -> list[LaxJsonDict]:
         channel = self.make_request("GET", "sync", access_token=access_token)
         self.assertEqual(channel.code, 200)
         room_sync = channel.json_body["rooms"]["join"][room_id]
@@ -642,7 +642,7 @@ class RedactionsTestCase(HomeserverTestCase):
         self.assertEqual(redact_event["redacts"], event_id)
 
         # But it isn't actually part of the event.
-        def get_event(txn: LoggingTransaction) -> JsonDict:
+        def get_event(txn: LoggingTransaction) -> LaxJsonDict:
             return db_to_json(
                 main_datastore._fetch_event_rows(txn, [redaction_event_id])[
                     redaction_event_id

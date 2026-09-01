@@ -61,7 +61,14 @@ from synapse.rest.client import (
     sync,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, JsonMapping, RoomAlias, UserID, create_requester
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    LaxJsonDict,
+    RoomAlias,
+    UserID,
+    create_requester,
+)
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
@@ -1858,12 +1865,12 @@ class RoomMessagesTestCase(RoomBase):
     def test_spam_checker_check_event_for_spam(
         self,
         name: str,
-        value: str | bool | Codes | tuple[Codes, JsonDict],
+        value: str | bool | Codes | tuple[Codes, LaxJsonDict],
         expected_code: int,
         expected_fields: dict,
     ) -> None:
         class SpamCheck:
-            mock_return_value: str | bool | Codes | tuple[Codes, JsonDict] | bool = (
+            mock_return_value: str | bool | Codes | tuple[Codes, LaxJsonDict] | bool = (
                 "NOT_SPAM"
             )
             mock_content: JsonMapping | None = None
@@ -2223,7 +2230,7 @@ class RoomInitialSyncTestCase(RoomBase):
         self.assertEqual("join", channel.json_body["membership"])
 
         # Room state is easier to assert on if we unpack it into a dict
-        state: JsonDict = {}
+        state: LaxJsonDict = {}
         for event in channel.json_body["state"]:
             if "state_key" not in event:
                 continue
@@ -2987,7 +2994,7 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )
 
-    def default_config(self) -> JsonDict:
+    def default_config(self) -> LaxJsonDict:
         config = default_config(server_name="test")
         config["room_list_publication_rules"] = [{"action": "allow"}]
         return config
@@ -3989,7 +3996,7 @@ class RoomAliasListTestCase(unittest.HomeserverTestCase):
         res = self._get_aliases(user_tok)
         self.assertEqual(res["aliases"], [alias1])
 
-    def _get_aliases(self, access_token: str, expected_code: int = 200) -> JsonDict:
+    def _get_aliases(self, access_token: str, expected_code: int = 200) -> LaxJsonDict:
         """Calls the endpoint under test. returns the json response object."""
         channel = self.make_request(
             "GET",
@@ -4044,7 +4051,7 @@ class RoomCanonicalAliasTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, expected_code, channel.result)
 
-    def _get_canonical_alias(self, expected_code: int = 200) -> JsonDict:
+    def _get_canonical_alias(self, expected_code: int = 200) -> LaxJsonDict:
         """Calls the endpoint under test. returns the json response object."""
         channel = self.make_request(
             "GET",
@@ -4057,8 +4064,8 @@ class RoomCanonicalAliasTestCase(unittest.HomeserverTestCase):
         return res
 
     def _set_canonical_alias(
-        self, content: JsonDict, expected_code: int = 200
-    ) -> JsonDict:
+        self, content: LaxJsonDict, expected_code: int = 200
+    ) -> LaxJsonDict:
         """Calls the endpoint under test. returns the json response object."""
         channel = self.make_request(
             "PUT",
@@ -4819,7 +4826,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def _check_redactions(
         self,
         original_events: list[EventBase],
-        pulled_events: list[JsonDict],
+        pulled_events: list[LaxJsonDict],
         expect_redaction: bool,
         reason: str | None = None,
     ) -> None:

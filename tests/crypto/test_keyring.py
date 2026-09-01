@@ -48,7 +48,7 @@ from synapse.logging.context import (
 )
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -64,7 +64,7 @@ class MockPerspectiveServer:
         vk = signedjson.key.get_verify_key(self.key)
         return {"%s:%s" % (vk.alg, vk.version): encode_verify_key_base64(vk)}
 
-    def get_signed_key(self, server_name: str, verify_key: VerifyKey) -> JsonDict:
+    def get_signed_key(self, server_name: str, verify_key: VerifyKey) -> LaxJsonDict:
         key_id = "%s:%s" % (verify_key.alg, verify_key.version)
         res = {
             "server_name": server_name,
@@ -75,7 +75,7 @@ class MockPerspectiveServer:
         self.sign_response(res)
         return res
 
-    def sign_response(self, res: JsonDict) -> None:
+    def sign_response(self, res: LaxJsonDict) -> None:
         signedjson.sign.sign_json(res, self.server_name, self.key)
 
 
@@ -476,7 +476,7 @@ class ServerKeyFetcherTestCase(unittest.HomeserverTestCase):
         }
         signedjson.sign.sign_json(response, SERVER_NAME, testkey)
 
-        async def get_json(destination: str, path: str, **kwargs: Any) -> JsonDict:
+        async def get_json(destination: str, path: str, **kwargs: Any) -> LaxJsonDict:
             self.assertEqual(destination, SERVER_NAME)
             self.assertEqual(path, "/_matrix/key/v2/server")
             return response
@@ -565,7 +565,7 @@ class PerspectivesKeyFetcherTestCase(unittest.HomeserverTestCase):
         """
 
         async def post_json(
-            destination: str, path: str, data: JsonDict, **kwargs: Any
+            destination: str, path: str, data: LaxJsonDict, **kwargs: Any
         ) -> JsonDict:
             self.assertEqual(destination, self.mock_perspective_server.server_name)
             self.assertEqual(path, "/_matrix/key/v2/query")
@@ -648,7 +648,7 @@ class PerspectivesKeyFetcherTestCase(unittest.HomeserverTestCase):
         )
 
         async def post_json(
-            destination: str, path: str, data: JsonDict, **kwargs: str
+            destination: str, path: str, data: LaxJsonDict, **kwargs: str
         ) -> JsonDict:
             self.assertEqual(destination, self.mock_perspective_server.server_name)
             self.assertEqual(path, "/_matrix/key/v2/query")

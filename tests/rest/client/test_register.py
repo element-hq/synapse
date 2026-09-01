@@ -38,7 +38,7 @@ from synapse.appservice import ApplicationService
 from synapse.rest.client import account, account_validity, login, logout, register, sync
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, LaxJsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -364,7 +364,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
 
     @override_config({"registration_requires_token": True})
     def test_POST_registration_token_invalid(self) -> None:
-        params: JsonDict = {
+        params: LaxJsonDict = {
             "username": "kermit",
             "password": "monkey",
         }
@@ -413,7 +413,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
                 },
             )
         )
-        params1: JsonDict = {"username": "bert", "password": "monkey"}
+        params1: LaxJsonDict = {"username": "bert", "password": "monkey"}
         params2: JsonDict = {"username": "ernie", "password": "monkey"}
         # Do 2 requests without auth to get two session IDs
         channel1 = self.make_request(b"POST", self.url, params1)
@@ -537,7 +537,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         )
 
         # Do 2 requests without auth to get two session IDs
-        params1: JsonDict = {"username": "bert", "password": "monkey"}
+        params1: LaxJsonDict = {"username": "bert", "password": "monkey"}
         params2: JsonDict = {"username": "ernie", "password": "monkey"}
         channel1 = self.make_request(b"POST", self.url, params1)
         session1 = channel1.json_body["session"]

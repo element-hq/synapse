@@ -94,8 +94,19 @@ MutableStateMap = MutableMapping[StateKey, T]
 # A "simple" (canonical) JSON value.
 SimpleJsonValue = str | int | bool | None
 JsonValue = list[SimpleJsonValue] | tuple[SimpleJsonValue, ...] | SimpleJsonValue
-# A JSON-serialisable dict.
+
+LaxJsonDict = dict[str, Any]
+"""
+A JSON-serialisable dict, without strong type enforcement.
+"""
+
 JsonDict = dict[str, Any]
+"""
+A JSON-serialisable dict.
+
+NOTE: Will be updated to point at `StrictJsonDict` in the future.
+"""
+
 # A JSON-serialisable mapping; roughly speaking an immutable JSONDict.
 # Useful when you have a TypedDict which isn't going to be mutated and you don't want
 # to cast to JsonDict everywhere.

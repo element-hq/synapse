@@ -24,7 +24,7 @@ from twisted.internet.testing import MemoryReactor
 import synapse.rest.admin
 from synapse.rest.client import login, reporting, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -153,7 +153,7 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
             msg=channel.result["body"],
         )
 
-    def _assert_status(self, response_status: int, data: JsonDict) -> None:
+    def _assert_status(self, response_status: int, data: LaxJsonDict) -> None:
         channel = self.make_request(
             "POST", self.report_path, data, access_token=self.other_user_tok
         )
@@ -225,7 +225,7 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.result["body"])
 
-    def _assert_status(self, response_status: int, data: JsonDict) -> None:
+    def _assert_status(self, response_status: int, data: LaxJsonDict) -> None:
         channel = self.make_request(
             "POST",
             self.report_path,
@@ -310,7 +310,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(rows), 0)
 
     def _assert_status(
-        self, response_status: int, data: JsonDict, user_id: str | None = None
+        self, response_status: int, data: LaxJsonDict, user_id: str | None = None
     ) -> None:
         if user_id is None:
             user_id = self.target_user_id

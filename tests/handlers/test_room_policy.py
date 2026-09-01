@@ -32,7 +32,7 @@ from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
 from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, LaxJsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -130,7 +130,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         async def policy_server_signs_event_with_wrong_key(
             destination: str, pdu: EventBase, timeout: int | None = None
-        ) -> JsonDict | None:
+        ) -> LaxJsonDict | None:
             sk = signedjson.key.generate_signing_key("policy_server")
             sigs = compute_event_signature(
                 pdu.room_version,
@@ -526,7 +526,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             f"event did not include policy server signature, signature block = {ev.get('signatures', None)}",
         )
 
-    def _fetch_federation_event(self, event_id: str) -> JsonDict | None:
+    def _fetch_federation_event(self, event_id: str) -> LaxJsonDict | None:
         # Request federation events to see the signatures
         channel = self.make_request(
             "POST",

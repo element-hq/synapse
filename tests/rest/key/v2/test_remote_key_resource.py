@@ -35,7 +35,7 @@ from synapse.http.site import SynapseRequest
 from synapse.rest.key.v2 import KeyResource
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
-from synapse.types import JsonDict
+from synapse.types import JsonDict, LaxJsonDict
 from synapse.util.clock import Clock
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.stringutils import random_string
@@ -67,7 +67,7 @@ class BaseRemoteKeyResourceTestCase(unittest.HomeserverTestCase):
             path: str,
             ignore_backoff: bool = False,
             **kwargs: Any,
-        ) -> JsonDict | list:
+        ) -> LaxJsonDict | list:
             self.assertTrue(ignore_backoff)
             self.assertEqual(destination, server_name)
             key_id = "%s:%s" % (signing_key.alg, signing_key.version)
