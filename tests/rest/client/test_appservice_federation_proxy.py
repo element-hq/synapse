@@ -339,6 +339,38 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         )
         self.agent_request.assert_not_called()
 
+    def test_path_with_query_string_is_rejected(self) -> None:
+        """A path containing a query string is rejected and not relayed to the destination."""
+        channel = self._fed_proxy(
+            {
+                "destination": "remote.example.com",
+                "method": "GET",
+                "path": f"/_matrix/federation/v1/{APPSERVICE_PREFIX}/some/path?foo=bar",
+            }
+        )
+
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.AS_FEDPROXY_PATH_NOT_ALLOWED
+        )
+        self.agent_request.assert_not_called()
+
+    def test_path_with_fragment_is_rejected(self) -> None:
+        """A path containing a fragment is rejected and not relayed to the destination."""
+        channel = self._fed_proxy(
+            {
+                "destination": "remote.example.com",
+                "method": "GET",
+                "path": f"/_matrix/federation/v1/{APPSERVICE_PREFIX}/some/path#frag",
+            }
+        )
+
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.AS_FEDPROXY_PATH_NOT_ALLOWED
+        )
+        self.agent_request.assert_not_called()
+
     def test_get_with_body_is_rejected(self) -> None:
         """GET requests with a body are rejected and not relayed to the destination."""
         channel = self._fed_proxy(

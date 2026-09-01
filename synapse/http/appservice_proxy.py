@@ -277,6 +277,15 @@ def _check_path_allowed_for_appservice(
             Codes.AS_FEDPROXY_PATH_NOT_ALLOWED,
         )
 
+    # Deny query parameters or fragments smuggled in via the path.
+    split_path = urlsplit(path)
+    if split_path.query or split_path.fragment:
+        raise SynapseError(
+            HTTPStatus.FORBIDDEN,
+            "Path must not contain a query string or fragment",
+            Codes.AS_FEDPROXY_PATH_NOT_ALLOWED,
+        )
+
     # Ensure the path is under the appservice's own proxy prefix.
     if appservice.proxy_prefix is None:
         raise SynapseError(
