@@ -373,9 +373,9 @@ class DelayedEventsHandler:
             requested_delay = delay.as_millis()
             max_delay = self._config.server.max_event_delay_duration.as_millis()
             raise SynapseError(
-                HTTPStatus.FORBIDDEN,
+                HTTPStatus.BAD_REQUEST,
                 f"The requested delay ({requested_delay}ms) exceeds the allowed maximum ({max_delay}ms)",
-                Codes.FORBIDDEN,
+                Codes.DELAY_TOO_LARGE,
             )
 
         self._event_creation_handler.validator.validate_builder(
