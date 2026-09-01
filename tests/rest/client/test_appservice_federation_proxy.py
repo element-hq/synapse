@@ -258,6 +258,55 @@ class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
         )
 
     @unittest.override_config({"federation": {"max_short_retries": 0}})
+    def test_remote_5xx_response_is_relayed(self) -> None:
+        """A 5xx response from the remote destination is relayed back to the caller
+        with its original error code."""
+        self.agent_request.return_value = FakeResponse.json(
+            code=503, payload={"error": "overloaded"}
+        )
+
+        channel = self._fed_proxy(
+            {
+                "destination": "remote.example.com",
+                "method": "GET",
+                "path": f"/_matrix/federation/v1/{APPSERVICE_PREFIX}/some/path",
+            }
+        )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(
+            channel.json_body,
+            {"status": 503, "content": {"error": "overloaded"}},
+        )
+
+    def test_destination_backoff_is_ignored(self) -> None:
+        """A destination that Synapse is currently backing off from for normal
+        federation traffic is still reachable via the federation proxy."""
+        self.get_success(
+            self.hs.get_datastores().main.set_destination_retry_timings(
+                "remote.example.com",
+                None,
+                self.clock.time_msec(),  # We last retried just now...
+                24 * 60 * 60 * 1000,  # ...and we won't retry for another 24h.
+            )
+        )
+        self.agent_request.return_value = FakeResponse.json(
+            code=200, payload={"ok": True}
+        )
+
+        channel = self._fed_proxy(
+            {
+                "destination": "remote.example.com",
+                "method": "GET",
+                "path": f"/_matrix/federation/v1/{APPSERVICE_PREFIX}/some/path",
+            }
+        )
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {"status": 200, "content": {"ok": True}})
+        self.agent_request.assert_called_once()
+
+    @unittest.override_config({"federation": {"max_short_retries": 0}})
     def test_connection_failure_causes_502(self) -> None:
         """A failure to connect to the remote destination is relayed back to the caller as HTTP 502."""
         self.agent_request.side_effect = Exception("boom")

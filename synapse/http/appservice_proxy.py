@@ -42,7 +42,6 @@ from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import JsonDict
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.json import json_decoder
-from synapse.util.retryutils import NotRetryingDestination
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -228,23 +227,19 @@ async def send_federation_request_from_appservice(
             Codes.AS_FEDPROXY_DESTINATION_DENIED,
         )
 
+    if method not in ("GET", "PUT", "POST", "DELETE"):
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            f"Unsupported method {method}",
+            Codes.INVALID_PARAM,
+        )
+
     client = hs.get_federation_http_client()
 
     try:
-        if method == "GET":
-            content = await client.get_json(destination, path, args=args)
-        elif method == "PUT":
-            content = await client.put_json(destination, path, args=args, data=data)
-        elif method == "POST":
-            content = await client.post_json(destination, path, args=args, data=data)
-        elif method == "DELETE":
-            content = await client.delete_json(destination, path, args=args)
-        else:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                f"Unsupported method {method}",
-                Codes.INVALID_PARAM,
-            )
+        content = await client.send_direct_request(
+            method, destination, path, args=args, json_body=data
+        )
         return HTTPStatus.OK, content
     except HttpResponseException as e:
         try:
@@ -258,7 +253,7 @@ async def send_federation_request_from_appservice(
             e.msg,
             Codes.AS_FEDPROXY_DESTINATION_DENIED,
         )
-    except (RequestSendFailed, NotRetryingDestination) as e:
+    except RequestSendFailed as e:
         raise SynapseError(
             HTTPStatus.BAD_GATEWAY,
             str(e),

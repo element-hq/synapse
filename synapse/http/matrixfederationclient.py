@@ -1468,6 +1468,82 @@ class MatrixFederationHttpClient:
         )
         return body
 
+    async def send_direct_request(
+        self,
+        method: str,
+        destination: str,
+        path: str,
+        args: QueryParams | None = None,
+        json_body: JsonDict | None = None,
+        timeout: int | None = None,
+    ) -> JsonDict:
+        """Sends a single one-off request to the destination, for a caller
+        that owns its own retry policy.
+
+        Unlike `get_json`/`put_json`/`post_json`/`delete_json`, this method
+        always ignores the destination's backoff data, and raises the
+        destination's real `HttpResponseException` rather than
+        `RequestSendFailed` for a 5xx or 429 response that survives the
+        normal short-retry schedule.
+
+        Args:
+            method: The HTTP method to use.
+            destination: The remote server to send the HTTP request to.
+            path: The HTTP path.
+            args: query params
+            json_body: A dict containing the data that will be used as the
+                request body. This will be encoded as JSON.
+            timeout: number of milliseconds to wait for the response.
+                self._default_timeout (60s) by default.
+
+        Returns:
+            Succeeds when we get a 2xx HTTP response. The
+            result will be the decoded JSON body.
+
+        Raises:
+            HttpResponseException: If we get an HTTP response code >= 300
+                (including 429 and 5xx responses that survive retrying).
+            FederationDeniedError: If this destination is not on our
+                federation whitelist
+            RequestSendFailed: If there were problems connecting to the
+                remote, due to e.g. DNS failures, connection timeouts etc.
+        """
+        request = MatrixFederationRequest(
+            method=method,
+            destination=destination,
+            path=path,
+            query=args,
+            json=json_body,
+        )
+
+        start_ms = self.clock.time_msec()
+
+        try:
+            response = await self._send_request(
+                request,
+                ignore_backoff=True,
+                timeout=timeout,
+            )
+        except RequestSendFailed as e:
+            if isinstance(e.inner_exception, HttpResponseException):
+                raise e.inner_exception from e
+            raise
+
+        if timeout is not None:
+            _sec_timeout = timeout / 1000
+        else:
+            _sec_timeout = self.default_timeout_seconds
+
+        return await _handle_response(
+            self.clock,
+            self.reactor,
+            _sec_timeout,
+            request,
+            response,
+            start_ms,
+            parser=JsonParser(),
+        )
+
     async def get_file(
         self,
         destination: str,
