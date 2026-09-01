@@ -405,7 +405,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         for key_id in claimed_keys.keys():
             self.assertIn(key_id, ["alg1:k20", "alg1:k21", "alg1:k22"])
 
-    @override_config({"max_one_time_keys_per_device": 5})
+    @mock.patch("synapse.handlers.e2e_keys.MAX_ONE_TIME_KEYS_PER_DEVICE", 5)
     def test_upload_one_time_keys_over_limit_is_rejected(self) -> None:
         """Uploading one-time keys which would take a device over the limit fails"""
         local_user = "@boris:" + self.hs.hostname
