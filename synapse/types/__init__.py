@@ -1019,7 +1019,23 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
 @attr.s(frozen=True, slots=True, order=False)
 class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
-    """A basic stream token class for streams that supports multiple writers."""
+    """
+    A basic stream token class for streams that supports multiple writers.
+
+    Serialised as either:
+        - the bare `stream` position (e.g. `42`); or
+        - if any writer is ahead of that position,
+          as `m{stream}~{id}.{pos}~{id}.{pos}...`, where:
+          each `id` is the writer's ID from the `instance_map` table
+          (see `DataStore.get_id_for_instance`)
+
+    For the latter (`m{}~{}.{}~...`) form, it is necessary to check the writer of a
+    given row to determine how it compares to the token.
+
+    See:
+        - `is_stream_position_in_range` for a single row
+        - `make_multiwriter_sharded_token_bounds_sql` for SQL
+    """
 
     @classmethod
     async def parse(cls, store: "DataStore", string: str) -> "MultiWriterStreamToken":
@@ -1221,7 +1237,9 @@ class StreamToken:
     groups_key: int
     un_partial_stated_rooms_key: int
     thread_subscriptions_key: int
-    sticky_events_key: int
+    sticky_events_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
     quarantined_media_key: MultiWriterStreamToken = attr.ib(
         validator=attr.validators.instance_of(MultiWriterStreamToken)
     )
@@ -1273,7 +1291,9 @@ class StreamToken:
                 groups_key=int(groups_key),
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
                 thread_subscriptions_key=int(thread_subscriptions_key),
-                sticky_events_key=int(sticky_events_key),
+                sticky_events_key=await MultiWriterStreamToken.parse(
+                    store, sticky_events_key
+                ),
                 quarantined_media_key=await MultiWriterStreamToken.parse(
                     store, quarantined_media_key
                 ),
@@ -1301,7 +1321,7 @@ class StreamToken:
                 str(self.groups_key),
                 str(self.un_partial_stated_rooms_key),
                 str(self.thread_subscriptions_key),
-                str(self.sticky_events_key),
+                await self.sticky_events_key.to_string(store),
                 await self.quarantined_media_key.to_string(store),
                 str(self.profile_updates_key),
             ]
@@ -1339,6 +1359,12 @@ class StreamToken:
                 self.quarantined_media_key.copy_and_advance(new_value),
             )
             return new_token
+        elif key == StreamKeyType.STICKY_EVENTS:
+            new_token = self.copy_and_replace(
+                StreamKeyType.STICKY_EVENTS,
+                self.sticky_events_key.copy_and_advance(new_value),
+            )
+            return new_token
 
         new_token = self.copy_and_replace(key, new_value)
         new_id = new_token.get_field(key)
@@ -1362,6 +1388,7 @@ class StreamToken:
             StreamKeyType.RECEIPT,
             StreamKeyType.DEVICE_LIST,
             StreamKeyType.QUARANTINED_MEDIA,
+            StreamKeyType.STICKY_EVENTS,
         ],
     ) -> MultiWriterStreamToken: ...
 
@@ -1376,7 +1403,6 @@ class StreamToken:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
-            StreamKeyType.STICKY_EVENTS,
             StreamKeyType.PROFILE_UPDATES,
         ],
     ) -> int: ...
@@ -1452,7 +1478,7 @@ StreamToken.START = StreamToken(
     groups_key=0,
     un_partial_stated_rooms_key=0,
     thread_subscriptions_key=0,
-    sticky_events_key=0,
+    sticky_events_key=MultiWriterStreamToken(stream=0),
     quarantined_media_key=MultiWriterStreamToken(stream=0),
     profile_updates_key=0,
 )

@@ -1037,12 +1037,12 @@ class SlidingSyncExtensionHandler:
         # to make sure the client receives all visible (unexpired) sticky events
         since_token = sticky_events_request.since or SlidingSyncStickyEventsToken.START
         (
-            sticky_events_to_id,
+            sticky_events_to_token,
             room_to_event_ids,
         ) = await self.store.get_sticky_events_in_rooms(
             all_interested_room_ids,
-            from_id=since_token.sticky_events_stream_id,
-            to_id=to_token.sticky_events_key,
+            from_token=await since_token.to_stream_token(self.store),
+            to_token=to_token.sticky_events_key,
             now=now,
             limit=min(sticky_events_request.limit, StickyEvent.MAX_EVENTS_IN_SYNC),
         )
@@ -1079,8 +1079,8 @@ class SlidingSyncExtensionHandler:
 
         return SlidingSyncResult.Extensions.StickyEventsExtension(
             room_id_to_sticky_events=room_id_to_sticky_events,
-            next_batch=SlidingSyncStickyEventsToken(
-                sticky_events_stream_id=sticky_events_to_id
+            next_batch=await SlidingSyncStickyEventsToken.from_stream_token(
+                self.store, sticky_events_to_token
             ),
         )
 
