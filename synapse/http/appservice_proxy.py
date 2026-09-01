@@ -221,7 +221,7 @@ async def send_federation_request_from_appservice(
     """
     _check_path_allowed_for_appservice(appservice, path)
 
-    if destination == hs.hostname:
+    if hs.is_mine_server_name(destination):
         raise SynapseError(
             HTTPStatus.FORBIDDEN,
             "Cannot target this homeserver itself",
