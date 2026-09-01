@@ -35,6 +35,7 @@ AS_TOKEN = "as_token"
 
 
 class ApplicationServiceFederationProxyTestCase(unittest.HomeserverTestCase):
+    """Tests MSC4512 implementation of ASes sending federation requests"""
     servlets = [
         admin.register_servlets,
         login.register_servlets,
