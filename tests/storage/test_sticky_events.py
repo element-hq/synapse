@@ -66,7 +66,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
     def test_get_updated_sticky_events(self) -> None:
         """Test getting updated sticky events between stream IDs."""
         # Get the starting stream_id
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         event_id_1 = self.helper.send_sticky_event(
             self.room_id,
@@ -76,7 +76,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
-        mid_id = self.store.get_max_sticky_events_stream_id()
+        mid_id = self.store.get_sticky_events_stream_token().stream
 
         event_id_2 = self.helper.send_sticky_event(
             self.room_id,
@@ -86,7 +86,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Get all updates
         updates = self.get_success(
@@ -129,7 +129,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Delete expired events
         self.get_success(self.store._delete_expired_sticky_events())
@@ -150,7 +150,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
     def test_get_updated_sticky_events_with_limit(self) -> None:
         """Test that the limit parameter works correctly."""
         # Get the starting stream_id
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         event_id_1 = self.helper.send_sticky_event(
             self.room_id,
@@ -189,7 +189,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         room_id = self.helper.create_room_as(
             user2_id, tok=user2_tok, room_version=RoomVersions.V10.identifier
@@ -267,7 +267,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Check the event made it into the sticky_events table
         updates = self.get_success(
@@ -288,7 +288,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         token = self.login(user_id, "pass")
         room_id = self.helper.create_room_as(user_id, tok=token)
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         # Create and persist a sticky event that is soft-failed
         soft_failed_sticky_event = self.get_success(
@@ -306,7 +306,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         updates = self.get_success(
             self.store.get_updated_sticky_events(
@@ -327,7 +327,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         token = self.login(user_id, "pass")
         room_id = self.helper.create_room_as(user_id, tok=token)
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         # Create and persist a sticky event that is marked policy_server_spammy
         # N.B. policy_server_spammy events are always soft-failed too
@@ -361,7 +361,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Verify only the regular event was inserted
         updates = self.get_success(
@@ -383,7 +383,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         token = self.login(user_id, "pass")
         room_id = self.helper.create_room_as(user_id, tok=token)
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         # Create and persist a sticky event that is marked spam_checker_spammy
         # N.B. spam_checker_spammy events are always soft-failed too
@@ -417,7 +417,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Verify only the valid sticky event was inserted
         updates = self.get_success(
