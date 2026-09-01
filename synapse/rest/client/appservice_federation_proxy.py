@@ -35,7 +35,7 @@ ALLOWED_METHODS = ("GET", "PUT", "POST", "DELETE")
 class AppserviceFederationProxyRestServlet(RestServlet):
     PATTERNS = [
         re.compile(
-            r"^/_matrix/client/unstable/io.element.msc4512/appservice/fed_proxy$"
+            r"^/_matrix/client/unstable/io\.element\.msc4512/appservice/fed_proxy$"
         )
     ]
 
