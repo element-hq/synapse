@@ -51,16 +51,18 @@ logger = logging.getLogger(__name__)
 # "Hop-by-hop" headers (as opposed to "end-to-end" headers) as defined by RFC2616
 # section 13.5.1 and referenced in RFC9110 section 7.6.1. These are meant to only be
 # consumed by the immediate recipient and not be forwarded on.
-HOP_BY_HOP_HEADERS_LOWERCASE = {
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailers",
-    "transfer-encoding",
-    "upgrade",
-}
+HOP_BY_HOP_HEADERS_LOWERCASE = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
 assert all(header.lower() == header for header in HOP_BY_HOP_HEADERS_LOWERCASE)
 
 

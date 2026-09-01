@@ -194,14 +194,21 @@ __all__ = [
     "run_in_background",
     "run_as_background_process",
     "cached",
+    "CachedFunction",
     "NOT_SPAM",
     "UserID",
+    "DomainSpecificString",
     "DatabasePool",
     "LoggingTransaction",
     "DirectServeHtmlResource",
     "DirectServeJsonResource",
+    "SimpleHttpClient",
+    "SynapseRequest",
     "ModuleApi",
+    "AccountDataManager",
+    "PublicRoomListManager",
     "PRESENCE_ALL_USERS",
+    "UserPresenceState",
     "LoginResponse",
     "JsonDict",
     "JsonMapping",
@@ -209,7 +216,13 @@ __all__ = [
     "StateMap",
     "ProfileInfo",
     "RoomAlias",
+    "RoomID",
+    "Requester",
+    "UserInfo",
+    "UserIpAndAgent",
     "UserProfile",
+    "Absent",
+    "AbsentType",
     "RatelimitOverride",
     "MediaUploadLimit",
 ]
@@ -2042,10 +2055,11 @@ class ModuleApi:
                 deactivation,
             )
 
-        await self._hs.get_profile_handler().set_displayname(
+        await self._hs.get_profile_handler().dispatch_set_profile_field(
             target_user=user_id,
             requester=requester,
-            new_displayname=new_displayname,
+            field_name=ProfileFields.DISPLAYNAME,
+            new_value=new_displayname,
             by_admin=True,
         )
 
