@@ -49,6 +49,7 @@ from synapse.rest.admin._base import (
     assert_user_is_admin,
 )
 from synapse.rest.client._base import client_patterns
+from synapse.storage.databases.main import UserPaginateResponse
 from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.types import JsonDict, JsonMapping, TaskStatus, UserID
@@ -181,13 +182,16 @@ class UsersRestServletV2(RestServlet):
         )
 
         # If support for MSC3866 is not enabled, don't show the approval flag.
-        filter = None
+        users_filter = None
         if not self._msc3866_enabled:
+            users_filter = attr.filters.exclude(
+                attr.fields(UserPaginateResponse).approved
+            )
 
-            def _filter(a: attr.Attribute) -> bool:
-                return a.name != "approved"
-
-        ret = {"users": [attr.asdict(u, filter=filter) for u in users], "total": total}
+        ret = {
+            "users": [attr.asdict(u, filter=users_filter) for u in users],
+            "total": total,
+        }
         if (start + limit) < total:
             ret["next_token"] = str(start + len(users))
 
