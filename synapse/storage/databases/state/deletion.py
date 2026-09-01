@@ -14,6 +14,7 @@
 
 
 import contextlib
+import logging
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -30,10 +31,13 @@ from synapse.storage.database import (
     make_in_list_sql_clause,
 )
 from synapse.storage.engines import PostgresEngine
+from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+logger = logging.getLogger(__name__)
 
 
 class StateDeletionDataStore:
@@ -81,6 +85,12 @@ class StateDeletionDataStore:
     # event will fail to persist (as well as any event in the same batch).
     DELAY_BEFORE_DELETION_MS = 10 * 60 * 1000
 
+    # How old a row in `state_groups_persisting` has to be before we assume the
+    # persist that wrote it has gone away. This should be much longer than any
+    # persist can take. If we clear the row of a live persist, then its state
+    # groups can be deleted while it is still using them.
+    STALE_PERSISTING_DURATION = Duration(days=7)
+
     def __init__(
         self,
         database: DatabasePool,
@@ -91,17 +101,35 @@ class StateDeletionDataStore:
         self.db_pool = database
         self._instance_name = hs.get_instance_name()
 
-        with db_conn.cursor(txn_name="_clear_existing_persising") as txn:
-            self._clear_existing_persising(txn)
+        with db_conn.cursor(txn_name="_clear_existing_persisting") as txn:
+            self._clear_existing_persisting(txn)
 
-    def _clear_existing_persising(self, txn: LoggingTransaction) -> None:
+    def _clear_existing_persisting(self, txn: LoggingTransaction) -> None:
         """On startup we clear any entries in `state_groups_persisting` that
-        match our instance name, in case of a previous unclean shutdown"""
+        match our instance name (or are very old), in case of a previous unclean
+        shutdown."""
 
-        self.db_pool.simple_delete_txn(
-            txn,
-            table="state_groups_persisting",
-            keyvalues={"instance_name": self._instance_name},
+        # Delete any rows that are very old, or that match our instance name. We
+        # clear all stale rows, even if they don't match our instance name, as
+        # we don't know if the instance that created them is still running.
+        cutoff = self._clock.time_msec() - self.STALE_PERSISTING_DURATION.as_millis()
+        sql = """
+            DELETE FROM state_groups_persisting
+            WHERE inserted_ts < ? OR (instance_name = ?)
+            RETURNING state_group
+        """
+        txn.execute(sql, (cutoff, self._instance_name))
+
+        # Two instances can each have a stale row for the same state group.
+        state_groups = {state_group for (state_group,) in txn}
+
+        if not state_groups:
+            return
+
+        logger.info(
+            "Cleared %d stale state groups from state_groups_persisting: %s",
+            len(state_groups),
+            shortstr(state_groups),
         )
 
     async def check_state_groups_and_bump_deletion(
@@ -277,11 +305,20 @@ class StateDeletionDataStore:
                 f"state groups have been deleted: {shortstr(missing_state_groups)}"
             )
 
-        self.db_pool.simple_insert_many_txn(
+        # There is a unique key on (state_group, instance_name) so we need to
+        # handle the case where we have already marked a state group as being
+        # persisted. This can happen if we fail to persist an event and then
+        # retry.
+        now = self._clock.time_msec()
+        self.db_pool.simple_upsert_many_txn(
             txn,
             table="state_groups_persisting",
-            keys=("state_group", "instance_name"),
-            values=[(state_group, self._instance_name) for state_group in state_groups],
+            key_names=("state_group", "instance_name"),
+            key_values=[
+                (state_group, self._instance_name) for state_group in state_groups
+            ],
+            value_names=("inserted_ts",),
+            value_values=[(now,) for _ in state_groups],
         )
 
     def _finish_persisting_txn(

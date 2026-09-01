@@ -1,0 +1,1 @@
+Make `federation_domain_whitelist` nullable in config schema.
