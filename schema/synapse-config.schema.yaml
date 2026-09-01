@@ -1285,7 +1285,7 @@ properties:
     description: >-
       How long after an `m.room.message` was sent a local user is still allowed
       to redact it. If a local user tries to redact a `m.room.message` older
-      than this period Synapse responds with `403 M_ALLOWED_REDACTION_PERIOD_PASSED`
+      than this period Synapse responds with `403 M_FORBIDDEN`
       and does not redact the event.
 
 

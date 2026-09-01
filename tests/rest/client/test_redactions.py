@@ -189,7 +189,7 @@ class RedactionsTestCase(HomeserverTestCase):
         body = self._redact_event(
             self.other_access_token, self.room_id, msg_id, expect_code=403
         )
-        self.assertEqual(body["errcode"], Codes.ALLOWED_REDACTION_PERIOD_PASSED)
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
 
     @override_config({"redaction_allowed_period": "1h"})
     def test_edit_redaction_uses_original_timestamp(self) -> None:
@@ -216,7 +216,7 @@ class RedactionsTestCase(HomeserverTestCase):
         body = self._redact_event(
             self.other_access_token, self.room_id, edit["event_id"], expect_code=403
         )
-        self.assertEqual(body["errcode"], Codes.ALLOWED_REDACTION_PERIOD_PASSED)
+        self.assertEqual(body["errcode"], Codes.FORBIDDEN)
 
     @override_config({"redaction_allowed_period": "1h"})
     def test_can_redact_old_non_message_event(self) -> None:

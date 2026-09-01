@@ -2252,16 +2252,18 @@ class EventCreationHandler:
             return
 
         redacts = event_dict["content"].get("redacts") or event_dict.get("redacts")
+        room_id = event_dict["room_id"]
+
         if redacts is None:
             return
 
-        target = await self.store.get_event(redacts, allow_none=True)
+        target = await self.store.get_event(check_room_id=room_id, redact_behaviour=redacts, allow_none=True)
         if target is None:
             return
 
         relation = relation_from_event(target)
         if relation is not None and relation.rel_type == RelationTypes.REPLACE:
-            original = await self.store.get_event(relation.parent_id, allow_none=True)
+            original = await self.store.get_event(check_room_id=room_id, redact_behaviour=relation.parent_id, allow_none=True)
             if original is not None:
                 target = original
 
@@ -2272,7 +2274,7 @@ class EventCreationHandler:
             raise SynapseError(
                 403,
                 f"Events older than {period}ms cannot be redacted.",
-                Codes.ALLOWED_REDACTION_PERIOD_PASSED,
+                Codes.FORBIDDEN,
             )
 
     async def _maybe_kick_guest_users(
