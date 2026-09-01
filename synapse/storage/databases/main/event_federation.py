@@ -1313,6 +1313,7 @@ class EventFederationWorkerStore(
         # Sort the seeds lexicographically by event ID: seeds are all 0 hops away from
         # themselves, so the event ID is the only tie-breaker available for them and we need
         # the walk to start from a deterministic order.
+        # See https://github.com/matrix-org/matrix-spec-proposals/blob/kegan/placeholder-1/proposals/4242-state-dags.md#get_missing_events
         seed_ids = sorted(set(latest_event_ids) - earliest_set)
         if not seed_ids or limit <= 0:
             return []
