@@ -31,6 +31,7 @@ jobs:
         background: true
         id: postgres
         # Use faketime here for schema deltas that are wall-clock sensitive under Postgres
+        # For SQLite, faketime is used when invoking `make_full_schema.sh` within the script
         run: |
           # Build a docker image with faketime
           mkdir /tmp/postgres-faketime
@@ -55,7 +56,7 @@ jobs:
             --health-timeout 5s --health-retries 5 \
             localhost/postgres-faketime
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -78,10 +79,8 @@ jobs:
           PGHOST: localhost
           PGUSER: postgres
           PGPASSWORD: postgres
-        # Use faketime here for schema deltas that are wall-clock sensitive under SQLite
         run: |
-          faketime -f "2001-05-25 12:42:42" \
-            poetry run python .ci/scripts/schema_diff.py \
+          poetry run python .ci/scripts/schema_diff.py \
             --base origin/develop \
             > "${{ runner.temp }}/schema_diff.md"
 

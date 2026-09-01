@@ -141,7 +141,7 @@ pub(crate) async fn run_python_awaitable<F>(
     make_awaitable: F,
 ) -> PyResult<Py<PyAny>>
 where
-    F: for<'py> Fn(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
+    F: for<'py> Fn(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + Sync + 'static,
 {
     // Resolves when the awaitable completes; carries the resolved value or error.
     let (tx, rx) = oneshot::channel::<PyResult<Py<PyAny>>>();
