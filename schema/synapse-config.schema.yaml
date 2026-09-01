@@ -800,31 +800,6 @@ properties:
     default: null
     examples:
       - 1y
-  max_one_time_keys_per_device:
-    type: integer
-    minimum: 1
-    description: >-
-      The maximum number of end-to-end encryption one-time keys, per key
-      algorithm, to keep for each device. Uploads which would take a device over
-      this are rejected with a `400 Bad Request` / `M_TOO_LARGE` error.
-
-
-      The spec allows clients to discard their oldest private one-time keys once
-      they hold too many, and both libolm (at 100 keys) and vodozemac (at 5000)
-      do so, so keys beyond that bound could never be used anyway. This limit
-      protects against clients that keep uploading keys regardless of how many
-      the server already holds, which would otherwise leave the server handing
-      out keys the device has forgotten. Rejecting the upload, rather than
-      quietly discarding keys, makes the problem visible to the client.
-
-
-      Server admins should take care not to set this below the number of keys
-      clients aim to keep on the server - e.g. 50 for clients built on the
-      matrix-rust-sdk - as every upload from such clients would then be
-      rejected, leaving them unable to publish any one-time keys at all.
-    default: 500
-    examples:
-      - 1000
   email:
     type: object
     description: >-
