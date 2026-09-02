@@ -1578,6 +1578,7 @@ class FederationHandler:
             first_hop_events = await self.store.get_events_as_list(
                 sorted(first_hop_event_ids)
             )
+            # the sort exists to make [:limit] truncation deterministic
             first_hop_events.sort(key=lambda ev: ev.event_id)
             first_hop_events = first_hop_events[:limit]
             seed_event_ids.extend(ev.event_id for ev in first_hop_events)

@@ -441,8 +441,8 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         self,
         earliest_events: list[str],
         latest_events: list[str],
+        walk_state_dag: bool,
         limit: int = 10,
-        walk_state_dag: bool = True,
     ) -> list[JsonDict]:
         content: JsonDict = {
             "earliest_events": earliest_events,
@@ -541,7 +541,10 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         )
 
         events = self._get_missing_events(
-            earliest_events=[], latest_events=[self.message_id], limit=20
+            earliest_events=[],
+            latest_events=[self.message_id],
+            walk_state_dag=True,
+            limit=20,
         )
 
         self.assertCountEqual(
@@ -557,6 +560,7 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         events = self._get_missing_events(
             earliest_events=list(message.prev_state_events),
             latest_events=[self.message_id],
+            walk_state_dag=True,
             limit=20,
         )
         self.assertEqual(events, [])
@@ -1234,8 +1238,8 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag_ignores_partial_state(self) -> None:
         room_version = RoomVersions.MSC4242v12.identifier
-        creator_user_id = self.register_user("kermit_msc4242", "test")
-        tok = self.login("kermit_msc4242", "test")
+        creator_user_id = self.register_user("user1_msc4242", "test")
+        tok = self.login("user1_msc4242", "test")
         room_id = self.helper.create_room_as(
             room_creator=creator_user_id, tok=tok, room_version=room_version
         )
@@ -1262,19 +1266,26 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         self.assertNotIn("servers_in_room", channel.json_body)
         self.assertIn("state_dag", channel.json_body)
 
-        state_dag = channel.json_body["state_dag"]
-        create_event_ids = [
-            ev
-            for ev in state_dag
-            if (ev["type"], ev["state_key"]) == ("m.room.create", "")
-        ]
-        self.assertEqual(len(create_event_ids), 1)
+        # the full state DAG is returned, including the member events that a
+        # partial state join would have omitted to prove we are in fact ignoring the
+        # partial state flag.
+        self.assertIncludes(
+            {(ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]},
+            {
+                ("m.room.create", ""),
+                ("m.room.power_levels", ""),
+                ("m.room.join_rules", ""),
+                ("m.room.history_visibility", ""),
+                ("m.room.member", creator_user_id),
+            },
+            exact=True,
+        )
 
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_make_join_state_dag(self) -> None:
         room_version = RoomVersions.MSC4242v12.identifier
-        creator_user_id = self.register_user("kermit_msc4242", "test")
-        tok = self.login("kermit_msc4242", "test")
+        creator_user_id = self.register_user("user1_msc4242", "test")
+        tok = self.login("user1_msc4242", "test")
         room_id = self.helper.create_room_as(
             room_creator=creator_user_id, tok=tok, room_version=room_version
         )
