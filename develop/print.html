@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-484fa0f4.js";
+            window.path_to_searchindex_js = "searchindex-50fa2d49.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -7743,6 +7743,7 @@ It’s recommended to leave this option as it is. We expect to remove this optio
 <li>“off”: this option will take no effect</li>
 </ul>
 <p>Note that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.</p>
+<p>A client may supply its own <code>m.room.encryption</code> event in the <code>initial_state</code> of its <code>/createRoom</code> request. If that event is valid (it specifies an <code>algorithm</code> as a string), it takes precedence and this option will not overwrite it, allowing the client to, for example, choose a different encryption algorithm. An empty or otherwise invalid <code>m.room.encryption</code> event does not disable forced encryption: the default will still be applied on top of it.</p>
 <p>Defaults to <code>"off"</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">encryption_enabled_by_default_for_room_type: invite
