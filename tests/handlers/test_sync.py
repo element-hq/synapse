@@ -26,7 +26,7 @@ from parameterized import parameterized, parameterized_class
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
+from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, ProfileFields
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -1187,8 +1187,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
 
     def test_initial_sync_no_profile_updates_if_not_enabled(self) -> None:
-        """Test that without MSC4429 enabled the initial sync response does not
-        contain any profile updates."""
+        """Test that without `include_profile_updates_in_sync` enabled the initial sync
+        response does not contain any profile updates."""
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.other_user),
@@ -1212,8 +1212,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_no_profile_updates_if_not_filtered_for(self) -> None:
-        """Test that with MSC4429 enabled the initial sync response does not
-        contain any profile updates, if fields are not filtered for."""
+        """Test that with `include_profile_updates_in_sync` enabled the initial sync
+        response does not contain any profile updates, if fields are not filtered for."""
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.other_user),
@@ -1240,9 +1240,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
 
     @override_config({"include_profile_updates_in_sync": True})
     def test_initial_sync_responds_with_tracked_profile_updates(self) -> None:
-        """Test that with MSC4429 enabled the initial sync response does
-        contain profile updates for users who share rooms, for the fields the
-        client requests. This response should include our syncing user."""
+        """Test that with `include_profile_updates_in_sync` enabled the initial sync
+        response does contain profile updates for users who share rooms, for the fields
+        the client requests. This response should include our syncing user."""
         self.get_success(
             self.profile_handler.set_field(
                 target_user=UserID.from_string(self.other_user),
@@ -1304,8 +1304,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_initial_sync_does_not_include_untracked_users_profile_updates(
         self, is_lazy: bool
     ) -> None:
-        """Test that with MSC4429 enabled the initial sync response does not
-        contain profile updates for users who do not share rooms."""
+        """Test that with `include_profile_updates_in_sync` enabled the initial sync
+        response does not contain profile updates for users who do not share rooms."""
         third_user = self.register_user("third_user", "password")
         self.get_success(
             self.profile_handler.set_field(
@@ -1347,8 +1347,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_initial_sync_lazy_loading_responds_with_only_profiles_with_events(
         self,
     ) -> None:
-        """Test that with MSC4429 enabled the initial sync lazy loading response does
-        contain profile updates for events in the timeline.
+        """Test that with `include_profile_updates_in_sync` enabled the initial sync
+        lazy loading response does contain profile updates for events in the timeline.
 
         This test ensures lazy loading sync only returns profiles that we also have
         events for in the sync response. The second room in this test has the most
@@ -1424,8 +1424,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_sends_down_profile_update_diffs(
         self,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental sync response does
-        contain profile update diffs."""
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response does contain profile update diffs."""
         requester = create_requester(self.user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -1499,9 +1499,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_does_not_filter_profile_updates_when_lazy_loading(
         self,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental sync lazy loading response
-        does contain profile updates even if the user would be filtered out by lazy
-        loading.
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync lazy loading response does contain profile updates even if the user would
+        be filtered out by lazy loading.
         """
         third_user = self.register_user("third_user", "password")
         third_tok = self.login("third_user", "password")
@@ -1652,7 +1652,7 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         is_initial: bool,
         is_lazy: bool,
     ) -> None:
-        """Test that with MSC4429 enabled any sync response
+        """Test that with `include_profile_updates_in_sync` enabled any sync response
         doesn't contain federated users even if there are timeline events from them.
         """
         # Join a federated user to the room, causing a membership event into
@@ -1742,8 +1742,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         is_initial: bool,
         is_lazy: bool,
     ) -> None:
-        """Test that with MSC4429 enabled any sync response always contains the users
-        own updates.
+        """Test that with `include_profile_updates_in_sync` enabled any sync response
+        always contains the users own updates.
 
         This test is made with a user that is not in any rooms, to prove our code
         to collect interested users from the profile updates always collect the user.
@@ -1830,8 +1830,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         is_initial: bool,
         is_lazy: bool,
     ) -> None:
-        """Test that with MSC4429 enabled a sync response correctly includes falsey
-        profile field values.
+        """Test that with `include_profile_updates_in_sync` enabled a sync response
+        correctly includes falsey profile field values.
         """
         requester = create_requester(self.user)
         filter_json: dict[str, dict] = {
@@ -1911,8 +1911,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_lazy_loading_cache_filters_recently_sent_profiles_and_fields(
         self,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental sync lazy loading response
-        filters out unchanged profiles or fields we have recently sent to the client.
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync lazy loading response filters out unchanged profiles or fields we have
+        recently sent to the client.
         """
         requester = create_requester(self.user)
         self.get_success(
@@ -2062,8 +2063,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_incremental_sync_sends_down_null_profile_if_user_no_longer_sharing_rooms(
         self,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental sync response
-        includes a 'null' for users who are no longer sharing rooms.
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response includes a 'null' for users who are no longer sharing rooms.
         """
         requester = create_requester(self.user)
         initial_result = self.get_success(
@@ -2108,13 +2109,111 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@other_user:test"],
         )
 
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_deleted_fields(self, is_lazy: bool) -> None:
+        """
+        Tests that, with `include_profile_updates_in_sync` enabled,
+        an incremental sync returns deleted fields as a `null` value, both for
+        `displayname` (stored as its own column) and for
+        generic custom fields (stored as JSON).
+        """
+        # Set up a user with `displayname` and `m.status` profile fields
+        requester = create_requester(self.user)
+        other_requester = create_requester(self.other_user)
+        other_user = UserID.from_string(self.other_user)
+        filter_json: dict = {
+            "org.matrix.msc4429.profile_fields": {"ids": ["displayname", "m.status"]},
+        }
+        if is_lazy:
+            filter_json["room"] = {
+                "state": {
+                    "lazy_load_members": True,
+                },
+            }
+        sync_config = generate_sync_config(
+            user_id=self.user,
+            filter_collection=FilterCollection(
+                hs=self.hs,
+                filter_json=filter_json,
+            ),
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Bob",
+            )
+        )
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name="m.status",
+                new_value={"text": "On holiday"},
+            )
+        )
+
+        # Do an initial sync after the point of those fields being set
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=sync_config,
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            initial_result.profile_updates["@other_user:test"],
+            {"displayname": "Bob", "m.status": {"text": "On holiday"}},
+        )
+
+        # Delete the displayname and the `m.status` profile fields
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="",
+            )
+        )
+        self.get_success(
+            self.profile_handler.delete_profile_field(
+                target_user=other_user,
+                requester=other_requester,
+                field_name="m.status",
+            )
+        )
+
+        # Do an incremental sync.
+        # Expect the deletion of both fields to be communicated in it.
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=sync_config,
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertEqual(
+            incremental_result.profile_updates,
+            # We currently represent deleted fields as `null`, even though
+            # it's ambiguous (TODO MSC change)
+            {"@other_user:test": {"displayname": None, "m.status": None}},
+        )
+
     @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_sends_down_all_requested_fields_for_users_who_have_joined(
         self,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental sync response
-        includes all the requested fields of a user who has joined a room with the
-        syncing user.
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response includes all the requested fields of a user who has joined a room
+        with the syncing user.
         """
         requester = create_requester(self.user)
         initial_result = self.get_success(
@@ -2211,8 +2310,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     )
     @override_config({"include_profile_updates_in_sync": True})
     def test_incremental_sync_includes_own_profile_updates(self, is_lazy: bool) -> None:
-        """Test that with MSC4429 enabled the incremental sync response includes
-        ones own profile updates."""
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response includes ones own profile updates."""
         requester = create_requester(self.user)
         filter_json: dict[str, dict] = {
             "org.matrix.msc4429.profile_fields": {"ids": ["m.status", "avatar_url"]}
@@ -2275,8 +2374,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         eager_sync: bool,
         is_lazy: bool,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental sync response
-        correctly handles multiple join / leave / join / leave in a row.
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response correctly handles multiple join / leave / join / leave in a row.
 
         In the first variant we sync and check after each iteration of join/leave.
         In the second variant we only sync at the end of all the join/leaves.
@@ -2440,9 +2539,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         value: str | bool | list | dict | int | float | None,
         new_value: str | bool | list | dict | int | float | None,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental lazy sync response
-        includes all the profile update changes for the user, even if the profile
-        field has been recently sent and is in our lazy loading cache.
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        lazy sync response includes all the profile update changes for the user, even
+        if the profile field has been recently sent and is in our lazy loading cache.
 
         Parameterize across different types of potential value types that profile
         field updates could have to ensure robustness.
@@ -2559,9 +2658,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
     def test_lazy_loading_cache_and_multiple_updates_to_the_same_field(
         self,
     ) -> None:
-        """Test that with MSC4429 enabled the incremental lazy sync response
-        includes an update to a field, even when the value changes back to a
-        value set and cached previously.
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        lazy sync response includes an update to a field, even when the value changes
+        back to a value set and cached previously.
         """
         requester = create_requester(self.user)
         filter_json = {

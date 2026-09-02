@@ -19,9 +19,12 @@
 #
 #
 
+from http import HTTPStatus
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ProfileFields
+from synapse.api.errors import StoreError
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine
@@ -94,6 +97,20 @@ class ProfileStoreTestCase(unittest.HomeserverTestCase):
         self.assertIsNone(
             self.get_success(self.store.get_profile_avatar_url(self.u_frank))
         )
+
+    def test_get_profile_field_without_profile(self) -> None:
+        """
+        Getting a custom profile field for a user that has no row in the
+        `profiles` table at all should raise a 404.
+
+        Regression test (we previously would trigger an unhandled exception).
+        Can happen for users whose profile was erased upon deactivation.
+        """
+        f = self.get_failure(
+            self.store.get_profile_field(self.u_frank, "org.example.field"),
+            StoreError,
+        )
+        self.assertEqual(f.value.code, HTTPStatus.NOT_FOUND)
 
     def test_profiles_bg_migration(self) -> None:
         """

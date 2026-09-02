@@ -1,0 +1,1 @@
+Fixed joining rooms with unrecognized restricted join rules being rejected outright instead of returning the proper `M_UNABLE_TO_AUTHORISE_JOIN` error code. Contributed by @tulir @ Beeper.
