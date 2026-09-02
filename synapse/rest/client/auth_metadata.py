@@ -34,6 +34,7 @@ class AuthMetadataServlet(RestServlet):
         *client_patterns(
             "/auth_metadata$",
             releases=("v1",),
+            unstable=False,
         ),
         *client_patterns(
             "/org.matrix.msc2965/auth_metadata$",
