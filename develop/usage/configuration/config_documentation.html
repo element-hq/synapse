@@ -37,7 +37,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-50fa2d49.js";
+            window.path_to_searchindex_js = "../../searchindex-459bbdf3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-64310643.js"></script>
@@ -1096,6 +1096,15 @@ For more details, see the <a href="../../setup/forward_proxy.html">forward proxy
 <p>Defaults to <code>"7d"</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">redaction_retention_period: 28d
+</code></pre>
+<hr>
+<h3 id="redaction_allowed_period"><a class="header" href="#redaction_allowed_period"><code>redaction_allowed_period</code></a></h3>
+<p>How long after an <code>m.room.message</code> was sent a local user is still allowed to redact it. If a local user tries to redact a <code>m.room.message</code> older than this period Synapse responds with <code>403 M_FORBIDDEN</code> and does not redact the event.</p>
+<p>Only applies to <code>m.room.message</code> events redacted by local users.  Redactions of other event types and redactions received over federation are unaffected. When the target of the redaction is an edit (<code>m.replace</code>), the age and type are taken from the original event and not the edit.</p>
+<p>Set to <code>null</code> (the default) to disable, allowing events to be redacted at any time.</p>
+<p>Defaults to <code>null</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">redaction_allowed_period: 7d
 </code></pre>
 <hr>
 <h3 id="forgotten_room_retention_period"><a class="header" href="#forgotten_room_retention_period"><code>forgotten_room_retention_period</code></a></h3>
