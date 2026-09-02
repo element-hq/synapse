@@ -1495,16 +1495,10 @@ class FederationHandler:
         earliest_events: list[str],
         latest_events: list[str],
         limit: int,
-        walk_state_dag: bool = False,
     ) -> list[EventBase]:
         # We allow partially joined rooms since in this case we are filtering out
         # non-local events in `filter_events_for_server`.
         await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
-
-        if walk_state_dag:
-            return await self.on_get_missing_events_state_dag(
-                room_id, earliest_events, latest_events, limit
-            )
 
         # Only allow up to 20 events to be retrieved per request.
         limit = min(limit, 20)
@@ -1530,6 +1524,7 @@ class FederationHandler:
 
     async def on_get_missing_events_state_dag(
         self,
+        origin: str,
         room_id: str,
         earliest_events: list[str],
         latest_events: list[str],
@@ -1552,6 +1547,8 @@ class FederationHandler:
             Only state events have `msc4242_state_dag_edges` rows, so we walk from such an
             event's `prev_state_events` instead, and return those as the first hop.
         """
+
+        await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
         limit = min(limit, StateDag.MAX_MISSING_EVENTS)
         earliest_event_set = set(earliest_events)
 
@@ -1572,7 +1569,9 @@ class FederationHandler:
                 for prev_state_event_id in event.prev_state_events
                 if prev_state_event_id not in earliest_event_set
             )
-
+        # `latest_events` can mix state and non-state events. If an event's
+        # prev_state_event is also one of the state-event seeds, it will be walked from
+        # below, so returning it as a first hop as well would just duplicate it.
         first_hop_event_ids.difference_update(seed_event_ids)
         first_hop_events: list[EventBase] = []
         if first_hop_event_ids:
