@@ -1478,7 +1478,7 @@ class MatrixFederationHttpClient:
         timeout: int | None = None,
     ) -> JsonDict:
         """Sends a single one-off request to the destination, for a caller
-        that owns its own retry policy.
+        that handles backing off itself.
 
         Unlike `get_json`/`put_json`/`post_json`/`delete_json`, this method
         always ignores the destination's backoff data, and raises the
