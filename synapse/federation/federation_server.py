@@ -868,6 +868,7 @@ class FederationServer(FederationBase):
         )
 
         if supports_msc4242_state_dag(event):
+            # We don't yet support faster room joins in Synapse with MSC4242
             caller_supports_partial_state = False
 
         # Use the join event's own stream ordering as the upper bound when fetching
@@ -904,10 +905,7 @@ class FederationServer(FederationBase):
             state_dag_map = await self.store.get_state_dag(
                 room_id, set(event.prev_state_events)
             )
-            # Sort by depth, though this is just a nicety, MSC4242 does not require it
-            state_dag = sorted(
-                state_dag_map.values(), key=lambda ev: (ev.depth, ev.event_id)
-            )
+            state_dag = list(state_dag_map.values())
         else:
             auth_chain_event_ids = await self.store.get_auth_chain_ids(
                 room_id, state_event_ids
@@ -1284,9 +1282,14 @@ class FederationServer(FederationBase):
                 limit,
             )
 
-            missing_events = await self.handler.on_get_missing_events(
-                origin, room_id, earliest_events, latest_events, limit, walk_state_dag
-            )
+            if walk_state_dag:
+                missing_events = await self.handler.on_get_missing_events_state_dag(
+                    origin, room_id, earliest_events, latest_events, limit
+                )
+            else:
+                missing_events = await self.handler.on_get_missing_events(
+                    origin, room_id, earliest_events, latest_events, limit
+                )
 
             if len(missing_events) < 5:
                 logger.debug(

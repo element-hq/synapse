@@ -504,5 +504,7 @@ class StickyEvent:
 
 class StateDag:
     GET_MISSING_EVENTS_FIELD: Final = "org.matrix.msc4242.state_dag"
-
+    # Max number of events to return in a single /get_missing_events response.
+    # Arbitrary, servers usually never get this high so it's mostly to bound the max size of
+    # a single /get_missing_events response.
     MAX_MISSING_EVENTS: Final = 1000
