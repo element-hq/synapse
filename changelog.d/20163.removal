@@ -1,0 +1,1 @@
+Drop `GET /_matrix/client/unstable/org.matrix.msc2965/auth_issuer` endpoint which never ended up being used.
