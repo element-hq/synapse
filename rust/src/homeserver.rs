@@ -22,9 +22,8 @@ use crate::runtime::RustRuntime;
 
 /// The Python `HomeServer`, as seen from Rust.
 ///
-/// Like [`crate::reactor::Reactor`], this is a wrapper around a foreign Python
-/// object. No validation is performed, on the assumption the Python side is
-/// correctly typed.
+/// This is a wrapper around a foreign Python object. No validation is
+/// performed, on the assumption the Python side is correctly typed.
 pub struct HomeServer(Py<PyAny>);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for HomeServer {
