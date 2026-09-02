@@ -1,1 +1,1 @@
-restricts events (specifically of type m.room.message) from being redacted by local users
+Add a config option that limits the time period in which local users can redact their own messages. Contributed by @defaultdino.

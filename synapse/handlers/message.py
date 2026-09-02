@@ -2257,13 +2257,17 @@ class EventCreationHandler:
         if redacts is None:
             return
 
-        target = await self.store.get_event(check_room_id=room_id, redact_behaviour=redacts, allow_none=True)
+        target = await self.store.get_event(
+            redacts, check_room_id=room_id, allow_none=True
+        )
         if target is None:
             return
 
         relation = relation_from_event(target)
         if relation is not None and relation.rel_type == RelationTypes.REPLACE:
-            original = await self.store.get_event(check_room_id=room_id, redact_behaviour=relation.parent_id, allow_none=True)
+            original = await self.store.get_event(
+                relation.parent_id, check_room_id=room_id, allow_none=True
+            )
             if original is not None:
                 target = original
 
