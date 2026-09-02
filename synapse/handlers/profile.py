@@ -247,8 +247,11 @@ class ProfileHandler:
         if not by_admin and not self.hs.config.registration.enable_set_displayname:
             profile = await self.store.get_profileinfo(target_user)
             if profile.display_name:
+                # The spec reserves 400 for malformed input; disabled profile
+                # modifications are covered by the 403 response of
+                # https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
                 raise SynapseError(
-                    400,
+                    403,
                     "Changing display name is disabled on this server",
                     Codes.FORBIDDEN,
                 )
@@ -369,8 +372,11 @@ class ProfileHandler:
         if not by_admin and not self.hs.config.registration.enable_set_avatar_url:
             profile = await self.store.get_profileinfo(target_user)
             if profile.avatar_url:
+                # The spec reserves 400 for malformed input; disabled profile
+                # modifications are covered by the 403 response of
+                # https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
                 raise SynapseError(
-                    400, "Changing avatar is disabled on this server", Codes.FORBIDDEN
+                    403, "Changing avatar is disabled on this server", Codes.FORBIDDEN
                 )
 
         if not isinstance(new_avatar_url, str):
@@ -668,10 +674,19 @@ class ProfileHandler:
         if stream_id is not None:
             room_ids = await self.store.get_rooms_for_user(target_user.to_string())
             if room_ids:
+                # Wake up the stream for the rooms involved
                 self._notifier.on_new_event(
                     StreamKeyType.PROFILE_UPDATES,
                     stream_id,
                     rooms=room_ids,
+                )
+            else:
+                # Wake up the stream for ourselves, as we might be updating our
+                # profile even if we don't have rooms
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    users=[target_user],
                 )
 
     async def set_profile_field(
@@ -807,10 +822,19 @@ class ProfileHandler:
         if stream_id:
             room_ids = await self.store.get_rooms_for_user(target_user.to_string())
             if room_ids:
+                # Wake up the stream for the rooms involved
                 self._notifier.on_new_event(
                     StreamKeyType.PROFILE_UPDATES,
                     stream_id,
                     rooms=room_ids,
+                )
+            else:
+                # Wake up the stream for ourselves, as we might be updating our
+                # profile even if we don't have rooms
+                self._notifier.on_new_event(
+                    StreamKeyType.PROFILE_UPDATES,
+                    stream_id,
+                    users=[target_user],
                 )
 
     async def on_profile_query(self, args: JsonDict) -> JsonDict:

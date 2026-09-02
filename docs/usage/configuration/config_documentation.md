@@ -1073,6 +1073,21 @@ Example configuration:
 redaction_retention_period: 28d
 ```
 ---
+### `redaction_allowed_period`
+
+How long after an `m.room.message` was sent a local user is still allowed to redact it. If a local user tries to redact a `m.room.message` older than this period Synapse responds with `403 M_FORBIDDEN` and does not redact the event.
+
+Only applies to `m.room.message` events redacted by local users.  Redactions of other event types and redactions received over federation are unaffected. When the target of the redaction is an edit (`m.replace`), the age and type are taken from the original event and not the edit.
+
+Set to `null` (the default) to disable, allowing events to be redacted at any time.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+redaction_allowed_period: 7d
+```
+---
 ### `forgotten_room_retention_period`
 
 How long to keep locally forgotten rooms before purging them from the DB. A value of `null` means it's disabled. Defaults to `null`.
@@ -1287,10 +1302,15 @@ Options related to federation.
 ---
 ### `federation_domain_whitelist`
 
-*(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+*(null|array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+
 If specified as an empty list (`[]`), federation will be denied with all servers. Specifying an empty list (`[]`) here is the recommended way of disabling federation.
-If not specified, the default is to allow federation with all servers.
-Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist. There is no default for this option.
+
+If unset or null, allows federation with all servers.
+
+Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
+
+Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -2662,13 +2682,20 @@ This setting has the following sub-options:
 
   * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
 
-  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+
+    Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
+
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+
+    Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
 Example configuration:
 ```yaml
 matrix_rtc:
   transports:
   - type: livekit
+    url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
@@ -3997,6 +4024,8 @@ Possible options are "all", "invite", and "off". They are defined as:
 * "off": this option will take no effect
 
 Note that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.
+
+A client may supply its own `m.room.encryption` event in the `initial_state` of its `/createRoom` request. If that event is valid (it specifies an `algorithm` as a string), it takes precedence and this option will not overwrite it, allowing the client to, for example, choose a different encryption algorithm. An empty or otherwise invalid `m.room.encryption` event does not disable forced encryption: the default will still be applied on top of it.
 
 Defaults to `"off"`.
 

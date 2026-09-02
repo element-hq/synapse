@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
 import typing
 
 from synapse.api.auth.mas import MasDelegatedAuth
@@ -24,9 +23,6 @@ from synapse.types import JsonDict
 
 if typing.TYPE_CHECKING:
     from synapse.server import HomeServer
-
-
-logger = logging.getLogger(__name__)
 
 
 class AuthMetadataServlet(RestServlet):
