@@ -16,6 +16,7 @@
 -- of the state events in a sync window can be looked up by event, even when
 -- the rows are stamped before the window (rows are stamped with the minimum
 -- stream ordering of their persist batch, see `_update_current_state_txn`).
+-- See https://github.com/element-hq/synapse/issues/18793.
 --
 -- This is a partial index as rows with a NULL event_id (state deletions) are
 -- never looked up by event.

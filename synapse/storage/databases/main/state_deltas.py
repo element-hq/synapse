@@ -343,7 +343,9 @@ class StateDeltasStore(SQLBaseStore):
         the deltas of a batch's state events for any token that falls inside
         the batch -- a position that a worker reading the events stream from
         replication routinely observes, since RDATA advances the stream one
-        event at a time.
+        event at a time. That is the cause of
+        https://github.com/element-hq/synapse/issues/18793: a state event in
+        a sync timeline whose `state_after` does not carry it.
 
         A delta's effective position is therefore taken to be the *maximum* of
         the row's `stream_id` and its event's own stream ordering:
