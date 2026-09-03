@@ -473,13 +473,14 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
 
         returned = [(ev["type"], ev.get("state_key")) for ev in events]
         self.assertIncludes(
-            returned,
-            [
+            set(returned),
+            {
                 ("m.room.create", ""),
                 ("m.room.topic", ""),
                 ("m.room.member", self.local_user_id),
                 ("m.room.member", f"@remote:{self.OTHER_SERVER_NAME}"),
-            ], exact=True,
+            },
+            exact=True,
         )
 
         # the seed itself is not returned, so only the first topic is
@@ -544,12 +545,12 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
 
         # We get all the same events
         self.assertIncludes(
-            [(ev["type"], ev.get("state_key")) for ev in events],
-            [(ev.type, ev.state_key) for ev in state_dag.values()],
+            {(ev["type"], ev.get("state_key")) for ev in events},
+            {(ev.type, ev.state_key) for ev in state_dag.values()},
             exact=True,
         )
         # and no messages (we aren't walking up prev_events)
-        self.assertEqual([ev for ev in events if ev[0] == "m.room.message"], [])
+        self.assertEqual([ev for ev in events if ev["type"] == "m.room.message"], [])
 
     def test_non_state_seed_stops_at_earliest_events(self) -> None:
         message = self.get_success(
