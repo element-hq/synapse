@@ -21,4 +21,4 @@
 -- This is a partial index as rows with a NULL event_id (state deletions) are
 -- never looked up by event.
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-    (9409, 'current_state_delta_stream_event_id_index', '{}');
+    (9411, 'current_state_delta_stream_event_id_index', '{}');
