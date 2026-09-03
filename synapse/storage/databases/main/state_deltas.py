@@ -235,7 +235,9 @@ class StateDeltasStore(SQLBaseStore):
         to_token: RoomStreamToken | None,
     ) -> list[StateDelta]:
         """
-        Get the state deltas between two tokens.
+        Get the state deltas between two tokens, bounded on the delta rows'
+        own `stream_id`. See `get_current_state_deltas_for_room` for when that
+        is the wrong bound.
 
         (> `from_token` and <= `to_token`)
         """
@@ -281,9 +283,18 @@ class StateDeltasStore(SQLBaseStore):
         to_token: RoomStreamToken | None,
     ) -> list[StateDelta]:
         """
-        Get the state deltas between two tokens.
+        Get the state deltas between two tokens, bounded on the delta rows'
+        own `stream_id`.
 
         (> `from_token` and <= `to_token`)
+
+        Rows are stamped with the minimum stream ordering of their persist
+        batch (see `_update_current_state_txn`), so a token that falls inside
+        a batch -- which a worker reading the events stream from replication
+        routinely observes -- misses that batch's deltas here. Callers that
+        pair the deltas with the events in the same window (a timeline)
+        should use `get_current_state_deltas_for_room_by_event_position`
+        instead, which bounds each delta on its event's position.
         """
         # We can bail early if the `from_token` is after the `to_token`
         if (
