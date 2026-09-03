@@ -359,6 +359,17 @@ class StateDeltasStore(SQLBaseStore):
           position), the row's `stream_id` stands, preserving the
           re-announcement.
 
+        Bounding at read time, rather than changing the stamp in
+        `_update_current_state_txn`, is deliberate. Restamping would only
+        repair rows written after the upgrade: a `since` token that split a
+        batch persisted before it would keep missing that batch's deltas, so
+        a reader like this one would be needed for historic rows anyway. It
+        also keeps the write path, and the other consumers of the delta
+        stream that are happy with the batch-minimum stamp, untouched; and
+        the maximum above stays correct whether the stamp is the batch
+        minimum, the event's own position or (see the FIXME on
+        `_update_current_state_txn`) something later.
+
         That maximum is not a bound an index can serve, so the window is
         fetched as the union of two index-driven sets (with the exact
         per-writer filtering done in Python, as for
