@@ -1,0 +1,1 @@
+Don't validate signatures with unknown algorithms for master keys, and allow updates to signatures.

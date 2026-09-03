@@ -19,6 +19,7 @@
 #
 #
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from netaddr import IPAddress
@@ -33,7 +34,7 @@ from synapse.api.errors import (
     MissingClientTokenError,
     UnstableSpecAuthError,
 )
-from synapse.appservice import ApplicationService
+from synapse.appservice import ApplicationService, Scopes
 from synapse.http import get_request_user_agent
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace
@@ -361,6 +362,21 @@ class BaseAuth:
         return create_requester(
             effective_user_id, app_service=app_service, device_id=effective_device_id
         )
+
+    def assert_requester_has_scope(self, requester: Requester, scope: Scopes) -> None:
+        """Asserts that the requester has the given scope, either directly
+        (e.g. via an OAuth token) or via the scopes registered against the
+        application service.
+        """
+        if scope in requester.scope:
+            return
+
+        if requester.app_service_id is not None:
+            app_service = self.store.get_app_service_by_id(requester.app_service_id)
+            if app_service is not None and app_service.has_scope(scope):
+                return
+
+        raise AuthError(HTTPStatus.FORBIDDEN, f"Missing {scope} scope")
 
     async def _record_request(
         self, request: SynapseRequest, requester: Requester
