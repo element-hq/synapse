@@ -242,6 +242,7 @@ class HttpListenerConfig:
     """Object describing the http-specific parts of the config of a listener"""
 
     x_forwarded: bool = False
+    trusted_proxies: list[str] | None = None
     resources: list[HttpResourceConfig] = attr.Factory(list)
     additional_resources: dict[str, dict] = attr.Factory(dict)
     tag: str | None = None
@@ -1174,8 +1175,27 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
         # getting a client IP.
         # Note: a reverse proxy is required anyway, as there is no way of exposing a
         # unix socket to the internet.
+        trusted_proxies = listener.get("trusted_proxies")
+        if trusted_proxies is not None:
+            if not isinstance(trusted_proxies, list) or not all(
+                isinstance(proxy, str) for proxy in trusted_proxies
+            ):
+                raise ConfigError(
+                    "listener option 'trusted_proxies' must be a list of IP addresses"
+                    " or CIDR ranges"
+                )
+            try:
+                for proxy in trusted_proxies:
+                    IPNetwork(proxy)
+            except (AddrFormatError, ValueError) as e:
+                raise ConfigError(
+                    f"Invalid IP address or CIDR range in listener option"
+                    f" 'trusted_proxies': {e}"
+                ) from e
+
         http_config = HttpListenerConfig(
             x_forwarded=listener.get("x_forwarded", (True if socket_path else False)),
+            trusted_proxies=trusted_proxies,
             resources=resources,
             additional_resources=listener.get("additional_resources", {}),
             tag=listener.get("tag"),
