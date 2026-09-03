@@ -1548,7 +1548,8 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
         message_pos = message.internal_metadata.stream_ordering
         assert message_pos is not None
 
-        # Push the state event out of the timeline window.
+        # Push the state event out of the timeline window: more fillers than
+        # the timeline limit of 3, so the window holds fillers only.
         for i in range(10):
             self.helper.send(self.room_id, body=f"filler {i}", tok=self.bob_tok)
 
