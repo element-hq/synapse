@@ -34,8 +34,6 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.events import EventBase
-from synapse.replication.tcp.resource import _batch_updates
-from synapse.replication.tcp.streams.events import EventsStream
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
@@ -48,7 +46,10 @@ from tests.federation.transport.test_knocking import (
 )
 from tests.rest.client.test_rooms import make_request_with_cancellation_test
 from tests.server import TimedOutException
-from tests.test_utils.event_injection import create_event, inject_event
+from tests.test_utils.event_injection import (
+    inject_event,
+    persist_message_and_state_event_in_one_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1293,13 +1294,14 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
     events stream from replication routinely observes such a token, which is
     why this is seen on worker deployments and not on a single process.
 
+    `test_state_after_with_token_inside_persist_batch` reproduces this end to
+    end with a hand-built `since` token. Its preconditions -- the batch-minimum
+    stamp, and that the events replication stream really hands out a token
+    inside a batch -- are pinned in `tests/storage/test_state_deltas.py` and
+    `tests/replication/tcp/streams/test_events.py`.
+
     The remaining tests guard that whatever repairs this reports the *resolved*
     state at the end of the timeline rather than replaying the timeline.
-
-    The first two tests are storage- and replication-level and would normally
-    live under `tests/storage/` / `tests/replication/`; they are kept here
-    deliberately, as the documented preconditions of the end-to-end tests
-    beside them (with which they share the `_persist_batch` helper).
     """
 
     servlets = [
@@ -1311,8 +1313,6 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.persistence = hs.get_storage_controllers().persistence
-        assert self.persistence is not None
 
         self.alice = self.register_user("alice", "password")
         self.alice_tok = self.login("alice", "password")
@@ -1363,42 +1363,11 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
         return [e["event_id"] for e in room["org.matrix.msc4222.state_after"]["events"]]
 
     def _persist_batch(self) -> tuple[EventBase, EventBase]:
-        """Persist a message and a state event in a *single* persist batch
-        (a single `_persist_events_and_state_updates` call), with the message
-        first, so that the message's stream ordering is the batch minimum."""
-        assert self.persistence is not None
-        prev_event_ids = self.get_success(
-            self.store.get_prev_events_for_room(self.room_id)
-        )
-
-        message, message_ctx = self.get_success(
-            create_event(
-                self.hs,
-                room_id=self.room_id,
-                type="m.room.message",
-                sender=self.alice,
-                content={"msgtype": "m.text", "body": "batched message"},
-                prev_event_ids=prev_event_ids,
+        return self.get_success(
+            persist_message_and_state_event_in_one_batch(
+                self.hs, self.room_id, self.alice
             )
         )
-        state_event, state_ctx = self.get_success(
-            create_event(
-                self.hs,
-                room_id=self.room_id,
-                type="m.call.member",
-                state_key=self.alice,
-                sender=self.alice,
-                content={"memberships": [{"device_id": "BATCHED"}]},
-                prev_event_ids=prev_event_ids,
-            )
-        )
-
-        self.get_success(
-            self.persistence.persist_events(
-                [(message, message_ctx), (state_event, state_ctx)]
-            )
-        )
-        return message, state_event
 
     def _assert_state_after_is_current_state(self, room: JsonDict) -> None:
         """For a joined room `end_token` is the global `now_token`, so every
@@ -1425,58 +1394,10 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
     # The persist-batch window
     # ------------------------------------------------------------------
 
-    def test_state_delta_stream_id_of_batched_state_event(self) -> None:
-        """Documents that `current_state_delta_stream.stream_id` for a state
-        event persisted in a batch is the *minimum* stream ordering of the batch
-        (see `_persist_events_txn`: `min_stream_order`), not the state event's
-        own stream ordering.
-
-        This is the storage-level precondition for the "timeline has it,
-        state_after doesn't" symptom: any sync token that falls strictly between
-        the batch minimum and the state event's stream ordering will put the
-        state event in the timeline while excluding its delta.
-        """
-        message, state_event = self._persist_batch()
-
-        message_pos = message.internal_metadata.stream_ordering
-        state_pos = state_event.internal_metadata.stream_ordering
-        assert message_pos is not None and state_pos is not None
-        self.assertLess(message_pos, state_pos)
-
-        rows = self.get_success(
-            self.store.db_pool.simple_select_list(
-                table="current_state_delta_stream",
-                keyvalues={"room_id": self.room_id, "type": "m.call.member"},
-                retcols=("stream_id", "event_id", "instance_name"),
-                desc="test_state_delta_stream_id",
-            )
-        )
-        self.assertEqual(len(rows), 1, rows)
-        delta_stream_id, delta_event_id, _instance_name = rows[0]
-        self.assertEqual(delta_event_id, state_event.event_id)
-
-        self.assertEqual(
-            delta_stream_id,
-            message_pos,
-            "expected the delta to be recorded at the batch minimum",
-        )
-
-        deltas = self.get_success(
-            self.store.get_current_state_deltas_for_room(
-                self.room_id,
-                from_token=RoomStreamToken(stream=message_pos),
-                to_token=RoomStreamToken(stream=state_pos),
-            )
-        )
-        self.assertEqual(
-            [d.event_id for d in deltas],
-            [],
-            "state delta unexpectedly visible in (message_pos, state_pos]",
-        )
-
     def test_state_after_with_token_inside_persist_batch(self) -> None:
-        """The end-to-end consequence of the above: if a client's `since` token
-        lands strictly inside a persist batch (which a *reader* worker can
+        """The end-to-end symptom of the batch-minimum stamp: if a client's
+        `since` token lands strictly inside a persist batch (which a *reader*
+        worker can
         observe, because it advances its events-stream position from replication
         RDATA batches that may split a persist batch), the state event is in the
         timeline of the next sync and must also be in `state_after`.
@@ -1517,46 +1438,6 @@ class SyncStateAfterTimelineStateTestCase(unittest.HomeserverTestCase):
             f"state event in timeline but missing from state_after when the "
             f"since token splits a persist batch: {room}",
         )
-
-    def test_events_replication_stream_splits_persist_batches(self) -> None:
-        """Shows that the `since` token used by
-        `test_state_after_with_token_inside_persist_batch` is one a real
-        deployment hands out.
-
-        The events replication stream emits a distinct token for every event
-        stream ordering (`_batch_updates` only collapses rows that share a
-        token), and `_process_rdata` calls `on_rdata` -- and hence
-        `process_replication_position` -- once per token. So a reader worker
-        (e.g. a sync worker) advances its events-stream position *through* the
-        middle of a persist batch, one event at a time, while reading
-        `current_state_delta_stream` straight from the database.
-        """
-        before = self.store.get_room_max_token().stream
-        message, state_event = self._persist_batch()
-        after = self.store.get_room_max_token().stream
-
-        message_pos = message.internal_metadata.stream_ordering
-        state_pos = state_event.internal_metadata.stream_ordering
-        assert message_pos is not None and state_pos is not None
-
-        stream = EventsStream(self.hs)
-        updates, _upto, _limited = self.get_success(
-            # A limit of 100 is comfortably more than the handful of rows this
-            # test persists, so the update batch is never truncated.
-            stream._update_function("master", before, after, 100)
-        )
-
-        # The tokens a reader will actually advance to, in order.
-        delivered = [token for token, _row in _batch_updates(updates) if token]
-
-        self.assertIn(
-            message_pos,
-            delivered,
-            "a reader worker advances to the batch minimum before it sees the "
-            "state event",
-        )
-        self.assertIn(state_pos, delivered)
-        self.assertLess(delivered.index(message_pos), delivered.index(state_pos))
 
     # ------------------------------------------------------------------
     # Guards: `state_after` must be the *resolved* state, not a replay of

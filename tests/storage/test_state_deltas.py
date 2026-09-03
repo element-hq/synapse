@@ -23,7 +23,9 @@ from synapse.types.storage import _BackgroundUpdates
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.test_utils.event_injection import create_event
+from tests.test_utils.event_injection import (
+    persist_message_and_state_event_in_one_batch,
+)
 
 
 class StateDeltasByEventPositionTestCase(unittest.HomeserverTestCase):
@@ -40,51 +42,17 @@ class StateDeltasByEventPositionTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.persistence = hs.get_storage_controllers().persistence
-        assert self.persistence is not None
 
         self.alice = self.register_user("alice", "password")
         self.alice_tok = self.login("alice", "password")
         self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_tok)
 
     def _persist_batch(self) -> tuple[EventBase, EventBase]:
-        """Persist a message and a state event in a single persist batch, with
-        the message first, so that the message's stream ordering is the batch
-        minimum and the state event's delta row is stamped before the state
-        event itself."""
-        assert self.persistence is not None
-        prev_event_ids = self.get_success(
-            self.store.get_prev_events_for_room(self.room_id)
-        )
-
-        message, message_ctx = self.get_success(
-            create_event(
-                self.hs,
-                room_id=self.room_id,
-                type="m.room.message",
-                sender=self.alice,
-                content={"msgtype": "m.text", "body": "batched message"},
-                prev_event_ids=prev_event_ids,
+        return self.get_success(
+            persist_message_and_state_event_in_one_batch(
+                self.hs, self.room_id, self.alice
             )
         )
-        state_event, state_ctx = self.get_success(
-            create_event(
-                self.hs,
-                room_id=self.room_id,
-                type="m.call.member",
-                state_key=self.alice,
-                sender=self.alice,
-                content={"memberships": [{"device_id": "BATCHED"}]},
-                prev_event_ids=prev_event_ids,
-            )
-        )
-
-        self.get_success(
-            self.persistence.persist_events(
-                [(message, message_ctx), (state_event, state_ctx)]
-            )
-        )
-        return message, state_event
 
     def _batch_positions(self) -> tuple[str, int, int]:
         """Persist a batch and return (state event id, batch minimum position,
@@ -95,6 +63,25 @@ class StateDeltasByEventPositionTestCase(unittest.HomeserverTestCase):
         assert message_pos is not None and state_pos is not None
         self.assertLess(message_pos, state_pos)
         return state_event.event_id, message_pos, state_pos
+
+    def test_delta_row_is_stamped_at_batch_minimum(self) -> None:
+        """Documents the precondition: the `current_state_delta_stream` row of
+        a state event persisted in a batch is stamped with the batch's
+        *minimum* stream ordering (see `_update_current_state_txn`), not the
+        state event's own, so a window bounded on the stamp and a window
+        bounded on the event disagree about which side of a mid-batch token
+        the delta falls on."""
+        state_event_id, message_pos, _state_pos = self._batch_positions()
+
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="current_state_delta_stream",
+                keyvalues={"room_id": self.room_id, "type": "m.call.member"},
+                retcols=("stream_id", "event_id"),
+                desc="test_delta_row_is_stamped_at_batch_minimum",
+            )
+        )
+        self.assertEqual(rows, [(message_pos, state_event_id)])
 
     def test_mid_batch_delta_is_in_window(self) -> None:
         """A window whose lower bound splits a persist batch contains the
