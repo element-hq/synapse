@@ -35,7 +35,6 @@ from synapse.api.constants import (
 )
 from synapse.api.filtering import Filter
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -50,6 +49,7 @@ from synapse.types import (
 )
 from synapse.util.clock import Clock
 
+from tests.test_utils.event_builders import make_test_pdu_event
 from tests.test_utils.event_injection import create_event
 from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase
 
@@ -690,7 +690,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             extra_content={
                 "power_level_content_override": {
                     "users": {
-                        user2_id: 100,
                         # Allow user1 to send state in the room
                         user1_id: 100,
                     }
@@ -861,7 +860,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             extra_content={
                 "power_level_content_override": {
                     "users": {
-                        user2_id: 100,
                         # Allow user1 to send state in the room
                         user1_id: 100,
                     }
@@ -1350,6 +1348,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
         self.room_member_handler = hs.get_room_member_handler()
+        self.room_version = self.hs.config.server.default_room_version
 
     def test_remote_join(self) -> None:
         """
@@ -1361,98 +1360,96 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
 
         before_join_token = self.event_sources.get_current_token()
 
-        intially_unjoined_room_id = f"!example:{self.OTHER_SERVER_NAME}"
-
         # Remotely join a room on another homeserver.
         #
         # To do this we have to mock the responses from the remote homeserver. We also
         # patch out a bunch of event checks on our end.
-        create_event_source = {
+        creation_event_source = {
             "auth_events": [],
             "content": {
-                "creator": f"@creator:{self.OTHER_SERVER_NAME}",
-                "room_version": self.hs.config.server.default_room_version.identifier,
+                "room_version": self.room_version.identifier,
             },
-            "depth": 0,
+            "depth": 1,
             "origin_server_ts": 0,
             "prev_events": [],
-            "room_id": intially_unjoined_room_id,
             "sender": f"@creator:{self.OTHER_SERVER_NAME}",
             "state_key": "",
             "type": EventTypes.Create,
         }
+
         self.add_hashes_and_signatures_from_other_server(
-            create_event_source,
-            self.hs.config.server.default_room_version,
+            creation_event_source,
+            self.room_version,
         )
-        create_event = make_event_from_dict(
-            create_event_source,
-            self.hs.config.server.default_room_version,
-            {},
-            None,
+        # This handles FrozenEvent* creation for us, and will create the room_id if this
+        # is a msc4921 room
+        creation_event = make_test_pdu_event(
+            creation_event_source,
+            self.room_version,
         )
+
+        initially_unjoined_room_id = creation_event.room_id
+
         creator_join_event_source = {
-            "auth_events": [create_event.event_id],
+            "auth_events": [],
             "content": {
                 "membership": "join",
             },
-            "depth": 1,
+            "depth": 2,
             "origin_server_ts": 1,
             "prev_events": [],
-            "room_id": intially_unjoined_room_id,
+            "room_id": initially_unjoined_room_id,
             "sender": f"@creator:{self.OTHER_SERVER_NAME}",
             "state_key": f"@creator:{self.OTHER_SERVER_NAME}",
             "type": EventTypes.Member,
         }
+
         self.add_hashes_and_signatures_from_other_server(
             creator_join_event_source,
-            self.hs.config.server.default_room_version,
+            self.room_version,
         )
-        creator_join_event = make_event_from_dict(
+        creator_join_event = make_test_pdu_event(
             creator_join_event_source,
-            self.hs.config.server.default_room_version,
-            {},
-            None,
+            self.room_version,
         )
 
         # Our local user is going to remote join the room
         join_event_source = {
-            "auth_events": [create_event.event_id],
+            "auth_events": [],
             "content": {"membership": "join"},
-            "depth": 1,
+            "depth": 3,
             "origin_server_ts": 100,
             "prev_events": [creator_join_event.event_id],
             "sender": user1_id,
             "state_key": user1_id,
-            "room_id": intially_unjoined_room_id,
+            "room_id": initially_unjoined_room_id,
             "type": EventTypes.Member,
         }
+
         add_hashes_and_signatures(
-            self.hs.config.server.default_room_version,
+            self.room_version,
             join_event_source,
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = make_event_from_dict(
+        join_event = make_test_pdu_event(
             join_event_source,
-            self.hs.config.server.default_room_version,
-            {},
-            None,
+            self.room_version,
         )
 
         mock_make_membership_event = AsyncMock(
             return_value=(
                 self.OTHER_SERVER_NAME,
                 join_event,
-                self.hs.config.server.default_room_version,
+                self.room_version,
             )
         )
         mock_send_join = AsyncMock(
             return_value=SendJoinResult(
                 join_event,
                 self.OTHER_SERVER_NAME,
-                state=[create_event, creator_join_event],
-                auth_chain=[create_event, creator_join_event],
+                state=[creation_event, creator_join_event],
+                auth_chain=[creation_event, creator_join_event],
                 partial_state=False,
                 servers_in_room=frozenset(),
             )
@@ -1482,7 +1479,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
                 self.room_member_handler.update_membership(
                     requester=create_requester(user1_id),
                     target=UserID.from_string(user1_id),
-                    room_id=intially_unjoined_room_id,
+                    room_id=initially_unjoined_room_id,
                     action=Membership.JOIN,
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 )
@@ -1519,7 +1516,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             membership_changes,
             [
                 CurrentStateDeltaMembership(
-                    room_id=intially_unjoined_room_id,
+                    room_id=initially_unjoined_room_id,
                     event_id=join_event.event_id,
                     event_pos=join_pos,
                     membership="join",

@@ -120,7 +120,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -416,7 +415,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -517,7 +515,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -714,7 +711,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
 
         auth_event_ids = [
-            initial_state_map[("m.room.create", "")],
             initial_state_map[("m.room.power_levels", "")],
             member_event.event_id,
         ]
@@ -834,6 +830,9 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
         room_version = self.get_success(main_store.get_room_version(room_id))
 
+        ernie_user_id = self.register_user("ernie", "test")
+        ernie_tok = self.login("ernie", "test")
+        self.helper.join(room_id, user=ernie_user_id, tok=ernie_tok)
         # Add another local user to the room. This user is going to be kicked in a
         # rejected event.
         bert_user_id = self.register_user("bert", "test")
@@ -842,13 +841,13 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         # Allow the remote user to kick bert.
         # The remote user is going to send a rejected power levels event later on and we
-        # need state resolution to order it before another power levels event kermit is
+        # need state resolution to order it before another power levels event ernie is
         # going to send later on. Hence we give both users the same power level, so that
         # ties are broken by `origin_server_ts`.
         self.helper.send_state(
             room_id,
             "m.room.power_levels",
-            {"users": {kermit_user_id: 100, OTHER_USER: 100}},
+            {"users": {ernie_user_id: 100, OTHER_USER: 100}},
             tok=kermit_tok,
         )
 
@@ -887,7 +886,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [other_member_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         initial_state_map[("m.room.power_levels", "")],
                         # The event will be rejected because of the duplicated auth
                         # event.
@@ -936,7 +934,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_power_levels_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         rejected_power_levels_event.event_id,
                         initial_state_map[("m.room.member", bert_user_id)],
                         initial_state_map[("m.room.member", OTHER_USER)],
@@ -1014,8 +1011,8 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 self.helper.send_state(
                     room_id,
                     "m.room.power_levels",
-                    {"users": {kermit_user_id: 100, OTHER_USER: 100, bert_user_id: 1}},
-                    tok=kermit_tok,
+                    {"users": {ernie_user_id: 100, OTHER_USER: 100, bert_user_id: 1}},
+                    tok=ernie_tok,
                 )["event_id"]
             )
         )
@@ -1050,7 +1047,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                     "sender": OTHER_USER,
                     "prev_events": [rejected_kick_event.event_id],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         initial_state_map[("m.room.power_levels", "")],
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],
@@ -1078,7 +1074,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         missing_event.event_id,
                     ],
                     "auth_events": [
-                        initial_state_map[("m.room.create", "")],
                         new_power_levels_event.event_id,
                         initial_state_map[("m.room.member", OTHER_USER)],
                     ],

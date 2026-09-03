@@ -49,6 +49,11 @@ def default_event_fields(room_version: RoomVersion) -> JsonDict:
     else:
         defaults["auth_events"] = []
 
+    # MSC4291 versions do not have a room_id in the create event, so discard this now
+    # as it needs to be populated later for the actual room
+    if room_version.msc4291_room_ids_as_hashes:
+        defaults.pop("room_id")
+
     if room_version == RoomVersions.V1:
         # V1 requires an event_id field, but later versions don't.
         defaults["event_id"] = "$test_event_id:matrix.org"

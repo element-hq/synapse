@@ -8,10 +8,9 @@ import synapse.rest.client.room
 from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import make_event_from_dict
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
-from synapse.types import UserID, create_requester
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -43,10 +42,10 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
         self.chris_token = self.login("chris", "pass")
 
         # Create a room on this homeserver. Note that this counts as a join: it
-        # contributes to the rate limter's count of actions
+        # contributes to the rate limiter's count of actions
         self.room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
 
-        self.intially_unjoined_room_id = f"!example:{self.OTHER_SERVER_NAME}"
+        self.room_version = self.hs.config.server.default_room_version
 
     @override_config({"rc_joins_per_room": {"per_second": 0.1, "burst_count": 2}})
     def test_local_user_local_joins_contribute_to_limit_and_are_limited(self) -> None:
@@ -105,60 +104,55 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
         # We also patch out a bunch of event checks on our end. All we're really
         # trying to check here is that remote joins will bump the rate limter when
         # they are persisted.
-        create_event_source = {
+        create_event_source: JsonDict = {
             "auth_events": [],
             "content": {
-                "creator": f"@creator:{self.OTHER_SERVER_NAME}",
-                "room_version": self.hs.config.server.default_room_version.identifier,
+                "room_version": self.room_version.identifier,
             },
-            "depth": 0,
+            "depth": 1,
             "origin_server_ts": 0,
             "prev_events": [],
-            "room_id": self.intially_unjoined_room_id,
             "sender": f"@creator:{self.OTHER_SERVER_NAME}",
             "state_key": "",
             "type": EventTypes.Create,
         }
-        self.add_hashes_and_signatures_from_other_server(
+
+        self.add_hashes_and_signatures_from_other_server(create_event_source)
+        create_event = make_test_pdu_event(
             create_event_source,
-            self.hs.config.server.default_room_version,
-        )
-        create_event = make_event_from_dict(
-            create_event_source,
-            self.hs.config.server.default_room_version,
-            {},
-            None,
+            self.room_version,
         )
 
+        # Extract the room_id for use below
+        initially_unjoined_room_id = create_event.room_id
+
         join_event_source = {
-            "auth_events": [create_event.event_id],
+            "auth_events": [],
             "content": {"membership": "join"},
-            "depth": 1,
+            "depth": 2,
             "origin_server_ts": 100,
             "prev_events": [create_event.event_id],
             "sender": self.bob,
             "state_key": self.bob,
-            "room_id": self.intially_unjoined_room_id,
+            "room_id": initially_unjoined_room_id,
             "type": EventTypes.Member,
         }
         add_hashes_and_signatures(
-            self.hs.config.server.default_room_version,
+            self.room_version,
             join_event_source,
             self.hs.hostname,
             self.hs.signing_key,
         )
-        join_event = make_event_from_dict(
+        join_event = make_test_pdu_event(
             join_event_source,
-            self.hs.config.server.default_room_version,
-            {},
-            None,
+            self.room_version,
         )
 
         mock_make_membership_event = AsyncMock(
             return_value=(
                 self.OTHER_SERVER_NAME,
                 join_event,
-                self.hs.config.server.default_room_version,
+                self.room_version,
             )
         )
         mock_send_join = AsyncMock(
@@ -196,7 +190,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 self.handler.update_membership(
                     requester=create_requester(self.bob),
                     target=UserID.from_string(self.bob),
-                    room_id=self.intially_unjoined_room_id,
+                    room_id=initially_unjoined_room_id,
                     action=Membership.JOIN,
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 )
@@ -207,7 +201,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 self.handler.update_membership(
                     requester=create_requester(self.chris),
                     target=UserID.from_string(self.chris),
-                    room_id=self.intially_unjoined_room_id,
+                    room_id=initially_unjoined_room_id,
                     action=Membership.JOIN,
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 ),

@@ -497,7 +497,7 @@ class UnreadMessagesTestCase(unittest.HomeserverTestCase):
             self.room_id,
             EventTypes.PowerLevels,
             {
-                "users": {self.user_id: 100, self.user2: 100},
+                "users": {self.user2: 100},
                 "users_default": 0,
                 "events": {
                     "m.room.name": 50,

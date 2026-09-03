@@ -2382,7 +2382,6 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
                 "origin_server_ts": 1,
                 "content": {"membership": Membership.JOIN},
                 "auth_events": [
-                    state_map[(EventTypes.Create, "")].event_id,
                     state_map[(EventTypes.JoinRules, "")].event_id,
                 ],
                 "prev_events": list(forward_extremity_event_ids),
