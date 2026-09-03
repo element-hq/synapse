@@ -316,7 +316,7 @@ class StateDeltasStore(SQLBaseStore):
         *,
         from_token: RoomStreamToken | None,
         to_token: RoomStreamToken | None,
-        events_state_key_populated: bool = True,
+        events_state_key_populated: bool,
     ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens, bounding each delta on the
