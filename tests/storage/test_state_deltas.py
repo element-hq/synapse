@@ -19,6 +19,7 @@ from synapse.events import EventBase
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import RoomStreamToken
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -200,7 +201,7 @@ class StateDeltasByEventPositionTestCase(unittest.HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": "current_state_delta_stream_event_id_index",
+                    "update_name": _BackgroundUpdates.CURRENT_STATE_DELTA_STREAM_EVENT_ID_INDEX,
                     "progress_json": "{}",
                 },
             )

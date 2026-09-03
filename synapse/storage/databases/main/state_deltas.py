@@ -34,6 +34,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.stream import _filter_results_by_stream
 from synapse.types import RoomStreamToken, StrCollection
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
 
@@ -78,7 +79,7 @@ class StateDeltasStore(SQLBaseStore):
             columns=("room_id", "stream_id"),
         )
         self.db_pool.updates.register_background_index_update(
-            update_name="current_state_delta_stream_event_id_index",
+            update_name=_BackgroundUpdates.CURRENT_STATE_DELTA_STREAM_EVENT_ID_INDEX,
             index_name="current_state_delta_stream_event_id_idx",
             table="current_state_delta_stream",
             columns=("event_id",),
@@ -508,7 +509,7 @@ class StateDeltasStore(SQLBaseStore):
         # walk the room's entire delta history, so fall back to the plain
         # `stream_id` bounds until the background update has completed.
         if not await self.db_pool.updates.has_completed_background_update(
-            "current_state_delta_stream_event_id_index"
+            _BackgroundUpdates.CURRENT_STATE_DELTA_STREAM_EVENT_ID_INDEX
         ):
             return await self.db_pool.runInteraction(
                 "get_current_state_deltas_for_room_by_event_position_fallback",
@@ -518,14 +519,15 @@ class StateDeltasStore(SQLBaseStore):
                 to_token=to_token,
             )
 
-        # `events.state_key` is back-populated by a schema-76 background
-        # update; until it has completed, old state events may have a NULL
-        # state_key and the event-driven query must not filter on it.
+        # `events.state_key` is back-populated by a schema-72 background
+        # update (`delta/72/03bg_populate_events_columns.py`); until it has
+        # completed, old state events may have a NULL state_key and the
+        # event-driven query must not filter on it.
         # (`has_completed_background_update` memoises completion, so this is
         # only a query the first time.)
         events_state_key_populated = (
             await self.db_pool.updates.has_completed_background_update(
-                "events_populate_state_key_rejections"
+                _BackgroundUpdates.EVENTS_POPULATE_STATE_KEY_REJECTIONS
             )
         )
 
