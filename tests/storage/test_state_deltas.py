@@ -15,6 +15,7 @@
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
+from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -176,6 +177,35 @@ class StateDeltasByEventPositionTestCase(unittest.HomeserverTestCase):
             )
         )
         self.assertEqual([d.event_id for d in deltas], [state_event_id])
+
+    def test_rows_without_an_event_keep_their_stamp(self) -> None:
+        """Rows with no event -- the clearance of the room's state when the
+        last local user leaves -- have no event position to bound on and are
+        returned at their own stamp, exactly as the stamp-bounded query
+        returns them."""
+        before = self.store.get_room_max_token()
+        self.helper.leave(self.room_id, self.alice, tok=self.alice_tok)
+        after = self.store.get_room_max_token()
+
+        deltas = self.get_success(
+            self.store.get_current_state_deltas_for_room_by_event_position(
+                self.room_id, from_token=before, to_token=after
+            )
+        )
+
+        self.assertTrue(deltas)
+        self.assertEqual({d.event_id for d in deltas}, {None})
+        self.assertIn(
+            (EventTypes.Create, ""), {(d.event_type, d.state_key) for d in deltas}
+        )
+        self.assertCountEqual(
+            deltas,
+            self.get_success(
+                self.store.get_current_state_deltas_for_room(
+                    self.room_id, from_token=before, to_token=after
+                )
+            ),
+        )
 
     def test_falls_back_until_index_built(self) -> None:
         """Until the `current_state_delta_stream(event_id)` index has been
