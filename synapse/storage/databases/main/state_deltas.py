@@ -371,22 +371,23 @@ class StateDeltasStore(SQLBaseStore):
         `_update_current_state_txn`) something later.
 
         That maximum is not a bound an index can serve, so the window is
-        fetched as the union of two index-driven sets (with the exact
-        per-writer filtering done in Python, as for
+        fetched as the `UNION ALL` of two disjoint index-driven sets (with
+        the exact per-writer filtering done in Python, as for
         `get_current_state_deltas_for_room_txn`):
 
         * rows whose own `stream_id` is in the window -- an index range on
           `current_state_delta_stream(room_id, stream_id)`, exactly like
           `get_current_state_deltas_for_room_txn`; this is every row except
           the mid-batch stragglers;
-        * rows whose *event* is in the window -- driven by the
-          `events(room_id, stream_ordering)` index over the events in the
-          window, joined back via the partial
+        * rows stamped at or below the window whose *event* is in the window
+          -- driven by the `events(room_id, stream_ordering)` index over the
+          events in the window, joined back via the partial
           `current_state_delta_stream(event_id)` index. A row stamped below
           the window with an effective position inside it must have its event
           inside the window, so this query is what recovers the mid-batch
           stragglers, at a cost proportional to the number of state events in
-          the window.
+          the window. Restricting it to rows stamped at or below the window
+          is what keeps the two sets disjoint, so no de-duplication is needed.
         """
         args: list[str | int] = [room_id]
 
@@ -400,9 +401,11 @@ class StateDeltasStore(SQLBaseStore):
             stream_id_to_clause = "AND d.stream_id <= ?"
             args.append(to_token.get_max_stream_pos())
 
-        # Rows below the window's lower bound can only have an effective
-        # position inside the window via their event, so the event-driven query is
-        # only needed when there is a lower bound at all.
+        # Rows stamped at or below the window's lower bound can only have an
+        # effective position inside the window via their event, so the
+        # event-driven query is only needed when there is a lower bound at all,
+        # and only has to consider those rows: the first query covers the rest,
+        # which keeps the two sets disjoint.
         by_event_position_sql = ""
         if from_token is not None:
             event_position_to_clause = ""
@@ -417,7 +420,7 @@ class StateDeltasStore(SQLBaseStore):
                 event_state_key_clause = "AND e.state_key IS NOT NULL"
 
             by_event_position_sql = f"""
-                UNION
+                UNION ALL
                 SELECT d.instance_name, d.stream_id, d.type, d.state_key,
                     d.event_id, d.prev_event_id,
                     e.instance_name, e.stream_ordering
@@ -426,10 +429,12 @@ class StateDeltasStore(SQLBaseStore):
                     ON d.event_id = e.event_id AND d.room_id = e.room_id
                 WHERE e.room_id = ? {event_state_key_clause}
                     AND ? < e.stream_ordering {event_position_to_clause}
+                    AND d.stream_id <= ?
             """
             args.extend([room_id, from_token.stream])
             if to_token is not None:
                 args.append(to_token.get_max_stream_pos())
+            args.append(from_token.stream)
 
         sql = f"""
                 SELECT d.instance_name, d.stream_id, d.type, d.state_key,
