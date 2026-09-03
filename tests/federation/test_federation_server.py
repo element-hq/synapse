@@ -398,6 +398,9 @@ def _create_acl_event(content: JsonDict) -> EventBase:
 class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
     """
     Tests for walking the MSC4242 state DAG via /get_missing_events.
+
+    In future, these can be ported to Complement to benefit other servers,
+    but as of writing MSC4242 is not fully implemented so can't be in Complement yet.
     """
 
     servlets = [
@@ -469,10 +472,15 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         )
 
         returned = [(ev["type"], ev.get("state_key")) for ev in events]
-        self.assertIn(("m.room.create", ""), returned)
-        self.assertIn(("m.room.topic", ""), returned)
-        self.assertIn(("m.room.member", self.local_user_id), returned)
-        self.assertIn(("m.room.member", f"@remote:{self.OTHER_SERVER_NAME}"), returned)
+        self.assertIncludes(
+            returned,
+            [
+                ("m.room.create", ""),
+                ("m.room.topic", ""),
+                ("m.room.member", self.local_user_id),
+                ("m.room.member", f"@remote:{self.OTHER_SERVER_NAME}"),
+            ], exact=True,
+        )
 
         # the seed itself is not returned, so only the first topic is
         self.assertEqual(len([ev for ev in returned if ev[0] == "m.room.topic"]), 1)
@@ -520,19 +528,6 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
         )
 
     def test_walks_from_a_non_state_event(self) -> None:
-        events = self._get_missing_events(
-            earliest_events=[],
-            latest_events=[self.message_id],
-            limit=20,
-            walk_state_dag=True,
-        )
-
-        returned = [(ev["type"], ev.get("state_key")) for ev in events]
-        self.assertIn(("m.room.create", ""), returned)
-        self.assertIn(("m.room.topic", ""), returned)
-        self.assertEqual([ev for ev in returned if ev[0] == "m.room.message"], [])
-
-    def test_first_hop_from_a_non_state_event_is_returned(self) -> None:
         store = self.hs.get_datastores().main
         message = self.get_success(store.get_event(self.message_id))
         assert supports_msc4242_state_dag(message)
@@ -547,10 +542,14 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
             limit=20,
         )
 
-        self.assertCountEqual(
+        # We get all the same events
+        self.assertIncludes(
             [(ev["type"], ev.get("state_key")) for ev in events],
             [(ev.type, ev.state_key) for ev in state_dag.values()],
+            exact=True,
         )
+        # and no messages (we aren't walking up prev_events)
+        self.assertEqual([ev for ev in events if ev[0] == "m.room.message"], [])
 
     def test_non_state_seed_stops_at_earliest_events(self) -> None:
         message = self.get_success(
@@ -1256,6 +1255,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             KNOWN_ROOM_VERSIONS[room_version],
         )
+        # Ask to join as a partial state (omit_members=true) which should be ignored.
         channel = self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{room_id}/x?omit_members=true",
@@ -1298,6 +1298,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         event = channel.json_body["event"]
+        # MSC4242 events don't have an auth_events field.
         self.assertNotIn("auth_events", event)
 
         extremities = self.get_success(
@@ -1305,6 +1306,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertGreater(len(extremities), 0)
         self.assertCountEqual(event["prev_state_events"], extremities)
+        # When creating events, prev_state_events should be set to the state DAG fwd extremities
         self.assertIncludes(
             set(event["prev_state_events"]), set(extremities), exact=True
         )
