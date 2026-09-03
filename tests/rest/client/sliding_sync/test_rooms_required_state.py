@@ -24,12 +24,16 @@ from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState, SlidingSyncTableChanges
+from synapse.types import RoomStreamToken, SlidingSyncStreamToken, StreamKeyType
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.server import TimedOutException
-from tests.test_utils.event_injection import mark_event_as_partial_state
+from tests.test_utils.event_injection import (
+    mark_event_as_partial_state,
+    persist_message_and_state_event_in_one_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +196,69 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # connection before.
         self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
         self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_incremental_sync_pos_inside_persist_batch(
+        self,
+    ) -> None:
+        """
+        Test that a state event in the timeline of an incremental sync is also in
+        `rooms.required_state` when the `pos` token falls inside the persist batch
+        that wrote it.
+
+        `current_state_delta_stream` rows are stamped with the *minimum* stream
+        ordering of their persist batch, so bounding the deltas on the stamp
+        misses the batch's state events for such a token -- one that a worker
+        reading the events stream from replication routinely hands out as `pos`.
+        This is the sliding sync shape of
+        https://github.com/element-hq/synapse/issues/18793.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [["m.call.member", user1_id]],
+                    # Enough for both events of the persist batch below.
+                    "timeline_limit": 10,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        message, state_event = self.get_success(
+            persist_message_and_state_event_in_one_batch(self.hs, room_id1, user1_id)
+        )
+        message_pos = message.internal_metadata.stream_ordering
+        assert message_pos is not None
+
+        # A `pos` positioned just after the message but before the state event,
+        # i.e. in the middle of the persist batch.
+        token = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        )
+        split_token = SlidingSyncStreamToken(
+            stream_token=token.stream_token.copy_and_replace(
+                StreamKeyType.ROOM, RoomStreamToken(stream=message_pos)
+            ),
+            connection_position=token.connection_position,
+        )
+        split_pos = self.get_success(split_token.to_string(self.store))
+
+        response_body, _ = self.do_sync(sync_body, since=split_pos, tok=user1_tok)
+
+        room = response_body["rooms"][room_id1]
+        self.assertIn(state_event.event_id, [e["event_id"] for e in room["timeline"]])
+        required_state = room.get("required_state")
+        self.assertIsNotNone(
+            required_state,
+            "state event in the timeline but no required_state when pos splits a "
+            f"persist batch: {room}",
+        )
+        self._assertRequiredStateIncludes(required_state, {state_event}, exact=True)
 
     def test_rooms_incremental_sync_restart(self) -> None:
         """
