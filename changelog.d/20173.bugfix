@@ -1,0 +1,1 @@
+Fix `PUT`/`DELETE` on a profile field returning HTTP 400 instead of 403 (with errcode `M_FORBIDDEN`) when profile changes are disabled via `enable_set_displayname` or `enable_set_avatar_url`.
