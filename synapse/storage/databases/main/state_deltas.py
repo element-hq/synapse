@@ -547,8 +547,9 @@ class StateDeltasStore(SQLBaseStore):
         # update (`delta/72/03bg_populate_events_columns.py`); until it has
         # completed, old state events may have a NULL state_key and the
         # event-driven query must not filter on it.
-        # (`has_completed_background_update` memoises completion, so this is
-        # only a query the first time.)
+        # (`has_completed_background_update` memoises completion, so once the
+        # update has finished this costs nothing; until then it is one
+        # `background_updates` lookup per call, as for the index check above.)
         events_state_key_populated = (
             await self.db_pool.updates.has_completed_background_update(
                 _BackgroundUpdates.EVENTS_POPULATE_STATE_KEY_REJECTIONS
