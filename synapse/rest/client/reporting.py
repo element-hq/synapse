@@ -131,8 +131,7 @@ class ReportRoomRestServlet(RestServlet):
         super().__init__()
         self.hs = hs
         self.auth = hs.get_auth()
-        self.clock = hs.get_clock()
-        self.store = hs.get_datastores().main
+        self.reports_handler = hs.get_reports_handler()
 
     class PostBody(RequestBodyModel):
         reason: StrictStr
@@ -141,25 +140,15 @@ class ReportRoomRestServlet(RestServlet):
         self, request: SynapseRequest, room_id: str
     ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        user_id = requester.user.to_string()
-
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
-        room = await self.store.get_room(room_id)
-        if room is None:
-            if self.hs.config.experimental.msc4277_enabled:
-                # Respond with 200 and no content regardless of whether the room
-                # exists to prevent enumeration attacks.
-                return 200, {}
-            else:
-                raise NotFoundError("Room does not exist")
-
-        await self.store.add_room_report(
-            room_id=room_id,
-            user_id=user_id,
-            reason=body.reason,
-            received_ts=self.clock.time_msec(),
-        )
+        try:
+            await self.reports_handler.report_room(requester, room_id, body.reason)
+        except NotFoundError:
+            if not self.hs.config.experimental.msc4277_enabled:
+                raise
+            # Respond with 200 and no content regardless of whether the room
+            # exists to prevent enumeration attacks.
 
         return 200, {}
 

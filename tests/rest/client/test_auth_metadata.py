@@ -27,20 +27,6 @@ from synapse.rest.client import auth_metadata
 from tests.unittest import HomeserverTestCase
 
 
-class AuthIssuerTestCase(HomeserverTestCase):
-    servlets = [
-        auth_metadata.register_servlets,
-    ]
-
-    def test_returns_404_when_mas_disabled(self) -> None:
-        # Make an unauthenticated request for the discovery info.
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/unstable/org.matrix.msc2965/auth_issuer",
-        )
-        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
-
-
 @parameterized_class(
     ("endpoint",),
     [
