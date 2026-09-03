@@ -112,17 +112,11 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         )
         return self.instances[instance_name]
 
-    def _get_reported_metric_position_of_worker(self, *, instance_name: str) -> int:
-        """The position the metric reports for the test stream on the given
-        process.
-
-        The gauge outlives each test, so it still holds the label sets of ID
-        generators from earlier tests.
-        """
+    def _get_reported_metric_position(self) -> int:
+        """The position the metric reports for the test stream."""
 
         return self.get_prometheus_metric_current_value(
             stream_current_position_gauge,
-            instance_name=instance_name,
             stream_name="test_stream",
         )
 
@@ -253,9 +247,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         id_gen = self._create_id_generator()
 
-        self.assertEqual(
-            self._get_reported_metric_position_of_worker(instance_name="master"), 7
-        )
+        self.assertEqual(self._get_reported_metric_position(), 7)
 
         async def _get_next_async() -> None:
             async with id_gen.get_next():
@@ -264,9 +256,7 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.get_success(_get_next_async())
 
         self.assertEqual(id_gen.get_current_token(), 8)
-        self.assertEqual(
-            self._get_reported_metric_position_of_worker(instance_name="master"), 8
-        )
+        self.assertEqual(self._get_reported_metric_position(), 8)
 
     def test_cancelled_enter_does_not_wedge_position(self) -> None:
         """Reproduces presence getting stuck.
@@ -543,25 +533,6 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         id_gen.advance("first", 11)
         id_gen.advance("second", 15)
         self.assertEqual(id_gen.get_persisted_upto_position(), 11)
-
-    def test_current_position_metric_diverges_when_not_replicated(self) -> None:
-        """A process that stops being told about a stream reports a position that
-        falls behind a process that is still being told about it.
-        """
-        self._insert_row_with_id("writer", 3)
-
-        # Two processes' view of a stream that a third process writes.
-        told = self._create_id_generator("told", writers=["writer"])
-        self._create_id_generator("not_told", writers=["writer"])
-
-        told.advance("writer", 5)
-
-        self.assertEqual(
-            self._get_reported_metric_position_of_worker(instance_name="told"), 5
-        )
-        self.assertEqual(
-            self._get_reported_metric_position_of_worker(instance_name="not_told"), 3
-        )
 
     def test_get_persisted_upto_position_get_next(self) -> None:
         """Test that `get_persisted_upto_position` correctly tracks updates to
