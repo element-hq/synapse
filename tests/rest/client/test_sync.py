@@ -33,7 +33,6 @@ from synapse.api.constants import (
     ReceiptTypes,
     RelationTypes,
 )
-from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -1350,9 +1349,6 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         sync.register_servlets,
     ]
 
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.store = hs.get_datastores().main
-
     def test_archived_room_state_after_not_newer_than_leave(self) -> None:
         """`state_after` for a left room must be the state at the end of that
         room's timeline, i.e. at the user's leave point — never state from
@@ -1368,11 +1364,6 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         alice_tok = self.login("alice", "password")
         bob = self.register_user("bob", "password")
         bob_tok = self.login("bob", "password")
-
-        # Opt Alice in to MSC4222.
-        self.get_success(
-            self.store.set_features_for_user(alice, {ExperimentalFeature.MSC4222: True})
-        )
 
         # Name the room to avoid heroes: those come from the *current*
         # summary — a separate leak path from the one under test.
@@ -1402,7 +1393,7 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
                 }
             }
         )
-        sync_url = f"/sync?filter={sync_filter}&org.matrix.msc4222.use_state_after=true"
+        sync_url = f"/sync?filter={sync_filter}&use_state_after=true"
 
         # Initial sync.
         channel = self.make_request("GET", sync_url, access_token=alice_tok)
@@ -1432,7 +1423,7 @@ class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
         left_room = channel.json_body["rooms"]["leave"][room_id]
-        state_after_events = left_room["org.matrix.msc4222.state_after"]["events"]
+        state_after_events = left_room["state_after"]["events"]
 
         # Post-leave state must not appear in `state_after`.
         self.assertNotIn(
