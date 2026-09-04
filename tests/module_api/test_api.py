@@ -18,28 +18,46 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import importlib
 from typing import Any
 from unittest.mock import AsyncMock, Mock
+
+from parameterized import parameterized
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+import synapse.module_api
+from synapse.api import errors as api_errors
 from synapse.api.constants import EduTypes, EventTypes
-from synapse.api.errors import NotFoundError
+from synapse.api.errors import (
+    FederationDeniedError,
+    HttpResponseException,
+    NotFoundError,
+    RequestSendFailed,
+)
 from synapse.events import EventBase
 from synapse.federation.units import Transaction
 from synapse.handlers.device import DeviceWriterHandler
 from synapse.handlers.presence import UserPresenceState
 from synapse.handlers.push_rules import InvalidRuleException
 from synapse.module_api import ModuleApi
+from synapse.module_api.module_errors import (
+    FederationHttpDeniedException,
+    FederationHttpNotRetryingDestinationException,
+    FederationHttpRequestSendFailedException,
+    FederationHttpResponseException,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, notifications, presence, profile, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
+from synapse.util.retryutils import NotRetryingDestination
 
 from tests.events.test_presence_router import send_presence_update, sync_presence
 from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.test_utils import FakeResponse
 from tests.test_utils.event_injection import inject_member_event
 from tests.unittest import HomeserverTestCase, override_config
 
@@ -378,6 +396,180 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
             )
         )
         self.assertFalse(is_in_public_rooms)
+
+    def test_module_errors_preserves_historical_errors_reexport(self) -> None:
+        self.assertIs(synapse.module_api.errors, api_errors)
+
+    def test_module_errors_reexports_federation_http_exceptions(self) -> None:
+        original_errors = synapse.module_api.errors
+        try:
+            module_api_errors = importlib.import_module("synapse.module_api.errors")
+
+            self.assertIs(
+                module_api_errors.FederationHttpResponseException,
+                FederationHttpResponseException,
+            )
+            self.assertIs(
+                module_api_errors.FederationHttpNotRetryingDestinationException,
+                FederationHttpNotRetryingDestinationException,
+            )
+            self.assertIs(
+                module_api_errors.FederationHttpDeniedException,
+                FederationHttpDeniedException,
+            )
+            self.assertIs(
+                module_api_errors.FederationHttpRequestSendFailedException,
+                FederationHttpRequestSendFailedException,
+            )
+        finally:
+            synapse.module_api.errors = original_errors
+
+    @parameterized.expand(
+        [
+            ("get", "get_json", False),
+            ("put", "put_json", True),
+            ("post", "post_json", True),
+            ("delete", "delete_json", False),
+        ]
+    )
+    def test_send_federation_http_request_dispatches_request(
+        self, method: str, client_method_name: str, sends_body: bool
+    ) -> None:
+        federation_http_client = self.hs.get_federation_http_client()
+        client_method = AsyncMock(return_value={"result": "ok"})
+        setattr(federation_http_client, client_method_name, client_method)
+
+        body = {"request": "body"} if sends_body else None
+        result = self.get_success(
+            self.module_api.send_federation_http_request(
+                method=method,
+                remote_server_name="remote.example",
+                path="/_matrix/federation/v1/test",
+                query_parameters={"key": ["one", "two"]},
+                body=body,
+                timeout=1234,
+            )
+        )
+
+        self.assertEqual(result, {"result": "ok"})
+        expected_args: dict[str, object] = {
+            "destination": "remote.example",
+            "path": "/_matrix/federation/v1/test",
+            "args": {"key": ["one", "two"]},
+            "timeout": 1234,
+        }
+        if sends_body:
+            expected_args["data"] = body
+
+        client_method.assert_awaited_once_with(**expected_args)
+
+    def test_send_federation_http_request_is_signed(self) -> None:
+        federation_http_client = self.hs.get_federation_http_client()
+        request_mock = Mock(
+            return_value=defer.succeed(
+                FakeResponse.json(payload={"rooms": [], "inaccessible_children": []})
+            )
+        )
+        federation_http_client.agent.request = request_mock  # type: ignore[method-assign]
+
+        result = self.get_success(
+            self.module_api.send_federation_http_request(
+                method="GET",
+                remote_server_name="remote.example",
+                path="/_matrix/federation/v1/hierarchy/%21room%3Atest",
+                query_parameters={"suggested_only": "true"},
+            )
+        )
+
+        self.assertEqual(result, {"rooms": [], "inaccessible_children": []})
+        request_mock.assert_called_once()
+        self.assertEqual(request_mock.call_args.args[0], b"GET")
+        self.assertEqual(
+            request_mock.call_args.args[1],
+            b"matrix-federation://remote.example/_matrix/federation/v1/"
+            b"hierarchy/%21room%3Atest?suggested_only=true",
+        )
+
+        headers = request_mock.call_args.kwargs["headers"]
+        authorization_headers = headers.getRawHeaders(b"Authorization")
+        self.assertIsNotNone(authorization_headers)
+        assert authorization_headers is not None
+        self.assertEqual(len(authorization_headers), 1)
+        self.assertIn(b'origin="test"', authorization_headers[0])
+        self.assertIn(b'destination="remote.example"', authorization_headers[0])
+
+    def test_send_federation_http_request_rejects_unknown_method(self) -> None:
+        failure = self.get_failure(
+            self.module_api.send_federation_http_request(
+                method="PATCH",
+                remote_server_name="remote.example",
+                path="/_matrix/federation/v1/test",
+            ),
+            ValueError,
+        )
+
+        self.assertIn("GET, PUT, POST, or DELETE", str(failure.value))
+
+    @parameterized.expand(
+        [
+            (
+                "response",
+                HttpResponseException(404, "Not Found", b'{"errcode":"M_NOT_FOUND"}'),
+                FederationHttpResponseException,
+                {
+                    "status_code": 404,
+                    "msg": "Not Found",
+                    "response_body": b'{"errcode":"M_NOT_FOUND"}',
+                },
+            ),
+            (
+                "backoff",
+                NotRetryingDestination(1000, 2000, "remote.example"),
+                FederationHttpNotRetryingDestinationException,
+                {},
+            ),
+            (
+                "denied",
+                FederationDeniedError("remote.example"),
+                FederationHttpDeniedException,
+                {},
+            ),
+            (
+                "send_failed",
+                RequestSendFailed(Exception("connection failed"), can_retry=True),
+                FederationHttpRequestSendFailedException,
+                {"can_retry": True},
+            ),
+        ]
+    )
+    def test_send_federation_http_request_translates_errors(
+        self,
+        _name: str,
+        internal_error: Exception,
+        public_error: type[Exception],
+        expected_attributes: dict[str, object],
+    ) -> None:
+        federation_http_client = self.hs.get_federation_http_client()
+        federation_http_client.get_json = AsyncMock(  # type: ignore[method-assign]
+            side_effect=internal_error
+        )
+
+        failure = self.get_failure(
+            self.module_api.send_federation_http_request(
+                method="GET",
+                remote_server_name="remote.example",
+                path="/_matrix/federation/v1/test",
+            ),
+            public_error,
+        )
+
+        self.assertEqual(
+            failure.value.remote_server_name,  # type: ignore[attr-defined]
+            "remote.example",
+        )
+        self.assertIs(failure.value.__cause__, internal_error)
+        for attribute, expected_value in expected_attributes.items():
+            self.assertEqual(getattr(failure.value, attribute), expected_value)
 
     def test_send_local_online_presence_to(self) -> None:
         # Test sending local online presence to users from the main process
