@@ -3465,6 +3465,58 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         self.assertTrue(room_id2 not in newly_joined)
         self.assertTrue(room_id2 in newly_left)
 
+    def test_newly_left_room_still_shows_up_when_current_membership_is_gone(self) -> None:
+        """
+        Test that a room still shows up as `newly_left` when the user left during the
+        token range but the current membership snapshot was later removed.
+
+        The room can be reconstructed via a state-reset-style entry in this case, so
+        the important regression is that we still include it without asserting.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        before_leave_token = self.event_sources.get_current_token()
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        after_leave_token = self.event_sources.get_current_token()
+
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                },
+                desc="remove_current_membership_state_after_leave",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="local_current_membership",
+                keyvalues={
+                    "room_id": room_id,
+                    "user_id": user1_id,
+                },
+                desc="remove_local_current_membership_after_leave",
+            )
+        )
+        self.store._get_rooms_for_local_user_where_membership_is_inner.invalidate_all()
+
+        room_id_results, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_leave_token,
+            to_token=after_leave_token,
+        )
+
+        self.assertIncludes(room_id_results.keys(), {room_id}, exact=True)
+        self.assertEqual(room_id_results[room_id].membership, Membership.LEAVE)
+        self.assertTrue(room_id not in newly_joined)
+        self.assertTrue(room_id in newly_left)
+
     def test_get_kicked_room(self) -> None:
         """
         Test that a room that the user was kicked from still shows up. When the user
