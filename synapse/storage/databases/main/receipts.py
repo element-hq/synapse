@@ -32,7 +32,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import EduTypes
+from synapse.api.constants import Direction, EduTypes
 from synapse.replication.tcp.streams import ReceiptsStream
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -578,54 +578,80 @@ class ReceiptsWorkerStore(SQLBaseStore):
         self,
         to_key: MultiWriterStreamToken,
         from_key: MultiWriterStreamToken | None = None,
-    ) -> Mapping[str, JsonMapping]:
-        """Get receipts for all rooms between two stream_ids, up
-        to a limit of the latest 100 read receipts.
+        limit: int = 100,
+        order: Direction = Direction.FORWARDS,
+    ) -> tuple[Mapping[str, JsonMapping], MultiWriterStreamToken]:
+        """Get receipts for all rooms between two stream_ids, up to a limit of
+        `limit` read receipts in that range.
 
         Args:
             to_key: Max stream id to fetch receipts up to.
             from_key: Min stream id to fetch receipts from. None fetches
                 from the start.
+            limit: The maximum number of receipts to fetch.
+            order: `Direction.FORWARDS` fetches the oldest `limit` receipts in
+                the range. `Direction.BACKWARDS` fetches the newest `limit`
+                instead; anything older is deliberately skipped, and the
+                returned stream token is always `to_key`.
 
         Returns:
-            A dictionary of roomids to a list of receipts.
+            A two-tuple containing the following:
+                * A dictionary of roomids to receipt EDUs.
+                * The stream token up to which receipts were actually fetched.
+                  This is earlier than `to_key` if the limit was hit; callers
+                  must call this method again from the returned token to fetch
+                  the remaining receipts.
         """
+        sql_order = "DESC" if order == Direction.BACKWARDS else "ASC"
 
-        def f(txn: LoggingTransaction) -> list[tuple[str, str, str, str, str]]:
+        def f(
+            txn: LoggingTransaction,
+        ) -> tuple[list[tuple[int, str, str, str, str, str]], int]:
             if from_key:
-                sql = """
+                sql = f"""
                     SELECT stream_id, instance_name, room_id, receipt_type, user_id, event_id, data
                     FROM receipts_linearized WHERE
                     stream_id > ? AND stream_id <= ?
-                    ORDER BY stream_id DESC
-                    LIMIT 100
+                    ORDER BY stream_id {sql_order}
+                    LIMIT ?
                 """
-                txn.execute(sql, [from_key.stream, to_key.get_max_stream_pos()])
+                txn.execute(sql, [from_key.stream, to_key.get_max_stream_pos(), limit])
             else:
-                sql = """
+                sql = f"""
                     SELECT stream_id, instance_name, room_id, receipt_type, user_id, event_id, data
                     FROM receipts_linearized WHERE
                     stream_id <= ?
-                    ORDER BY stream_id DESC
-                    LIMIT 100
+                    ORDER BY stream_id {sql_order}
+                    LIMIT ?
                 """
 
-                txn.execute(sql, [to_key.get_max_stream_pos()])
+                txn.execute(sql, [to_key.get_max_stream_pos(), limit])
+
+            rows = txn.fetchall()
 
             return [
-                (room_id, receipt_type, user_id, event_id, data)
-                for stream_id, instance_name, room_id, receipt_type, user_id, event_id, data in txn
+                (stream_id, room_id, receipt_type, user_id, event_id, data)
+                for stream_id, instance_name, room_id, receipt_type, user_id, event_id, data in rows
                 if MultiWriterStreamToken.is_stream_position_in_range(
                     from_key, to_key, instance_name, stream_id
                 )
-            ]
+            ], len(rows)
 
-        txn_results = await self.db_pool.runInteraction(
+        txn_results, fetched_row_count = await self.db_pool.runInteraction(
             "get_linearized_receipts_for_all_rooms", f
         )
 
+        if order == Direction.FORWARDS and fetched_row_count >= limit and txn_results:
+            # We hit the limit, so there may be more receipts in the range. Report
+            # how far we actually got so that the caller can fetch the rest. The
+            # rows are ordered by ascending stream ID, so the last row is the
+            # newest one we fetched.
+            reached_token = MultiWriterStreamToken(stream=txn_results[-1][0])
+        else:
+            reached_token = to_key
+
         results: JsonDict = {}
-        for room_id, receipt_type, user_id, event_id, data in txn_results:
+        for _stream_id, room_id, receipt_type, user_id, event_id, data in txn_results:
             # We want a single event per room, since we want to batch the
             # receipts by room, event and type.
             room_event = results.setdefault(
@@ -640,7 +666,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
             receipt_type_dict[user_id] = db_to_json(data)
 
-        return results
+        return results, reached_token
 
     async def get_linearized_receipts_for_user_in_rooms(
         self, user_id: str, room_ids: StrCollection, to_key: MultiWriterStreamToken
