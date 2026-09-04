@@ -273,6 +273,22 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         default: true,
         default_enabled: true,
     },
+    // MSC4505: explicitly suppress live location share beacon updates in unencrypted
+    // rooms (in encrypted rooms they arrive as m.room.encrypted and can only be
+    // suppressed client-side after decryption).
+    PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4505.rule.beacon"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[Condition::Known(KnownCondition::EventMatch(
+            EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc3672.beacon"),
+            },
+        ))]),
+        actions: Cow::Borrowed(&[]),
+        default: true,
+        default_enabled: true,
+    },
 ];
 
 pub const BASE_APPEND_CONTENT_RULES: &[PushRule] = &[PushRule {
@@ -717,6 +733,43 @@ pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
                 pattern: Cow::Borrowed("org.matrix.msc3381.poll.end"),
             },
         ))]),
+        actions: Cow::Borrowed(&[Action::Notify]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
+        rule_id: Cow::Borrowed("global/underride/.org.matrix.msc4505.rule.beacon_info_one_to_one"),
+        priority_class: 1,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::RoomMemberCount {
+                is: Some(Cow::Borrowed("2")),
+            }),
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc3672.beacon_info"),
+            })),
+            Condition::Known(KnownCondition::EventPropertyIs(EventPropertyIsCondition {
+                key: Cow::Borrowed("content.live"),
+                value: Cow::Owned(SimpleJsonValue::Bool(true)),
+            })),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify, SOUND_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
+        rule_id: Cow::Borrowed("global/underride/.org.matrix.msc4505.rule.beacon_info"),
+        priority_class: 1,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc3672.beacon_info"),
+            })),
+            Condition::Known(KnownCondition::EventPropertyIs(EventPropertyIsCondition {
+                key: Cow::Borrowed("content.live"),
+                value: Cow::Owned(SimpleJsonValue::Bool(true)),
+            })),
+        ]),
         actions: Cow::Borrowed(&[Action::Notify]),
         default: true,
         default_enabled: true,

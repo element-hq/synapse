@@ -50,6 +50,7 @@ class FilteredPushRules:
         msc4028_push_encrypted_events: bool,
         msc4210_enabled: bool,
         msc4306_enabled: bool,
+        msc4505_enabled: bool,
     ): ...
     def rules(self) -> Collection[tuple[PushRule, bool]]: ...
 
