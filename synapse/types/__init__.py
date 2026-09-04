@@ -31,6 +31,7 @@ from typing import (
     Any,
     ClassVar,
     Final,
+    Iterator,
     Literal,
     Mapping,
     Match,
@@ -1392,20 +1393,22 @@ class StreamToken:
         """Returns the stream ID for the given key."""
         return getattr(self, key.value)
 
-    def is_before_or_eq(self, other_token: "StreamToken") -> bool:
-        """Wether this token is before the other token, i.e. every constituent
-        part is before the other.
+    def _iter_fields_strictly_after_token(
+        self, other_token: "StreamToken"
+    ) -> Iterator[StreamKeyType]:
+        """The keys where `other_token` is behind this token.
 
-        Essentially it is `self <= other`.
+        A generator so that `is_before_or_eq` can stop at the first one.
 
-        Note: if `self.is_before_or_eq(other_token) is False` then that does not
-        imply that the reverse is True.
+        The typing key is never yielded. That stream is allowed to "reset", and
+        so comparisons don't really make sense as is.
+        TODO: Figure out a better way of tracking resets.
         """
 
         for _, key in StreamKeyType.__members__.items():
             if key == StreamKeyType.TYPING:
-                # Typing stream is allowed to "reset", and so comparisons don't
-                # really make sense as is.
+                # The typing key is never yielded. That stream is allowed to
+                # "reset", and so comparisons don't really make sense as is.
                 # TODO: Figure out a better way of tracking resets.
                 continue
 
@@ -1415,17 +1418,34 @@ class StreamToken:
             if isinstance(self_value, RoomStreamToken):
                 assert isinstance(other_value, RoomStreamToken)
                 if not self_value.is_before_or_eq(other_value):
-                    return False
+                    yield key
             elif isinstance(self_value, MultiWriterStreamToken):
                 assert isinstance(other_value, MultiWriterStreamToken)
                 if not self_value.is_before_or_eq(other_value):
-                    return False
+                    yield key
             else:
                 assert isinstance(other_value, int)
                 if self_value > other_value:
-                    return False
+                    yield key
 
-        return True
+    def fields_strictly_after_token(
+        self, other_token: "StreamToken"
+    ) -> list[StreamKeyType]:
+        """The keys where `other_token` is behind this token, i.e. the keys that
+        stop `self.is_before_or_eq(other_token)` from being True.
+        """
+        return list(self._iter_fields_strictly_after_token(other_token))
+
+    def is_before_or_eq(self, other_token: "StreamToken") -> bool:
+        """Whether this token is before the other token, i.e. every constituent
+        part is before the other.
+
+        Essentially it is `self <= other`.
+
+        Note: if `self.is_before_or_eq(other_token) is False` then that does not
+        imply that the reverse is True.
+        """
+        return next(self._iter_fields_strictly_after_token(other_token), None) is None
 
     def __str__(self) -> str:
         return (
