@@ -24,6 +24,7 @@ Utilities for running the unit tests
 """
 
 import base64
+import os
 import sys
 import warnings
 from binascii import unhexlify
@@ -39,13 +40,43 @@ from twisted.web.http import RESPONSES
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IResponse
 
+from synapse.media.storage_provider import (
+    FileStorageProviderBackend,
+    StorageProviderWrapper,
+)
 from synapse.types import JsonSerializable
 from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from sys import UnraisableHookArgs
 
+    from synapse.server import HomeServer
+
 TV = TypeVar("TV")
+
+
+def list_stored_media_files(hs: "HomeServer") -> set[str]:
+    """List the paths of every file in the media store, including the
+    directories of any file-backed storage providers.
+
+    Note that the media store path may be shared between tests, so compare
+    against a listing taken earlier in the test rather than expecting it to
+    start off empty.
+    """
+    directories = [hs.config.media.media_store_path]
+    for provider in hs.get_media_repository().media_storage.storage_providers:
+        # Only file-backed providers write anything we can look at on disk.
+        if isinstance(provider, StorageProviderWrapper) and isinstance(
+            provider.backend, FileStorageProviderBackend
+        ):
+            directories.append(provider.backend.base_directory)
+
+    return {
+        os.path.join(dirpath, filename)
+        for directory in directories
+        for dirpath, _, filenames in os.walk(directory)
+        for filename in filenames
+    }
 
 
 def get_awaitable_result(awaitable: Awaitable[TV]) -> TV:
