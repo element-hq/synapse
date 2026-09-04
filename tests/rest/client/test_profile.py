@@ -856,6 +856,199 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
+    @unittest.override_config(
+        {"experimental_features": {"msc4133_key_allowlist": ["allowed_field"]}}
+    )
+    def test_set_custom_field_allowlist(self) -> None:
+        """A field named in the allowlist can be set."""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/allowed_field",
+            content={"allowed_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # A field not named in the allowlist is rejected.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/other_field",
+            content={"other_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+    @unittest.override_config(
+        {"experimental_features": {"msc4133_key_denylist": ["denied_field"]}}
+    )
+    def test_set_custom_field_denylist(self) -> None:
+        """A field named in the denylist is rejected."""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/denied_field",
+            content={"denied_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        # A field not named in the denylist can be set.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/other_field",
+            content={"other_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_key_allowlist": []}})
+    def test_set_custom_field_empty_allowlist(self) -> None:
+        """An empty allowlist rejects every custom field."""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/other_field",
+            content={"other_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+    @unittest.override_config(
+        {
+            "experimental_features": {
+                "msc4133_key_allowlist": ["allowed_field"],
+                "msc4133_key_denylist": ["allowed_field"],
+            }
+        }
+    )
+    def test_set_custom_field_allowlist_overrides_denylist(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/allowed_field",
+            content={"allowed_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+    @unittest.override_config(
+        {
+            "experimental_features": {
+                "msc4133_key_allowlist": ["allowed_field"],
+                "msc4133_key_denylist": ["denied_field"],
+            }
+        }
+    )
+    def test_set_custom_field_allowlist_and_denylist_still_restricts(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/other_field",
+            content={"other_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+    @unittest.override_config(
+        {"experimental_features": {"msc4133_key_allowlist": ["allowed_field"]}}
+    )
+    def test_delete_custom_field_allowlist(self) -> None:
+        """Deleting is restricted by the allowlist in the same way as setting."""
+        channel = self.make_request(
+            "DELETE",
+            f"/_matrix/client/v3/profile/{self.owner}/allowed_field",
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "DELETE",
+            f"/_matrix/client/v3/profile/{self.owner}/other_field",
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+    @unittest.override_config(
+        {"experimental_features": {"msc4133_key_denylist": ["denied_field"]}}
+    )
+    def test_delete_custom_field_denylist(self) -> None:
+        """Deleting is restricted by the denylist in the same way as setting."""
+        channel = self.make_request(
+            "DELETE",
+            f"/_matrix/client/v3/profile/{self.owner}/denied_field",
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        channel = self.make_request(
+            "DELETE",
+            f"/_matrix/client/v3/profile/{self.owner}/other_field",
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+    @unittest.override_config(
+        {"experimental_features": {"msc4133_key_denylist": ["denied_field"]}}
+    )
+    def test_set_custom_field_denylist_bypassed_by_admin(self) -> None:
+        """Server admins are not subject to the denylist."""
+        self.register_user("admin", "pass", admin=True)
+        admin_tok = self.login("admin", "pass")
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/denied_field",
+            content={"denied_field": "test"},
+            access_token=admin_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "DELETE",
+            f"/_matrix/client/v3/profile/{self.owner}/denied_field",
+            access_token=admin_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+    @unittest.override_config(
+        {"experimental_features": {"msc4133_key_allowlist": ["allowed_field"]}}
+    )
+    def test_set_custom_field_allowlist_bypassed_by_admin(self) -> None:
+        """Server admins are not subject to the allowlist."""
+        self.register_user("admin", "pass", admin=True)
+        admin_tok = self.login("admin", "pass")
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/other_field",
+            content={"other_field": "test"},
+            access_token=admin_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+    @unittest.override_config(
+        {"experimental_features": {"msc4133_key_allowlist": ["allowed_field"]}}
+    )
+    def test_set_displayname_unaffected_by_allowlist(self) -> None:
+        """displayname and avatar_url are governed by their own config options."""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/displayname",
+            content={"displayname": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/avatar_url",
+            content={"avatar_url": "mxc://test/good"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
     def _setup_local_files(self, names_and_props: dict[str, dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 

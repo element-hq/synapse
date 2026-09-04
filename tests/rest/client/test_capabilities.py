@@ -204,6 +204,156 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
             ["avatar_url"],
         )
 
+    def test_get_profile_fields_capabilities_no_restrictions(self) -> None:
+        """Without an allowlist or denylist, no restrictions are advertised.
+
+        In particular `allowed` must stay absent, as MSC4133 gives it whitelist
+        semantics for *all* profile fields.
+        """
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(capabilities["m.profile_fields"], {"enabled": True})
+
+    @override_config(
+        {"experimental_features": {"msc4133_key_allowlist": ["allowed_field"]}}
+    )
+    def test_get_profile_fields_capabilities_allowlist(self) -> None:
+        """An allowlist is advertised on the stable capability.
+
+        `msc4133_enabled` is deliberately left off here: the allowlist is enforced on
+        the stable endpoint regardless of that flag, so it must be advertised on the
+        stable capability regardless of it too.
+        """
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["m.profile_fields"],
+            {
+                "enabled": True,
+                "allowed": ["allowed_field", "displayname", "avatar_url"],
+            },
+        )
+        self.assertNotIn("uk.tcpip.msc4133.profile_fields", capabilities)
+
+    @override_config({"experimental_features": {"msc4133_key_allowlist": []}})
+    def test_get_profile_fields_capabilities_empty_allowlist(self) -> None:
+        """An empty allowlist leaves only the fields with their own config option."""
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["m.profile_fields"],
+            {"enabled": True, "allowed": ["displayname", "avatar_url"]},
+        )
+
+    @override_config(
+        {"experimental_features": {"msc4133_key_denylist": ["denied_field"]}}
+    )
+    def test_get_profile_fields_capabilities_denylist(self) -> None:
+        """A denylist is advertised as `disallowed`, and `allowed` stays absent."""
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["m.profile_fields"],
+            {"enabled": True, "disallowed": ["denied_field"]},
+        )
+
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4133_enabled": True,
+                "msc4133_key_denylist": ["denied_field"],
+            }
+        }
+    )
+    def test_get_profile_fields_capabilities_denylist_msc4133(self) -> None:
+        """The unstable capability mirrors the stable one."""
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["uk.tcpip.msc4133.profile_fields"],
+            capabilities["m.profile_fields"],
+        )
+        self.assertEqual(
+            capabilities["uk.tcpip.msc4133.profile_fields"],
+            {"enabled": True, "disallowed": ["denied_field"]},
+        )
+
+    @override_config(
+        {
+            "enable_set_displayname": False,
+            "experimental_features": {
+                "msc4133_enabled": True,
+                "msc4133_key_allowlist": ["allowed_field"],
+            },
+        }
+    )
+    def test_get_profile_fields_capabilities_allowlist_displayname_disabled(
+        self,
+    ) -> None:
+        """displayname is kept out of `allowed` when it cannot be set."""
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["m.profile_fields"],
+            {"enabled": True, "allowed": ["allowed_field", "avatar_url"]},
+        )
+        self.assertFalse(capabilities["m.set_displayname"]["enabled"])
+        self.assertEqual(
+            capabilities["uk.tcpip.msc4133.profile_fields"],
+            capabilities["m.profile_fields"],
+        )
+
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4133_enabled": True,
+                "msc4133_key_allowlist": ["allowed_field"],
+                "msc4133_key_denylist": ["denied_field"],
+            }
+        }
+    )
+    def test_get_profile_fields_capabilities_allowlist_and_denylist(
+        self,
+    ) -> None:
+        """When both are configured, only the enforced allowlist is advertised."""
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["m.profile_fields"],
+            {
+                "enabled": True,
+                "allowed": ["allowed_field", "displayname", "avatar_url"],
+            },
+        )
+
     def test_get_delayed_events_capabilities_default_config_msc4140(self) -> None:
         access_token = self.login(self.localpart, self.password)
 

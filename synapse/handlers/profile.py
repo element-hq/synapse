@@ -689,6 +689,26 @@ class ProfileHandler:
                     users=[target_user],
                 )
 
+    def _is_profile_field_disallowed(self, field_name: str) -> bool:
+        """Check whether this server's configuration forbids modifying a custom
+        profile field.
+
+        If an allowlist is defined, the field being modified must be present in it.
+        Otherwise, the denylist (if defined) is consulted instead.
+
+        Args:
+            field_name: The name of the profile field being modified.
+
+        Returns:
+            True if this field may not be modified.
+        """
+        allowlist = self.hs.config.experimental.msc4133_key_allowlist
+        if allowlist is not None:
+            return field_name not in allowlist
+
+        denylist = self.hs.config.experimental.msc4133_key_denylist
+        return denylist is not None and field_name in denylist
+
     async def set_profile_field(
         self,
         *,
@@ -719,6 +739,13 @@ class ProfileHandler:
 
         if not by_admin and target_user != requester.user:
             raise AuthError(403, "Cannot set another user's profile")
+
+        if not by_admin and self._is_profile_field_disallowed(field_name):
+            raise SynapseError(
+                403,
+                "Changing this profile field is disabled on this server",
+                Codes.FORBIDDEN,
+            )
 
         stream_id = await self.store.set_profile_field(
             target_user,
@@ -807,6 +834,13 @@ class ProfileHandler:
 
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's profile")
+
+        if not by_admin and self._is_profile_field_disallowed(field_name):
+            raise SynapseError(
+                403,
+                "Deleting this profile field is disabled on this server",
+                Codes.FORBIDDEN,
+            )
 
         stream_id = await self.store.delete_profile_field(
             target_user,

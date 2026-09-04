@@ -21,7 +21,7 @@
 #
 
 from functools import cache
-from typing import Any
+from typing import Any, Optional
 
 import attr
 
@@ -246,6 +246,34 @@ class ExperimentalConfig(Config):
 
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
+
+        # MSC4133: Allowlist for custom profile fields. If present this list takes
+        # precedence over the denylist and only the specified profile fields may be set.
+        self.msc4133_key_allowlist: Optional[list[str]] = experimental.get(
+            "msc4133_key_allowlist"
+        )
+        if self.msc4133_key_allowlist is not None:
+            if not isinstance(self.msc4133_key_allowlist, list) or not all(
+                isinstance(k, str) for k in self.msc4133_key_allowlist
+            ):
+                raise ConfigError(
+                    "experimental_features.msc4133_key_allowlist must be a list of strings",
+                    ("experimental", "msc4133_key_allowlist"),
+                )
+
+        # MSC4133: Denylist for custom profile fields. If present the user may set any
+        # custom field except the specified fields. Will be overruled by the allowlist.
+        self.msc4133_key_denylist: Optional[list[str]] = experimental.get(
+            "msc4133_key_denylist"
+        )
+        if self.msc4133_key_denylist is not None:
+            if not isinstance(self.msc4133_key_denylist, list) or not all(
+                isinstance(k, str) for k in self.msc4133_key_denylist
+            ):
+                raise ConfigError(
+                    "experimental_features.msc4133_key_denylist must be a list of strings",
+                    ("experimental", "msc4133_key_denylist"),
+                )
 
         # MSC4143: Matrix RTC Transport using Livekit Backend
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
