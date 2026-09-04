@@ -496,8 +496,21 @@ class ApplicationServicesHandler:
         from_key = await self.store.get_type_stream_id_for_appservice(
             service, "read_receipt"
         )
-        if new_token is not None and new_token.stream <= from_key:
-            logger.debug("Rejecting token lower than or equal to stored: %s", new_token)
+        if new_token.stream <= from_key:
+            if new_token.stream == from_key:
+                logger.debug(
+                    "Receipt token %s already handled for appservice %s",
+                    new_token,
+                    service.id,
+                )
+            else:
+                logger.warning(
+                    "Receipt token %s is behind stored position %s for appservice %s",
+                    new_token,
+                    from_key,
+                    service.id,
+                )
+
             return [], MultiWriterStreamToken(stream=from_key)
 
         from_token = MultiWriterStreamToken(stream=from_key)
