@@ -29,6 +29,7 @@ from typing import (
 )
 from unittest.mock import AsyncMock, Mock
 
+from immutabledict import immutabledict
 from parameterized import parameterized
 
 from twisted.internet import defer
@@ -799,6 +800,109 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
             ),
             302,
         )
+
+    def test_read_receipts_from_lagging_writer_are_not_skipped(self) -> None:
+        """
+        With several receipt writers, a worker can be notified with a token in
+        which one writer is ahead of the others, e.g. because its replication
+        rows arrived first. The application service handler must not treat the
+        leading writer's position as the point it has caught up to, or the
+        lagging writer's receipts would be skipped for good once they arrive.
+
+        Scenario: writers `rw1` and `rw2` alternate stream IDs 1001 to 1200.
+        The worker has heard from `rw2` up to 1200 but from `rw1` only up to
+        1000, so the receipt stream watermark is still 1000.
+        """
+        interested_appservice = self._register_application_service(
+            namespaces={
+                ApplicationService.NS_ROOMS: [
+                    {
+                        "regex": "!fakeroom_.*",
+                        "exclusive": True,
+                    }
+                ],
+            },
+        )
+
+        # The application service has already been sent everything up to 1000.
+        self.get_success(
+            self.hs.get_datastores().main.set_appservice_stream_type_pos(
+                interested_appservice, "read_receipt", 1000
+            )
+        )
+
+        # Insert the receipts as the two writers would have persisted them, each
+        # in its own room so they can be told apart in what the appservice gets.
+        self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_insert_many(
+                desc="test_read_receipts_from_lagging_writer_are_not_skipped",
+                table="receipts_linearized",
+                keys=(
+                    "stream_id",
+                    "instance_name",
+                    "room_id",
+                    "receipt_type",
+                    "user_id",
+                    "event_id",
+                    "data",
+                ),
+                values=[
+                    (
+                        stream_id,
+                        "rw1" if stream_id % 2 else "rw2",
+                        f"!fakeroom_{stream_id}:test",
+                        "m.read",
+                        self.local_user,
+                        f"$eventid_{stream_id}",
+                        "{}",
+                    )
+                    for stream_id in range(1001, 1201)
+                ],
+            )
+        )
+
+        def notify(new_token: MultiWriterStreamToken) -> None:
+            self.get_success(
+                self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                    services=[interested_appservice],
+                    stream_key=StreamKeyType.RECEIPT,
+                    new_token=new_token,
+                    users=[],
+                )
+            )
+
+        def received_stream_ids() -> list[int]:
+            return [
+                int(event["room_id"].removeprefix("!fakeroom_").removesuffix(":test"))
+                for call in self.send_mock.call_args_list
+                for event in call[0][2]
+            ]
+
+        def stored_position() -> int:
+            return self.get_success(
+                self.hs.get_datastores().main.get_type_stream_id_for_appservice(
+                    interested_appservice, "read_receipt"
+                )
+            )
+
+        # `rw2`'s rows have replicated to this worker, `rw1`'s have not.
+        notify(
+            MultiWriterStreamToken(
+                stream=1000, instance_map=immutabledict({"rw2": 1200})
+            )
+        )
+
+        # Nothing can be sent yet without risking `rw1`'s receipts being skipped,
+        # and the stored position must not move past them.
+        self.assertEqual(received_stream_ids(), [])
+        self.assertEqual(stored_position(), 1000)
+
+        # `rw1`'s rows arrive and the watermark catches up.
+        notify(MultiWriterStreamToken(stream=1200))
+
+        # Every receipt from both writers is delivered exactly once, in order.
+        self.assertEqual(received_stream_ids(), list(range(1001, 1201)))
+        self.assertEqual(stored_position(), 1200)
 
     def test_application_services_are_fast_forwarded_on_first_read_receipt_delivery(
         self,
