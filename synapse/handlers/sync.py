@@ -1257,6 +1257,7 @@ class SyncHandler:
                     end_token,
                     members_to_fetch,
                     timeline_state,
+                    joined,
                 )
 
             # If we only have partial state for the room, `state_ids` may be missing the
@@ -1479,6 +1480,7 @@ class SyncHandler:
         end_token: StreamToken,
         members_to_fetch: set[str] | None,
         timeline_state: StateMap[str],
+        joined: bool,
     ) -> StateMap[str]:
         """Calculate the state events to be included in an incremental sync response.
 
@@ -1503,6 +1505,7 @@ class SyncHandler:
                 events in the timeline. Otherwise, `None`.
             timeline_state: The contribution to the room state from state events in
                 `batch`. Only contains the last event for any given state key.
+            joined: whether the user is currently joined to the room
 
         Returns:
             A map from (type, state_key) to event_id, for each event that we believe
@@ -1528,13 +1531,28 @@ class SyncHandler:
                 # events to understand the events in this timeline. So we always
                 # fish out all the member events corresponding to the timeline
                 # here. The caller will then dedupe any redundant ones.
-                member_ids = await self._state_storage_controller.get_current_state_ids(
-                    room_id=room_id,
-                    state_filter=StateFilter.from_types(
-                        (EventTypes.Member, member) for member in members_to_fetch
-                    ),
-                    await_full_state=await_full_state,
+                member_filter = StateFilter.from_types(
+                    (EventTypes.Member, member) for member in members_to_fetch
                 )
+                if joined:
+                    member_ids = (
+                        await self._state_storage_controller.get_current_state_ids(
+                            room_id=room_id,
+                            state_filter=member_filter,
+                            await_full_state=await_full_state,
+                        )
+                    )
+                else:
+                    # The user is no longer in the room, so `end_token` points
+                    # at the user's leave/etc event, and the current state may
+                    # include state from after that point. Use state groups to
+                    # get the memberships as of `end_token` instead.
+                    member_ids = await self._state_storage_controller.get_state_ids_at(
+                        room_id,
+                        stream_position=end_token,
+                        state_filter=member_filter,
+                        await_full_state=await_full_state,
+                    )
                 delta_state_ids.update(member_ids)
 
             # We don't do LL filtering for incremental syncs - see

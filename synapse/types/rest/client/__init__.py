@@ -26,6 +26,7 @@ from pydantic import (
     ConfigDict,
     Field,
     GetCoreSchemaHandler,
+    GetPydanticSchema,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -33,7 +34,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import CoreSchema, PydanticCustomError
+from pydantic_core import CoreSchema
 from typing_extensions import Annotated, Self
 
 from synapse.types import Absent, AbsentType, NonNegativeStrictInt
@@ -91,25 +92,33 @@ class EmailRequestTokenBody(ThreepidRequestTokenBody):
     # know the exact spelling (eg. upper and lower case) of address in the database.
     # Without this, an email stored in the database as "foo@bar.com" would cause
     # user requests for "FOO@bar.com" to raise a Not Found error.
+    #
+    # A ValueError produces a Pydantic error of type "value_error", which
+    # validate_json_object translates to M_INVALID_PARAM, the errcode the spec
+    # lists for an invalid address on /account/3pid/email/requestToken:
+    # https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3account3pidemailrequesttoken
     @field_validator("email")
     @classmethod
     def _email_validator(cls, email: StrictStr) -> StrictStr:
-        try:
-            return validate_email(email)
-        except ValueError as e:
-            # To ensure backward compatibility of HTTP error codes, we return a
-            # Pydantic error with the custom, unrecognized error type
-            # "email_custom_err_type" instead of the default error type
-            # "value_error". This results in the more generic BAD_JSON HTTP
-            # error instead of the more specific INVALID_PARAM one.
-            raise PydanticCustomError("email_custom_err_type", str(e), None) from e
+        return validate_email(email)
 
 
-ISO3116_1_Alpha_2 = Annotated[str, StringConstraints(pattern="[A-Z]{2}", strict=True)]
+ISO3166_1_Alpha_2 = Annotated[
+    str,
+    GetPydanticSchema(
+        lambda source, handler: pydantic_core.core_schema.custom_error_schema(
+            pydantic_core.core_schema.str_schema(pattern="[A-Z]{2}", strict=True),
+            custom_error_type="value_error",
+            custom_error_context={
+                "error": "Not a valid ISO 3166-1 alpha-2 country code"
+            },
+        )
+    ),
+]
 
 
 class MsisdnRequestTokenBody(ThreepidRequestTokenBody):
-    country: ISO3116_1_Alpha_2
+    country: ISO3166_1_Alpha_2
     phone_number: StrictStr
 
 

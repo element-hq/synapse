@@ -1,0 +1,1 @@
+Fix `/sync` returning membership events from after the user's leave in `state_after` for left rooms when lazy-loading room members (experimental [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222) implementation).

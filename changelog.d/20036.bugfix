@@ -1,0 +1,1 @@
+Apply the `rc_reports` rate limit to the [room reporting endpoint](https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3roomsroomidreport), which the spec declares as rate-limited.
