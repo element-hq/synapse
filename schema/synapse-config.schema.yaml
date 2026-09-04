@@ -5823,6 +5823,9 @@ properties:
 
 
       _Changed in Synapse 1.116.0: Added password\_path_
+
+
+      _Changed in Synapse 1.161.0: Added username_
     properties:
       enabled:
         type: boolean
@@ -5842,6 +5845,13 @@ properties:
           The full path to a local Unix socket file. **If this is used, `host`
           and `port` are ignored.**
         default: /tmp/redis.sock
+      username:
+        type: ["string", "null"]
+        description: >-
+          Optional username if configured on the Redis instance (Redis 6+
+          ACL authentication). Requires `password` (or `password_path`) to
+          also be set.
+        default: null
       password:
         type: ["string", "null"]
         description: Optional password if configured on the Redis instance.
@@ -5885,6 +5895,7 @@ properties:
       - enabled: true
         host: localhost
         port: 6379
+        username: "<username>"
         password_path: "<path_to_the_password_file>"
         dbid: "<dbid>"
   worker_app:

@@ -4670,6 +4670,8 @@ _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
 _Changed in Synapse 1.116.0: Added password\_path_
 
+_Changed in Synapse 1.161.0: Added username_
+
 This setting has the following sub-options:
 
 * `enabled` (boolean): Whether to use Redis support. Defaults to `false`.
@@ -4679,6 +4681,8 @@ This setting has the following sub-options:
 * `port` (integer): Optional port to use to connect to Redis. Defaults to `6379`.
 
 * `path` (string): The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.** Defaults to `"/tmp/redis.sock"`.
+
+* `username` (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set. Defaults to `null`.
 
 * `password` (string|null): Optional password if configured on the Redis instance. Defaults to `null`.
 
@@ -4702,6 +4706,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
+  username: <username>
   password_path: <path_to_the_password_file>
   dbid: <dbid>
 ```
