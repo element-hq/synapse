@@ -1687,12 +1687,16 @@ class FederationEventHandler:
 
     @trace
     async def _auth_and_persist_outliers(
-        self, room_id: str, events: Iterable[EventBase]
-    ) -> None:
+        self,
+        room_id: str,
+        events: Iterable[EventBase],
+        from_send_join: bool = False,
+    ) -> bool:
         """Persist a batch of outlier events fetched from remote servers.
 
         We first sort the events to make sure that we process each event's auth_events
-        before the event itself.
+        before the event itself. For MSC4242 State DAG events this means sorting by
+        `prev_state_events`, which is also where auth events are calculated from.
 
         We then mark the events as outliers, persist them to the database, and, where
         appropriate (eg, an invite), awake the notifier.
@@ -1701,8 +1705,20 @@ class FederationEventHandler:
             room_id: the room that the events are meant to be in (though this has
                not yet been checked)
             events: the events that have been fetched
+            from_send_join: If True, `events` is the complete state DAG from a /send_join
+               response, which allows the events to be processed as a batch rather than
+               one at a time. Only used for MSC4242 State DAG rooms.
+        Returns:
+            True if any of the events were rejected.
         """
         event_map = {event.event_id: event for event in events}
+        if not event_map:
+            return False
+
+        # There must be an event in events else we would have returned by now
+        is_state_dag_room = next(
+            iter(event_map.values())
+        ).room_version.msc4242_state_dags
 
         event_ids = event_map.keys()
         set_tag(
@@ -1729,26 +1745,39 @@ class FederationEventHandler:
 
         # We need to persist an event's auth events before the event.
         auth_graph = {
-            ev.event_id: [e_id for e_id in ev.auth_event_ids() if e_id in event_map]
+            ev.event_id: [
+                e_id
+                for e_id in (
+                    ev.prev_state_events
+                    if supports_msc4242_state_dag(ev)
+                    else ev.auth_event_ids()
+                )
+                if e_id in event_map
+            ]
             for ev in event_map.values()
         }
-        sorted_auth_event_ids = sorted_topologically(event_map.keys(), auth_graph)
-        sorted_auth_events = [event_map[e_id] for e_id in sorted_auth_event_ids]
+        sorted_event_ids = sorted_topologically(event_map.keys(), auth_graph)
+        sorted_events = [event_map[e_id] for e_id in sorted_event_ids]
         logger.info(
             "Persisting %i remaining outliers: %s",
-            len(sorted_auth_events),
-            shortstr(e.event_id for e in sorted_auth_events),
+            len(sorted_events),
+            shortstr(e.event_id for e in sorted_events),
         )
+
+        if is_state_dag_room:
+            return await self._auth_and_persist_state_dag_outliers(
+                room_id, event_map, sorted_events, from_send_join
+            )
+
+        events_and_contexts_to_persist: list[EventPersistencePair] = []
 
         # get all the auth events for all the events in this batch. By now, they should
         # have been persisted.
         auth_event_ids = {
-            aid for event in sorted_auth_events for aid in event.auth_event_ids()
+            aid for event in sorted_events for aid in event.auth_event_ids()
         }
         auth_map = {
-            ev.event_id: ev
-            for ev in sorted_auth_events
-            if ev.event_id in auth_event_ids
+            ev.event_id: ev for ev in sorted_events if ev.event_id in auth_event_ids
         }
 
         missing_events = auth_event_ids.difference(auth_map)
@@ -1759,8 +1788,6 @@ class FederationEventHandler:
                 redact_behaviour=EventRedactBehaviour.as_is,
             )
             auth_map.update(persisted_events)
-
-        events_and_contexts_to_persist: list[EventPersistencePair] = []
 
         async def prep(event: EventBase) -> None:
             with nested_logging_context(suffix=event.event_id):
@@ -1807,7 +1834,7 @@ class FederationEventHandler:
 
             events_and_contexts_to_persist.append((event, context))
 
-        for i, event in enumerate(sorted_auth_events):
+        for i, event in enumerate(sorted_events):
             await prep(event)
 
             # The above function is typically not async, and so won't yield to
@@ -1815,6 +1842,11 @@ class FederationEventHandler:
             # occasionally to ensure we don't block other work.
             if (i + 1) % 1000 == 0:
                 await self._clock.sleep(Duration(seconds=0))
+
+        has_rejected_events = any(
+            context.rejected is not None
+            for _, context in events_and_contexts_to_persist
+        )
 
         # Also persist the new event in batches for similar reasons as above.
         for batch in batch_iter(events_and_contexts_to_persist, 1000):
@@ -1826,6 +1858,250 @@ class FederationEventHandler:
                 # during backfill should be marked as backfilled as well.
                 backfilled=True,
             )
+
+        return has_rejected_events
+
+    async def _auth_and_persist_state_dag_outliers(
+        self,
+        room_id: str,
+        event_map: dict[str, EventBase],
+        sorted_events: list[EventBase],
+        from_send_join: bool,
+    ) -> bool:
+        """Persist a batch of MSC4242 State DAG outlier events.
+
+        Other room versions check that an event is allowed according to the auth events
+        the event itself lists. MSC4242 rooms instead calculate the auth state before the
+        event and then determine if the event is allowed.
+
+        This means we normally cannot prep the whole batch and then persist the whole
+        batch, as the state at an event's `prev_state_events` has to have been persisted
+        before we can work out that event's auth events. The exception is a /send_join
+        response, where the entire state DAG is in `event_map` and so the state at each
+        event can be remembered as we go.
+
+        Params:
+            room_id: the room that the events are meant to be in (though this has
+               not yet been checked)
+            event_map: all of the events being persisted, by event ID
+            sorted_events: the events being persisted, sorted so that an event's
+               `prev_state_events` come before it
+            from_send_join: True if `event_map` is the complete state DAG from a
+               /send_join response
+        Returns:
+            True if any of the events were rejected.
+        """
+        has_rejected_events = False
+        events_and_contexts_to_persist: list[EventPersistencePair] = []
+        event_id_to_state_group: dict[str, int] = {}
+        state_group_to_state_map: dict[int, StateMap[str]] = {}
+        processed_event_map: dict[str, EventBase] = {}
+
+        async def process(event: EventBase) -> EventPersistencePair:
+            assert supports_msc4242_state_dag(event)
+            with nested_logging_context(suffix=event.event_id):
+                # We can only use the state we have remembered if we have remembered it
+                # for every one of the event's `prev_state_events`. If we haven't, the
+                # missing ones were already persisted, so use the database instead.
+                known_prev_state_maps = None
+                if from_send_join and all(
+                    prev_state_event_id in event_id_to_state_group
+                    for prev_state_event_id in event.prev_state_events
+                ):
+                    known_prev_state_maps = {
+                        event_id_to_state_group[prev_state_event_id]: (
+                            state_group_to_state_map[
+                                event_id_to_state_group[prev_state_event_id]
+                            ]
+                        )
+                        for prev_state_event_id in event.prev_state_events
+                    }
+
+                (
+                    context,
+                    calculated_auth_event_ids,
+                ) = await self._calculate_state_dag_context(
+                    event,
+                    known_prev_state_maps=known_prev_state_maps,
+                    event_map=processed_event_map,
+                )
+                event.internal_metadata.calculated_auth_event_ids = (
+                    calculated_auth_event_ids
+                )
+                event.internal_metadata.outlier = True
+
+                batched_auth_events = None
+                if from_send_join:
+                    # The events in this batch aren't persisted yet, so pull the auth
+                    # events out of the batch, falling back to the database for events we
+                    # had already seen and hence filtered out of the batch.
+                    calculated_auth_events = {
+                        event_id: event_map[event_id]
+                        for event_id in calculated_auth_event_ids
+                        if event_id in event_map
+                    }
+                    missing_auth_event_ids = set(calculated_auth_event_ids).difference(
+                        calculated_auth_events
+                    )
+                    if missing_auth_event_ids:
+                        calculated_auth_events.update(
+                            await self._store.get_events(
+                                missing_auth_event_ids,
+                                allow_rejected=True,
+                                redact_behaviour=EventRedactBehaviour.as_is,
+                            )
+                        )
+                    batched_auth_events = {
+                        event_id: event_map[event_id]
+                        for event_id in itertools.chain(
+                            calculated_auth_event_ids, event.prev_state_events
+                        )
+                        if event_id in event_map
+                    }
+                    if context.state_group is not None:
+                        event_id_to_state_group[event.event_id] = context.state_group
+                        state_group_to_state_map[
+                            context.state_group
+                        ] = await context.get_current_state_ids()
+                else:
+                    calculated_auth_events = await self._store.get_events(
+                        calculated_auth_event_ids,
+                        allow_rejected=True,
+                        redact_behaviour=EventRedactBehaviour.as_is,
+                    )
+
+                try:
+                    validate_event_for_room_version(event)
+                    await check_state_independent_auth_rules(
+                        self._store, event, batched_auth_events
+                    )
+                    check_state_dependent_auth_rules(
+                        event, calculated_auth_events.values()
+                    )
+                except AuthError as e:
+                    logger.warning("Rejecting %r because %s", event, e)
+                    context.rejected = RejectedReason.AUTH_ERROR
+                except EventSizeError as e:
+                    if e.unpersistable:
+                        # This event is completely unpersistable.
+                        raise e
+                    # Otherwise, we are somewhat lenient and just persist the event
+                    # as rejected, for moderate compatibility with older Synapse
+                    # versions.
+                    logger.warning("While validating received event %r: %s", event, e)
+                    context.rejected = RejectedReason.OVERSIZED_EVENT
+
+            processed_event_map[event.event_id] = event
+            return event, context
+
+        if from_send_join:
+            for i, event in enumerate(sorted_events):
+                event_and_context = await process(event)
+                if event_and_context[1].rejected is not None:
+                    has_rejected_events = True
+                events_and_contexts_to_persist.append(event_and_context)
+
+                # The above function is typically not async, and so won't yield to
+                # the reactor. For large rooms let's yield to the reactor
+                # occasionally to ensure we don't block other work.
+                if (i + 1) % 1000 == 0:
+                    await self._clock.sleep(Duration(seconds=0))
+
+            for batch in batch_iter(events_and_contexts_to_persist, 1000):
+                await self.persist_events_and_notify(
+                    room_id,
+                    batch,
+                    # Mark these events as backfilled as they're historic events that
+                    # will eventually be backfilled. For example, missing events we
+                    # fetch during backfill should be marked as backfilled as well.
+                    backfilled=True,
+                )
+        else:
+            for event in sorted_events:
+                event_and_context = await process(event)
+                if event_and_context[1].rejected is not None:
+                    has_rejected_events = True
+                await self.persist_events_and_notify(
+                    room_id,
+                    [event_and_context],
+                    # Mark these events as backfilled as they're historic events that
+                    # will eventually be backfilled. For example, missing events we
+                    # fetch during backfill should be marked as backfilled as well.
+                    backfilled=True,
+                )
+
+        return has_rejected_events
+
+    async def _calculate_state_dag_context(
+        self,
+        event: MSC4242Event,
+        known_prev_state_maps: dict[int, StateMap[str]] | None = None,
+        event_map: dict[str, EventBase] | None = None,
+    ) -> tuple[EventContext, list[str]]:
+        """Calculate the context and auth events for an MSC4242 State DAG event.
+
+        The state before the event is resolved from the event's `prev_state_events`, and
+        the auth events are then calculated from that state, in the same way
+        `EventBuilder.build` does when creating events locally. This is the expensive
+        bit, but it's a one-time cost as the calculated auth events are remembered on
+        the event.
+
+        Args:
+            event: The event to calculate the context for.
+            known_prev_state_maps: The state maps at all of the event's
+               `prev_state_events`, keyed by state group, if known. This allows events
+               which have not been persisted yet to be processed.
+            event_map: Events which may be needed to resolve the state but which have not
+               been persisted yet.
+        Returns:
+            The persisted EventContext and the calculated auth event IDs.
+
+        Raises:
+            SynapseError if the event has no `prev_state_events` and is not a create
+            event.
+        """
+        if len(event.prev_state_events) == 0 and event.type != EventTypes.Create:
+            raise SynapseError(502, f"event {event.event_id} has no prev_state_events")
+
+        if known_prev_state_maps:
+            if len(known_prev_state_maps) == 1:
+                state_ids = list(known_prev_state_maps.values())[0]
+            else:
+                res = await self._state_resolution_handler.resolve_state_groups(
+                    event.room_id,
+                    event.room_version.identifier,
+                    known_prev_state_maps,
+                    event_map=event_map,
+                    state_res_store=StateResolutionStore(
+                        self._store, self._state_deletion_store
+                    ),
+                )
+                state_ids = await res.get_state(self._state_storage_controller)
+        else:
+            state_ids = await self._state_handler.compute_state_after_events(
+                event.room_id,
+                event.prev_state_events,
+                # We cannot filter the state as we need to persist the state group.
+                state_filter=None,
+                await_full_state=False,
+            )
+
+        # We should always have some resolved state after the prev_state_events, except
+        # for the create event which is the start of the state DAG.
+        is_create_event = (
+            len(event.prev_state_events) == 0 and event.type == EventTypes.Create
+        )
+        if not is_create_event:
+            assert len(state_ids) > 0
+
+        context = await self._state_handler.compute_event_context(
+            event,
+            state_ids,
+            # `compute_event_context` asserts this is None if there is no state, which
+            # is the case for the create event.
+            partial_state=None if is_create_event else False,
+        )
+        return context, self._event_auth_handler.compute_auth_events(event, state_ids)
 
     @trace
     async def _check_event_auth(
