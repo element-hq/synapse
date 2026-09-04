@@ -180,8 +180,8 @@ class SyncRestServlet(RestServlet):
         # (to allow some time for the ecosystem to adapt to the stable identifiers)
         if not use_state_after:
             use_state_after = use_unstable_state_after_name = parse_boolean(
-request, "org.matrix.msc4222.use_state_after", default=False
-)
+                request, "org.matrix.msc4222.use_state_after", default=False
+            )
 
         logger.debug(
             "/sync: user=%r, timeout=%r, since=%r, "
