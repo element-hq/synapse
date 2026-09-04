@@ -509,6 +509,10 @@ class FakeRedisPubSubServer:
             defaultdict(set)
         )
 
+        # The arguments of every `AUTH` command received, in order: `(password,)`
+        # when only a password is configured, `(username, password)` with both.
+        self.auth_attempts: list[tuple[bytes, ...]] = []
+
     def add_subscriber(self, conn: "FakeRedisPubSubProtocol", channel: bytes) -> None:
         """A connection has called SUBSCRIBE"""
         self._subscribers_by_channel[channel].add(conn)
@@ -580,6 +584,11 @@ class FakeRedisPubSubProtocol(Protocol):
         # Connection keep-alives.
         elif command == b"PING":
             self.send("PONG")
+
+        # We don't check the credentials, just record that they were sent.
+        elif command == b"AUTH":
+            self._server.auth_attempts.append(args)
+            self.send("OK")
 
         else:
             raise Exception(f"Unknown command: {command!r}")

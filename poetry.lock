@@ -3384,15 +3384,15 @@ windows-platform = ["appdirs (>=1.4.0)", "appdirs (>=1.4.0)", "bcrypt (>=3.1.3)"
 
 [[package]]
 name = "txredisapi"
-version = "1.4.11"
+version = "1.4.12"
 description = "non-blocking redis client for python"
 optional = true
 python-versions = "*"
 groups = ["main"]
 markers = "extra == \"all\" or extra == \"redis\""
 files = [
-    {file = "txredisapi-1.4.11-py3-none-any.whl", hash = "sha256:ac64d7a9342b58edca13ef267d4fa7637c1aa63f8595e066801c1e8b56b22d0b"},
-    {file = "txredisapi-1.4.11.tar.gz", hash = "sha256:3eb1af99aefdefb59eb877b1dd08861efad60915e30ad5bf3d5bf6c5cedcdbc6"},
+    {file = "txredisapi-1.4.12-py3-none-any.whl", hash = "sha256:c698fff24a0b82e8932ef18c5623496b0a8b5195e4e94bf8524800a00ca6b7c1"},
+    {file = "txredisapi-1.4.12.tar.gz", hash = "sha256:98e2440ff2e297c9048c5f9d516e7b1302d447cd9cd4568c986c35a8523de3c7"},
 ]
 
 [package.dependencies]
@@ -3784,4 +3784,4 @@ url-preview = ["lxml"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10.0,<4.0.0"
-content-hash = "53ecef32887866656603697f9e11043dae7b2917b1a2e7727f5133f604acf9de"
+content-hash = "66a59048fe0dd67acd9ce6a695814f88050692ef858fd8b42fbcbe659e1a2f6a"
