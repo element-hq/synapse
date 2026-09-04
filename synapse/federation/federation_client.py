@@ -1283,16 +1283,15 @@ class FederationClient(FederationBase):
                         "Unexpected create event(s) in auth chain: %s"
                         % (auth_chain_create_events,)
                     )
-
-            return SendJoinResult(
-                event=event,
-                state=signed_state,
-                auth_chain=signed_auth,
-                origin=destination,
-                partial_state=response.members_omitted,
-                servers_in_room=servers_in_room or frozenset(),
-                state_dag=None,
-            )
+                return SendJoinResult(
+                    event=event,
+                    state=signed_state,
+                    auth_chain=signed_auth,
+                    origin=destination,
+                    partial_state=response.members_omitted,
+                    servers_in_room=servers_in_room or frozenset(),
+                    state_dag=None,
+                )
 
         # MSC3083 defines additional error codes for room joins.
         failover_errcodes = None
