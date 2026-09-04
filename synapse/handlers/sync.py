@@ -1559,17 +1559,42 @@ class SyncHandler:
                 from_token=since_token.room_key,
                 to_token=end_token.room_key,
             )
+            # Track state keys whose deltas have event_id=None, indicating
+            # the server has left the room and current_state_events was cleared.
+            cleared_state_keys: list[tuple[str, str]] = []
             for delta in deltas:
                 if delta.event_id is None:
-                    # There was a state reset and this state entry is no longer
-                    # present, but we have no way of informing the client about
-                    # this, so we just skip it for now.
+                    # The state entry was cleared (server left the room). We
+                    # need to look up the actual state at the end of the
+                    # timeline via state groups instead.
+                    # See https://github.com/element-hq/synapse/issues/18793
+                    cleared_state_keys.append((delta.event_type, delta.state_key))
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
                 # multiple deltas for a given type/state_key we'll always pick
                 # the latest one.
                 delta_state_ids[(delta.event_type, delta.state_key)] = delta.event_id
+
+            # If there were state keys cleared because the server left the room,
+            # fall back to looking up the state at end_token via state groups
+            # (which are preserved even after current_state_events is cleared).
+            # This ensures the leave event is included in state_after.
+            if cleared_state_keys:
+                cleared_state_filter = StateFilter.from_types(cleared_state_keys)
+                state_at_end = (
+                    await self._state_storage_controller.get_state_ids_at(
+                        room_id,
+                        stream_position=end_token,
+                        state_filter=cleared_state_filter,
+                        await_full_state=await_full_state,
+                    )
+                )
+                # Only include state that wasn't already covered by a later
+                # delta with a proper event_id.
+                for key, event_id in state_at_end.items():
+                    if key not in delta_state_ids:
+                        delta_state_ids[key] = event_id
 
             return delta_state_ids
 
