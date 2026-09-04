@@ -20,18 +20,20 @@
 #
 import logging
 from http import HTTPStatus
+from unittest import skip as skip_test
 from unittest.mock import Mock
 
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, StateDag
 from synapse.api.errors import Codes, FederationError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.http.types import QueryParams
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
@@ -391,6 +393,180 @@ def _create_acl_event(content: JsonDict) -> EventBase:
             "content": content,
         }
     )
+
+
+class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
+    """
+    Tests for walking the MSC4242 state DAG via /get_missing_events.
+
+    In future, these can be ported to Complement to benefit other servers,
+    but as of writing MSC4242 is not fully implemented so can't be in Complement yet.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4242_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self.local_user_id = self.register_user("alice", "pass")
+        self.local_user_token = self.login("alice", "pass")
+        self.room_id = self.helper.create_room_as(
+            room_creator=self.local_user_id,
+            tok=self.local_user_token,
+            room_version=RoomVersions.MSC4242v12.identifier,
+        )
+        self.inject_room_member(
+            self.room_id, f"@remote:{self.OTHER_SERVER_NAME}", "join"
+        )
+
+        # a message is interleaved between the two topics, so it is an ancestor of
+        # `second_topic_id` in the timeline DAG but absent from the state DAG
+        self.first_topic_id = self.helper.send_state(
+            self.room_id, "m.room.topic", {"topic": "one"}, tok=self.local_user_token
+        )["event_id"]
+        self.message_id = self.helper.send(
+            self.room_id, body="a message", tok=self.local_user_token
+        )["event_id"]
+        self.second_topic_id = self.helper.send_state(
+            self.room_id, "m.room.topic", {"topic": "two"}, tok=self.local_user_token
+        )["event_id"]
+
+    def _get_missing_events(
+        self,
+        earliest_events: list[str],
+        latest_events: list[str],
+        walk_state_dag: bool,
+        limit: int = 10,
+    ) -> list[JsonDict]:
+        content: JsonDict = {
+            "earliest_events": earliest_events,
+            "latest_events": latest_events,
+            "limit": limit,
+        }
+        if walk_state_dag:
+            content[StateDag.GET_MISSING_EVENTS_FIELD] = True
+
+        channel = self.make_signed_federation_request(
+            "POST",
+            f"/_matrix/federation/v1/get_missing_events/{self.room_id}",
+            content=content,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.json_body)
+        return channel.json_body["events"]
+
+    def test_walks_the_state_dag(self) -> None:
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=True,
+        )
+
+        returned = [(ev["type"], ev.get("state_key")) for ev in events]
+        self.assertIncludes(
+            set(returned),
+            {
+                ("m.room.create", ""),
+                ("m.room.join_rules", ""),
+                ("m.room.history_visibility", ""),
+                ("m.room.power_levels", ""),
+                ("m.room.topic", ""),
+                ("m.room.member", self.local_user_id),
+                ("m.room.member", f"@remote:{self.OTHER_SERVER_NAME}"),
+            },
+            exact=True,
+        )
+
+        # the seed itself is not returned, so only the first topic is
+        self.assertEqual(len([ev for ev in returned if ev[0] == "m.room.topic"]), 1)
+
+        # the state DAG contains no message events
+        self.assertEqual([ev for ev in returned if ev[0] == "m.room.message"], [])
+
+    def test_stops_at_earliest_events(self) -> None:
+        events = self._get_missing_events(
+            earliest_events=[self.first_topic_id],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=True,
+        )
+        self.assertEqual(events, [])
+
+    def test_honours_limit(self) -> None:
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=2,
+            walk_state_dag=True,
+        )
+        self.assertEqual(len(events), 2)
+
+    def test_is_opt_in(self) -> None:
+        state_dag_events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=True,
+        )
+        timeline_events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.second_topic_id],
+            limit=20,
+            walk_state_dag=False,
+        )
+
+        self.assertEqual(
+            [ev for ev in state_dag_events if ev["type"] == "m.room.message"], []
+        )
+        self.assertNotEqual(
+            [ev for ev in timeline_events if ev["type"] == "m.room.message"], []
+        )
+
+    def test_walks_from_a_non_state_event(self) -> None:
+        store = self.hs.get_datastores().main
+        message = self.get_success(store.get_event(self.message_id))
+        assert supports_msc4242_state_dag(message)
+        state_dag = self.get_success(
+            store.get_state_dag(self.room_id, set(message.prev_state_events))
+        )
+
+        events = self._get_missing_events(
+            earliest_events=[],
+            latest_events=[self.message_id],
+            walk_state_dag=True,
+            limit=20,
+        )
+
+        # We get all the same events
+        self.assertIncludes(
+            {(ev["type"], ev.get("state_key")) for ev in events},
+            {(ev.type, ev.state_key) for ev in state_dag.values()},
+            exact=True,
+        )
+        # and no messages (we aren't walking up prev_events)
+        self.assertEqual([ev for ev in events if ev["type"] == "m.room.message"], [])
+
+    def test_non_state_seed_stops_at_earliest_events(self) -> None:
+        message = self.get_success(
+            self.hs.get_datastores().main.get_event(self.message_id)
+        )
+        assert supports_msc4242_state_dag(message)
+        events = self._get_missing_events(
+            earliest_events=list(message.prev_state_events),
+            latest_events=[self.message_id],
+            walk_state_dag=True,
+            limit=20,
+        )
+        self.assertEqual(events, [])
 
 
 class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
@@ -1002,36 +1178,43 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
-        # we should get complete room state back
-        returned_state = [
-            (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
+        expected_state = [
+            ("m.room.create", ""),
+            ("m.room.power_levels", ""),
+            ("m.room.join_rules", ""),
+            ("m.room.history_visibility", ""),
+            ("m.room.member", f"@kermit_v{room_version}:test"),
+            ("m.room.member", f"@fozzie_v{room_version}:test"),
+            # nb: *not* the joining user
         ]
-        self.assertCountEqual(
-            returned_state,
-            [
-                ("m.room.create", ""),
-                ("m.room.power_levels", ""),
-                ("m.room.join_rules", ""),
-                ("m.room.history_visibility", ""),
-                ("m.room.member", f"@kermit_v{room_version}:test"),
-                ("m.room.member", f"@fozzie_v{room_version}:test"),
-                # nb: *not* the joining user
-            ],
-        )
 
-        # also check the auth chain
-        returned_auth_chain_events = [
-            (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
-        ]
-        self.assertCountEqual(
-            returned_auth_chain_events,
-            [
-                ("m.room.create", ""),
-                ("m.room.member", f"@kermit_v{room_version}:test"),
-                ("m.room.power_levels", ""),
-                ("m.room.join_rules", ""),
-            ],
-        )
+        if KNOWN_ROOM_VERSIONS[room_version].msc4242_state_dags:
+            returned_state_dag = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]
+            ]
+            self.assertCountEqual(returned_state_dag, expected_state)
+            self.assertNotIn("state", channel.json_body)
+            self.assertNotIn("auth_chain", channel.json_body)
+        else:
+            # we should get complete room state back
+            returned_state = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["state"]
+            ]
+            self.assertCountEqual(returned_state, expected_state)
+
+            # also check the auth chain
+            returned_auth_chain_events = [
+                (ev["type"], ev["state_key"]) for ev in channel.json_body["auth_chain"]
+            ]
+            self.assertCountEqual(
+                returned_auth_chain_events,
+                [
+                    ("m.room.create", ""),
+                    ("m.room.member", f"@kermit_v{room_version}:test"),
+                    ("m.room.power_levels", ""),
+                    ("m.room.join_rules", ""),
+                ],
+            )
 
         # the room should show that the new user is a member
         r = self.get_success(self._storage_controllers.state.get_current_state(room_id))
@@ -1041,19 +1224,96 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     @override_config({"use_frozen_dicts": True})
     def test_send_join_with_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=True"""
-        if room_version == RoomVersions.MSC4242v12.identifier:
-            # TODO: This room version doesn't work over federation in this PR.
-            return
         self._test_send_join_common(room_version)
 
     @parameterized.expand([(k,) for k in KNOWN_ROOM_VERSIONS.keys()])
     @override_config({"use_frozen_dicts": False})
     def test_send_join_without_frozen_dicts(self, room_version: str) -> None:
         """Test send_join with USE_FROZEN_DICTS=False"""
-        if room_version == RoomVersions.MSC4242v12.identifier:
-            # TODO: This room version doesn't work over federation in this PR.
-            return
         self._test_send_join_common(room_version)
+
+    @skip_test("requires MSC4242 inbound event auth")
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
+    def test_send_join_state_dag(self) -> None:
+        self._test_send_join_common(RoomVersions.MSC4242v12.identifier)
+
+    @skip_test("requires MSC4242 inbound event auth")
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
+    def test_send_join_state_dag_ignores_partial_state(self) -> None:
+        room_version = RoomVersions.MSC4242v12.identifier
+        creator_user_id = self.register_user("user1_msc4242", "test")
+        tok = self.login("user1_msc4242", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=creator_user_id, tok=tok, room_version=room_version
+        )
+
+        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/make_join/{room_id}/{joining_user}?ver={room_version}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        join_event_dict = channel.json_body["event"]
+        self.add_hashes_and_signatures_from_other_server(
+            join_event_dict,
+            KNOWN_ROOM_VERSIONS[room_version],
+        )
+        # Ask to join as a partial state (omit_members=true) which should be ignored.
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/send_join/{room_id}/x?omit_members=true",
+            content=join_event_dict,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["members_omitted"], False)
+        self.assertNotIn("servers_in_room", channel.json_body)
+        self.assertIn("state_dag", channel.json_body)
+
+        # the full state DAG is returned, including the member events that a
+        # partial state join would have omitted to prove we are in fact ignoring the
+        # partial state flag.
+        self.assertIncludes(
+            {(ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]},
+            {
+                ("m.room.create", ""),
+                ("m.room.power_levels", ""),
+                ("m.room.join_rules", ""),
+                ("m.room.history_visibility", ""),
+                ("m.room.member", creator_user_id),
+            },
+            exact=True,
+        )
+
+    @override_config({"experimental_features": {"msc4242_enabled": True}})
+    def test_make_join_state_dag(self) -> None:
+        room_version = RoomVersions.MSC4242v12.identifier
+        creator_user_id = self.register_user("user1_msc4242", "test")
+        tok = self.login("user1_msc4242", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=creator_user_id, tok=tok, room_version=room_version
+        )
+
+        joining_user = "@misspiggy:" + self.OTHER_SERVER_NAME
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/make_join/{room_id}/{joining_user}?ver={room_version}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        event = channel.json_body["event"]
+        # MSC4242 events don't have an auth_events field.
+        self.assertNotIn("auth_events", event)
+
+        extremities = self.get_success(
+            self.hs.get_datastores().main.get_state_dag_extremities(room_id)
+        )
+        self.assertGreater(len(extremities), 0)
+        self.assertCountEqual(event["prev_state_events"], extremities)
+        # When creating events, prev_state_events should be set to the state DAG fwd extremities
+        self.assertIncludes(
+            set(event["prev_state_events"]), set(extremities), exact=True
+        )
 
     def test_send_join_partial_state(self) -> None:
         """/send_join should return partial state, if requested"""

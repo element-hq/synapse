@@ -40,7 +40,13 @@ from signedjson.sign import verify_signed_json
 from unpaddedbase64 import decode_base64
 
 from synapse import event_auth
-from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
+from synapse.api.constants import (
+    MAX_DEPTH,
+    EventContentFields,
+    EventTypes,
+    Membership,
+    StateDag,
+)
 from synapse.api.errors import (
     AuthError,
     CodeMessageException,
@@ -58,7 +64,8 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase
+from synapse.events import EventBase, event_exists_in_state_dag
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
 from synapse.events.validator import EventValidator
 from synapse.federation.federation_client import InvalidResponseError
@@ -1042,6 +1049,11 @@ class FederationHandler:
         # Note that this requires the /send_join request to come back to the
         # same server.
         prev_event_ids = None
+        prev_state_events = None
+        if room_version.msc4242_state_dags:
+            prev_state_events = list(
+                await self.store.get_state_dag_extremities(room_id)
+            )
         if room_version.restricted_join_rule:
             # Note that the room's state can change out from under us and render our
             # nice join rules-conformant event non-conformant by the time we build the
@@ -1098,6 +1110,7 @@ class FederationHandler:
             ) = await self.event_creation_handler.create_new_client_event(
                 builder=builder,
                 prev_event_ids=prev_event_ids,
+                prev_state_events=prev_state_events,
             )
         except SynapseError as e:
             logger.warning("Failed to create join to %s because %s", room_id, e)
@@ -1515,6 +1528,75 @@ class FederationHandler:
         )
 
         return missing_events
+
+    async def on_get_missing_events_state_dag(
+        self,
+        origin: str,
+        room_id: str,
+        earliest_events: list[str],
+        latest_events: list[str],
+        limit: int,
+    ) -> list[EventBase]:
+        """Processes a /get_missing_events request for the state DAG.
+
+        This is similar to processing the normal DAG with a few notable exceptions:
+          * The max 20 limit does not apply. As the entire state DAG needs to be filled
+            in, we cannot arbitrarily set a low limit. If the state DAG delta is 1000s of
+            events, we rely on the sender to set sensible limits depending on the
+            bandwidth/round trip tradeoff, capped at `StateDag.MAX_MISSING_EVENTS` so a
+            single request cannot ask for an unbounded response.
+          * We do not filter any events in the state DAG. History visibility does not
+            filter out delivery of auth chain events, so neither should this. All of the
+            returned events will be treated as outliers and as such will not be delivered
+            to clients.
+          * `latest_events` may name events which are not themselves in the state DAG,
+            because the caller seeds this request with whatever it received over /send.
+            Only state events have `msc4242_state_dag_edges` rows, so we walk from such an
+            event's `prev_state_events` instead, and return those as the first hop.
+        """
+
+        await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
+        limit = min(limit, StateDag.MAX_MISSING_EVENTS)
+        earliest_event_set = set(earliest_events)
+
+        seed_events = await self.store.get_events(latest_events)
+
+        seed_event_ids: list[str] = []
+        first_hop_event_ids: set[str] = set()
+        for event_id, event in seed_events.items():
+            if event_exists_in_state_dag(event):
+                seed_event_ids.append(event_id)
+                continue
+            # event is a message, so its prev_state_events are the first returned hop
+            assert supports_msc4242_state_dag(
+                event
+            )  # type-assert to access .prev_state_events
+            first_hop_event_ids.update(
+                prev_state_event_id
+                for prev_state_event_id in event.prev_state_events
+                if prev_state_event_id not in earliest_event_set
+            )
+        # `latest_events` can mix state and non-state events. If an event's
+        # prev_state_event is also one of the state-event seeds, it will be walked from
+        # below, so returning it as a first hop as well would just duplicate it.
+        first_hop_event_ids.difference_update(seed_event_ids)
+        first_hop_events: list[EventBase] = []
+        if first_hop_event_ids:
+            first_hop_events = await self.store.get_events_as_list(
+                sorted(first_hop_event_ids)
+            )
+            # the sort exists to make [:limit] truncation deterministic
+            first_hop_events.sort(key=lambda ev: ev.event_id)
+            first_hop_events = first_hop_events[:limit]
+            seed_event_ids.extend(ev.event_id for ev in first_hop_events)
+
+        missing_events = await self.store.get_missing_events_state_dag(
+            room_id=room_id,
+            earliest_event_ids=earliest_events,
+            latest_event_ids=seed_event_ids,
+            limit=limit - len(first_hop_events),
+        )
+        return first_hop_events + missing_events
 
     async def exchange_third_party_invite(
         self, sender_user_id: str, target_user_id: str, room_id: str, signed: JsonDict
