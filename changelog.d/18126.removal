@@ -1,0 +1,1 @@
+Remove deprecated worker generation script which causes app to crash on startup
