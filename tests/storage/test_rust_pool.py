@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 # The reactor the trial runner spins up; real, so threads and callFromThread work.
 from twisted.internet import reactor as _reactor
-from twisted.internet.defer import gatherResults, inlineCallbacks
+from twisted.internet.defer import Deferred, gatherResults, inlineCallbacks
 from twisted.trial import unittest as trial_unittest
 
 from synapse.storage.rust_pool import RustConnectionPool
@@ -119,6 +119,63 @@ class RustConnectionPoolTestCase(trial_unittest.TestCase):
             [self.pool.run_with_connection(txn, n) for n in range(10)]
         )
         self.assertEqual(results, [(n,) for n in range(10)])
+
+    @inlineCallbacks
+    def test_open_transaction_is_committed_on_return(self) -> Any:
+        # adbapi's contract: a function that leaves its transaction open has it
+        # committed for it when it returns, so its writes are visible to the
+        # next caller (who may be on a different connection).
+        yield self._create_scratch_table()
+
+        def insert_without_commit(conn: Any) -> None:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO rust_pool_scratch (v) VALUES ($1)", [1])
+
+        yield self.pool.run_with_connection(insert_without_commit)
+        self.assertEqual((yield self._count_rows()), 1)
+
+    @inlineCallbacks
+    def test_open_transaction_is_rolled_back_on_error(self) -> Any:
+        # ...and a function that raises has its open transaction rolled back, so
+        # nothing it wrote is visible and the connection is clean for reuse.
+        yield self._create_scratch_table()
+
+        class MarkerError(Exception):
+            pass
+
+        def insert_then_fail(conn: Any) -> None:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO rust_pool_scratch (v) VALUES ($1)", [1])
+            raise MarkerError("boom")
+
+        yield self.assertFailure(
+            self.pool.run_with_connection(insert_then_fail), MarkerError
+        )
+        self.assertEqual((yield self._count_rows()), 0)
+
+    def _create_scratch_table(self) -> "Deferred[None]":
+        def create(conn: Any) -> None:
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS rust_pool_scratch")
+            cursor.execute("CREATE TABLE rust_pool_scratch (v INT)")
+
+        def drop() -> "Deferred[None]":
+            def _drop(conn: Any) -> None:
+                conn.cursor().execute("DROP TABLE IF EXISTS rust_pool_scratch")
+
+            return self.pool.run_with_connection(_drop)
+
+        self.addCleanup(drop)
+        return self.pool.run_with_connection(create)
+
+    def _count_rows(self) -> "Deferred[int]":
+        def count(conn: Any) -> int:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM rust_pool_scratch")
+            (n,) = cursor.fetch_one()
+            return n
+
+        return self.pool.run_with_connection(count)
 
     def test_run_when_not_running_raises(self) -> None:
         self.pool.close()

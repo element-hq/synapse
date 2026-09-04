@@ -119,9 +119,10 @@ class RustConnectionPool:
         """Run ``func(conn, *args, **kwargs)`` on a worker thread.
 
         ``conn`` is a connection checked out of the Rust pool for the duration
-        of the call. The function is responsible for committing or rolling back
-        (as Synapse's ``new_transaction`` does); the connection is returned to
-        the pool afterwards regardless.
+        of the call. As with ``adbapi.ConnectionPool.runWithConnection``, any
+        transaction the function leaves open is committed if it returns and
+        rolled back if it raises; the connection is returned to the pool
+        afterwards regardless.
 
         Returns:
             A ``Deferred`` firing with ``func``'s result, following the Synapse
@@ -142,12 +143,34 @@ class RustConnectionPool:
     ) -> R:
         """Worker-thread body: check out a connection, run ``func``, return it.
 
+        Matches adbapi's ``_runWithConnection`` transaction contract: commit on
+        success, roll back on exception. The commit makes callers that rely on
+        the pool's implicit commit (e.g. one-shot runners that execute DDL and
+        return) durable, and is a no-op after functions like
+        ``new_transaction`` that commit themselves. The rollback returns the
+        connection to the pool *clean* so it is reused, rather than being
+        discarded as mid-transaction (tearing down the TCP session) every time
+        a transaction function raises.
+
         A checkout failure surfaces as the raised exception (→ errback) before
         there is any connection to release.
         """
         conn = self._pool.connect()
         try:
-            return func(conn, *args, **kwargs)
+            result = func(conn, *args, **kwargs)
+            conn.commit()
+            return result
+        except BaseException:
+            # BaseException, matching adbapi: even for e.g. SystemExit the
+            # transaction is rolled back so the connection goes back to the
+            # pool clean (reusable) rather than mid-transaction (discarded).
+            try:
+                conn.rollback()
+            except Exception:
+                # Re-raise the original error, not the rollback failure; the
+                # shim has already discarded the connection as unusable.
+                logger.warning("Rollback failed on connection check-in", exc_info=True)
+            raise
         finally:
             # Return the connection to the pool. The Rust shim returns a clean
             # connection for reuse and discards one left mid-transaction or
