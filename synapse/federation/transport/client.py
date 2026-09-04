@@ -776,18 +776,21 @@ class TransportLayerClient:
         limit: int,
         min_depth: int,
         timeout: int,
+        state_dag: bool,
     ) -> JsonDict:
         path = _create_v1_path("/get_missing_events/%s", room_id)
-
+        request_body = {
+            "limit": int(limit),
+            "min_depth": int(min_depth),
+            "earliest_events": earliest_events,
+            "latest_events": latest_events,
+        }
+        if state_dag:
+            request_body["org.matrix.msc4242.state_dag"] = True
         return await self.client.post_json(
             destination=destination,
             path=path,
-            data={
-                "limit": int(limit),
-                "min_depth": int(min_depth),
-                "earliest_events": earliest_events,
-                "latest_events": latest_events,
-            },
+            data=request_body,
             timeout=timeout,
         )
 
@@ -986,6 +989,10 @@ class SendJoinResponse:
     # "event" is not included in the response.
     event: EventBase | None = None
 
+    # MSC4242: State DAGs. Always included for state dag rooms, else None.
+    # Replaces auth_events.
+    state_dag: list[EventBase] | None = None
+
     # The room state is incomplete
     members_omitted: bool = False
 
@@ -1068,7 +1075,7 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
     MAX_RESPONSE_SIZE = 500 * 1024 * 1024
 
     def __init__(self, room_version: RoomVersion, v1_api: bool):
-        self._response = SendJoinResponse([], [], event_dict={})
+        self._response = SendJoinResponse([], [], event_dict={}, state_dag=[])
         self._room_version = room_version
         self._coros: list[Generator[None, bytes, None]] = []
 
@@ -1111,6 +1118,15 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
                     use_float="True",
                 )
             )
+
+            if room_version.msc4242_state_dags:
+                self._coros.append(
+                    ijson.items_coro(
+                        _event_list_parser(room_version, self._response.state_dag),
+                        prefix + "state_dag.item",
+                        use_float=True,
+                    )
+                )
 
     def write(self, data: bytes) -> int:
         for c in self._coros:
