@@ -237,19 +237,27 @@ class RelationsWorkerStore(SQLBaseStore):
         # If no recursion is needed then the event_relations table is queried
         # for direct children of the requested event.
         if recurse:
+            # The events table is joined inside the recursion rather than
+            # after it: Postgres cannot estimate the size of a recursive CTE,
+            # and when the guess is large it joins the CTE against a scan of
+            # *every* event in the room, which takes seconds in busy rooms.
+            # Joining per step keeps every events lookup an index probe.
             sql = """
                 WITH RECURSIVE related_events AS (
-                    SELECT event_id, relation_type, relates_to_id, 0 AS depth
-                    FROM event_relations
-                    WHERE relates_to_id = ?
-                    UNION SELECT e.event_id, e.relation_type, e.relates_to_id, depth + 1
+                    SELECT e.event_id, e.relation_type, ev.room_id, ev.sender,
+                        ev.topological_ordering, ev.stream_ordering, ev.type, 0 AS depth
                     FROM event_relations e
-                    INNER JOIN related_events r ON r.event_id = e.relates_to_id
-                    WHERE depth <= 3
+                    INNER JOIN events ev ON ev.event_id = e.event_id
+                    WHERE e.relates_to_id = ?
+                    UNION ALL SELECT e.event_id, e.relation_type, ev.room_id, ev.sender,
+                        ev.topological_ordering, ev.stream_ordering, ev.type, r.depth + 1
+                    FROM related_events r
+                    INNER JOIN event_relations e ON e.relates_to_id = r.event_id
+                    INNER JOIN events ev ON ev.event_id = e.event_id
+                    WHERE r.depth <= 3
                 )
                 SELECT event_id, relation_type, sender, topological_ordering, stream_ordering
                 FROM related_events
-                INNER JOIN events USING (event_id)
                 WHERE %s
                 ORDER BY topological_ordering %s, stream_ordering %s
                 LIMIT ?;
