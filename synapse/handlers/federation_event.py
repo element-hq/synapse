@@ -61,7 +61,7 @@ from synapse.event_auth import (
     validate_event_for_room_version,
 )
 from synapse.events import EventBase
-from synapse.events.py_protocol import MSC4242Event
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -1834,6 +1834,11 @@ class FederationEventHandler:
         """
         Checks whether an event should be rejected (for failing auth checks).
 
+        For MSC4242 State DAG rooms the auth events are calculated from the state before
+        the event rather than taken from the event, so checking the event against its auth
+        events (step 4) is the same as checking it against the state before it (step 5),
+        and only step 4 is performed.
+
         Args:
             origin: The host the event originates from. This is used to fetch
                any missing auth events. It can be set to None, but only if we are
@@ -1874,7 +1879,7 @@ class FederationEventHandler:
         # caller rather than swallow with `context.rejected` (since we cannot be
         # certain that there is a permanent problem with the event).
         claimed_auth_events = await self._load_or_fetch_auth_events_for_event(
-            origin, event
+            origin, event, context
         )
         set_tag(
             SynapseTags.RESULT_PREFIX + "claimed_auth_events",
@@ -1897,6 +1902,9 @@ class FederationEventHandler:
                 "While checking auth of %r against auth_events: %s", event, e
             )
             context.rejected = RejectedReason.AUTH_ERROR
+            return
+
+        if supports_msc4242_state_dag(event):
             return
 
         # now check the auth rules pass against the room state before the event
@@ -2112,7 +2120,7 @@ class FederationEventHandler:
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
-        self, destination: str | None, event: EventBase
+        self, destination: str | None, event: EventBase, context: EventContext
     ) -> Collection[EventBase]:
         """Fetch this event's auth_events, from database or remote
 
@@ -2125,6 +2133,10 @@ class FederationEventHandler:
         to `destination`, or we couldn't validate the signature on the event (which
         in turn has multiple potential causes).
 
+        MSC4242 State DAG events do not list their auth events, so instead we make sure we
+        have all of the event's `prev_state_events` and then calculate the auth events from
+        the state before the event.
+
         Args:
             destination: where to send the /event_auth request. Typically the server
                that sent us `event` in the first place.
@@ -2134,8 +2146,11 @@ class FederationEventHandler:
 
             event: the event whose auth_events we want
 
+            context: the state before the event.
+
         Returns:
-            all of the events listed in `event.auth_events_ids`, after deduplication
+            all of the events listed in `event.auth_events_ids`, after deduplication. For
+            MSC4242 State DAG events, the calculated auth events.
 
         Raises:
             AssertionError if some auth events were missing and no `destination` was
@@ -2143,7 +2158,11 @@ class FederationEventHandler:
 
             AuthError if we were unable to fetch the auth_events for any reason.
         """
-        event_auth_event_ids = set(event.auth_event_ids())
+        event_auth_event_ids = set(
+            event.prev_state_events
+            if supports_msc4242_state_dag(event)
+            else event.auth_event_ids()
+        )
         event_auth_events = await self._store.get_events(
             event_auth_event_ids, allow_rejected=True
         )
@@ -2151,6 +2170,8 @@ class FederationEventHandler:
             event_auth_events.keys()
         )
         if not missing_auth_event_ids:
+            if supports_msc4242_state_dag(event):
+                return await self._load_calculated_auth_events(event, context)
             return event_auth_events.values()
         if destination is None:
             # this shouldn't happen: destination must be set unless we know we have already
@@ -2181,6 +2202,8 @@ class FederationEventHandler:
         missing_auth_event_ids.difference_update(extra_auth_events.keys())
         event_auth_events.update(extra_auth_events)
         if not missing_auth_event_ids:
+            if supports_msc4242_state_dag(event):
+                return await self._load_calculated_auth_events(event, context)
             return event_auth_events.values()
 
         # we still don't have all the auth events.
@@ -2193,6 +2216,34 @@ class FederationEventHandler:
         # exist, which means it is premature to store `event` as rejected.
         # instead we raise an AuthError, which will make the caller ignore it.
         raise AuthError(code=HTTPStatus.FORBIDDEN, msg="Auth events could not be found")
+
+    async def _load_calculated_auth_events(
+        self, event: MSC4242Event, context: EventContext
+    ) -> Collection[EventBase]:
+        """Calculate the auth events for an MSC4242 State DAG event and load them.
+
+        MSC4242 events do not list their auth events, so they are calculated from the
+        state before the event, in the same way `EventBuilder.build` does when creating
+        events locally. The calculated auth event IDs are remembered on the event so we
+        don't need to calculate them again when the event is persisted.
+
+        Rejected events never form part of the room state, so the calculated auth events
+        cannot be rejected and are loaded without allowing rejected events.
+
+        Args:
+            event: the event whose auth events we want.
+            context: the state before the event.
+
+        Returns:
+            The calculated auth events.
+        """
+        state_ids = await context.get_prev_state_ids()
+        calculated_auth_event_ids = self._event_auth_handler.compute_auth_events(
+            event, state_ids
+        )
+        event.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
+        calculated_auth_events = await self._store.get_events(calculated_auth_event_ids)
+        return calculated_auth_events.values()
 
     @trace
     @tag_args
