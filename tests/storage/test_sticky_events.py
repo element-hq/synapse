@@ -12,6 +12,8 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import sqlite3
 
+from immutabledict import immutabledict
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
@@ -25,7 +27,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, create_requester
+from synapse.types import JsonDict, MultiWriterStreamToken, create_requester
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -176,6 +178,67 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, event_id_1)
+
+    def test_get_sticky_events_in_rooms_token_does_not_go_backwards(self) -> None:
+        """
+        Tests that the token does not get rewound, for instance if a
+        different, lagging, sync worker handles a request.
+        """
+        instance_name = self.hs.get_instance_name()
+
+        self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "message 1", "msgtype": "m.text"},
+            tok=self.token,
+        )
+        first_id = self.store.get_sticky_events_stream_token().stream
+
+        event_id_2 = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "message 2", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+        second_id = self.store.get_sticky_events_stream_token().stream
+
+        from_token = MultiWriterStreamToken(
+            stream=first_id, instance_map=immutabledict({"someworker": 42})
+        )
+        # `to_token` has 2 components that are behind compared to `from_token`:
+        # the baseline position and the position of the advanced worker 'someworker'
+        to_token = MultiWriterStreamToken(
+            stream=first_id - 1,
+            instance_map=immutabledict({instance_name: second_id, "someworker": 36}),
+        )
+
+        new_token, sticky_by_room = self.get_success(
+            self.store.get_sticky_events_in_rooms(
+                [self.room_id],
+                from_token=from_token,
+                to_token=to_token,
+                now=self.clock.time_msec(),
+                limit=None,
+            )
+        )
+
+        self.assertEqual(sticky_by_room, {self.room_id: [event_id_2]})
+        self.assertEqual(
+            new_token,
+            MultiWriterStreamToken(
+                # The baseline position is not wound back
+                stream=first_id,
+                instance_map=immutabledict(
+                    {
+                        instance_name: second_id,
+                        # The position of this advanced worker is not wound back either
+                        "someworker": 42,
+                    }
+                ),
+            ),
+        )
 
     def test_outlier_events_not_in_table(self) -> None:
         """
