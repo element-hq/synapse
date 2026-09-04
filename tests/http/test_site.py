@@ -19,17 +19,22 @@
 #
 #
 
+from unittest.mock import Mock
+
+from netaddr import IPNetwork
 from parameterized import parameterized
 
-from twisted.internet.address import IPv6Address
+from twisted.internet.address import IPv4Address, IPv6Address, UNIXAddress
 from twisted.internet.testing import MemoryReactor, StringTransport
+from twisted.web.http_headers import Headers
 
 from synapse.app._base import max_request_body_size
 from synapse.app.homeserver import SynapseHomeServer
+from synapse.http.site import XForwardedForRequest
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, TestCase
 
 
 class SynapseRequestTestCase(HomeserverTestCase):
@@ -256,3 +261,113 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # We should get a 400
         response = transport.value().decode()
         self.assertRegex(response, r"^HTTP/1\.1 400 ")
+
+
+class XForwardedForRequestTestCase(TestCase):
+    """Tests for resolving the client IP from the X-Forwarded-For header."""
+
+    def _make_request(
+        self,
+        peer: object,
+        forwarded_for: list[bytes],
+        trusted_proxies: tuple[IPNetwork, ...] = (),
+    ) -> XForwardedForRequest:
+        site = Mock()
+        site.reactor = Mock()
+        site.trusted_proxies = trusted_proxies
+
+        channel = Mock()
+        channel.getPeer.return_value = peer
+
+        request = XForwardedForRequest(channel, site, our_server_name="test.server")
+        request.requestHeaders = Headers({b"X-Forwarded-For": forwarded_for})
+        request._process_forwarded_headers()
+        return request
+
+    def test_no_trusted_proxies_keeps_first_entry(self) -> None:
+        """Without trusted_proxies, the first entry is used as before."""
+        request = self._make_request(
+            peer=IPv4Address("TCP", "192.168.0.1", 45000),
+            forwarded_for=[b"9.9.9.9, 1.2.3.4"],
+        )
+        self.assertEqual(request.getClientIP(), "9.9.9.9")
+
+    def test_trusted_proxy_single_hop(self) -> None:
+        """The address reported by a trusted proxy is used."""
+        request = self._make_request(
+            peer=IPv4Address("TCP", "10.0.0.9", 45000),
+            forwarded_for=[b"1.2.3.4"],
+            trusted_proxies=(IPNetwork("10.0.0.0/8"),),
+        )
+        self.assertEqual(request.getClientIP(), "1.2.3.4")
+
+    def test_spoofed_entries_are_ignored(self) -> None:
+        """Entries injected by the client cannot override the proxy's report.
+
+        The reverse proxy appends the real client IP to the (spoofed) chain it
+        received, giving `9.9.9.9, 1.2.3.4`. Only `1.2.3.4` is one hop away
+        from the trusted proxy, so `9.9.9.9` must be ignored.
+        """
+        request = self._make_request(
+            peer=IPv4Address("TCP", "10.0.0.9", 45000),
+            forwarded_for=[b"9.9.9.9, 1.2.3.4"],
+            trusted_proxies=(IPNetwork("10.0.0.0/8"),),
+        )
+        self.assertEqual(request.getClientIP(), "1.2.3.4")
+
+    def test_untrusted_peer_is_not_spoofable(self) -> None:
+        """The header is ignored entirely if the peer is not a trusted proxy."""
+        request = self._make_request(
+            peer=IPv4Address("TCP", "192.168.0.1", 45000),
+            forwarded_for=[b"1.2.3.4"],
+            trusted_proxies=(IPNetwork("10.0.0.0/8"),),
+        )
+        self.assertEqual(request.getClientIP(), "192.168.0.1")
+
+    def test_multiple_trusted_proxies(self) -> None:
+        """The chain is followed through multiple trusted proxies."""
+        request = self._make_request(
+            peer=IPv4Address("TCP", "10.0.0.9", 45000),
+            forwarded_for=[b"10.1.0.9, 10.0.0.5, 1.2.3.4"],
+            trusted_proxies=(
+                IPNetwork("10.0.0.0/8"),
+                IPNetwork("10.1.0.0/16"),
+            ),
+        )
+        self.assertEqual(request.getClientIP(), "1.2.3.4")
+
+    def test_all_trusted_chain_uses_leftmost_entry(self) -> None:
+        """If the whole chain is trusted, the leftmost entry is the client."""
+        request = self._make_request(
+            peer=IPv4Address("TCP", "10.0.0.9", 45000),
+            forwarded_for=[b"10.1.0.9, 10.0.0.5"],
+            trusted_proxies=(IPNetwork("10.0.0.0/8"),),
+        )
+        self.assertEqual(request.getClientIP(), "10.1.0.9")
+
+    def test_unix_socket_peer_is_trusted(self) -> None:
+        """A unix socket peer is local, so the chain is honoured."""
+        request = self._make_request(
+            peer=UNIXAddress(b"/run/synapse.sock"),
+            forwarded_for=[b"10.0.0.5, 1.2.3.4"],
+            trusted_proxies=(IPNetwork("10.0.0.0/8"),),
+        )
+        self.assertEqual(request.getClientIP(), "1.2.3.4")
+
+    def test_invalid_entry_stops_the_chain(self) -> None:
+        """The chain is not followed past an entry which is not an IP address."""
+        request = self._make_request(
+            peer=IPv4Address("TCP", "10.0.0.9", 45000),
+            forwarded_for=[b"1.2.3.4, not-an-ip, 10.0.0.5"],
+            trusted_proxies=(IPNetwork("10.0.0.0/8"),),
+        )
+        self.assertEqual(request.getClientIP(), "10.0.0.5")
+
+    def test_multiple_headers_are_concatenated(self) -> None:
+        """Multiple X-Forwarded-For headers behave as one comma-separated list."""
+        request = self._make_request(
+            peer=IPv4Address("TCP", "10.0.0.9", 45000),
+            forwarded_for=[b"9.9.9.9", b"1.2.3.4"],
+            trusted_proxies=(IPNetwork("10.0.0.0/8"),),
+        )
+        self.assertEqual(request.getClientIP(), "1.2.3.4")
