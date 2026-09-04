@@ -1,0 +1,1 @@
+Return the stable `M_UNKNOWN_DEVICE` error code, added in Matrix 1.17, instead of its unstable MSC4326-prefixed identifier.
