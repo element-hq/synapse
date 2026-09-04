@@ -36,6 +36,7 @@ from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
+from tests.storage.databases.main.test_events_worker import LoggingContext
 from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
@@ -643,6 +644,113 @@ class StateStoreTestCase(HomeserverTestCase):
                     ),
                 )
                 self.assertEqual(context.state_group_before_event, groups[0][0])
+
+    def test_get_partial_filtered_current_state_ids_concrete(self) -> None:
+        """A filter with no wildcards is served from the per-key cache, and the
+        absence of a key is cached too."""
+        room_id = self.room.to_string()
+
+        create = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Create, "", {}
+        )
+        name = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Name, "", {"name": "test room"}
+        )
+
+        state_filter = StateFilter.from_types(
+            [(EventTypes.Create, ""), (EventTypes.Name, ""), (EventTypes.Topic, "")]
+        )
+
+        state = self.get_success(
+            self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+        )
+
+        self.assertEqual(
+            dict(state),
+            {
+                (EventTypes.Create, ""): create.event_id,
+                (EventTypes.Name, ""): name.event_id,
+            },
+        )
+
+        # The room has no topic, and that fact is cached, so asking again does
+        # not go back to the database.
+        sentinel = object()
+        cache = self.store._get_current_state_event_id.cache
+        self.assertIsNone(
+            cache.get_immediate((room_id, (EventTypes.Topic, "")), sentinel)
+        )
+        self.assertEqual(
+            cache.get_immediate((room_id, (EventTypes.Name, "")), sentinel),
+            name.event_id,
+        )
+
+    def test_get_partial_filtered_current_state_ids_invalidation(self) -> None:
+        """Persisting a new state event invalidates the cached entries for the
+        room."""
+        room_id = self.room.to_string()
+
+        self.inject_state_event(self.room, self.u_alice, EventTypes.Create, "", {})
+
+        state_filter = StateFilter.from_types([(EventTypes.Name, "")])
+
+        state = self.get_success(
+            self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+        )
+        self.assertEqual(dict(state), {})
+
+        name = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Name, "", {"name": "test room"}
+        )
+
+        state = self.get_success(
+            self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+        )
+        self.assertEqual(dict(state), {(EventTypes.Name, ""): name.event_id})
+
+        name2 = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Name, "", {"name": "renamed"}
+        )
+
+        state = self.get_success(
+            self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+        )
+        self.assertEqual(dict(state), {(EventTypes.Name, ""): name2.event_id})
+
+    def test_get_partial_filtered_current_state_ids_uses_full_cache(self) -> None:
+        """Test that fetching a single state key from a room with a full cache
+        hits the full cache and does not go to the database."""
+
+        room_id = self.room.to_string()
+
+        create = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Create, "", {}
+        )
+        name = self.inject_state_event(
+            self.room, self.u_alice, EventTypes.Name, "", {"name": "test room"}
+        )
+
+        # prime the full cache
+        state_filter = StateFilter.all()
+        state = self.get_success(
+            self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+        )
+        self.assertEqual(
+            dict(state),
+            {
+                (EventTypes.Create, ""): create.event_id,
+                (EventTypes.Name, ""): name.event_id,
+            },
+        )
+
+        # now fetch a single key and check that it hits the full cache
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
+            state_filter = StateFilter.from_types([(EventTypes.Name, "")])
+            state = self.get_success(
+                self.store.get_partial_filtered_current_state_ids(room_id, state_filter)
+            )
+            self.assertEqual(dict(state), {(EventTypes.Name, ""): name.event_id})
+            self.assertEqual(ctx.get_resource_usage().db_txn_count, 0)
 
 
 class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
