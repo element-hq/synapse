@@ -184,13 +184,10 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
                 expected_room_state[event_type]["content"], event["content"]
             )
 
-            # Check the state key is correct
+            # Check the state_key is correct
             self.assertEqual(
                 expected_room_state[event_type]["state_key"], event["state_key"]
             )
-
-            # Ensure the event has been stripped
-            self.assertNotIn("signatures", event)
 
             # Pop once we've found and processed a state event
             expected_room_state.pop(event_type)

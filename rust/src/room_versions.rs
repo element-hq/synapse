@@ -161,6 +161,23 @@ pub struct RoomVersion {
     /// This is similar to how doubly-linked lists can potentially not refer to previous items correctly
     /// without verifying the list's integrity, but doing it on every insert is too expensive.
     pub msc4242_state_dags: bool,
+    /// Determines whether a room version *SHOULD* rather than *MAY* reject invites/knocks
+    /// with invalid stripped state events.
+    ///
+    /// According to MSC4311:
+    /// > If any of the [stripped state] events are not a PDU, not for the room ID specified, or fail
+    /// > signature checks, or the `m.room.create` event is missing, the receiving
+    /// > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
+    /// > error (new to the endpoint). For invites to room version 12+ rooms, servers
+    /// > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+    ///
+    /// Regardless of room version (we should always do these things):
+    /// 1. The `m.room.create` event *MUST* be included in
+    ///    `invite_room_state`/`knock_room_state` when sending invites/knocks over the
+    ///    federation API's.
+    /// 2. Use full PDU's in the `invite_room_state`/`knock_room_state` in the federation
+    ///    API. The client API still uses stripped state.
+    msc4311_stripped_state: bool,
 }
 
 impl RoomVersion {
@@ -187,6 +204,7 @@ impl RoomVersion {
         msc4291_room_ids_as_hashes: false,
         strict_event_byte_limits_room_versions: false,
         msc4242_state_dags: false,
+        msc4311_stripped_state: false,
     };
 
     pub const V2: RoomVersion = RoomVersion {
@@ -304,6 +322,7 @@ impl RoomVersion {
         state_res: StateResolutionVersions::V2_1,
         msc4289_creator_power_enabled: true,
         msc4291_room_ids_as_hashes: true,
+        msc4311_stripped_state: true,
         ..Self::V11
     };
 
