@@ -509,7 +509,7 @@ class StateTestCase(unittest.TestCase):
 
         self.do_check(events, edges, expected_state_ids)
 
-    # The conflict cache tests below resolve `CACHE_EVENTS` with a plain dict
+    # The conflict cache tests below resolve `CACHE_TEST_CASE_EVENTS` with a plain dict
     # as the cache. A miss adds an entry to it and a hit does not, so its size
     # afterwards is the number of times the conflicted set was resolved.
 
