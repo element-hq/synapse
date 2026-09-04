@@ -143,6 +143,9 @@ class SyncConfig:
     # `org.matrix.msc4222.use_state_after` query parameter rather than the
     # stable one, in which case the unstable response field name is used too.
     # Only relevant when `use_state_after` is True.
+    #
+    # FIXME(unstable_state_after): Remove support for the unstable identifiers after 2027-09-01
+    # (to allow some time for the ecosystem to adapt to the stable identifiers)
     use_unstable_state_after_name: bool = False
 
 

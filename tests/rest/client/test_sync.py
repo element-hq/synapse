@@ -766,11 +766,13 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
+# FIXME(unstable_state_after): Remove this whole test case after 2027-09-01
+# and we drop support for the unstable variant of `state_after`
 class SyncStateAfterTestCase(unittest.HomeserverTestCase):
     """
     Tests for the `use_state_after` opt-in on `/sync` (MSC4222, stable as of
-    Matrix v1.16): the name of the room state field in the response should
-    match the query parameter the client opted in with.
+    Matrix v1.16): the variant of the `state_after` field in the response should
+    match the stable/unstable query parameter the client opted in with.
     """
 
     servlets = [
