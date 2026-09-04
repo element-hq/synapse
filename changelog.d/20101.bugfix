@@ -1,0 +1,1 @@
+Return the `M_INVALID_PARAM` error code specified by Matrix v1.13 ([MSC4178](https://github.com/matrix-org/matrix-spec-proposals/pull/4178)) when a malformed email address or country code is submitted to `/account/3pid/{email,msisdn}/requestToken`, and report an unsupported medium ahead of the denied/in-use checks on the msisdn variant.

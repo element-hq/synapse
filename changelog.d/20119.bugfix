@@ -1,0 +1,1 @@
+Fix a bug where the `event_search` background reindex skipped all `m.room.topic` events, making room topics unsearchable after a search index rebuild.
