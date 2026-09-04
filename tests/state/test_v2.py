@@ -453,21 +453,20 @@ class StateTestCase(unittest.TestCase):
 
         self.do_check(events, edges, expected_state_ids)
 
-    def do_check(
+    def build_event_graph(
         self,
         events: list[FakeEvent],
         edges: list[list[str]],
-        expected_state_ids: list[str],
-    ) -> None:
-        """Take a list of events and edges and calculate the state of the
-        graph at END, and asserts it matches `expected_state_ids`
+    ) -> tuple[dict[str, EventBase], dict[str, StateMap[str]]]:
+        """Build the graph of `INITIAL_EVENTS` plus `events`.
 
         Args:
             events
             edges: A list of chains of event edges, e.g.
                 `[[A, B, C]]` are edges A->B and B->C.
-            expected_state_ids: The expected state at END, (excluding
-                the keys that haven't changed since START).
+
+        Returns:
+            The events by event ID, and the state after each node ID.
         """
         # We want to sort the events into topological order for processing.
         graph: dict[str, set[str]] = {}
@@ -538,6 +537,26 @@ class StateTestCase(unittest.TestCase):
 
             state_at_event[node_id] = state_after
             event_map[event_id] = event
+
+        return event_map, state_at_event
+
+    def do_check(
+        self,
+        events: list[FakeEvent],
+        edges: list[list[str]],
+        expected_state_ids: list[str],
+    ) -> None:
+        """Take a list of events and edges and calculate the state of the
+        graph at END, and asserts it matches `expected_state_ids`
+
+        Args:
+            events
+            edges: A list of chains of event edges, e.g.
+                `[[A, B, C]]` are edges A->B and B->C.
+            expected_state_ids: The expected state at END, (excluding
+                the keys that haven't changed since START).
+        """
+        event_map, state_at_event = self.build_event_graph(events, edges)
 
         expected_state = {}
         for node_id in expected_state_ids:
