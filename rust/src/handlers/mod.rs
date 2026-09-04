@@ -21,7 +21,7 @@ use pyo3::{
     Bound, PyResult, Python,
 };
 
-use crate::config::SynapseHomeServerConfig;
+use crate::homeserver::HomeServer;
 use crate::storage::db::python_db_pool::PythonDatabasePoolWrapper;
 use crate::storage::store::Store;
 
@@ -36,19 +36,17 @@ struct RustHandlers {
 impl RustHandlers {
     #[new]
     #[pyo3(signature = (homeserver))]
-    pub fn py_new(py: Python<'_>, homeserver: &Bound<'_, PyAny>) -> PyResult<RustHandlers> {
-        let config: SynapseHomeServerConfig = homeserver.getattr("config")?.extract()?;
+    pub fn py_new(py: Python<'_>, homeserver: HomeServer) -> PyResult<RustHandlers> {
+        let config = homeserver.config(py)?;
 
-        // The Twisted reactor, used both to drive our Tokio runtime and to
-        // marshal database work back onto the reactor thread.
-        let reactor = homeserver.call_method0("get_reactor")?.unbind();
+        // The per-homeserver Rust state, which gives us the tokio runtime
+        // and the Twisted reactor.
+        let runtime = homeserver.get_rust_runtime(py)?;
 
-        // hs.get_datastores().main.db_pool
-        let db_pool_py = homeserver
-            .call_method0("get_datastores")?
-            .getattr("main")?
-            .getattr("db_pool")?;
-        let db_pool = PythonDatabasePoolWrapper::new(&db_pool_py, reactor.clone_ref(py))?;
+        let db_pool = PythonDatabasePoolWrapper::new(
+            &homeserver.main_database_pool(py)?,
+            runtime.reactor().clone_ref(py),
+        )?;
 
         // Store is shared across all of the handlers so let's use an `Arc`
         let store = Arc::new(Store {
@@ -64,7 +62,7 @@ impl RustHandlers {
             versions::VersionsHandler {
                 global_unstable_feature_map: Arc::clone(&global_unstable_feature_map),
                 store: Arc::clone(&store),
-                reactor: reactor.clone_ref(py),
+                runtime: runtime.clone(),
             },
         )?;
 

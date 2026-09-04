@@ -21,7 +21,7 @@ use reqwest::RequestBuilder;
 
 use crate::deferred::create_deferred;
 use crate::errors::HttpResponseException;
-use crate::tokio_runtime::runtime;
+use crate::runtime::RustRuntime;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -42,21 +42,18 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 #[pyclass]
 struct HttpClient {
     client: reqwest::Client,
-    reactor: Py<PyAny>,
+    runtime: RustRuntime,
 }
 
 #[pymethods]
 impl HttpClient {
     #[new]
-    #[pyo3(signature = (reactor, user_agent, http2_only = false))]
+    #[pyo3(signature = (runtime, user_agent, http2_only = false))]
     pub fn py_new(
-        reactor: Bound<PyAny>,
+        runtime: &RustRuntime,
         user_agent: &str,
         http2_only: bool,
     ) -> PyResult<HttpClient> {
-        // Make sure the runtime gets installed
-        let _ = runtime(&reactor)?;
-
         let mut builder = reqwest::Client::builder().user_agent(user_agent);
 
         if http2_only {
@@ -69,7 +66,7 @@ impl HttpClient {
 
         Ok(HttpClient {
             client,
-            reactor: reactor.unbind(),
+            runtime: runtime.clone(),
         })
     }
 
@@ -107,7 +104,7 @@ impl HttpClient {
         builder: RequestBuilder,
         response_limit: usize,
     ) -> PyResult<Bound<'a, PyAny>> {
-        create_deferred(py, self.reactor.bind(py), async move {
+        create_deferred(py, &self.runtime, async move {
             let response = builder.send().await.context("sending request")?;
 
             let status = response.status();
