@@ -476,6 +476,9 @@ class GetMissingEventsStateDagTests(unittest.FederatingHomeserverTestCase):
             set(returned),
             {
                 ("m.room.create", ""),
+                ("m.room.join_rules", ""),
+                ("m.room.history_visibility", ""),
+                ("m.room.power_levels", ""),
                 ("m.room.topic", ""),
                 ("m.room.member", self.local_user_id),
                 ("m.room.member", f"@remote:{self.OTHER_SERVER_NAME}"),
