@@ -65,6 +65,7 @@ pub struct ExperimentalConfig {
     pub msc4108_enabled: bool,
     pub msc4108_delegation_endpoint: Option<String>,
     pub msc3575_enabled: bool,
+    pub msc4525_enabled: bool,
     pub msc4133_enabled: bool,
     pub msc4155_enabled: bool,
     pub msc4306_enabled: bool,

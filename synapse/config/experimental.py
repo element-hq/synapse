@@ -119,6 +119,13 @@ class ExperimentalConfig(Config):
         # This is enabled by default as a replacement for the sliding sync proxy.
         self.msc3575_enabled: bool = experimental.get("msc3575_enabled", True)
 
+        # MSC4525: Paginated Sync, a simplified dialect of Simplified Sliding
+        # Sync (MSC4186) without lists/ranges/subscriptions, where the server
+        # pages the client through changed rooms (most recently active first)
+        # with bounded response sizes. Disabled by default; can also be enabled
+        # for individual users via the admin experimental-features API.
+        self.msc4525_enabled: bool = experimental.get("msc4525_enabled", False)
+
         # MSC3773: Thread notifications
         self.msc3773_enabled: bool = experimental.get("msc3773_enabled", False)
 

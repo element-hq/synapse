@@ -120,9 +120,27 @@ async fn build_versions_response(
         None => global_unstable_feature_map.msc3575,
     };
 
+    let msc4525_enabled = match user_id {
+        Some(user_id) => {
+            // Don't both looking anything up if it's enabled for everyone
+            if global_unstable_feature_map.msc4525 {
+                true
+            } else {
+                // Look up whether it's explicitly enabled/disabled for this user
+                store
+                    .is_feature_enabled_for_user(user_id, PerUserExperimentalFeature::MSC4525)
+                    .await?
+                    // Default to false if there is no entry for this user
+                    .unwrap_or(false)
+            }
+        }
+        None => global_unstable_feature_map.msc4525,
+    };
+
     let unstable_feature_map = UnstableFeatureMap {
         msc3575: msc3575_enabled,
         msc3881: msc3881_enabled,
+        msc4525: msc4525_enabled,
         ..*global_unstable_feature_map
     };
 
@@ -236,6 +254,9 @@ pub struct UnstableFeatureMap {
     /// Simplified sliding sync
     #[serde(rename = "org.matrix.simplified_msc3575")]
     msc3575: bool,
+    /// MSC4525: Paginated sync
+    #[serde(rename = "org.matrix.msc4525")]
+    msc4525: bool,
     /// Arbitrary key-value profile fields.
     #[serde(rename = "uk.tcpip.msc4133")]
     msc4133: bool,
@@ -318,6 +339,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
             || (config.experimental.msc4108_delegation_endpoint.is_some()),
         msc4140: config.server.msc4140_enabled,
         msc3575: config.experimental.msc3575_enabled,
+        msc4525: config.experimental.msc4525_enabled,
         msc4133: config.experimental.msc4133_enabled,
         msc4133_stable: true,
         msc4155: config.experimental.msc4155_enabled,
