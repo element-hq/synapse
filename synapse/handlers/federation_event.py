@@ -61,6 +61,7 @@ from synapse.event_auth import (
     validate_event_for_room_version,
 )
 from synapse.events import EventBase
+from synapse.events.py_protocol import MSC4242Event
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -2428,3 +2429,18 @@ class FederationEventHandler:
                 len(ev.auth_event_ids()),
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many auth_events")
+
+
+def is_state_dag_connected(state_dag: Collection[MSC4242Event]) -> bool:
+    """Returns True if the given events form a connected state DAG (MSC4242).
+
+    The DAG is connected if every event referenced in a `prev_state_events` field is
+    itself present in `state_dag`, i.e. there are no gaps in the DAG.
+    """
+    have_event_ids = {ev.event_id for ev in state_dag}
+    all_prev_state_events = {
+        prev_state_event_id
+        for ev in state_dag
+        for prev_state_event_id in ev.prev_state_events
+    }
+    return all_prev_state_events.issubset(have_event_ids)
