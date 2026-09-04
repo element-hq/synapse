@@ -1102,7 +1102,10 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
         instance_name: str | None,
         pos: int,
     ) -> bool:
-        """Checks if a given persisted position is between the two given tokens.
+        """
+        Checks if a given persisted position is between the two given tokens.
+
+        Bounds: low < (instance_name, pos) <= high
 
         If `instance_name` is None then the row was persisted before multi
         writer support.
