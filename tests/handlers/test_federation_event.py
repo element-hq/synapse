@@ -23,13 +23,15 @@ from unittest import mock
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import AuthError, StoreError
-from synapse.api.room_versions import RoomVersion
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.event_auth import (
     check_state_dependent_auth_rules,
     check_state_independent_auth_rules,
 )
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventContext
 from synapse.federation.transport.client import StateRequestResponse
+from synapse.handlers.federation_event import is_state_dag_connected
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -1184,3 +1186,59 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                 bert_member_event.event_id,
                 "Rejected kick event unexpectedly became part of room state.",
             )
+
+
+class IsStateDagConnectedTests(unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.origin_server_ts = 0
+
+    def _make_event(self, prev_state_events: list[str]) -> MSC4242Event:
+        """Build an MSC4242 event with the given `prev_state_events`."""
+        # Event IDs are hashes of the event, so vary a field to keep them distinct.
+        self.origin_server_ts += 1
+        event = make_test_event(
+            {
+                "type": "m.room.topic",
+                "state_key": "",
+                "content": {},
+                "sender": "@alice:test",
+                "origin_server_ts": self.origin_server_ts,
+                "prev_state_events": prev_state_events,
+            },
+            room_version=RoomVersions.MSC4242v12,
+        )
+        assert supports_msc4242_state_dag(event)
+        return event
+
+    def test_linear(self) -> None:
+        create = self._make_event([])
+        second = self._make_event([create.event_id])
+        third = self._make_event([second.event_id])
+
+        self.assertTrue(is_state_dag_connected([third, create, second]))
+
+    def test_fork_and_merge(self) -> None:
+        create = self._make_event([])
+        fork_one = self._make_event([create.event_id])
+        fork_two = self._make_event([create.event_id])
+        fork_three = self._make_event([create.event_id])
+        merge = self._make_event([fork_one.event_id, fork_three.event_id])
+
+        self.assertTrue(
+            is_state_dag_connected([create, fork_one, fork_two, fork_three, merge])
+        )
+
+    def test_missing_prev_state_event(self) -> None:
+        create = self._make_event([])
+        second = self._make_event([create.event_id])
+        unconnected = self._make_event(["$unknown"])
+
+        self.assertFalse(is_state_dag_connected([create, second, unconnected]))
+
+    def test_missing_intermediate_event(self) -> None:
+        create = self._make_event([])
+        second = self._make_event([create.event_id])
+        third = self._make_event([second.event_id])
+
+        self.assertFalse(is_state_dag_connected([create, third]))
