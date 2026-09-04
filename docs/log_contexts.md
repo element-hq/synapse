@@ -2,9 +2,15 @@
 
 To help track the processing of individual requests, synapse uses a
 '`log context`' to track which request it is handling at any given
-moment. This is done via a thread-local variable; a `logging.Filter` is
-then used to fish the information back out of the thread-local variable
-and add it to each log record.
+moment. The "current" log context is stored in the Rust extension
+(`synapse.synapse_rust.logcontext`), which resolves it from the current
+tokio task (if we are running inside one) and otherwise from the current OS
+thread; a `logging.Filter` is then used to fish the information back out and
+add it to each log record. Storing it in Rust means a single source of truth is
+visible from both Python (the reactor and its thread pool) and Rust (tokio
+tasks), so log records emitted from either — including from Rust code polled on
+a worker thread — are attributed to the right request. See
+[the Rust side](#the-rust-side) below.
 
 Logcontexts are also used for CPU and database accounting, so that we
 can track which requests were responsible for high CPU use or database
@@ -18,7 +24,7 @@ Asynchronous functions make the whole thing complicated, so this document descri
 how it all works, and how to write code which follows the rules.
 
 In this document, "awaitable" refers to any object which can be `await`ed. In the context of
-Synapse, that normally means either a coroutine or a Twisted 
+Synapse, that normally means either a coroutine or a Twisted
 [`Deferred`](https://twistedmatrix.com/documents/current/api/twisted.internet.defer.Deferred.html).
 
 ## Logcontexts without asynchronous code
@@ -268,7 +274,7 @@ async def main():
         await d
         # Good: This will be logged against the "main" logcontext
         logger.debug("phew")
-``` 
+```
 
 **Solution 2:** We could also fix this by surrounding the call to `d.callback` with a
 `PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
@@ -534,9 +540,9 @@ def reset_listener_queue():
 
 So, both ends of the awaitable chain have now dropped their references,
 and the awaitable chain is now orphaned, and will be garbage-collected at
-some point. Note that `await_something_interesting` is a coroutine, 
+some point. Note that `await_something_interesting` is a coroutine,
 which Python implements as a generator function.  When Python
-garbage-collects generator functions, it gives them a chance to 
+garbage-collects generator functions, it gives them a chance to
 clean up by making the `await` (or `yield`) raise a `GeneratorExit`
 exception. In our case, that means that the `__exit__` handler of
 `PreserveLoggingContext` will carefully restore the request context, but
@@ -549,6 +555,30 @@ supposed to be awaiting is bad practice, so this doesn't
 actually happen too much. Unfortunately, when it does happen, it will
 lead to leaked logcontexts which are incredibly hard to track down.
 
+
+## The Rust side
+
+The "current" logcontext is stored in the Rust extension rather than in a
+Python thread-local, so that it is visible from both Python and Rust.
+`current_context()` and `set_current_context()` are imported from
+`synapse.logging.context` as usual — the Rust storage is an implementation
+detail that Python code does not need to care about.
+
+`set_current_context` only ever runs on a Python thread, i.e. the reactor or one
+of its thread pools, where it does the `getrusage` CPU accounting. It is never
+called from a tokio worker thread.
+
+What Rust code *does* need to be aware of is that when spawning a future onto
+the tokio runtime, the current logcontext must be captured and carried along, so
+that log records emitted while the future is polled (including any `log::`
+records from dependencies, and any Python invoked back from Rust) are attributed
+correctly. Don't use a bare `tokio::spawn`. Instead use
+`LogContextHandle::capture(py)` plus `LogContextHandle::scope` (in
+`rust/src/logging/context.rs`), which capture the caller's logcontext from the
+Python side and record it on the spawned task; this is what `create_deferred`
+does. `current_context()` returns the task's captured context first, so
+`LoggingContextFilter` — and therefore `pyo3-log` — sees the right context on
+worker threads without any per-log-record work.
 
 ## Debugging logcontext issues
 
@@ -563,4 +593,19 @@ loggers:
     # Unlike other loggers, this one needs to be explicitly configured to see debug logs.
     synapse.logging.context.debug:
         level: DEBUG
+```
+
+Note that some of these traces (`LoggingContext(...).__enter__`/`__exit__`) are
+emitted from Rust via `pyo3-log`, which caches logger levels for performance.
+Configuring the logger in the logging config (as above) works — the cache is
+flushed whenever the config is (re)loaded, including on `SIGHUP` — but enabling
+the logger *at runtime* (e.g. `setLevel(logging.DEBUG)` from the manhole) will
+not surface the Rust-emitted traces until you also flush the cache:
+
+```python
+import logging
+from synapse.synapse_rust import reset_logging_config
+
+logging.getLogger("synapse.logging.context.debug").setLevel(logging.DEBUG)
+reset_logging_config()
 ```

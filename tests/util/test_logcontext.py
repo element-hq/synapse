@@ -20,13 +20,18 @@
 #
 
 import logging
+from contextlib import contextmanager
 from typing import Callable, Generator, cast
+from unittest.mock import patch
 
 from twisted.internet import defer, reactor as _reactor
 
+import synapse.logging.context as context_module
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
+    ContextRequest,
     LoggingContext,
+    LoggingContextFilter,
     PreserveLoggingContext,
     _Sentinel,
     current_context,
@@ -34,6 +39,7 @@ from synapse.logging.context import (
     nested_logging_context,
     run_coroutine_in_background,
     run_in_background,
+    set_current_context,
 )
 from synapse.types import ISynapseReactor
 from synapse.util.clock import Clock
@@ -698,6 +704,227 @@ class LoggingContextTestCase(unittest.TestCase):
         with LoggingContext(name="foo", server_name="test_server"):
             nested_context = nested_logging_context(suffix="bar")
             self.assertEqual(nested_context.name, "foo-bar")
+
+
+# A stand-in `(ru_utime, ru_stime)` value to pass to `start()`/`stop()`.
+#
+# The code under test only checks whether an rusage was supplied at all
+# (`None` means the platform doesn't track per-thread CPU); the values
+# themselves don't matter here. A constant also avoids depending on
+# `RUSAGE_THREAD` support on the platform running the tests.
+_TRUTHY_RUSAGE = (0.0, 0.0)
+
+
+@contextmanager
+def _capture_logcontext_errors() -> Generator[list[str], None, None]:
+    """Capture the messages passed to `logcontext_error` while inside the block.
+
+    `logcontext_error` is looked up as a module global at call time, so patching
+    the module attribute intercepts every call site (`LoggingContext`,
+    `PreserveLoggingContext`, `run_in_background`, ...).
+    """
+    messages: list[str] = []
+    with patch.object(context_module, "logcontext_error", messages.append):
+        yield messages
+
+
+class LogContextErrorMessageTestCase(unittest.TestCase):
+    """Tests asserting the exact messages passed to `logcontext_error`, and
+    the conditions that trigger each one.
+
+    The implementation lives in Rust (`rust/src/logging/context.rs`). Downstream
+    log scraping depends on the wording and argument order of these messages, so
+    accidental changes must fail a test.
+    """
+
+    def setUp(self) -> None:
+        # These tests call `__enter__`/`__exit__`/`start`/`stop` by hand. Let's
+        # make sure the current context ends up back at the sentinel regardless
+        # of what a test does.
+        self.assertIs(current_context(), SENTINEL_CONTEXT)
+        self.addCleanup(set_current_context, SENTINEL_CONTEXT)
+
+    def test_enter_wrong_previous_context(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            # `ctx` records the sentinel as its `previous_context` (we are at the
+            # sentinel now), but we enter it while a *different* context is active.
+            ctx = LoggingContext(name="ctx", server_name="s")
+            other = LoggingContext(name="other", server_name="s")
+            other.__enter__()
+
+            ctx.__enter__()
+
+            self.assertEqual(
+                messages,
+                [
+                    "Expected previous context %r, found %r"
+                    % (ctx.previous_context, other)
+                ],
+            )
+
+    def test_exit_context_was_lost(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            ctx = LoggingContext(name="ctx", server_name="s")
+            ctx.__enter__()
+            # Simulate the context being lost from under us before exit.
+            set_current_context(SENTINEL_CONTEXT)
+
+            ctx.__exit__(None, None, None)
+
+            self.assertEqual(messages, ["Expected logging context ctx was lost"])
+        self.assertTrue(ctx.finished)
+
+    def test_exit_found_different_context(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            ctx = LoggingContext(name="ctx", server_name="s")
+            ctx.__enter__()
+            other = LoggingContext(name="other", server_name="s")
+            other.__enter__()
+
+            ctx.__exit__(None, None, None)
+
+            self.assertEqual(messages, ["Expected logging context ctx but found other"])
+
+    def test_preserve_logging_context_was_lost(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            target = LoggingContext(name="target", server_name="s")
+            preserve = PreserveLoggingContext(target)
+            preserve.__enter__()
+            set_current_context(SENTINEL_CONTEXT)
+
+            preserve.__exit__(None, None, None)
+
+            self.assertEqual(messages, ["Expected logging context target was lost"])
+
+    def test_preserve_logging_context_found_different_context(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            target = LoggingContext(name="target", server_name="s")
+            preserve = PreserveLoggingContext(target)
+            preserve.__enter__()
+            other = LoggingContext(name="other", server_name="s")
+            other.__enter__()
+
+            preserve.__exit__(None, None, None)
+
+            self.assertEqual(
+                messages, ["Expected logging context target but found other"]
+            )
+
+    def test_start_on_different_thread(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            ctx = LoggingContext(name="ctx", server_name="s")
+            # Pretend the context was created on another OS thread.
+            ctx.main_thread += 1
+
+            ctx.start(None)
+
+            self.assertEqual(messages, ["Started logcontext ctx on different thread"])
+
+    def test_stop_on_different_thread(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            ctx = LoggingContext(name="ctx", server_name="s")
+            ctx.main_thread += 1
+
+            ctx.stop(None)
+
+            self.assertEqual(messages, ["Stopped logcontext ctx on different thread"])
+
+    def test_restart_finished_context(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            ctx = LoggingContext(name="ctx", server_name="s")
+            ctx.finished = True
+
+            ctx.start(None)
+
+            self.assertEqual(messages, ["Re-starting finished log context ctx"])
+
+    def test_restart_already_active_context(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            ctx = LoggingContext(name="ctx", server_name="s")
+            ctx.start(_TRUTHY_RUSAGE)
+
+            ctx.start(_TRUTHY_RUSAGE)
+
+            self.assertEqual(messages, ["Re-starting already-active log context ctx"])
+
+    def test_stop_without_start(self) -> None:
+        with _capture_logcontext_errors() as messages:
+            ctx = LoggingContext(name="ctx", server_name="s")
+
+            ctx.stop(_TRUTHY_RUSAGE)
+
+            self.assertEqual(
+                messages,
+                ["Called stop on logcontext ctx without recording a start rusage"],
+            )
+
+
+class LoggingContextFilterTestCase(unittest.TestCase):
+    """Tests for `LoggingContextFilter`, which is how logcontexts reach log
+    output. Checks that it fills record attributes from a real logcontext, and
+    that under the sentinel it only sets defaults for attributes that aren't
+    already present."""
+
+    def setUp(self) -> None:
+        self.assertIs(current_context(), SENTINEL_CONTEXT)
+        self.filter = LoggingContextFilter()
+
+    def _make_record(self, **attrs: object) -> logging.LogRecord:
+        record = logging.LogRecord("test", logging.INFO, "path", 1, "msg", None, None)
+        for key, value in attrs.items():
+            setattr(record, key, value)
+        return record
+
+    def test_fills_record_from_real_context(self) -> None:
+        request = ContextRequest(
+            request_id="req-1",
+            ip_address="1.2.3.4",
+            site_tag="site",
+            requester="@u:test",
+            authenticated_entity="@u:test",
+            method="GET",
+            url="/path",
+            protocol="1.1",
+            user_agent="UA",
+        )
+        with LoggingContext(name="ctx", server_name="myserver", request=request):
+            record = self._make_record()
+            self.assertTrue(self.filter.filter(record))
+
+        # Read via `__dict__` since these attributes are only ever set
+        # dynamically (they aren't declared on `logging.LogRecord`).
+        attrs = record.__dict__
+        self.assertEqual(attrs["server_name"], "myserver")
+        # For backwards compatibility, `str(context)` is stored as `request`.
+        self.assertEqual(attrs["request"], "ctx")
+        self.assertEqual(attrs["ip_address"], "1.2.3.4")
+        self.assertEqual(attrs["site_tag"], "site")
+        self.assertEqual(attrs["requester"], "@u:test")
+        self.assertEqual(attrs["authenticated_entity"], "@u:test")
+        self.assertEqual(attrs["method"], "GET")
+        self.assertEqual(attrs["url"], "/path")
+        self.assertEqual(attrs["protocol"], "1.1")
+        self.assertEqual(attrs["user_agent"], "UA")
+
+    def test_sentinel_sets_defaults_when_absent(self) -> None:
+        record = self._make_record()
+        self.assertTrue(self.filter.filter(record))
+
+        self.assertEqual(
+            record.__dict__["server_name"], "unknown_server_from_sentinel_context"
+        )
+        self.assertEqual(record.__dict__["request"], "sentinel")
+
+    def test_sentinel_does_not_clobber_preset_attributes(self) -> None:
+        # Simulate a 3rd-party log record that already carries its own attributes;
+        # under the sentinel the filter must leave them untouched.
+        record = self._make_record(
+            server_name="third-party-server", request="third-party-request"
+        )
+        self.assertTrue(self.filter.filter(record))
+
+        self.assertEqual(record.__dict__["server_name"], "third-party-server")
+        self.assertEqual(record.__dict__["request"], "third-party-request")
 
 
 # a function which returns a deferred which has been "called", but

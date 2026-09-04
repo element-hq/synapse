@@ -1,0 +1,1 @@
+Port the logcontext machinery (`LoggingContext`, `ContextResourceUsage` and the current-context storage) to Rust.

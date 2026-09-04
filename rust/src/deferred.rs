@@ -25,6 +25,7 @@ use pyo3::{
 };
 use tokio::sync::oneshot;
 
+use crate::logging::context::with_logcontext;
 use crate::tokio_runtime::runtime;
 
 create_exception!(
@@ -71,7 +72,13 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// Creates a twisted deferred from the given future, spawning the task on the
 /// tokio runtime.
 ///
-/// Does not handle deferred cancellation or contextvars.
+/// Does not handle contextvars.
+///
+/// TODO: propagate deferred cancellation to the tokio task (via
+/// `JoinHandle::abort`). Until then a cancelled request leaves its task
+/// running, so the task can outlive the request's logcontext —
+/// `run_python_awaitable` defends against the resulting finished-context case,
+/// but the work itself is wasted.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
     reactor: &Bound<'py, PyAny>,
@@ -85,9 +92,15 @@ where
     let deferred_callback = deferred.getattr("callback")?.unbind();
     let deferred_errback = deferred.getattr("errback")?.unbind();
 
+    // Capture the caller's logcontext here (on the reactor thread) and record
+    // it in the spawned task. Log records emitted while the future is polled
+    // (on the tokio threads) are then attributed to the context that was
+    // current when the caller invoked us. See `crate::logging::context`.
+    let logcontext = crate::logging::context::LogContextHandle::capture(py);
+
     let rt = runtime(reactor)?;
     let handle = rt.handle()?;
-    let task = handle.spawn(fut);
+    let task = handle.spawn(logcontext.scope(fut));
 
     // Unbind the reactor so that we can pass it to the task
     let reactor = reactor.clone().unbind();
@@ -148,7 +161,16 @@ where
     // Shared between the success and error callbacks (only one ever fires).
     let sender = Arc::new(Mutex::new(Some(tx)));
 
-    Python::attach(|py| -> PyResult<()> {
+    // Capture the logcontext of the calling tokio task (if any). We restore it
+    // on the reactor thread before driving the awaitable, so Python code
+    // invoked from Rust (e.g. `DatabasePool.runInteraction`) runs in the same
+    // logcontext that was current when Python originally called into Rust. Its
+    // logging and DB-metrics accounting are then attributed to the right
+    // request. If we are not inside a scoped task, this is `None` and the
+    // awaitable runs in the sentinel.
+    let logcontext = crate::logging::context::LogContextHandle::task_current();
+
+    Python::attach(move |py| -> PyResult<()> {
         // Create some deferred success/error callback functions that we will use to get
         // the result from Python to Rust.
         let success_sender = Arc::clone(&sender);
@@ -216,21 +238,29 @@ where
             move |args, _kwargs| -> PyResult<Py<PyAny>> {
                 let py = args.py();
 
-                // We fire-and-forget using `run_in_background`. Re-using
-                // `run_in_background` also makes sure the awaitable gets run with the
-                // current logcontext while following the logcontext rules.
-                //
-                // FIXME: Currently runs in the sentinel logcontext because we don't manage it here
-                let deferred = logging_context_module(py)?.call_method1(
-                    intern!(py, "run_in_background"),
-                    (awaitable_factory.bind(py),),
-                );
+                // Drive the awaitable in the captured logcontext. Restored here
+                // as we're on the reactor thread (the only thread where the
+                // context's `main_thread` check passes).
+                let context = match &logcontext {
+                    Some(handle) => handle.logging_context().map(|ctx| ctx.clone_ref(py)),
+                    // Called from outside any scoped task: the sentinel.
+                    None => None,
+                };
 
-                let deferred = deferred?;
-                deferred.call_method1(
-                    intern!(py, "addCallbacks"),
-                    (on_success.bind(py), on_error.bind(py)),
-                )?;
+                // Kick off the awaitable, fire-and-forget, via
+                // `run_in_background`. It calls the factory in the current
+                // logcontext and follows the logcontext rules from there. In
+                // particular, it arranges for the reactor to be back at the
+                // sentinel when the awaitable later completes.
+                with_logcontext(py, context, || {
+                    let deferred = run_in_background(py, awaitable_factory.bind(py))?;
+                    deferred.call_method1(
+                        intern!(py, "addCallbacks"),
+                        (on_success.bind(py), on_error.bind(py)),
+                    )?;
+                    Ok(())
+                })?;
+
                 Ok(py.None())
             },
         )?;
@@ -270,6 +300,26 @@ fn failure_to_pyerr(failure: &Bound<'_, PyAny>) -> PyErr {
     }
 }
 
+/// A reference to `synapse.logging.context.run_in_background`.
+static RUN_IN_BACKGROUND: OnceCell<Py<PyAny>> = OnceCell::new();
+
+/// Call `synapse.logging.context.run_in_background(f)`, which calls `f` in the
+/// current logcontext and drives the awaitable it returns to completion,
+/// following the logcontext rules. Returns the resulting `Deferred`.
+fn run_in_background<'py>(py: Python<'py>, f: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let run_in_background = RUN_IN_BACKGROUND.get_or_try_init(|| {
+        logging_context_module(py)?
+            .getattr("run_in_background")
+            .map(Into::into)
+    })?;
+
+    run_in_background
+        .call1(py, (f,))?
+        .extract(py)
+        .map_err(Into::into)
+}
+
+/// A reference to `synapse.logging.context.make_deferred_yieldable`.
 static MAKE_DEFERRED_YIELDABLE: OnceCell<Py<PyAny>> = OnceCell::new();
 
 /// Given a deferred, make it follow the Synapse logcontext rules
