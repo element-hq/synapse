@@ -46,6 +46,7 @@ from synapse.api.room_versions import RoomVersion, StateResolutionVersions
 from synapse.events import EventBase, is_creator
 from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import MutableStateMap, StateKey, StateMap, StrCollection
+from synapse.util import MutableOverlayMapping
 from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
@@ -827,7 +828,7 @@ async def _iterative_auth_checks(
     Returns:
         Returns the final updated state
     """
-    resolved_state = dict(base_state)
+    resolved_state = MutableOverlayMapping(base_state)
 
     for idx, event_id in enumerate(event_ids, start=1):
         event = event_map[event_id]
