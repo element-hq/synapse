@@ -1,0 +1,1 @@
+Use sharded tokens in [MSC4354: Sticky Events] sync and sliding sync, preventing events appearing in multiple sync responses.
