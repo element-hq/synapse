@@ -28,6 +28,7 @@ import logging
 import secrets
 import time
 from typing import (
+    TYPE_CHECKING,
     AbstractSet,
     Any,
     Awaitable,
@@ -73,6 +74,7 @@ from synapse.logging.context import (
     current_context,
     set_current_context,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
@@ -91,6 +93,9 @@ from tests.server import (
 from tests.test_utils import event_injection, setup_awaitable_errors
 from tests.test_utils.logging_setup import setup_logging
 from tests.utils import checked_cast, default_config, setupdb
+
+if TYPE_CHECKING:
+    from prometheus_client.registry import Collector
 
 setupdb()
 setup_logging()
@@ -1094,6 +1099,69 @@ class HomeserverTestCase(TestCase):
             event_injection.inject_member_event(self.hs, room, user, membership)
         )
 
+    def get_prometheus_metric_current_value(
+        self, metric: "Collector", **labels: str
+    ) -> int:
+        """Get the value of a prometheus metric with the given labels.
+
+        This function will raise an AssertionError if there is not exactly one
+        sample with the given labels.
+
+        Note that the metrics outlives each individual test, so it may hold
+        values from previous tests.
+
+        Automatically includes SERVER_NAME_LABEL.
+        """
+
+        labels = dict(labels)
+        labels[SERVER_NAME_LABEL] = self.hs.hostname
+
+        # Matching samples for the given labels.
+        found_samples = []
+
+        for collected in metric.collect():
+            for sample in collected.samples:
+                # Check that all the labels match. If any label doesn't match,
+                # we skip this sample.
+                for label, value in labels.items():
+                    if sample.labels.get(label) != value:
+                        break
+                else:
+                    # We didn't break, so all the labels matched. Return this
+                    # sample's value.
+                    found_samples.append(sample)
+
+        # The caller expects there to be exactly one sample with the given
+        # labels. If there are multiple (or zero) samples, we error.
+        if len(found_samples) == 1:
+            # We found exactly one sample with the given labels, so return its
+            # value.
+            return int(found_samples[0].value)
+        elif len(found_samples) > 1:
+            # We found multiple samples with the given labels, so we error. We
+            # helpfully include the differences in labels between the samples to
+            # help the caller figure out why they got multiple samples.
+            labels_differences_dicts = _get_dict_differences(
+                [sample.labels for sample in found_samples]
+            )
+            differences_str = "\n".join(f" {diff}" for diff in labels_differences_dicts)
+
+            raise AssertionError(
+                f"Multiple metrics found for '{metric}' with labels {labels}\n"
+                f"The labels of the metrics that matched are (excluding common labels that are in all metrics):\n"
+                f"{differences_str}"
+            )
+        else:
+            all_metrics = "\n".join(
+                f" {sample.labels}"
+                for collected in metric.collect()
+                for sample in collected.samples
+            )
+            raise AssertionError(
+                f"No metric found for {metric} with labels {labels}\n"
+                f"All metrics:\n{all_metrics}"
+            )
+
 
 class FederatingHomeserverTestCase(HomeserverTestCase):
     """
@@ -1276,3 +1344,25 @@ def skip_unless(condition: bool, reason: str) -> Callable[[TV], TV]:
         return f
 
     return decorator
+
+
+def _get_dict_differences(dicts: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Return a list of dicts where each dict has the common key/values removed.
+
+    Useful for printing comparisons of prometheus metrics with different labels.
+    """
+    if not dicts:
+        return []
+
+    # Find the common key/values across all dicts
+    common_items = set(dicts[0].items())
+    for d in dicts[1:]:
+        common_items.intersection_update(d.items())
+
+    # Remove the common items from each dict
+    differences = []
+    for d in dicts:
+        diff = {k: v for k, v in d.items() if (k, v) not in common_items}
+        differences.append(diff)
+
+    return differences
