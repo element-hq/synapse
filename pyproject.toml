@@ -15,12 +15,12 @@ classifiers = [
 
 # Mandatory Dependencies
 dependencies = [
-    # we use the TYPE_CHECKER.redefine method added in jsonschema 3.0.0
-    "jsonschema>=3.0.0",
-    # 0.25.0 is the first version to support Python 3.14.
-    # We can remove this once https://github.com/python-jsonschema/jsonschema/issues/1426 is fixed
-    # and included in a release.
-    "rpds-py>=0.25.0",
+    # jsonschema==4.26.0 was the first version to require rpds-py>=0.25.0, which
+    # is the first version of rpds-py to support Python 3.14.
+    #
+    # Otherwise, we use the TYPE_CHECKER.redefine method added in jsonschema 3.0.0
+    "jsonschema>=4.26.0;python_version >= '3.14'",
+    "jsonschema>=3.0.0;python_version < '3.14'",
     # We choose 2.0 as a lower bound: the most recent backwards incompatible release.
     # It seems generally available, judging by https://pkgs.org/search/?q=immutabledict
     "immutabledict>=2.0",
