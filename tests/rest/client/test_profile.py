@@ -845,6 +845,21 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         avatar_url = self._get_avatar_url()
         self.assertEqual(avatar_url, "mxc://test/good")
 
+    def test_set_custom_field_never_existed_user(self) -> None:
+        """Setting a profile field for a user that does not exist should not
+        conjure up a profile row for them, even for a server admin."""
+        self.register_user("admin", "pass", admin=True)
+        admin_tok = self.login("admin", "pass")
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/profile/@never-existed:test/custom_field",
+            content={"custom_field": "test"},
+            access_token=admin_tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
     def test_set_custom_field_other(self) -> None:
         """Setting someone else's profile field should fail"""
         channel = self.make_request(

@@ -728,7 +728,10 @@ class ProfileWorkerStore(SQLBaseStore):
                 # possible due to the grammar.
                 (f'$."{new_field_name}"', user_id.localpart),
             )
-        row = cast(tuple[int | None, int | None, int | None], txn.fetchone())
+        row = cast("tuple[int | None, int | None, int | None] | None", txn.fetchone())
+        # The user may have no profile row at all; treat as an empty profile.
+        if row is None:
+            row = (None, None, None)
 
         # The values return null if the column is null.
         total_bytes = (
@@ -830,7 +833,7 @@ class ProfileWorkerStore(SQLBaseStore):
                     (
                         user_id.localpart,
                         user_id.to_string(),
-                        json_field_name,
+                        field_name,
                         canonical_value,
                         json_field_name,
                         canonical_value,

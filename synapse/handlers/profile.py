@@ -720,6 +720,11 @@ class ProfileHandler:
         if not by_admin and target_user != requester.user:
             raise AuthError(403, "Cannot set another user's profile")
 
+        # Don't recreate a profile row for a user that does not exist at all;
+        # deactivated (e.g. erased) users do exist, so are allowed through.
+        if await self.store.get_user_by_id(target_user.to_string()) is None:
+            raise SynapseError(404, "User not found", Codes.NOT_FOUND)
+
         stream_id = await self.store.set_profile_field(
             target_user,
             field_name,
