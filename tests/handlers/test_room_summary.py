@@ -33,7 +33,12 @@ from synapse.api.constants import (
     RestrictedJoinRuleTypes,
     RoomTypes,
 )
-from synapse.api.errors import AuthError, NotFoundError, SynapseError
+from synapse.api.errors import (
+    AuthError,
+    HttpResponseException,
+    NotFoundError,
+    SynapseError,
+)
 from synapse.api.room_versions import RoomVersions
 from synapse.federation.transport.client import TransportLayerClient
 from synapse.handlers.room_summary import _child_events_comparison_key, _RoomEntry
@@ -51,8 +56,14 @@ from tests.unittest import override_config
 def _create_event(
     room_id: str, order: Any | None = None, origin_server_ts: int = 0
 ) -> mock.Mock:
+    """Build a fake m.space.child event pointing at `room_id`.
+
+    The child room id is the event's state key (the event itself lives in the
+    parent space).
+    """
     result = mock.Mock(name=room_id)
-    result.room_id = room_id
+    result.state_key = room_id
+    result.room_id = "!parent:test"
     result.content = {}
     result.origin_server_ts = origin_server_ts
     if order is not None:
@@ -272,6 +283,53 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         # Combine the results.
         result["rooms"] += result2["rooms"]
         self._assert_hierarchy(result, expected)
+
+    def test_cache_invalidation(self) -> None:
+        """Repeated requests are served from the cached room summaries, which
+        must reflect changes to the underlying data immediately.
+        """
+        requester = create_requester(self.user)
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self._assert_hierarchy(result, [(self.space, [self.room]), (self.room, ())])
+
+        # Adding a child must be reflected on the next request.
+        room2 = self.helper.create_room_as(self.user, tok=self.token)
+        self._add_child(self.space, room2, self.token, order="a")
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self._assert_hierarchy(
+            result,
+            [(self.space, [room2, self.room]), (room2, ()), (self.room, ())],
+        )
+
+        # Removing a child (clearing its via) likewise.
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.SpaceChild,
+            body={},
+            tok=self.token,
+            state_key=room2,
+        )
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self._assert_hierarchy(result, [(self.space, [self.room]), (self.room, ())])
+
+        # A room name change flows through the room stats tables; their write
+        # must also invalidate the cached summary.
+        self.helper.send_state(
+            self.space,
+            event_type=EventTypes.Name,
+            body={"name": "new name"},
+            tok=self.token,
+        )
+        result = self.get_success(
+            self.handler.get_room_hierarchy(requester, self.space)
+        )
+        self.assertEqual(result["rooms"][0]["name"], "new name")
 
     def test_visibility(self) -> None:
         """A user not in a space cannot inspect it."""
@@ -1005,6 +1063,78 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
                 self.handler.get_room_hierarchy(create_requester(self.user), self.space)
             )
         self._assert_hierarchy(result, expected)
+
+    def test_fed_room_linked_from_two_spaces(self) -> None:
+        """
+        A room linked from two spaces is summarised using the via of the edge
+        the traversal actually reaches it by.
+
+        Summaries for upcoming rooms are fetched concurrently, ahead of the
+        strictly-ordered traversal; a room can be in the queue more than once
+        (it is only deduplicated when popped), and each queue entry carries the
+        via to summarise it with. The summary that gets used must therefore be
+        the one belonging to the entry that is popped, not any other entry for
+        the same room.
+        """
+        root_via = "root." + self.hs.hostname
+        subspace_via = "subspace." + self.hs.hostname
+        fed_room = "#linked-twice:" + self.hs.hostname + "2"
+
+        # A local subspace, ordered ahead of the federated room so it is
+        # traversed first — which pushes its own edge to the federated room onto
+        # the queue while the root's edge to it is still there.
+        subspace = self.helper.create_room_as(
+            self.user,
+            tok=self.token,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        self._add_child(self.space, subspace, self.token, order="a")
+        self._add_child(self.space, fed_room, self.token, order="b", via=[root_via])
+        self._add_child(subspace, fed_room, self.token, via=[subspace_via])
+
+        destinations: list[str] = []
+
+        async def get_room_hierarchy(
+            _self: TransportLayerClient,
+            destination: str,
+            room_id: str,
+            suggested_only: bool,
+        ) -> JsonDict:
+            destinations.append(destination)
+            # Only the subspace's via can actually serve the room, so summarising
+            # the wrong edge loses the room entirely.
+            if destination == root_via:
+                raise HttpResponseException(502, "Bad Gateway", b"{}")
+            return {
+                "room": {"room_id": fed_room, "world_readable": True},
+                "children": [],
+                "inaccessible_children": [],
+            }
+
+        with mock.patch(
+            "synapse.federation.transport.client.TransportLayerClient.get_room_hierarchy",
+            new=get_room_hierarchy,
+        ):
+            result = self.get_success(
+                self.handler.get_room_hierarchy(create_requester(self.user), self.space)
+            )
+
+        # The subspace's edge is the one the traversal pops, so that is the via
+        # the room must have been summarised with…
+        self.assertIn(subspace_via, destinations)
+
+        # …and the room is returned (exactly once), listed under both parents.
+        self._assert_hierarchy(
+            result,
+            [
+                (self.space, [subspace, fed_room, self.room]),
+                (subspace, [fed_room]),
+                (fed_room, ()),
+                (self.room, ()),
+            ],
+        )
 
     def test_fed_caching(self) -> None:
         """
