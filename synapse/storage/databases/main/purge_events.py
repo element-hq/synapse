@@ -23,7 +23,7 @@ import logging
 from typing import Any, cast
 
 from synapse.api.errors import SynapseError
-from synapse.storage.database import LoggingTransaction
+from synapse.storage.database import LoggingTransaction, user_is_local_like_pattern
 from synapse.storage.databases.main import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.engines import PostgresEngine
@@ -213,7 +213,10 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
             should_delete_expr += " AND sender NOT LIKE ?"
 
             # We include the parameter twice since we use the expression twice
-            should_delete_params += ("%:" + self.hs.hostname, "%:" + self.hs.hostname)
+            should_delete_params += (
+                user_is_local_like_pattern(self.hs),
+                user_is_local_like_pattern(self.hs),
+            )
 
         should_delete_params += (room_id, token.topological)
 

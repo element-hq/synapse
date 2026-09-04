@@ -100,6 +100,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
     PostgresEngine,
+    user_is_local_like_pattern,
 )
 from synapse.storage.databases.main.receipts import ReceiptsWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
@@ -1442,7 +1443,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
         # We only want local users, so we add a dodgy filter to the above query
         # and recheck it below.
-        user_filter = "%:" + self.hs.hostname
+        user_filter = user_is_local_like_pattern(self.hs)
 
         txn.execute(
             sql,
