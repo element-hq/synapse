@@ -12,6 +12,8 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import sqlite3
 
+from immutabledict import immutabledict
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
@@ -25,7 +27,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, create_requester
+from synapse.types import JsonDict, MultiWriterStreamToken, create_requester
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
@@ -66,7 +68,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
     def test_get_updated_sticky_events(self) -> None:
         """Test getting updated sticky events between stream IDs."""
         # Get the starting stream_id
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         event_id_1 = self.helper.send_sticky_event(
             self.room_id,
@@ -76,7 +78,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
-        mid_id = self.store.get_max_sticky_events_stream_id()
+        mid_id = self.store.get_sticky_events_stream_token().stream
 
         event_id_2 = self.helper.send_sticky_event(
             self.room_id,
@@ -86,7 +88,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Get all updates
         updates = self.get_success(
@@ -129,7 +131,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             tok=self.token,
         )["event_id"]
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Delete expired events
         self.get_success(self.store._delete_expired_sticky_events())
@@ -150,7 +152,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
     def test_get_updated_sticky_events_with_limit(self) -> None:
         """Test that the limit parameter works correctly."""
         # Get the starting stream_id
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         event_id_1 = self.helper.send_sticky_event(
             self.room_id,
@@ -177,6 +179,67 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, event_id_1)
 
+    def test_get_sticky_events_in_rooms_token_does_not_go_backwards(self) -> None:
+        """
+        Tests that the token does not get rewound, for instance if a
+        different, lagging, sync worker handles a request.
+        """
+        instance_name = self.hs.get_instance_name()
+
+        self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "message 1", "msgtype": "m.text"},
+            tok=self.token,
+        )
+        first_id = self.store.get_sticky_events_stream_token().stream
+
+        event_id_2 = self.helper.send_sticky_event(
+            self.room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": "message 2", "msgtype": "m.text"},
+            tok=self.token,
+        )["event_id"]
+        second_id = self.store.get_sticky_events_stream_token().stream
+
+        from_token = MultiWriterStreamToken(
+            stream=first_id, instance_map=immutabledict({"someworker": 42})
+        )
+        # `to_token` has 2 components that are behind compared to `from_token`:
+        # the baseline position and the position of the advanced worker 'someworker'
+        to_token = MultiWriterStreamToken(
+            stream=first_id - 1,
+            instance_map=immutabledict({instance_name: second_id, "someworker": 36}),
+        )
+
+        new_token, sticky_by_room = self.get_success(
+            self.store.get_sticky_events_in_rooms(
+                [self.room_id],
+                from_token=from_token,
+                to_token=to_token,
+                now=self.clock.time_msec(),
+                limit=None,
+            )
+        )
+
+        self.assertEqual(sticky_by_room, {self.room_id: [event_id_2]})
+        self.assertEqual(
+            new_token,
+            MultiWriterStreamToken(
+                # The baseline position is not wound back
+                stream=first_id,
+                instance_map=immutabledict(
+                    {
+                        instance_name: second_id,
+                        # The position of this advanced worker is not wound back either
+                        "someworker": 42,
+                    }
+                ),
+            ),
+        )
+
     def test_outlier_events_not_in_table(self) -> None:
         """
         Tests the behaviour of outliered and then de-outliered events in the
@@ -189,7 +252,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         room_id = self.helper.create_room_as(
             user2_id, tok=user2_tok, room_version=RoomVersions.V10.identifier
@@ -267,7 +330,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Check the event made it into the sticky_events table
         updates = self.get_success(
@@ -288,7 +351,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         token = self.login(user_id, "pass")
         room_id = self.helper.create_room_as(user_id, tok=token)
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         # Create and persist a sticky event that is soft-failed
         soft_failed_sticky_event = self.get_success(
@@ -306,7 +369,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         updates = self.get_success(
             self.store.get_updated_sticky_events(
@@ -327,7 +390,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         token = self.login(user_id, "pass")
         room_id = self.helper.create_room_as(user_id, tok=token)
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         # Create and persist a sticky event that is marked policy_server_spammy
         # N.B. policy_server_spammy events are always soft-failed too
@@ -361,7 +424,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Verify only the regular event was inserted
         updates = self.get_success(
@@ -383,7 +446,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         token = self.login(user_id, "pass")
         room_id = self.helper.create_room_as(user_id, tok=token)
 
-        start_id = self.store.get_max_sticky_events_stream_id()
+        start_id = self.store.get_sticky_events_stream_token().stream
 
         # Create and persist a sticky event that is marked spam_checker_spammy
         # N.B. spam_checker_spammy events are always soft-failed too
@@ -417,7 +480,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        end_id = self.store.get_max_sticky_events_stream_id()
+        end_id = self.store.get_sticky_events_stream_token().stream
 
         # Verify only the valid sticky event was inserted
         updates = self.get_success(
