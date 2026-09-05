@@ -1,0 +1,1 @@
+Fix the ordering of history in rooms affected by [GHSA-v56r-hwv5-mxg6](https://github.com/advisories/GHSA-v56r-hwv5-mxg6). Messages now come back in the order they were sent, and stay that way. Contributed by @catfromplan9.

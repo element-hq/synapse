@@ -39,6 +39,7 @@ from prometheus_client import Counter
 
 import synapse.metrics
 from synapse.api.constants import (
+    MAX_DEPTH,
     EventContentFields,
     EventTypes,
     Membership,
@@ -2827,6 +2828,57 @@ class PersistEventsStore:
 
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 
+    def _compute_topological_orderings_txn(
+        self,
+        txn: LoggingTransaction,
+        events_and_contexts: Collection[EventPersistencePair],
+    ) -> dict[str, int]:
+        """Compute the topological_ordering to store for each event.
+
+        Normally this is just the event's depth. But in rooms whose depth
+        reached MAX_DEPTH (see GHSA-v56r-hwv5-mxg6), every new event arrives
+        with depth == MAX_DEPTH, which would pile them all onto one ordering
+        and reduce /messages to arrival order. We store such events just above
+        the room's current maximum ordering instead, so a room repaired by the
+        fixup_max_depth_tie_ordering background update stays in chronological
+        order. Until that update runs, the room's maximum is itself MAX_DEPTH
+        and this reduces to the old behaviour.
+
+        Only events appended to the live timeline (positive stream ordering)
+        get this treatment. A backfilled at-cap event is older than the room's
+        maximum, and storing it above the maximum would strand it at the live
+        edge with an ordering the background update can no longer recognise as
+        wrong. Backfilled events keep the cap.
+        """
+        orderings = {event.event_id: event.depth for event, _ in events_and_contexts}
+
+        def place_past_cap(event: EventBase) -> bool:
+            return (
+                event.depth >= MAX_DEPTH
+                and (event.internal_metadata.stream_ordering or 0) > 0
+            )
+
+        capped_rooms = {
+            event.room_id for event, _ in events_and_contexts if place_past_cap(event)
+        }
+        next_ordering: dict[str, int] = {}
+        for room_id in capped_rooms:
+            txn.execute(
+                "SELECT COALESCE(max(topological_ordering), 0) FROM events WHERE room_id = ?",
+                (room_id,),
+            )
+            row = txn.fetchone()
+            assert row is not None
+            next_ordering[room_id] = min(row[0] + 1, MAX_DEPTH)
+
+        for event, _ in events_and_contexts:
+            if place_past_cap(event):
+                ordering = next_ordering[event.room_id]
+                orderings[event.event_id] = ordering
+                next_ordering[event.room_id] = min(ordering + 1, MAX_DEPTH)
+
+        return orderings
+
     def _store_event_txn(
         self,
         txn: LoggingTransaction,
@@ -2862,6 +2914,10 @@ class PersistEventsStore:
             ],
         )
 
+        topological_orderings = self._compute_topological_orderings_txn(
+            txn, events_and_contexts
+        )
+
         self.db_pool.simple_insert_many_txn(
             txn,
             table="events",
@@ -2886,7 +2942,7 @@ class PersistEventsStore:
                 (
                     self._instance_name,
                     event.internal_metadata.stream_ordering,
-                    event.depth,  # topological_ordering
+                    topological_orderings[event.event_id],
                     event.depth,  # depth
                     event.event_id,
                     event.room_id,
