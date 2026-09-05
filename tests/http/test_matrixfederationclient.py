@@ -133,8 +133,6 @@ class FederationClientTests(HomeserverTestCase):
             b"%s" % (len(res_json), res_json)
         )
 
-        self.pump()
-
         res = self.successResultOf(test_d)
 
         # check the response is as expected
@@ -710,8 +708,6 @@ class FederationClientTests(HomeserverTestCase):
             b"%s" % (len(return_value), return_value)
         )
 
-        self.pump()
-
         f = self.failureResultOf(test_d)
         self.assertIsInstance(f.value, RequestSendFailed)
 
@@ -750,8 +746,6 @@ class FederationClientTests(HomeserverTestCase):
         protocol.dataReceived(
             b"HTTP/1.1 200 OK\r\nServer: Fake\r\nContent-Type: application/json\r\n\r\n"
         )
-
-        self.pump()
 
         # should still be waiting
         self.assertNoResult(test_d)
@@ -853,7 +847,7 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
             self.hs.get_federation_http_client().get_json("remoteserv:8008", "foo/bar")
         )
 
-        # Pump the reactor so our deferred goes through the motions
+        # Needed under Postgres
         self.pump()
 
         # Make sure that the request was proxied through the `federation_sender` worker
@@ -905,9 +899,7 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
             self.hs.get_federation_http_client().get_json("remoteserv:8008", "foo/bar")
         )
 
-        # Pump the reactor so our deferred goes through the motions. We pump with 10
-        # seconds (0.1 * 100) so the `MatrixFederationHttpClient` runs out of retries
-        # and finally passes along the error response.
+        # Needed under Postgres
         self.pump(0.1)
 
         # Make sure that the request was proxied through the `federation_sender` worker
@@ -984,7 +976,7 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
             )
         )
 
-        # Pump the reactor so our deferred goes through the motions
+        # Needed under Postgres
         self.pump()
 
         # Make sure that the request was proxied through the `federation_sender` worker
@@ -1078,9 +1070,7 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
             self.hs.get_federation_http_client().get_json("remoteserv:8008", "foo/bar")
         )
 
-        # Pump the reactor so our deferred goes through the motions. We pump with 10
-        # seconds (0.1 * 100) so the `MatrixFederationHttpClient` runs out of retries
-        # and finally passes along the error response.
+        # Needed under Postgres
         self.pump(0.1)
 
         # Make sure that the request was *NOT* proxied through the `federation_sender`

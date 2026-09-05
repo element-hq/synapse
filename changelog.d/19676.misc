@@ -1,0 +1,1 @@
+Remove unnecessary `self.pump` calls in some of our tests.

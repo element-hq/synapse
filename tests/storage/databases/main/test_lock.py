@@ -66,16 +66,11 @@ class LockTestCase(unittest.HomeserverTestCase):
         task2 = defer.ensureDeferred(task())
         task3 = defer.ensureDeferred(task())
 
-        # Give the reactor a kick so that the database transaction returns.
-        self.pump()
-
         release_lock.callback(None)
 
         # Run the tasks to completion.
         self.get_success(task1)
-        self.pump()
         self.get_success(task2)
-        self.pump()
         self.get_success(task3)
 
         # At most one task should have held the lock at a time.
