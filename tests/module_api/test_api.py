@@ -85,6 +85,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
     def test_can_register_user(self) -> None:
         """Tests that an external module can register a user"""
         # Register a new user
+        register_ts = int(self.clock.time_msec())
         user_id, access_token = self.get_success(
             self.module_api.register(
                 "bob", displayname="Bobberino", emails=["bob@bobinator.bob"]
@@ -105,8 +106,8 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
         self.assertEqual(email.address, "bob@bobinator.bob")
 
         # Should these be 0?
-        self.assertEqual(email.validated_at, 0)
-        self.assertEqual(email.added_at, 0)
+        self.assertEqual(email.validated_at, register_ts)
+        self.assertEqual(email.added_at, register_ts)
 
         # Check that the displayname was assigned
         displayname = self.get_success(

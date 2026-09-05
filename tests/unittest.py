@@ -69,15 +69,16 @@ from synapse.http.server import JsonResource, OptionsResource
 from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
-    LoggingContext,
     current_context,
     set_current_context,
 )
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
+from synapse.storage.background_updates import UpdaterStatus
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
+from synapse.util.duration import Duration
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -103,6 +104,11 @@ _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
 P = ParamSpec("P")
 R = TypeVar("R")
 S = TypeVar("S")
+
+BACKGROUND_UPDATE_TIMEOUT = Duration(seconds=5)
+"""
+We expect this to be pretty immediate as we're working with an empty database.
+"""
 
 
 class _TypedFailure(Generic[_ExcType], Protocol):
@@ -481,7 +487,11 @@ class HomeserverTestCase(TestCase):
 
     def wait_for_background_updates(self) -> None:
         """Block until all background database updates have completed."""
-        store = self.hs.get_datastores().main
+        self._wait_for_background_updates(self.hs)
+
+    def _wait_for_background_updates(self, hs: HomeServer) -> None:
+        """Block until all background database updates have completed."""
+        store = hs.get_datastores().main
         while not self.get_success(
             store.db_pool.updates.has_completed_background_updates()
         ):
@@ -666,10 +676,6 @@ class HomeserverTestCase(TestCase):
         # construct a homeserver with a matching name.
         server_name = config_obj.server.server_name
 
-        async def run_bg_updates() -> None:
-            with LoggingContext(name="run_bg_updates", server_name=server_name):
-                self.get_success(stor.db_pool.updates.run_background_updates(False))
-
         hs = setup_test_homeserver(
             cleanup_func=self.addCleanup,
             server_name=server_name,
@@ -678,11 +684,58 @@ class HomeserverTestCase(TestCase):
             clock=clock,
             **extra_homeserver_attributes,
         )
-        stor = hs.get_datastores().main
 
-        # Run the database background updates, when running against "master".
-        if hs.__class__.__name__ == "TestHomeServer":
-            self.get_success(run_bg_updates())
+        # Wait for the database background updates to complete. This is important
+        # because tests assume that the database is using the latest schema.
+        #
+        # We could use `self._wait_for_background_updates(hs)` to accomplish the same
+        # thing but we don't want to start or drive the background updates here. We want
+        # to ensure the homeserver itself is doing that.
+        start_time_s = time.time()
+        store = hs.get_datastores().main
+        while not self.get_success(
+            # This check is slightly naive. It only checks if there is anything left in
+            # the `background_updates` database table so it is possible that the
+            # homeserver mistakenly never registered any background updates to be run.
+            # Since `register_background_xxx(...)` is done across the codebase, we can't
+            # really assert that everything was registered as expected.
+            store.db_pool.updates.has_completed_background_updates()
+        ):
+            # Timeout if it takes too long. This should be pretty immediate as we're
+            # working with an empty database. We use real wall-clock time for the
+            # timeout as it's easiest to just drive the reactor forward hoping the
+            # background updates finish within the timeout.
+            current_time_s = time.time()
+            if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT.as_secs():
+                background_update_status = store.db_pool.updates.get_status()
+
+                # Add some better context when we give up
+                extra_message = ""
+                if background_update_status == UpdaterStatus.NOT_STARTED:
+                    extra_message = (
+                        "Did you forget to `start_doing_background_updates()`?"
+                    )
+                elif background_update_status == UpdaterStatus.RUNNING_UPDATE:
+                    extra_message = "Background updates were still running when we gave up. Are they stuck?"
+                else:
+                    extra_message = (
+                        f"Background update status was {background_update_status}."
+                    )
+
+                raise AssertionError(
+                    "Timed out waiting for background updates to complete "
+                    + f"(waited {BACKGROUND_UPDATE_TIMEOUT.as_secs()}s of real wall-clock time). "
+                    + extra_message
+                )
+
+            # Keep driving any potential database interactions
+            self.reactor.advance(
+                # Ideally, we could just use `0` but the background update machinery
+                # waits `sleep_duration_ms` between each background update.
+                Duration(
+                    milliseconds=hs.config.background_updates.sleep_duration_ms
+                ).as_secs()
+            )
 
         return hs
 
