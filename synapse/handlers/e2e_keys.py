@@ -20,6 +20,7 @@
 #
 #
 import logging
+from collections import Counter
 from typing import TYPE_CHECKING, Iterable, Mapping
 
 import attr
@@ -59,6 +60,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ONE_TIME_KEY_UPLOAD = "one_time_key_upload_lock"
+
+# The maximum number of one-time keys, per algorithm, to keep for a device. Uploads
+# which would exceed it are rejected, which protects against clients that keep
+# uploading keys they will never be able to use.
+#
+# The spec allows clients to discard their oldest private one-time keys once they hold
+# too many, and both libolm (at 100 keys) and vodozemac (at 5000) do, so keys beyond
+# that bound could never be used anyway. The limit sits comfortably above the 50 keys
+# clients built on the matrix-rust-sdk aim to keep on the server, and well below
+# vodozemac's private key bound, so we never reject an upload from a well-behaved
+# client nor hold a key the client has already discarded.
+MAX_ONE_TIME_KEYS_PER_DEVICE = 500
 
 
 class E2eKeysHandler:
@@ -121,7 +134,6 @@ class E2eKeysHandler:
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
         )
-
         self._task_scheduler.register_action(
             self._delete_old_one_time_keys_task, "delete_old_otks"
         )
@@ -987,6 +999,28 @@ class E2eKeysHandler:
                 else:
                     new_keys.append(
                         (algorithm, key_id, encode_canonical_json(key).decode("ascii"))
+                    )
+
+            # Reject uploads which would take the device over the limit, rather than
+            # quietly discarding keys, so that a client which keeps uploading keys
+            # regardless of how many the server holds gets told about it.
+            counts = await self.store.count_e2e_one_time_keys(user_id, device_id)
+            for algorithm, new_count in Counter(
+                algorithm for algorithm, _, _ in new_keys
+            ).items():
+                total = counts.get(algorithm, 0) + new_count
+                if total > MAX_ONE_TIME_KEYS_PER_DEVICE:
+                    raise SynapseError(
+                        400,
+                        "Uploading %i more %s one-time keys would leave the device "
+                        "holding %i, over the limit of %i"
+                        % (
+                            new_count,
+                            algorithm,
+                            total,
+                            MAX_ONE_TIME_KEYS_PER_DEVICE,
+                        ),
+                        Codes.TOO_LARGE,
                     )
 
             log_kv({"message": "Inserting new one_time_keys.", "keys": new_keys})
