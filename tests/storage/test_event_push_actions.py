@@ -472,6 +472,71 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
         self.get_success(self.store._rotate_notifs())
         _assert_badge(1)
 
+    def _send_message(
+        self,
+        room_id: str,
+        tok: str,
+        thread_root: str | None = None,
+        highlight_for: str | None = None,
+    ) -> str:
+        """Send a message, optionally into a thread and/or mentioning a user."""
+        content: JsonDict = {
+            "msgtype": "m.text",
+            "body": highlight_for if highlight_for is not None else "msg",
+        }
+        if thread_root is not None:
+            content["m.relates_to"] = {
+                "rel_type": RelationTypes.THREAD,
+                "event_id": thread_root,
+            }
+        return self.helper.send_event(
+            room_id, type="m.room.message", content=content, tok=tok
+        )["event_id"]
+
+    def test_count_aggregation_main_timeline_top_up_stays_on_main_timeline(
+        self,
+    ) -> None:
+        """
+        Regression test: the top up of un-rotated push actions for the main timeline
+        must be added to the main timeline, not to whichever thread the summary query
+        happened to return last.
+        """
+        user_id, _, _, other_token, room_id = self._create_users_and_room()
+
+        self._send_message(room_id, other_token)
+        self.get_success(self.store._rotate_notifs())
+
+        # A summary row for a thread whose ID sorts after "main", so that it, rather
+        # than the main timeline, is the last row the summary query returns.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="event_push_summary",
+                values={
+                    "user_id": user_id,
+                    "room_id": room_id,
+                    "thread_id": "zzz-thread",
+                    "notif_count": 1,
+                    "unread_count": 0,
+                    "stream_ordering": 100000,
+                    "last_receipt_stream_ordering": None,
+                },
+            )
+        )
+
+        # A main timeline notification which has not been rotated yet.
+        self._send_message(room_id, other_token)
+
+        counts = self.get_success(
+            self.store.db_pool.runInteraction(
+                "get-unread-counts",
+                self.store._get_unread_counts_by_receipt_txn,
+                room_id,
+                user_id,
+            )
+        )
+        self.assertEqual(counts.main_timeline, NotifCounts(notify_count=2))
+        self.assertEqual(counts.threads, {"zzz-thread": NotifCounts(notify_count=1)})
+
     def test_count_aggregation_threads(self) -> None:
         """
         This is essentially the same test as test_count_aggregation, but adds

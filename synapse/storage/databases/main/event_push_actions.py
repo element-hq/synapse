@@ -704,21 +704,14 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             if thread_id not in summarised_threads:
                 continue
 
-            if thread_id == MAIN_TIMELINE:
-                counts.notify_count += notif_count
-                counts.unread_count += unread_count
-            elif thread_id in thread_counts:
-                thread_counts[thread_id].notify_count += notif_count
-                thread_counts[thread_id].unread_count += unread_count
-            else:
-                # Previous thread summaries of 0 are discarded above.
-                #
-                # TODO If empty summaries are deleted this can be removed.
-                thread_counts[thread_id] = NotifCounts(
-                    notify_count=notif_count,
-                    unread_count=unread_count,
-                    highlight_count=0,
-                )
+            # Note that previous thread summaries of 0 are discarded above, so this
+            # may create a new entry.
+            #
+            # TODO If empty summaries are deleted this can use `thread_counts`
+            # directly.
+            counts = _get_thread(thread_id)
+            counts.notify_count += notif_count
+            counts.unread_count += unread_count
 
         # Finally we need to count push actions that aren't included in the
         # summary returned above. This might be due to recent events that haven't
