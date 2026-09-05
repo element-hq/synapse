@@ -160,6 +160,10 @@ jobs:
         run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
       - name: Run in-repo Complement Tests
+        # Always run as long as we attempted to run the original Complement tests
+        # This lets us get a status report on the in-repo tests, even if the
+        # standard Complement test suite fails.
+        if: always() && steps.run_complement_tests.outcome != 'skipped'
         id: run_in_repo_complement_tests
         # -p=1: We're using `-p 1` to force the test packages to run serially as GHA boxes
         #     are underpowered and don't like running tons of Synapse instances at once.
