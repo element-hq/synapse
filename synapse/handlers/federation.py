@@ -1268,6 +1268,7 @@ class FederationHandler:
         assert event.sender == user_id
         assert event.state_key == user_id
         assert event.room_id == room_id
+        assert event.content.get("membership") == membership
         return origin, event, room_version
 
     async def on_make_leave_request(
