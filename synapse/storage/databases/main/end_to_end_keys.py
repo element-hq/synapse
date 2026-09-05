@@ -61,8 +61,8 @@ from synapse.util.iterutils import batch_iter
 from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
-    from synapse.handlers.e2e_keys import SignatureListItem
     from synapse.server import HomeServer
+    from synapse.synapse_rust.e2e_keys import SignatureListItem
 
 
 @attr.s(slots=True, auto_attribs=True)
