@@ -87,3 +87,28 @@ class RedisFactory(protocol.ReconnectingClientFactory):
 
 class SubscriberFactory(RedisFactory):
     def __init__(self) -> None: ...
+
+class Sentinel:
+    def __init__(
+        self,
+        sentinels: list[tuple[str, int]],
+        min_other_sentinels: int = ...,
+        sentinel_kwargs: dict[str, Any] | None = ...,
+    ): ...
+    def master_for(
+        self,
+        service_name: str,
+        dbid: int | None = ...,
+        password: str | None = ...,
+        poolsize: int = ...,
+        **kwargs: Any,
+    ) -> ConnectionHandler: ...
+    def slave_for(
+        self,
+        service_name: str,
+        dbid: int | None = ...,
+        password: str | None = ...,
+        poolsize: int = ...,
+        **kwargs: Any,
+    ) -> ConnectionHandler: ...
+    def disconnect(self) -> "Deferred[None]": ...
