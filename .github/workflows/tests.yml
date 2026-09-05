@@ -419,14 +419,25 @@ jobs:
       - name: Set up PostgreSQL ${{ matrix.job.postgres-version }}
         if: ${{ matrix.job.postgres-version }}
         # 1. Mount postgres data files onto a tmpfs in-memory filesystem to reduce overhead of docker's overlayfs layer.
+        #    Use a custom path to ensure stability (it will change across versions,
+        #    see https://github.com/docker-library/postgres/blob/be0b7ac960bb393b00a31938b6d878397f482759/Dockerfile-debian.template#L188)
         # 2. Expose the unix socket for postgres. This removes latency of using docker-proxy for connections.
+        # 3. We disable crash-safety features for speed: fsync, synchronous commits, full-page writes.
+        #    Note: synchronous commits are enabled/disabled at runtime by Synapse, so there is also
+        #    code in `tests/server.py` to configure this as off.
         run: |
           docker run -d -p 5432:5432 \
-            --tmpfs /var/lib/postgres:rw,size=6144m \
+            --tmpfs /pgdata:rw,size=6144m \
             --mount 'type=bind,src=/var/run/postgresql,dst=/var/run/postgresql' \
+            -e PGDATA=/pgdata \
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_INITDB_ARGS="--lc-collate C --lc-ctype C --encoding UTF8" \
-            postgres:${{ matrix.job.postgres-version }}
+            postgres:${{ matrix.job.postgres-version }} \
+              -c fsync=off \
+              -c synchronous_commit=off \
+              -c full_page_writes=off \
+              -c wal_level=minimal \
+              -c max_wal_senders=0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
