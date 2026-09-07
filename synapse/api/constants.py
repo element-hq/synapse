@@ -360,6 +360,26 @@ class AccountDataTypes:
     SYNAPSE_ADMIN_CLIENT_CONFIG: Final = "io.element.synapse.admin_client_config"
 
 
+class PushRuleIds:
+    """Namespaced IDs of the server-default push rules that Synapse refers to
+    by name (the Rust push rule evaluator holds the full base rule set)."""
+
+    IS_USER_MENTION: Final = "global/override/.m.rule.is_user_mention"
+    IS_ROOM_MENTION: Final = "global/override/.m.rule.is_room_mention"
+
+    CONTAINS_DISPLAY_NAME: Final = "global/override/.m.rule.contains_display_name"
+    CONTAINS_USER_NAME: Final = "global/content/.m.rule.contains_user_name"
+    ROOMNOTIF: Final = "global/override/.m.rule.roomnotif"
+
+
+LEGACY_MENTION_PUSH_RULE_IDS: Final = (
+    PushRuleIds.CONTAINS_DISPLAY_NAME,
+    PushRuleIds.CONTAINS_USER_NAME,
+    PushRuleIds.ROOMNOTIF,
+)
+"""The legacy mention push rules removed from the base rule set by MSC4210."""
+
+
 class HistoryVisibility:
     INVITED: Final = "invited"
     JOINED: Final = "joined"

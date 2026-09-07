@@ -32,6 +32,7 @@ from typing import (
 
 from twisted.internet import defer
 
+from synapse.api.constants import LEGACY_MENTION_PUSH_RULE_IDS, PushRuleIds
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.config.homeserver import ExperimentalConfig
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -41,6 +42,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
 from synapse.storage.databases.main.appservice import ApplicationServiceWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
@@ -64,6 +66,12 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+# Background update carrying users' customisations of the legacy mention push
+# rules over to the intentional mention rules. See
+# `PushRulesWorkerStore._migrate_legacy_mention_push_rules`.
+_MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME = "migrate_legacy_mention_push_rules"
 
 
 def _load_rules(
@@ -217,6 +225,11 @@ class PushRulesWorkerStore(
 
         self._config = hs.config.push_rules
 
+        self.db_pool.updates.register_background_update_handler(
+            _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME,
+            self._migrate_legacy_mention_push_rules,
+        )
+
     def get_max_push_rules_stream_id(self) -> int:
         """Get the position of the push rules stream.
 
@@ -244,6 +257,258 @@ class PushRulesWorkerStore(
         if stream_name == PushRulesStream.NAME:
             self._push_rules_stream_id_gen.advance(instance_name, token)
         super().process_replication_position(stream_name, instance_name, token)
+
+    async def _migrate_legacy_mention_push_rules(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """Background update carrying users' customisations of the legacy
+        mention push rules over to the intentional mention rules.
+
+        Matrix v1.17 (MSC4210) removed `.m.rule.contains_display_name`,
+        `.m.rule.contains_user_name` and `.m.rule.roomnotif` from the base rule
+        set, so any `enabled` or `actions` override a user had on them stopped
+        having an effect. Each override is copied onto the replacement rule
+        unless the user has already customised the replacement rule themselves,
+        in which case their explicit choice is kept:
+
+        - `.m.rule.roomnotif` maps one-to-one onto `.m.rule.is_room_mention`.
+        - `.m.rule.contains_display_name` and `.m.rule.contains_user_name` both
+          map onto `.m.rule.is_user_mention`. It is only disabled if the user
+          had disabled *both* legacy rules, i.e. opted out of mention
+          notifications entirely; a user who silenced just one of them still
+          wanted to be notified of mentions. For `actions`, an override on
+          `.m.rule.contains_display_name` takes precedence over one on
+          `.m.rule.contains_user_name`, as it did at evaluation time (override
+          rules run before content rules).
+
+        The legacy overrides themselves are left in place: they are harmless
+        while the rules are withheld, and still apply if the legacy rules are
+        restored with `msc4210_enabled: false`.
+
+        Only the push rule caches are invalidated; no push rules stream entry is
+        written, as the background worker is not necessarily the push rules
+        writer. Clients therefore see the migrated overrides on their next full
+        fetch of the rule set rather than through an incremental sync.
+        """
+        last_user = progress.get("last_user", "")
+
+        legacy_rule_ids = list(LEGACY_MENTION_PUSH_RULE_IDS)
+        mention_rule_ids = [PushRuleIds.IS_USER_MENTION, PushRuleIds.IS_ROOM_MENTION]
+        legacy_user_mention_rule_ids = (
+            PushRuleIds.CONTAINS_DISPLAY_NAME,
+            PushRuleIds.CONTAINS_USER_NAME,
+        )
+
+        def _migrate_txn(txn: LoggingTransaction) -> tuple[int, int]:
+            # Find the next batch of users with a customisation of a legacy rule.
+            # Both tables are indexed on `(user_name, rule_id)`, so each branch is
+            # a range scan from the last processed user which stops as soon as
+            # it has found enough matches.
+            legacy_clause, legacy_args = make_in_list_sql_clause(
+                self.database_engine, "rule_id", legacy_rule_ids
+            )
+            sql = f"""
+                SELECT user_name FROM (
+                    SELECT user_name FROM push_rules
+                    WHERE user_name > ? AND {legacy_clause}
+                    ORDER BY user_name LIMIT ?
+                ) AS r
+                UNION
+                SELECT user_name FROM (
+                    SELECT user_name FROM push_rules_enable
+                    WHERE user_name > ? AND {legacy_clause}
+                    ORDER BY user_name LIMIT ?
+                ) AS e
+                ORDER BY user_name LIMIT ?
+            """
+            txn.execute(
+                sql,
+                [last_user, *legacy_args, batch_size]
+                + [last_user, *legacy_args, batch_size]
+                + [batch_size],
+            )
+            users = [user_name for (user_name,) in txn]
+            if not users:
+                return 0, 0
+
+            # Fetch the overrides those users have on the legacy and mention rules.
+            users_clause, users_args = make_in_list_sql_clause(
+                self.database_engine, "user_name", users
+            )
+            rules_clause, rules_args = make_in_list_sql_clause(
+                self.database_engine, "rule_id", legacy_rule_ids + mention_rule_ids
+            )
+
+            txn.execute(
+                f"""
+                SELECT user_name, rule_id, actions FROM push_rules
+                WHERE {users_clause} AND {rules_clause}
+                """,
+                users_args + rules_args,
+            )
+            actions_by_user: dict[str, dict[str, str]] = {}
+            for user_name, rule_id, actions in txn:
+                actions_by_user.setdefault(user_name, {})[rule_id] = actions
+
+            txn.execute(
+                f"""
+                SELECT user_name, rule_id, enabled FROM push_rules_enable
+                WHERE {users_clause} AND {rules_clause}
+                """,
+                users_args + rules_args,
+            )
+            enabled_by_user: dict[str, dict[str, bool]] = {}
+            for user_name, rule_id, enabled in txn:
+                enabled_by_user.setdefault(user_name, {})[rule_id] = bool(enabled)
+
+            # Work out which overrides to copy onto the mention rules.
+            new_actions: list[tuple[str, str, str]] = []
+            new_enabled: list[tuple[str, str, bool]] = []
+            for user_name in users:
+                actions = actions_by_user.get(user_name, {})
+                enabled = enabled_by_user.get(user_name, {})
+
+                user_new_actions: dict[str, str] = {}
+                user_new_enabled: dict[str, bool] = {}
+
+                if (
+                    PushRuleIds.IS_ROOM_MENTION not in actions
+                    and PushRuleIds.ROOMNOTIF in actions
+                ):
+                    user_new_actions[PushRuleIds.IS_ROOM_MENTION] = actions[
+                        PushRuleIds.ROOMNOTIF
+                    ]
+                if (
+                    PushRuleIds.IS_ROOM_MENTION not in enabled
+                    and PushRuleIds.ROOMNOTIF in enabled
+                ):
+                    user_new_enabled[PushRuleIds.IS_ROOM_MENTION] = enabled[
+                        PushRuleIds.ROOMNOTIF
+                    ]
+
+                if PushRuleIds.IS_USER_MENTION not in actions:
+                    for legacy_rule_id in legacy_user_mention_rule_ids:
+                        if legacy_rule_id in actions:
+                            user_new_actions[PushRuleIds.IS_USER_MENTION] = actions[
+                                legacy_rule_id
+                            ]
+                            break
+                if PushRuleIds.IS_USER_MENTION not in enabled and all(
+                    enabled.get(legacy_rule_id) is False
+                    for legacy_rule_id in legacy_user_mention_rule_ids
+                ):
+                    user_new_enabled[PushRuleIds.IS_USER_MENTION] = False
+
+                # Setting the actions of a rule also ensures it has a
+                # `push_rules_enable` row (see `_upsert_push_rule_txn`); keep
+                # the same invariant for the rows we insert.
+                for rule_id in user_new_actions:
+                    if rule_id not in enabled and rule_id not in user_new_enabled:
+                        user_new_enabled[rule_id] = True
+
+                new_actions.extend(
+                    (user_name, rule_id, rule_actions)
+                    for rule_id, rule_actions in user_new_actions.items()
+                )
+                new_enabled.extend(
+                    (user_name, rule_id, rule_enabled)
+                    for rule_id, rule_enabled in user_new_enabled.items()
+                )
+
+            # A user customising a mention rule concurrently would race these
+            # inserts on the `(user_name, rule_id)` unique constraint. Their row
+            # wins, as it does for the overrides read above: the inserts skip
+            # rows which already exist rather than fail the batch, which would
+            # only be retried through the updater's error handling.
+            if isinstance(self.database_engine, PostgresEngine):
+                insert_rule_sql = """
+                    INSERT INTO push_rules
+                        (id, user_name, rule_id, priority_class, priority, conditions, actions)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT DO NOTHING
+                """
+                insert_enable_sql = """
+                    INSERT INTO push_rules_enable (id, user_name, rule_id, enabled)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT DO NOTHING
+                """
+            elif isinstance(self.database_engine, Sqlite3Engine):
+                insert_rule_sql = """
+                    INSERT OR IGNORE INTO push_rules
+                        (id, user_name, rule_id, priority_class, priority, conditions, actions)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+                insert_enable_sql = """
+                    INSERT OR IGNORE INTO push_rules_enable (id, user_name, rule_id, enabled)
+                    VALUES (?, ?, ?, ?)
+                """
+            else:
+                raise RuntimeError("Unknown database engine")
+
+            if new_actions:
+                ids = self._push_rule_id_gen.get_next_mult_txn(txn, len(new_actions))
+                txn.execute_batch(
+                    insert_rule_sql,
+                    [
+                        # Overrides of server-default rules are stored as dummy
+                        # rules with no conditions, see `set_push_rule_actions`.
+                        (rule_id, user_name, rule_id_, -1, 1, "[]", actions)
+                        for rule_id, (user_name, rule_id_, actions) in zip(
+                            ids, new_actions
+                        )
+                    ],
+                )
+            if new_enabled:
+                ids = self._push_rules_enable_id_gen.get_next_mult_txn(
+                    txn, len(new_enabled)
+                )
+                txn.execute_batch(
+                    insert_enable_sql,
+                    [
+                        (row_id, user_name, rule_id, 1 if enabled else 0)
+                        for row_id, (user_name, rule_id, enabled) in zip(
+                            ids, new_enabled
+                        )
+                    ],
+                )
+
+            changed_users = {user_name for user_name, _, _ in new_actions} | {
+                user_name for user_name, _, _ in new_enabled
+            }
+            if changed_users:
+                self._invalidate_cache_and_stream_bulk(
+                    txn,
+                    self.get_push_rules_for_user,
+                    [(user_name,) for user_name in changed_users],
+                )
+
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME,
+                {"last_user": users[-1]},
+            )
+
+            return len(users), len(changed_users)
+
+        num_users, num_changed_users = await self.db_pool.runInteraction(
+            "migrate_legacy_mention_push_rules", _migrate_txn
+        )
+
+        # Logged so that a change in a user's mention notifications can be
+        # traced back to this update.
+        if num_changed_users:
+            logger.info(
+                "Migrated legacy mention push rule customisations for %d of %d users",
+                num_changed_users,
+                num_users,
+            )
+
+        if num_users < batch_size:
+            await self.db_pool.updates._end_background_update(
+                _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME
+            )
+
+        return num_users
 
     @cached(max_entries=5000)
     async def get_push_rules_for_user(self, user_id: str) -> FilteredPushRules:
