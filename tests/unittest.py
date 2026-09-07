@@ -331,7 +331,7 @@ class TestCase(unittest.TestCase):
 
             marker = MISSING_MARKER if is_missing else CORRECT_MARKER
 
-            expected_lines.append(f"{marker}┊  {expected_item!r},{RESET}")
+            expected_lines.append(f"{marker}   {expected_item!r}{RESET}")
 
         actual_lines: list[str] = []
         used_markers = set()
@@ -349,11 +349,11 @@ class TestCase(unittest.TestCase):
                 marker = EXTRA_MARKER
             used_markers.add(marker)
 
-            actual_lines.append(f"{marker}┊  {actual_item!r},{RESET}")
+            actual_lines.append(f"{marker}   {actual_item!r}{RESET}")
 
         newline = "\n"
-        expected_string = f"{BOLD}Expected items:{RESET}\n        ┊{{\n{newline.join(expected_lines)}\n        ┊}}"
-        actual_string = f"{BOLD}Actually received items:{RESET}\n        ┊{{\n{newline.join(actual_lines)}\n        ┊}}"
+        expected_string = f"{BOLD}Expected items:{RESET}\n         {{\n{newline.join(expected_lines)}\n         }}"
+        actual_string = f"{BOLD}Actually received items:{RESET}\n         {{\n{newline.join(actual_lines)}\n         }}"
         first_message = (
             "Items must match exactly (sets are not equal)"
             if exact
