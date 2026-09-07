@@ -244,16 +244,17 @@ class RelationsWorkerStore(SQLBaseStore):
             # Joining per step keeps every events lookup an index probe.
             sql = """
                 WITH RECURSIVE related_events AS (
-                    SELECT e.event_id, e.relation_type, ev.room_id, ev.sender,
+                    SELECT er.event_id, er.relation_type, ev.room_id, ev.sender,
                         ev.topological_ordering, ev.stream_ordering, ev.type, 0 AS depth
-                    FROM event_relations e
-                    INNER JOIN events ev ON ev.event_id = e.event_id
-                    WHERE e.relates_to_id = ?
-                    UNION ALL SELECT e.event_id, e.relation_type, ev.room_id, ev.sender,
+                    FROM event_relations er
+                    INNER JOIN events ev ON ev.event_id = er.event_id
+                    WHERE er.relates_to_id = ?
+                    UNION ALL
+                    SELECT er.event_id, er.relation_type, ev.room_id, ev.sender,
                         ev.topological_ordering, ev.stream_ordering, ev.type, r.depth + 1
                     FROM related_events r
-                    INNER JOIN event_relations e ON e.relates_to_id = r.event_id
-                    INNER JOIN events ev ON ev.event_id = e.event_id
+                    INNER JOIN event_relations er ON er.relates_to_id = r.event_id
+                    INNER JOIN events ev ON ev.event_id = er.event_id
                     WHERE r.depth <= 3
                 )
                 SELECT event_id, relation_type, sender, topological_ordering, stream_ordering
