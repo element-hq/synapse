@@ -1521,7 +1521,7 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, msg=channel.result)
 
     def test_login_appservice_msc4190_fail(self) -> None:
-        """Test that an appservice user can use /login"""
+        """Test that an appservice with MSC4190 enabled can't use /login"""
         self.register_appservice_user(
             "as3_user_alice", self.msc4190_service.token, inhibit_login=True
         )
@@ -1537,7 +1537,7 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, msg=channel.result)
         self.assertEqual(
             channel.json_body.get("errcode"),
-            Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            "M_APPSERVICE_LOGIN_UNSUPPORTED",
             channel.json_body,
         )
 

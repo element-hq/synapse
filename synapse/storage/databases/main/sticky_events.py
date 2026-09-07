@@ -28,7 +28,12 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
-from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.storage.util.id_generators import (
+    MultiWriterIdGenerator,
+    advance_multiwriter_sharded_token_after_partial_read,
+    make_multiwriter_sharded_token_bounds_sql,
+)
+from synapse.types import MultiWriterStreamToken
 from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
@@ -126,13 +131,13 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             self._sticky_events_id_gen.advance(instance_name, token)
         super().process_replication_position(stream_name, instance_name, token)
 
-    def get_max_sticky_events_stream_id(self) -> int:
-        """Get the current maximum stream_id for thread subscriptions.
+    def get_sticky_events_stream_token(self) -> MultiWriterStreamToken:
+        """Get the current position of the sticky events stream.
 
         Returns:
-            The maximum stream_id
+            A (potentially sharded) token for the sticky events stream.
         """
-        return self._sticky_events_id_gen.get_current_token()
+        return MultiWriterStreamToken.from_generator(self._sticky_events_id_gen)
 
     def get_sticky_events_stream_id_generator(self) -> MultiWriterIdGenerator:
         return self._sticky_events_id_gen
@@ -141,41 +146,54 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         self,
         room_ids: Collection[str],
         *,
-        from_id: int,
-        to_id: int,
+        from_token: MultiWriterStreamToken,
+        to_token: MultiWriterStreamToken,
         now: int,
         limit: int | None,
-    ) -> tuple[int, dict[str, list[str]]]:
+    ) -> tuple[MultiWriterStreamToken, dict[str, list[str]]]:
         """
-        Fetch all the sticky events' IDs in the given rooms, with sticky stream IDs satisfying
-        from_id < sticky stream ID <= to_id.
+        Fetch all the sticky events' IDs in the given rooms, with sticky stream positions
+        after `from_token` and at or before `to_token`.
 
         The events are returned ordered by the sticky events stream.
 
         Args:
             room_ids: The room IDs to return sticky events in.
-            from_id: The sticky stream ID that sticky events should be returned from (exclusive).
-            to_id: The sticky stream ID that sticky events should end at (inclusive).
+            from_token: The sticky stream position to return sticky events from (exclusive).
+            to_token: The sticky stream position to end at (inclusive).
             now: The current time in unix millis, used for skipping expired events.
             limit: Max sticky events to return, or None to apply no limit.
         Returns:
-            to_id, dict[room_id, list[event_ids]]
+            The stream position that has been read up to (which may be behind
+            `to_token` if `limit` was hit), and a dict[room_id, list[event_ids]].
         """
+        if limit == 0:
+            # No rows to return, so don't advance.
+            return from_token, {}
+
         sticky_events_rows = await self.db_pool.runInteraction(
             "get_sticky_events_in_rooms",
             self._get_sticky_events_in_rooms_txn,
             room_ids,
-            from_id=from_id,
-            to_id=to_id,
+            from_token=from_token,
+            to_token=to_token,
             now=now,
             limit=limit,
         )
 
-        if not sticky_events_rows:
-            return to_id, {}
-
-        # Get stream_id of the last row, which is the highest
-        new_to_id, _, _ = sticky_events_rows[-1]
+        if limit is not None and len(sticky_events_rows) == limit:
+            # We hit the limit, so advance the `to_token` partially
+            last_stream_id, _, _ = sticky_events_rows[-1]
+            new_to_token = advance_multiwriter_sharded_token_after_partial_read(
+                from_token_exclusive=from_token,
+                to_token_inclusive=to_token,
+                last_read_stream_id=last_stream_id,
+            )
+        else:
+            # We didn't hit the limit, therefore we have read the whole range.
+            # We can skip ahead to `to_token` (just be careful that we don't
+            # rewind `from_token` in the case this worker is behind.)
+            new_to_token = from_token.copy_and_advance(to_token)
 
         # room ID -> event IDs
         room_id_to_event_ids: dict[str, list[str]] = {}
@@ -183,22 +201,28 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             events = room_id_to_event_ids.setdefault(room_id, [])
             events.append(event_id)
 
-        return (new_to_id, room_id_to_event_ids)
+        return (new_to_token, room_id_to_event_ids)
 
     def _get_sticky_events_in_rooms_txn(
         self,
         txn: LoggingTransaction,
         room_ids: Collection[str],
         *,
-        from_id: int,
-        to_id: int,
+        from_token: MultiWriterStreamToken,
+        to_token: MultiWriterStreamToken,
         now: int,
         limit: int | None,
     ) -> list[tuple[int, str, str]]:
-        if len(room_ids) == 0:
+        if len(room_ids) == 0 or limit == 0 or to_token.is_before_or_eq(from_token):
             return []
         room_id_in_list_clause, room_id_in_list_values = make_in_list_sql_clause(
             txn.database_engine, "se.room_id", room_ids
+        )
+        stream_clause, stream_values = make_multiwriter_sharded_token_bounds_sql(
+            stream_id_column="se.stream_id",
+            instance_name_column="se.instance_name",
+            from_token_exclusive=from_token,
+            to_token_inclusive=to_token,
         )
         limit_clause = ""
         limit_params: tuple[int, ...] = ()
@@ -219,13 +243,12 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             WHERE
                 NOT {expr_soft_failed}
                 AND ? < expires_at
-                AND ? < stream_id
-                AND stream_id <= ?
+                AND {stream_clause}
                 AND {room_id_in_list_clause}
-            ORDER BY stream_id ASC
+            ORDER BY se.stream_id ASC
             {limit_clause}
             """,
-            (now, from_id, to_id, *room_id_in_list_values, *limit_params),
+            (now, *stream_values, *room_id_in_list_values, *limit_params),
         )
         return cast(list[tuple[int, str, str]], txn.fetchall())
 

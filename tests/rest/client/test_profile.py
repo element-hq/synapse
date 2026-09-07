@@ -127,6 +127,37 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
+    @unittest.override_config({"enable_set_displayname": False})
+    def test_set_displayname_disabled(self) -> None:
+        """Changing an existing displayname while `enable_set_displayname` is off
+        should get a 403 with M_FORBIDDEN."""
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/displayname" % (self.owner,),
+            content={"displayname": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_displayname()
+        self.assertEqual(res, "owner")
+
+    @unittest.override_config({"enable_set_displayname": False})
+    def test_delete_displayname_disabled(self) -> None:
+        """Deleting an existing displayname while `enable_set_displayname` is off
+        should get a 403 with M_FORBIDDEN."""
+        channel = self.make_request(
+            "DELETE",
+            "/profile/%s/displayname" % (self.owner,),
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_displayname()
+        self.assertEqual(res, "owner")
+
     def test_get_avatar_url(self) -> None:
         res = self._get_avatar_url()
         self.assertIsNone(res)
@@ -176,6 +207,53 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+
+    @unittest.override_config({"enable_set_avatar_url": False})
+    def test_set_avatar_url_disabled(self) -> None:
+        """Changing an existing avatar while `enable_set_avatar_url` is off should
+        get a 403 with M_FORBIDDEN. Setting it for the first time is allowed."""
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/avatar_url" % (self.owner,),
+            content={"avatar_url": "http://my.server/pic.gif"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/avatar_url" % (self.owner,),
+            content={"avatar_url": "http://my.server/me.png"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_avatar_url()
+        self.assertEqual(res, "http://my.server/pic.gif")
+
+    @unittest.override_config({"enable_set_avatar_url": False})
+    def test_delete_avatar_url_disabled(self) -> None:
+        """Deleting an existing avatar while `enable_set_avatar_url` is off should
+        get a 403 with M_FORBIDDEN."""
+        channel = self.make_request(
+            "PUT",
+            "/profile/%s/avatar_url" % (self.owner,),
+            content={"avatar_url": "http://my.server/pic.gif"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "DELETE",
+            "/profile/%s/avatar_url" % (self.owner,),
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        res = self._get_avatar_url()
+        self.assertEqual(res, "http://my.server/pic.gif")
 
     def _get_displayname(self, name: str | None = None) -> str | None:
         channel = self.make_request(

@@ -1,0 +1,1 @@
+Return the stable `M_APPSERVICE_LOGIN_UNSUPPORTED` error code, added in Matrix 1.17, instead of its unstable MSC4190-prefixed identifier.
