@@ -21,7 +21,7 @@
 import logging
 from typing import TYPE_CHECKING, Iterable, Sequence
 
-from synapse.api.constants import EduTypes, ReceiptTypes
+from synapse.api.constants import Direction, EduTypes, ReceiptTypes
 from synapse.appservice import ApplicationService
 from synapse.streams import EventSource
 from synapse.types import (
@@ -326,15 +326,35 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
             A two-tuple containing the following:
                 * A list of json dictionaries derived from read receipts that the
                   appservice may be interested in.
-                * The current read receipt stream token.
+                * The read receipt stream token up to which receipts were actually
+                  fetched. This is earlier than `to_key` if the fetch was
+                  truncated; callers must call this method again from the returned
+                  token to fetch the remaining receipts.
         """
         if from_key == to_key:
             return [], to_key
 
-        # Fetch all read receipts for all rooms, up to a limit of 100. This is ordered
-        # by most recent.
-        rooms_to_events = await self.store.get_linearized_receipts_for_all_rooms(
-            from_key=from_key, to_key=to_key
+        # A stored stream position of 1 means no read receipts have ever been
+        # delivered to this application service:
+        # `get_type_stream_id_for_appservice` returns 1 when there is no stored
+        # position, and actual receipts occupy stream IDs 2 and upwards.
+        is_first_receipt_delivery = from_key.stream <= 1
+
+        # Fetch read receipts for all rooms, in ascending stream order. The number
+        # of receipts fetched is capped, in which case `reached_token` tells us how
+        # far we actually got.
+        #
+        # On the first delivery, don't backfill the entire receipt history: just
+        # send the most recent receipts and fast-forward past everything older.
+        (
+            rooms_to_events,
+            reached_token,
+        ) = await self.store.get_linearized_receipts_for_all_rooms(
+            from_key=from_key,
+            to_key=to_key,
+            order=Direction.BACKWARDS
+            if is_first_receipt_delivery
+            else Direction.FORWARDS,
         )
 
         # Then filter down to rooms that the AS can read
@@ -345,7 +365,7 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
 
             events.append(event)
 
-        return events, to_key
+        return events, reached_token
 
     def get_current_key(self) -> MultiWriterStreamToken:
         return self.store.get_max_receipt_stream_id()
