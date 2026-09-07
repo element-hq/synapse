@@ -19,6 +19,7 @@
 #
 
 import datetime
+import random
 from typing import (
     Collection,
     Iterable,
@@ -27,6 +28,7 @@ from typing import (
     TypeVar,
     cast,
 )
+from unittest import mock
 
 import attr
 from parameterized import parameterized
@@ -40,18 +42,22 @@ from synapse.api.room_versions import (
     RoomVersion,
 )
 from synapse.events import EventBase
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
+from synapse.events.snapshot import EventContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.types import Cursor
 from synapse.synapse_rust.events import EventInternalMetadata
+from synapse.synapse_rust.room_versions import RoomVersions
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
 from synapse.util.json import json_encoder
 
 import tests.unittest
 import tests.utils
+from tests.test_utils.event_builders import make_test_event
 
 # The silly auth graph we use to test the auth difference algorithm,
 # where the top are the most recent events.
@@ -1414,6 +1420,358 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         # elapsed past the backoff range so there is no events to backoff from.
         self.assertEqual(event_ids_with_backoff, {})
 
+    def _create_msc4242_room(self) -> tuple[str, str]:
+        """Create an MSC4242 room with an additional join rules state event.
+
+        Returns:
+            A tuple of the room ID and the event ID of the most recent state event.
+        """
+        user_id = self.register_user("alice", "test")
+        tok = self.login("alice", "test")
+        room_id = self.helper.create_room_as(
+            room_creator=user_id,
+            tok=tok,
+            room_version=RoomVersions.MSC4242v12.identifier,
+        )
+        resp = self.helper.send_state(
+            room_id,
+            "m.room.join_rules",
+            {"join_rule": "knock"},
+            tok=tok,
+        )
+        return room_id, resp["event_id"]
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_state_dag(self) -> None:
+        """
+        Test that MSC4242 state dag rooms can return the complete state dag on request.
+        """
+        room_id, latest = self._create_msc4242_room()
+        state_dag = self.get_success(
+            self.store.get_state_dag(room_id, {latest}),
+        )
+        # create <- member <- pl <- join_rules <- his vis <- join_rules
+        self.assertEquals(len(state_dag), 6)
+        want_types = [
+            EventTypes.Create,
+            EventTypes.Member,
+            EventTypes.PowerLevels,
+            EventTypes.JoinRules,
+            EventTypes.RoomHistoryVisibility,
+            EventTypes.JoinRules,
+        ]
+        got_types = []
+        curr = {latest}
+        while len(curr) > 0:
+            event_id = curr.pop()
+            ev = state_dag[event_id]
+            got_types.append(ev.type)
+            curr.update(ev.prev_state_events)
+        got_types.reverse()  # we walked up the graph but want_types is walking down
+        self.assertEqual(got_types, want_types)
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_state_dag_at_create_event(self) -> None:
+        """
+        Test that asking for the state DAG at the create event returns just the create event:
+        we always return the requested forward extremities, and there are no earlier events to
+        walk back to.
+        """
+        room_id, _ = self._create_msc4242_room()
+        # Room IDs are the hash of the create event in this room version, so the create event
+        # ID is derivable from the room ID.
+        create_event_id = f"${room_id[1:]}"
+        state_dag = self.get_success(
+            self.store.get_state_dag(room_id, {create_event_id}),
+        )
+        self.assertEqual(list(state_dag), [create_event_id])
+
+
+class EventFederationGetMissingEventsStateDAGTestCase(
+    tests.unittest.HomeserverTestCase
+):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        persist_events = hs.get_datastores().persist_events
+        assert persist_events is not None
+        self.persist_events = persist_events
+
+        # Primarily testing to make sure that we sort events
+        # correctly when there are multiple prev_state_events
+        #       .- C -- D ---.
+        # A <- B             E
+        #       `- R -- W --`
+        #           `-- T -`
+        graph: dict[str, list[str]] = {
+            "A": [],
+            "B": ["A"],
+            "C": ["B"],
+            "R": ["B"],
+            "D": ["C"],
+            "W": ["R"],
+            "T": ["R"],
+            "E": ["W", "D", "T"],
+        }
+        self.graph = graph
+        (self.room_id, self.graph_events) = self._persist_state_dag(
+            "@test_get_missing_events_state_dag:localhost", graph
+        )
+
+    def _persist_state_dag(
+        self, creator: str, graph: dict[str, list[str]]
+    ) -> tuple[str, dict[str, MSC4242Event]]:
+        """Build and persist a state DAG in its own room, as `build_state_dag` returns it."""
+        (room_id, graph_events) = build_state_dag(creator, graph)
+
+        def insert(txn: LoggingTransaction) -> None:
+            mock_context = mock.Mock(spec=EventContext)
+            mock_context.rejected = False
+            for ev in graph_events.values():
+                # store the event first to satisfy fk constraints
+                self.persist_events._store_event_txn(
+                    txn,
+                    [(ev, mock_context)],
+                )
+                self.persist_events._store_state_dag_edges(
+                    txn,
+                    ev,
+                )
+
+        # satisfy fk constraints
+        self.get_success(
+            self.store.store_room(room_id, creator, False, RoomVersions.MSC4242v12)
+        )
+        self.get_success(
+            self.store.db_pool.runInteraction(
+                "_store_state_dag_edges",
+                insert,
+            )
+        )
+        return room_id, graph_events
+
+    def _get_missing_events(
+        self,
+        latest: list[str],
+        earliest: list[str],
+        limit: int,
+        room_id: str | None = None,
+        graph_events: dict[str, MSC4242Event] | None = None,
+    ) -> list[str]:
+        """Run `get_missing_events_state_dag` in terms of fake event IDs, returning the fake
+        event IDs which came back. Queries the room built in `prepare` unless told otherwise.
+        """
+        if room_id is None or graph_events is None:
+            room_id = self.room_id
+            graph_events = self.graph_events
+        fake_event_ids = {ev.event_id: fake for fake, ev in graph_events.items()}
+        got = self.get_success(
+            self.store.get_missing_events_state_dag(
+                room_id=room_id,
+                earliest_event_ids=[graph_events[fake].event_id for fake in earliest],
+                latest_event_ids=[graph_events[fake].event_id for fake in latest],
+                limit=limit,
+            ),
+        )
+        return [fake_event_ids[ev.event_id] for ev in got]
+
+    @parameterized.expand(
+        [
+            (["E"], ["D", "T", "W"], 3),
+            (["E"], ["D", "T"], 2),
+            (["E"], ["D"], 1),
+            (["W", "T", "D"], ["C", "R"], 2),
+            # breadth first and new entries are added to the end, sorted lexicographically
+            (["E"], ["D", "T", "W", "C", "R", "B", "A"], 100),
+            # we should sort the latest values initially
+            (["E", "C"], ["B", "D", "T", "W"], 4),
+            (["C", "E"], ["B", "D", "T", "W"], 4),
+            # dupes are ignored
+            (["E", "E", "C", "C", "C"], ["B", "D", "T", "W"], 4),
+            # include latest events in response. W included because reachable from E.
+            # sort order is based on # hops not processing order of parents
+            # (which would produce D,T,W,R as E is processed first, then W).
+            (["W", "E"], ["D", "R", "T", "W"], 4),
+        ]
+    )
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_missing_events_state_dag(
+        self, latest: list[str], want: list[str], limit: int
+    ) -> None:
+        #       .- C -- D ---.
+        # A <- B             E
+        #       `- R -- W --`
+        #           `-- T -`
+        self.assertEquals(
+            self._get_missing_events(latest=latest, earliest=[], limit=limit),
+            want,
+            f"latest={latest} want={want} limit={limit}",
+        )
+        # These expectations are written by hand, so use them to check `walk_state_dag`, which
+        # the randomly generated graphs below are compared against.
+        self.assertEquals(
+            walk_state_dag(self.graph, self.graph_events, latest, [], limit),
+            want,
+            f"latest={latest} want={want} limit={limit}",
+        )
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_missing_events_state_dag_limit_truncates(self) -> None:
+        """Lowering `limit` must truncate the result rather than change it.
+
+        `limit` also bounds how many hops the walk takes, so this checks the two uses agree:
+        as every extra hop contributes at least one event, a shallower walk cannot miss an
+        event that a `limit`-sized response should have contained.
+        """
+        full = self._get_missing_events(
+            latest=["E"], earliest=[], limit=len(self.graph_events)
+        )
+        self.assertEquals(full, ["D", "T", "W", "C", "R", "B", "A"])
+        for limit in range(1, len(full) + 1):
+            self.assertEquals(
+                self._get_missing_events(latest=["E"], earliest=[], limit=limit),
+                full[:limit],
+                f"limit={limit}",
+            )
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_missing_events_state_dag_returns_nothing(self) -> None:
+        """The cases where there is nothing to walk back to."""
+        # Nothing was asked for.
+        self.assertEquals(
+            self._get_missing_events(latest=["E"], earliest=[], limit=0), []
+        )
+        # Every event in the room has already been seen.
+        self.assertEquals(
+            self._get_missing_events(
+                latest=["E"], earliest=list(self.graph), limit=100
+            ),
+            [],
+        )
+        # Every event walked back from has already been seen.
+        self.assertEquals(
+            self._get_missing_events(latest=["E", "C"], earliest=["C", "E"], limit=100),
+            [],
+        )
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_missing_events_state_dag_random_graphs(self) -> None:
+        """Check the query against a direct implementation of the MSC4242 ordering.
+
+        Uses randomly generated DAGs, as the hand-written cases above can only cover the
+        shapes we thought to write down. The seed is fixed so that a failure is reproducible
+        and cannot appear on an unrelated change.
+        """
+        rand = random.Random(42)
+        # Single letters keep `build_state_dag`'s hash mining cheap. At least 4 events, as
+        # smaller graphs have too little to order for the walk to be interesting.
+        names = "ABCDEFGH"
+        for room_number in range(20):
+            # Each event picks its prev_state_events from the events before it, which keeps
+            # the graph acyclic and in causal order. "A" is the create event.
+            graph: dict[str, list[str]] = {names[0]: []}
+            for index in range(1, rand.randint(4, len(names))):
+                graph[names[index]] = sorted(
+                    rand.sample(names[:index], rand.randint(1, index))
+                )
+            built = list(graph)
+            (room_id, graph_events) = self._persist_state_dag(
+                f"@test_random_state_dag_{room_number}:localhost", graph
+            )
+
+            for _ in range(3):
+                # `latest` is sampled with replacement, as callers can repeat an event ID.
+                latest = [
+                    rand.choice(built) for _ in range(rand.randint(1, len(built)))
+                ]
+                earliest = rand.sample(built, rand.randint(0, len(built) // 2))
+                limit = rand.randint(0, len(built) + 1)
+                message = (
+                    f"graph={graph} latest={latest} earliest={earliest} limit={limit}"
+                )
+                self.assertEquals(
+                    self._get_missing_events(
+                        latest=latest,
+                        earliest=earliest,
+                        limit=limit,
+                        room_id=room_id,
+                        graph_events=graph_events,
+                    ),
+                    walk_state_dag(graph, graph_events, latest, earliest, limit),
+                    message,
+                )
+
+                # Lowering `limit` must truncate the result rather than change it. Take the
+                # limit from the events actually available rather than from the random one,
+                # which is often high enough that nothing is dropped.
+                full = self._get_missing_events(
+                    latest=latest,
+                    earliest=earliest,
+                    limit=len(built),
+                    room_id=room_id,
+                    graph_events=graph_events,
+                )
+                if len(full) > 1:
+                    self.assertEquals(
+                        self._get_missing_events(
+                            latest=latest,
+                            earliest=earliest,
+                            limit=len(full) - 1,
+                            room_id=room_id,
+                            graph_events=graph_events,
+                        ),
+                        full[:-1],
+                        message,
+                    )
+
+    @tests.unittest.override_config(
+        {"experimental_features": {"msc4242_enabled": True}}
+    )
+    def test_get_missing_events_state_dag_with_cycle(self) -> None:
+        """The walk must terminate even if the edges table contains a cycle.
+
+        A cycle cannot be produced by the normal write path, as an event's prev_state_events
+        are fixed at creation and its event ID is a hash of them. Insert one directly to check
+        that the query is bounded regardless.
+        """
+        # Claim that A (the create event) has E as a prev_state_event, so walking back from E
+        # eventually reaches A and then E again.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="msc4242_state_dag_edges",
+                values={
+                    "room_id": self.room_id,
+                    "event_id": self.graph_events["A"].event_id,
+                    "prev_state_event_id": self.graph_events["E"].event_id,
+                },
+                desc="insert_state_dag_cycle",
+            )
+        )
+
+        # Same as the acyclic walk from E, with E itself now reachable via A at the end. Each
+        # event appears exactly once: the CTE groups by event ID and keeps the fewest hops.
+        self.assertEquals(
+            self._get_missing_events(latest=["E"], earliest=[], limit=100),
+            ["D", "T", "W", "C", "R", "B", "A", "E"],
+        )
+
 
 @attr.s(auto_attribs=True)
 class FakeEvent:
@@ -1431,3 +1789,126 @@ class FakeEvent:
 
     def is_state(self) -> bool:
         return True
+
+
+def walk_state_dag(
+    graph: dict[str, list[str]],
+    graph_events: dict[str, MSC4242Event],
+    latest: list[str],
+    earliest: list[str],
+    limit: int,
+) -> list[str]:
+    """Work out what `get_missing_events_state_dag` should return, from the MSC4242 rules.
+
+    Walks back from `latest` via prev_state_events, then orders the events found by how many
+    hops they are from `latest`, breaking ties on the real event ID. An `earliest` event is
+    never returned and is never walked through, though its predecessors are still returned if
+    some other path reaches them.
+
+    Takes the graph and events as `build_state_dag` returns them, in terms of fake event IDs,
+    and returns the fake event IDs which should come back, in order. Ties break on the real
+    event ID rather than the fake one because the create event is the one event whose real ID
+    does not start with its fake ID.
+    """
+    hops: dict[str, int] = {}
+    # An event `limit` hops away can only be reached by returning an event at every hop
+    # before it, so a walk deeper than `limit` cannot contribute to the response.
+    frontier = sorted(set(latest) - set(earliest))
+    for hop in range(1, limit + 1):
+        next_frontier = set()
+        for fake_event_id in frontier:
+            for prev_fake_event_id in graph[fake_event_id]:
+                if prev_fake_event_id in earliest or prev_fake_event_id in hops:
+                    continue
+                # The first time we see an event is by definition its fewest hops.
+                hops[prev_fake_event_id] = hop
+                next_frontier.add(prev_fake_event_id)
+        frontier = sorted(next_frontier)
+    return sorted(
+        hops,
+        key=lambda fake: (hops[fake], graph_events[fake].event_id),
+    )[:limit]
+
+
+def build_state_dag(
+    creator: str, graph: dict[str, list[str]]
+) -> tuple[str, dict[str, MSC4242Event]]:
+    """Build an MSC4242 state DAG.
+
+    Args:
+        creator: The user ID creating the graph. Should be unique per-test to ensure room IDs change between tests.
+        graph: A map of fake event ID e.g. "B" to a list of prev_state_events e.g. ["A"]. Graphs must
+        be created in causal order (earliest events first). The first entry is assumed to be the
+        create event, so it must have no prev_state_events; every later entry must have at least one.
+    Returns:
+        A tuple of the room ID and a map from fake event ID e.g. "B" to real event which you can use .event_id
+        to extract the real event ID. Guarantees that the real event IDs start with the fake event ID e.g.
+        the real event for "B" is guarantees to start "$B...." which makes sorting tests much easier to reason about.
+        The create event is the exception: its ID is fixed by the room ID, so it does not start with its
+        fake event ID.
+    """
+    graph_events: dict[str, MSC4242Event] = {}  # graph ID => built event
+    create_event = make_test_event(
+        {
+            "type": EventTypes.Create,
+            "state_key": "",
+            "content": {
+                "room_version": RoomVersions.MSC4242v12.identifier,
+            },
+            "sender": creator,
+            "origin_server_ts": 1,
+        },
+        room_version=RoomVersions.MSC4242v12,
+    )
+    # Narrow to an MSC4242 event, so that `prev_state_events` can be used.
+    assert supports_msc4242_state_dag(create_event)
+    room_id = create_event.room_id
+    entropy = 1
+    for index, graph_event_id in enumerate(graph):
+        if index == 0:
+            # The first entry is the create event, which roots the state DAG.
+            assert len(graph[graph_event_id]) == 0, (
+                f"the first graph event {graph_event_id} is the create event, so it cannot "
+                "have any prev_state_events"
+            )
+            graph_events[graph_event_id] = create_event
+            continue
+        assert len(graph[graph_event_id]) > 0, (
+            f"graph event {graph_event_id} has no prev_state_events, but only the create event "
+            "(the first entry) may be missing them"
+        )
+        # Map previous event IDs to real event IDs. Requires us to build events in causal order.
+        prev_state_event_ids = [
+            graph_events[prev_graph_event_id].event_id
+            for prev_graph_event_id in graph[graph_event_id]
+        ]
+        # Event IDs are hashes of the event, so we cannot choose them directly. Instead, keep
+        # rebuilding the event with a different `origin_server_ts` until the hash happens to
+        # start with the fake event ID (e.g. "B" produces "$B..."). Ordering in the state DAG
+        # breaks ties lexicographically on the real event ID, so having the real IDs sort in
+        # the same order as the fake names is what makes the expectations in these tests
+        # readable.
+        while graph_event_id not in graph_events:
+            graph_event = make_test_event(
+                {
+                    "type": "foo",
+                    # All the fake events share a `type`, so the `state_key` is what makes
+                    # each one a distinct piece of state.
+                    "state_key": graph_event_id,
+                    "content": {},
+                    "sender": creator,
+                    "origin_server_ts": 1 + entropy,
+                    "prev_state_events": prev_state_event_ids,
+                    # Nothing in these tests looks at the message DAG, so just mirror the
+                    # state DAG here.
+                    "prev_events": prev_state_event_ids,
+                    "room_id": room_id,
+                },
+                room_version=RoomVersions.MSC4242v12,
+            )
+            assert supports_msc4242_state_dag(graph_event)
+            if not graph_event.event_id[1:].startswith(graph_event_id):
+                entropy += 1
+                continue
+            graph_events[graph_event_id] = graph_event
+    return (room_id, graph_events)

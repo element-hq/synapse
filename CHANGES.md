@@ -1,3 +1,18 @@
+# Synapse 1.160.0 (2026-09-02)
+
+No significant changes since 1.160.0rc2.
+
+
+
+
+# Synapse 1.160.0rc2 (2026-08-31)
+
+## Bugfixes
+
+- Fix sending custom profile field removals to legacy sync clients when the field is deleted using the profile field delete endpoint. ([\#20147](https://github.com/element-hq/synapse/issues/20147))
+
+
+
 # Synapse 1.160.0rc1 (2026-08-25)
 
 ## Features

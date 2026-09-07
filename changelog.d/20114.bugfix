@@ -1,0 +1,1 @@
+Fix a long-standing bug where private read receipts of users outside an application service's namespaces were sent to application services that opted in to receiving ephemeral events ([MSC2409](https://github.com/matrix-org/matrix-spec-proposals/pull/2409)).

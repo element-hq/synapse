@@ -31,7 +31,7 @@ from synapse.api.constants import (
     ProfileFields,
     ProfileUpdateAction,
 )
-from synapse.api.errors import AuthError, SynapseError
+from synapse.api.errors import AuthError, Codes, SynapseError
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -907,7 +907,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
         # Setting displayname a second time is forbidden
-        self.get_failure(
+        f = self.get_failure(
             self.handler.set_field(
                 target_user=self.frank,
                 requester=synapse.types.create_requester(self.frank),
@@ -916,6 +916,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ),
             SynapseError,
         )
+        self.assertEqual(f.value.code, 403)
+        self.assertEqual(f.value.errcode, Codes.FORBIDDEN)
 
     def test_set_my_name_noauth(self) -> None:
         self.get_failure(
@@ -1061,7 +1063,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
         # Set avatar a second time is forbidden
-        self.get_failure(
+        f = self.get_failure(
             self.handler.set_field(
                 target_user=self.frank,
                 requester=synapse.types.create_requester(self.frank),
@@ -1070,6 +1072,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             ),
             SynapseError,
         )
+        self.assertEqual(f.value.code, 403)
+        self.assertEqual(f.value.errcode, Codes.FORBIDDEN)
 
     def test_avatar_constraints_no_config(self) -> None:
         """Tests that the method to check an avatar against configured constraints skips
