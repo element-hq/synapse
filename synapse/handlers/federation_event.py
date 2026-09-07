@@ -523,8 +523,10 @@ class FederationEventHandler:
         Args:
             origin: Where the events came from
             room_id:
-            auth_events
-            state
+            auth_events: The auth chain from the send_join response. Empty for MSC4242
+                State DAG rooms, which do not have one.
+            state: The current state of the room. For MSC4242 State DAG rooms this is the
+                state DAG, which includes the auth chains for the state.
             event
             room_version: The room version we expect this room to have, and
                 will raise if it doesn't match the version in the create event.
@@ -556,6 +558,13 @@ class FederationEventHandler:
         if room_version.identifier != room_version_id:
             raise SynapseError(400, "Room version mismatch")
 
+        if room_version.msc4242_state_dags and not is_state_dag_connected(
+            [ev for ev in state if supports_msc4242_state_dag(ev)]
+        ):
+            # We should have been given a connected state DAG. If there is a gap in it we
+            # cannot calculate the state, so the response is invalid and we refuse the join.
+            raise SynapseError(502, "State DAG is not connected")
+
         # persist the auth chain and state events.
         #
         # any invalid events here will be marked as rejected, and we'll carry on.
@@ -567,9 +576,14 @@ class FederationEventHandler:
         # signatures right now doesn't mean that we will *never* be able to, so it
         # is premature to reject them.
         #
-        await self._auth_and_persist_outliers(
-            room_id, itertools.chain(auth_events, state)
+        has_rejected_events = await self._auth_and_persist_outliers(
+            room_id,
+            itertools.chain(auth_events, state),
+            from_send_join=True,
         )
+        if room_version.msc4242_state_dags and has_rejected_events:
+            # The state DAG must not include rejected events
+            raise SynapseError(502, "State DAG included rejected events")
 
         # and now persist the join event itself.
         logger.info(
@@ -620,6 +634,18 @@ class FederationEventHandler:
                             self._store, self._state_deletion_store
                         ),
                     )
+                )
+            elif supports_msc4242_state_dag(event):
+                # We don't blindly trust the state the remote server claims is current,
+                # and instead calculate the state before the join ourselves, which we can
+                # do now that the whole state DAG has been persisted.
+                state_before_event = (
+                    await self._state_handler.resolve_state_groups_for_events(
+                        event.room_id, event.prev_state_events
+                    )
+                )
+                state_ids_before_event = await state_before_event.get_state(
+                    self._state_storage_controller
                 )
             else:
                 state_ids_before_event = {
