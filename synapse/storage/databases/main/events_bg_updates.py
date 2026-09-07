@@ -358,6 +358,11 @@ class EventsBackgroundUpdatesStore(
         )
 
         self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.FIXUP_MAX_DEPTH_TIE_ORDERING,
+            self.fixup_max_depth_tie_ordering_bg_update,
+        )
+
+        self.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.EVENT_RESIGN,
             self._resign_events,
         )
@@ -2728,6 +2733,117 @@ class EventsBackgroundUpdatesStore(
             )
 
         return num_rooms
+
+    async def fixup_max_depth_tie_ordering_bg_update(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """Restore chronological ordering for events whose topological
+        ordering collapsed onto (or above) MAX_DEPTH.
+
+        In a room that was sent events with a huge depth (see
+        GHSA-v56r-hwv5-mxg6), every later event is created with its depth
+        capped at MAX_DEPTH. They all share one topological ordering, so
+        /messages falls back to arrival order. In room versions without strict
+        canonical JSON validation, the original over-large orderings also sort
+        above the capped ones, inverting the timeline.
+
+        This update re-spreads all events at or above MAX_DEPTH across the
+        unused ordering range above the room's highest real depth, ranked by
+        origin_server_ts. topological_ordering is local to this server, so
+        nothing changes over federation.
+        """
+
+        room_id_bound = progress.get("room_id", "")
+
+        def fixup_tie_ordering_txn(txn: LoggingTransaction) -> tuple[bool, int]:
+            txn.execute(
+                """
+                SELECT room_id FROM rooms
+                WHERE room_id > ?
+                ORDER BY room_id
+                LIMIT ?
+                """,
+                (room_id_bound, batch_size),
+            )
+            room_ids = [room_id for (room_id,) in txn]
+
+            if not room_ids:
+                return True, 0
+
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.FIXUP_MAX_DEPTH_TIE_ORDERING,
+                progress={"room_id": room_ids[-1]},
+            )
+
+            num_fixed = 0
+            for room_id in room_ids:
+                if self._fixup_depth_ties_in_room_txn(txn, room_id):
+                    num_fixed += 1
+
+            return False, num_fixed
+
+        done, num_fixed = await self.db_pool.runInteraction(
+            "fixup_max_depth_tie_ordering", fixup_tie_ordering_txn
+        )
+
+        if done:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.FIXUP_MAX_DEPTH_TIE_ORDERING
+            )
+
+        return num_fixed
+
+    def _fixup_depth_ties_in_room_txn(
+        self, txn: LoggingTransaction, room_id: str
+    ) -> bool:
+        """Re-spread this room's events at or above MAX_DEPTH by
+        origin_server_ts. Returns True if anything changed."""
+
+        txn.execute(
+            "SELECT count(*) FROM events WHERE room_id = ? AND topological_ordering >= ?",
+            (room_id, MAX_DEPTH),
+        )
+        row = txn.fetchone()
+        assert row is not None
+        count = row[0]
+        # A single event at the cap cannot be mis-ordered relative to the tie.
+        if count <= 1:
+            return False
+
+        txn.execute(
+            """
+            SELECT COALESCE(max(topological_ordering), 0) FROM events
+            WHERE room_id = ? AND topological_ordering < ?
+            """,
+            (room_id, MAX_DEPTH),
+        )
+        row = txn.fetchone()
+        assert row is not None
+        base = row[0]
+
+        # Spread over at most half the free range, leaving headroom above the
+        # block so newly persisted at-cap events can continue past it.
+        stride = max(1, (MAX_DEPTH - base) // (2 * (count + 1)))
+
+        txn.execute(
+            """
+            SELECT event_id FROM events
+            WHERE room_id = ? AND topological_ordering >= ?
+            ORDER BY COALESCE(origin_server_ts, 0) ASC, stream_ordering ASC
+            """,
+            (room_id, MAX_DEPTH),
+        )
+        event_ids = [event_id for (event_id,) in txn]
+
+        txn.execute_batch(
+            "UPDATE events SET topological_ordering = ? WHERE event_id = ?",
+            [
+                (min(base + stride * (i + 1), MAX_DEPTH), event_id)
+                for i, event_id in enumerate(event_ids)
+            ],
+        )
+        return True
 
     async def _resign_events(self, progress: dict, batch_size: int) -> int:
         """Retroactively re-sign events signed with a different key than the
