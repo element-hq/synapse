@@ -358,6 +358,38 @@ class DeviceStoreTestCase(HomeserverTestCase):
         )
         self.assertEqual(404, exc.value.code)
 
+    def test_add_device_change_to_streams_allocates_one_id_per_device(self) -> None:
+        """Adding more devices than fit in a single batch should still only consume
+        one stream ID per device.
+        """
+        user_id = "@user_id:test"
+        # Enough devices to span more than one `batch_iter` batch.
+        device_ids = [f"device_id{i}" for i in range(1500)]
+
+        self.get_success(
+            self.store.add_device_change_to_streams(
+                user_id=user_id,
+                device_ids=device_ids,
+                room_ids=["!some:room"],
+            )
+        )
+
+        stream_ids = self.get_success(
+            self.store.db_pool.simple_select_onecol(
+                table="device_lists_stream",
+                keyvalues={"user_id": user_id},
+                retcol="stream_id",
+            )
+        )
+
+        self.assertEqual(len(stream_ids), len(device_ids))
+        # The allocated IDs should be contiguous: a gap means IDs were allocated
+        # and then thrown away.
+        self.assertEqual(
+            max(stream_ids) - min(stream_ids) + 1,
+            len(device_ids),
+        )
+
     @patch("synapse.storage.databases.main.devices.PRUNE_DEVICE_LISTS_BATCH_SIZE", 5)
     def test_prune_old_device_lists_changes_in_room(self) -> None:
         """Test that old entries in the `device_lists_changes_in_room` table are pruned properly."""

@@ -1,0 +1,1 @@
+Fix a bug where a device list change for a user with a large number of devices would consume far more `device_lists` stream IDs than necessary, causing replication to fall behind.
