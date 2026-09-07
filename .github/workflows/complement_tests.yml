@@ -98,18 +98,22 @@ jobs:
         #
         # We deliberately do not dump the raw JSON to the terminal as it is huge
         # and unreadable. Instead we pipe it through `jq` to print a compact,
-        # real-time progress view: for each `go test -json` event we print only
-        # completed tests (`pass`/`skip`/`fail`, including subtests), dropping the
-        # noisy `run`/`output` events and package-level lines. The full detail
-        # lives in the raw log we tee to the file above. Non-JSON lines (e.g. the
-        # image build output and `set -x` traces that `go test -json` does not
-        # wrap) are passed through unchanged rather than parsed, so we still see
-        # them and the filter never aborts the pipeline.
+        # real-time progress view: completed tests print as `PASS/FAIL/SKIP
+        # <test> <elapsed>s`, known-noisy events (`run`/`output`/package-level
+        # pass, etc.) are dropped, and *any other* JSON event — package-level
+        # failures, `build-output`/`build-fail` events when a test package
+        # fails to compile, future event types — is passed through as raw JSON
+        # so a failure can never silently vanish from the progress view.
+        # Non-JSON lines (e.g. the image build output and `set -x` traces that
+        # `go test -json` does not wrap) are passed through unchanged rather
+        # than parsed, so we still see them and the filter never aborts the
+        # pipeline. The full detail lives in the raw log we tee to the file
+        # above.
         run: |
           set -o pipefail
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json -run 'TestSynapseVersion/Synapse_version_matches_current_git_checkout' 2>&1 \
             | tee /tmp/gotest-sanity-check-complement.log \
-            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
+            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type != "object" then $raw elif (.Action == "pass" or .Action == "fail" or .Action == "skip") and .Test != null then "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s" elif .Action == "start" or .Action == "run" or .Action == "output" or .Action == "pause" or .Action == "cont" or .Action == "pass" or .Action == "skip" then empty else $raw end'
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -121,10 +125,17 @@ jobs:
         # We do not hide successful tests in `gotestfmt` here as the list of sanity
         # check tests is so short. Feel free to change this when we get more tests.
         #
+        # The `jq` stage drops go build events (they carry an `.ImportPath`
+        # key) as gotestfmt panics on them (gotesttools/gotestfmt#64); all
+        # other lines pass through unchanged. Build errors are still visible
+        # in the test step above and in the uploaded raw log artifact.
+        #
         # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
         # it derives several values under `$settings` and passes them to our
         # custom `.ci/complement_package.gotpl` template to render the output.
-        run: cat /tmp/gotest-sanity-check-complement.log | gotestfmt -hide "successful-downloads,empty-packages"
+        run: |
+          set -o pipefail
+          cat /tmp/gotest-sanity-check-complement.log | jq -rR '. as $raw | if (try fromjson.ImportPath catch null) == null then $raw else empty end' | gotestfmt -hide "successful-downloads,empty-packages"
 
       - name: Run Complement Tests
         id: run_complement_tests
@@ -141,7 +152,7 @@ jobs:
           set -o pipefail
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 \
             | tee /tmp/gotest-complement.log \
-            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
+            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type != "object" then $raw elif (.Action == "pass" or .Action == "fail" or .Action == "skip") and .Test != null then "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s" elif .Action == "start" or .Action == "run" or .Action == "output" or .Action == "pause" or .Action == "cont" or .Action == "pass" or .Action == "skip" then empty else $raw end'
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -154,10 +165,16 @@ jobs:
         if: always() && steps.run_complement_tests.outcome != 'skipped'
         # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
         #
+        # We pre-filter the raw log through `jq` to drop `build-output`/
+        # `build-fail` events before handing it to `gotestfmt`, which panics
+        # on them. See the sanity check step above for details.
+        #
         # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
         # it derives several values under `$settings` and passes them to our
         # custom `.ci/complement_package.gotpl` template to render the output.
-        run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
+        run: |
+          set -o pipefail
+          cat /tmp/gotest-complement.log | jq -rR '. as $raw | if (try fromjson.ImportPath catch null) == null then $raw else empty end' | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
       - name: Run in-repo Complement Tests
         id: run_in_repo_complement_tests
@@ -174,7 +191,7 @@ jobs:
           set -o pipefail
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh --in-repo -p 1 -json 2>&1 \
             | tee /tmp/gotest-in-repo-complement.log \
-            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type == "object" then (select(.Action=="pass" or .Action=="fail" or .Action=="skip") | select(.Test) | "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s") else $raw end'
+            | jq -rR --unbuffered '. as $raw | (try fromjson catch $raw) | if type != "object" then $raw elif (.Action == "pass" or .Action == "fail" or .Action == "skip") and .Test != null then "\(.Action|ascii_upcase) \(.Test) \(.Elapsed)s" elif .Action == "start" or .Action == "run" or .Action == "output" or .Action == "pause" or .Action == "cont" or .Action == "pass" or .Action == "skip" then empty else $raw end'
         shell: bash
         env:
           POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
@@ -187,10 +204,16 @@ jobs:
         if: always() && steps.run_in_repo_complement_tests.outcome != 'skipped'
         # Hide successful tests in order to reduce the verbosity of the otherwise very large output.
         #
+        # We pre-filter the raw log through `jq` to drop `build-output`/
+        # `build-fail` events before handing it to `gotestfmt`, which panics
+        # on them. See the sanity check step above for details.
+        #
         # Note that the `-hide` argument is interpreted by `gotestfmt`. From it,
         # it derives several values under `$settings` and passes them to our
         # custom `.ci/complement_package.gotpl` template to render the output.
-        run: cat /tmp/gotest-in-repo-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
+        run: |
+          set -o pipefail
+          cat /tmp/gotest-in-repo-complement.log | jq -rR '. as $raw | if (try fromjson.ImportPath catch null) == null then $raw else empty end' | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
       - name: Upload Complement logs
         # Always upload the logs (as artifacts) if we attempted to run the

@@ -1,0 +1,1 @@
+Fix `join_rule` sometimes being stale or missing in room summary and room hierarchy responses.

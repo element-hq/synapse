@@ -794,7 +794,6 @@ class RoomSummaryHandler:
             "canonical_alias": stats.canonical_alias,
             "num_joined_members": stats.joined_members,
             "avatar_url": stats.avatar,
-            "join_rule": stats.join_rules,
             "world_readable": (
                 stats.history_visibility == HistoryVisibility.WORLD_READABLE
             ),
@@ -803,10 +802,13 @@ class RoomSummaryHandler:
             "encryption": stats.encryption,
         }
 
-        # Include allowed_room_ids for rooms with restricted join rules so that
-        # clients can determine which memberships grant access.
-        # Only the join rules event is needed for both has_restricted_join_rules
-        # and get_rooms_that_allow_join, so avoid fetching full state.
+        # The join rule (and, for restricted rooms, allowed_room_ids) is read from
+        # the current state rather than from `stats`: the room statistics are
+        # updated asynchronously and so can lag behind, or not exist yet at all.
+        #
+        # Only the join rules event is needed for the join rule itself,
+        # has_restricted_join_rules and get_rooms_that_allow_join, so avoid
+        # fetching full state.
         join_rules_state_ids = (
             await self._storage_controllers.state.get_current_state_ids(
                 room_id,
@@ -814,11 +816,26 @@ class RoomSummaryHandler:
             )
         )
 
+        join_rules_event_id = join_rules_state_ids.get((EventTypes.JoinRules, ""))
+        if join_rules_event_id:
+            # Note: for room versions with restricted join rules,
+            # has_restricted_join_rules() below looks at the same event, and
+            # events are cached, so this is normally free. For older room
+            # versions it is one extra (cached) event lookup per room.
+            join_rules_event = await self._store.get_event(join_rules_event_id)
+            join_rule = join_rules_event.content.get("join_rule")
+            # The content of the event is not validated, so only include
+            # well-formed (string) values.
+            if isinstance(join_rule, str):
+                entry["join_rule"] = join_rule
+
         try:
             room_version = await self._store.get_room_version(room_id)
         except UnsupportedRoomVersionError:
             room_version = None
 
+        # Include allowed_room_ids for rooms with restricted join rules so that
+        # clients can determine which memberships grant access.
         if room_version and await self._event_auth_handler.has_restricted_join_rules(
             join_rules_state_ids, room_version
         ):
