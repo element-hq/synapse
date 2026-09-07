@@ -42,7 +42,11 @@ from synapse.storage.database import (
     make_tuple_in_list_sql_clause,
 )
 from synapse.storage.engines._base import IsolationLevel
-from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.storage.util.id_generators import (
+    MultiWriterIdGenerator,
+    advance_multiwriter_sharded_token_after_partial_read,
+    make_multiwriter_sharded_token_bounds_sql,
+)
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -598,55 +602,52 @@ class ReceiptsWorkerStore(SQLBaseStore):
             A two-tuple containing the following:
                 * A dictionary of roomids to receipt EDUs.
                 * The stream token up to which receipts were actually fetched.
-                  This is earlier than `to_key` if the limit was hit; callers
-                  must call this method again from the returned token to fetch
-                  the remaining receipts.
+                  This is earlier than `to_key` (per writer) if the limit was
+                  hit; callers must call this method again from the returned
+                  token to fetch the remaining receipts.
         """
         sql_order = "DESC" if order == Direction.BACKWARDS else "ASC"
 
-        def f(
-            txn: LoggingTransaction,
-        ) -> tuple[list[tuple[int, str, str, str, str, str]], int]:
-            if from_key:
-                sql = f"""
-                    SELECT stream_id, instance_name, room_id, receipt_type, user_id, event_id, data
-                    FROM receipts_linearized WHERE
-                    stream_id > ? AND stream_id <= ?
-                    ORDER BY stream_id {sql_order}
-                    LIMIT ?
-                """
-                txn.execute(sql, [from_key.stream, to_key.get_max_stream_pos(), limit])
-            else:
-                sql = f"""
-                    SELECT stream_id, instance_name, room_id, receipt_type, user_id, event_id, data
-                    FROM receipts_linearized WHERE
-                    stream_id <= ?
-                    ORDER BY stream_id {sql_order}
-                    LIMIT ?
-                """
+        # Bound each row on its own writer's positions in the tokens, so that
+        # `limit` applies after the bounds and a truncated page never leaves
+        # in-range rows behind.
+        from_token = (
+            from_key if from_key is not None else MultiWriterStreamToken(stream=0)
+        )
+        bounds_clause, bounds_values = make_multiwriter_sharded_token_bounds_sql(
+            stream_id_column="stream_id",
+            instance_name_column="instance_name",
+            from_token_exclusive=from_token,
+            to_token_inclusive=to_key,
+        )
 
-                txn.execute(sql, [to_key.get_max_stream_pos(), limit])
+        def f(txn: LoggingTransaction) -> list[tuple[int, str, str, str, str, str]]:
+            sql = f"""
+                SELECT stream_id, room_id, receipt_type, user_id, event_id, data
+                FROM receipts_linearized
+                WHERE {bounds_clause}
+                ORDER BY stream_id {sql_order}
+                LIMIT ?
+            """
+            txn.execute(sql, [*bounds_values, limit])
 
-            rows = txn.fetchall()
+            return cast(list[tuple[int, str, str, str, str, str]], txn.fetchall())
 
-            return [
-                (stream_id, room_id, receipt_type, user_id, event_id, data)
-                for stream_id, instance_name, room_id, receipt_type, user_id, event_id, data in rows
-                if MultiWriterStreamToken.is_stream_position_in_range(
-                    from_key, to_key, instance_name, stream_id
-                )
-            ], len(rows)
-
-        txn_results, fetched_row_count = await self.db_pool.runInteraction(
+        txn_results = await self.db_pool.runInteraction(
             "get_linearized_receipts_for_all_rooms", f
         )
 
-        if order == Direction.FORWARDS and fetched_row_count >= limit and txn_results:
-            # We hit the limit, so there may be more receipts in the range. Report
-            # how far we actually got so that the caller can fetch the rest. The
-            # rows are ordered by ascending stream ID, so the last row is the
-            # newest one we fetched.
-            reached_token = MultiWriterStreamToken(stream=txn_results[-1][0])
+        if order == Direction.FORWARDS and len(txn_results) == limit:
+            # We hit the limit, so there may be more receipts in the range.
+            # Report how far we actually got so that the caller can fetch the
+            # rest, claiming each writer's position only up to the last row we
+            # fetched so that receipts from writers that are behind it are not
+            # skipped.
+            reached_token = advance_multiwriter_sharded_token_after_partial_read(
+                from_token_exclusive=from_token,
+                to_token_inclusive=to_key,
+                last_read_stream_id=txn_results[-1][0],
+            )
         else:
             reached_token = to_key
 
