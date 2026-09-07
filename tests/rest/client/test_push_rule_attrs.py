@@ -544,11 +544,10 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
             ("global/override/.m.rule.roomnotif",),
         ]
     )
-    @override_config({"experimental_features": {"msc4210_enabled": True}})
     def test_msc4210_legacy_mention_rules_removed(self, rule_path: str) -> None:
         """
-        Tests that the legacy mention rules are neither served nor modifiable
-        once MSC4210 removes them.
+        Tests that the legacy mention rules, which Matrix v1.17 (MSC4210) removed
+        from the base rule set, are neither served nor modifiable by default.
         """
         self.register_user("bob", "pass")
         token = self.login("bob", "pass")
@@ -561,10 +560,11 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
             ("global/override/.m.rule.roomnotif",),
         ]
     )
+    @override_config({"experimental_features": {"msc4210_enabled": False}})
     def test_msc4210_legacy_mention_rules_present(self, rule_path: str) -> None:
         """
-        Tests that the legacy mention rules are served and modifiable while
-        MSC4210 is disabled.
+        Tests that the legacy mention rules are served and modifiable when
+        they are restored with `msc4210_enabled: false`.
         """
         self.register_user("bob", "pass")
         token = self.login("bob", "pass")
@@ -593,9 +593,11 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
             token, "global/postcontent/.io.element.msc4306.rule.subscribed_thread"
         )
 
-    def test_contains_user_name(self) -> None:
+    @override_config({"experimental_features": {"msc4210_enabled": False}})
+    def test_contains_user_name_with_legacy_mentions(self) -> None:
         """
-        Tests that `contains_user_name` rule is present and have proper value in `pattern`.
+        Tests that, when the legacy mention rules are restored, the
+        `contains_user_name` rule is present and has the proper value in `pattern`.
         """
         username = "bob"
         self.register_user(username, "pass")

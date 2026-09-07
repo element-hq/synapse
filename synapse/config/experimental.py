@@ -253,8 +253,12 @@ class ExperimentalConfig(Config):
         # MSC4169: Backwards-compatible redaction sending using `/send`
         self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
 
-        # MSC4210: Remove legacy mentions
-        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
+        # MSC4210: Remove legacy mentions. Merged into Matrix v1.17, which removes
+        # `.m.rule.contains_display_name`, `.m.rule.contains_user_name` and
+        # `.m.rule.roomnotif` from the base push rule set. Enabled by default;
+        # this flag is kept as a temporary opt-out for deployments that still
+        # rely on the legacy rules and will be removed in a future release.
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", True)
 
         # MSC4222: Adding `state_after` to sync v2
         self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
