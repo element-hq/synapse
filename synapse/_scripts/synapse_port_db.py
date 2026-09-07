@@ -900,6 +900,14 @@ class Porter:
                     ("deleted_pushers", "stream_id"),
                 ],
             )
+            await self._setup_sequence(
+                "push_rules_id_seq",
+                [("push_rules", "id")],
+            )
+            await self._setup_sequence(
+                "push_rules_enable_id_seq",
+                [("push_rules_enable", "id")],
+            )
 
             await self._setup_autoincrement_sequence(
                 "sliding_sync_connection_positions", "connection_position"

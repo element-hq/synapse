@@ -49,7 +49,9 @@ from synapse.storage.databases.main.receipts import ReceiptsWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.push_rule import InconsistentRuleException, RuleNotFoundException
-from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
+from synapse.storage.types import Cursor
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.storage.util.sequence import build_sequence_generator
 from synapse.synapse_rust.push import FilteredPushRules, PushRule, PushRules
 from synapse.types import JsonDict
 from synapse.util import unwrapFirstError
@@ -184,8 +186,34 @@ class PushRulesWorkerStore(
             prefilled_cache=push_rules_prefill,
         )
 
-        self._push_rule_id_gen = IdGenerator(db_conn, "push_rules", "id")
-        self._push_rules_enable_id_gen = IdGenerator(db_conn, "push_rules_enable", "id")
+        # The `id` columns of `push_rules` and `push_rules_enable` are allocated
+        # from database sequences so that rows can be inserted from any worker
+        # (e.g. background updates), not just the push rules writer.
+        def get_max_push_rule_id(txn: Cursor) -> int:
+            txn.execute("SELECT COALESCE(MAX(id), 0) FROM push_rules")
+            return cast(tuple[int], txn.fetchone())[0]
+
+        self._push_rule_id_gen = build_sequence_generator(
+            db_conn,
+            database.engine,
+            get_max_push_rule_id,
+            "push_rules_id_seq",
+            table="push_rules",
+            id_column="id",
+        )
+
+        def get_max_push_rules_enable_id(txn: Cursor) -> int:
+            txn.execute("SELECT COALESCE(MAX(id), 0) FROM push_rules_enable")
+            return cast(tuple[int], txn.fetchone())[0]
+
+        self._push_rules_enable_id_gen = build_sequence_generator(
+            db_conn,
+            database.engine,
+            get_max_push_rules_enable_id,
+            "push_rules_enable_id_seq",
+            table="push_rules_enable",
+            id_column="id",
+        )
 
         self._config = hs.config.push_rules
 
@@ -667,7 +695,7 @@ class PushRulesWorkerStore(
                 )
 
             # We didn't update a row with the given rule_id so insert one
-            push_rule_id = self._push_rule_id_gen.get_next()
+            push_rule_id = self._push_rule_id_gen.get_next_id_txn(txn)
 
             self.db_pool.simple_insert_txn(
                 txn,
@@ -715,7 +743,7 @@ class PushRulesWorkerStore(
         else:
             raise RuntimeError("Unknown database engine")
 
-        new_enable_id = self._push_rules_enable_id_gen.get_next()
+        new_enable_id = self._push_rules_enable_id_gen.get_next_id_txn(txn)
         txn.execute(sql, (new_enable_id, user_id, rule_id))
 
     async def delete_push_rule(self, user_id: str, rule_id: str) -> None:
@@ -810,7 +838,7 @@ class PushRulesWorkerStore(
         if not self._is_push_writer:
             raise Exception("Not a push writer")
 
-        new_id = self._push_rules_enable_id_gen.get_next()
+        new_id = self._push_rules_enable_id_gen.get_next_id_txn(txn)
 
         if not is_default_rule:
             # first check it exists; we need to lock for key share so that a
