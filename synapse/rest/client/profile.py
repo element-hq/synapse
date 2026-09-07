@@ -36,7 +36,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, JsonValue, UserID
+from synapse.types import JsonDict, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
@@ -145,16 +145,21 @@ class ProfileFieldRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
+        ret: JsonDict = {}
         if field_name == ProfileFields.DISPLAYNAME:
-            field_value: (
-                JsonValue | dict[str, JsonValue]
-            ) = await self.profile_handler.get_displayname(user)
+            displayname = await self.profile_handler.get_displayname(user)
+            if displayname is not None:
+                ret[field_name] = displayname
         elif field_name == ProfileFields.AVATAR_URL:
-            field_value = await self.profile_handler.get_avatar_url(user)
+            avatar_url = await self.profile_handler.get_avatar_url(user)
+            if avatar_url is not None:
+                ret[field_name] = avatar_url
         else:
-            field_value = await self.profile_handler.get_profile_field(user, field_name)
+            ret[field_name] = await self.profile_handler.get_profile_field(
+                user, field_name
+            )
 
-        return 200, {field_name: field_value}
+        return 200, ret
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
