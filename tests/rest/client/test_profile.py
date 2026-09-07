@@ -485,6 +485,27 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             # The client requested ?propagate=true, so it should have happened.
             self.assertEqual(channel.json_body.get(prop), "http://my.server/pic.gif")
 
+    def test_get_unset_field_omits_key(self) -> None:
+        """
+        Fetching a standard profile field which the user has not set should
+        return a 200 with an empty body, rather than the key with a null value.
+        """
+        for field in ("displayname", "avatar_url"):
+            channel = self.make_request(
+                "DELETE",
+                f"/_matrix/client/v3/profile/{self.owner}/{field}",
+                access_token=self.owner_tok,
+            )
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+            for path in (
+                f"/profile/{self.owner}/{field}",
+                f"/_matrix/client/v3/profile/{self.owner}/{field}",
+            ):
+                channel = self.make_request("GET", path)
+                self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+                self.assertEqual(channel.json_body, {}, path)
+
     def test_get_missing_custom_field(self) -> None:
         channel = self.make_request(
             "GET",
