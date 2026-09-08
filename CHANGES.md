@@ -11,7 +11,6 @@ as this release deprecates `matrix_rtc.livekit_service_url`.
 - Add experimental support for letting application services proxy namespaces in the C-S and S-S API as per MSC4512. ([\#19972](https://github.com/element-hq/synapse/issues/19972))
 - Add experimental support for sending federation requests from application services as per MSC4512. ([\#19977](https://github.com/element-hq/synapse/issues/19977))
 - Add a config option that limits the time period in which local users can redact their own messages. Contributed by @defaultdino. ([\#20138](https://github.com/element-hq/synapse/issues/20138))
-- Deprecate `livekit_service_url` and add support for specifying the SFU WebSocket URL for configured LiveKit transports. Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11610). ([\#20146](https://github.com/element-hq/synapse/issues/20146))
 
 ## Bugfixes
 
@@ -38,6 +37,7 @@ as this release deprecates `matrix_rtc.livekit_service_url`.
 
 ## Deprecations and Removals
 
+- Deprecate `livekit_service_url` and add support for specifying the SFU WebSocket URL for configured LiveKit transports. Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11610). ([\#20146](https://github.com/element-hq/synapse/issues/20146))
 - Drop `GET /_matrix/client/unstable/org.matrix.msc2965/auth_issuer` endpoint which never ended up being used. ([\#20163](https://github.com/element-hq/synapse/issues/20163))
 - Remove support for the unstable `org.matrix.msc3202.device_id` query parameter for application service device masquerading. ([\#20192](https://github.com/element-hq/synapse/issues/20192))
 
