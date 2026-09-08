@@ -276,6 +276,23 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
             (True, ROOM_MENTION_DEFAULT_ACTIONS),
         )
 
+    def test_batching_counts_users_not_rows(self) -> None:
+        """A user with several legacy customisations must not shorten a batch,
+        as a short batch is what marks the update as complete."""
+        users = [f"@user{i}:test" for i in range(BATCH_SIZE + 1)]
+        for user_id in users:
+            # Two `push_rules` rows (and two `push_rules_enable` rows) per user.
+            self._set_actions(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY)
+            self._set_actions(user_id, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_LOUDLY)
+
+        self.assertEqual(self._run_migration(), 2)
+
+        for user_id in users:
+            self.assertEqual(
+                self._get_rule(user_id, PushRuleIds.IS_USER_MENTION),
+                (True, NOTIFY_ONLY),
+            )
+
     def test_nothing_to_migrate(self) -> None:
         """The update completes immediately when no user customised the legacy
         rules."""

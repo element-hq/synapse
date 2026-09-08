@@ -318,19 +318,28 @@ class PushRulesWorkerStore(
             # Find the next batch of users with a customisation of a legacy rule.
             # Both tables are indexed on `(user_name, rule_id)`, so each branch is
             # a range scan from the last processed user which stops as soon as
-            # it has found enough matches.
+            # it has found enough matches. The `DISTINCT` matters: a user may
+            # have customised several legacy rules, and the batch must be
+            # `batch_size` users rather than rows, as returning fewer users than
+            # asked for is what marks the update as complete.
+            #
+            # A batch walks roughly `batch_size` divided by the share of users
+            # with a legacy customisation index entries, and the whole update
+            # walks each table once. The exception is a batch past the last
+            # such user, which walks the remainder of the table in one go: the
+            # updater cannot shrink that below the cost of a batch of one.
             legacy_clause, legacy_args = make_in_list_sql_clause(
                 self.database_engine, "rule_id", legacy_rule_ids
             )
             sql = f"""
                 SELECT user_name FROM (
-                    SELECT user_name FROM push_rules
+                    SELECT DISTINCT user_name FROM push_rules
                     WHERE user_name > ? AND {legacy_clause}
                     ORDER BY user_name LIMIT ?
                 ) AS r
                 UNION
                 SELECT user_name FROM (
-                    SELECT user_name FROM push_rules_enable
+                    SELECT DISTINCT user_name FROM push_rules_enable
                     WHERE user_name > ? AND {legacy_clause}
                     ORDER BY user_name LIMIT ?
                 ) AS e
