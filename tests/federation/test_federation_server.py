@@ -1235,6 +1235,9 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     @skip_test("requires MSC4242 inbound event auth")
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag(self) -> None:
+        # KNOWN_ROOM_VERSIONS lacks MSC4242v12 rooms because it is behind an experimental features flag
+        # so set the flag and do the same test as above. When MSC4242 rooms are not gated behind a
+        # config flag this test can be deleted.
         self._test_send_join_common(RoomVersions.MSC4242v12.identifier)
 
     @skip_test("requires MSC4242 inbound event auth")
@@ -1259,7 +1262,8 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             join_event_dict,
             KNOWN_ROOM_VERSIONS[room_version],
         )
-        # Ask to join as a partial state (omit_members=true) which should be ignored.
+        # Ask to join as a partial state (omit_members=true) which should be ignored
+        # because we don't support partial joins in state DAG rooms just yet
         channel = self.make_signed_federation_request(
             "PUT",
             f"/_matrix/federation/v2/send_join/{room_id}/x?omit_members=true",
