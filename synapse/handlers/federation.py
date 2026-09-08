@@ -55,6 +55,7 @@ from synapse.api.errors import (
     FederationError,
     FederationPullAttemptBackoffError,
     HttpResponseException,
+    InvalidAPICallError,
     NotFoundError,
     PartialStateConflictError,
     RequestSendFailed,
@@ -1555,6 +1556,11 @@ class FederationHandler:
             Only state events have `msc4242_state_dag_edges` rows, so we walk from such an
             event's `prev_state_events` instead, and return those as the first hop.
         """
+        # guard against extreme cases
+        if len(earliest_events) > 100 or len(latest_events) > 100:
+            raise InvalidAPICallError(
+                "'earliest_events' and/or 'latest_events' too large, size must be less than 100"
+            )
 
         await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
         limit = min(limit, StateDag.MAX_MISSING_EVENTS)
