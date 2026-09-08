@@ -32,7 +32,10 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.types import Cursor
-from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.storage.util.id_generators import (
+    MultiWriterIdGenerator,
+    stream_current_position_gauge,
+)
 from synapse.storage.util.sequence import (
     LocalSequenceGenerator,
     PostgresSequenceGenerator,
@@ -108,6 +111,14 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
             self.db_pool.runWithConnection(_create)
         )
         return self.instances[instance_name]
+
+    def _get_reported_metric_position(self) -> int:
+        """The position the metric reports for the test stream."""
+
+        return self.get_prometheus_metric_current_value(
+            stream_current_position_gauge,
+            stream_name="test_stream",
+        )
 
     def _replicate(self, instance_name: str) -> None:
         """Similate a replication event for the given instance."""
@@ -228,6 +239,24 @@ class MultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         self.assertEqual(id_gen.get_positions(), {"master": 8})
         self.assertEqual(id_gen.get_current_token_for_writer("master"), 8)
+
+    def test_current_position_metric(self) -> None:
+        """The reported position follows `get_current_token`."""
+
+        self._insert_rows("master", 7)
+
+        id_gen = self._create_id_generator()
+
+        self.assertEqual(self._get_reported_metric_position(), 7)
+
+        async def _get_next_async() -> None:
+            async with id_gen.get_next():
+                pass
+
+        self.get_success(_get_next_async())
+
+        self.assertEqual(id_gen.get_current_token(), 8)
+        self.assertEqual(self._get_reported_metric_position(), 8)
 
     def test_cancelled_enter_does_not_wedge_position(self) -> None:
         """Reproduces presence getting stuck.
