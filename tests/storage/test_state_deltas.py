@@ -160,24 +160,6 @@ class StateDeltasByEventPositionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual([d.event_id for d in deltas], [state_event_id])
 
-    def test_unfiltered_event_driven_query(self) -> None:
-        """Until `events.state_key` has been back-populated the event-driven
-        query cannot filter on it; the unfiltered mode must find the same
-        deltas."""
-        state_event_id, message_pos, state_pos = self._batch_positions()
-
-        deltas = self.get_success(
-            self.store.db_pool.runInteraction(
-                "test_unfiltered_event_driven_query",
-                self.store.get_current_state_deltas_for_room_by_event_position_txn,
-                self.room_id,
-                from_token=RoomStreamToken(stream=message_pos),
-                to_token=RoomStreamToken(stream=state_pos),
-                events_state_key_populated=False,
-            )
-        )
-        self.assertEqual([d.event_id for d in deltas], [state_event_id])
-
     def test_rows_without_an_event_keep_their_stamp(self) -> None:
         """Rows with no event -- the clearance of the room's state when the
         last local user leaves -- have no event position to bound on and are

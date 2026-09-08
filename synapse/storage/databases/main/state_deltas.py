@@ -327,7 +327,6 @@ class StateDeltasStore(SQLBaseStore):
         *,
         from_token: RoomStreamToken | None,
         to_token: RoomStreamToken | None,
-        events_state_key_populated: bool,
     ) -> list[StateDelta]:
         """
         Get the state deltas between two tokens, bounding each delta on the
@@ -412,13 +411,10 @@ class StateDeltasStore(SQLBaseStore):
             if to_token is not None:
                 event_position_to_clause = "AND e.stream_ordering <= ?"
 
-            # Only state events can match the delta join, so once
-            # `events.state_key` is reliable we restrict the scan to them and
-            # spare one index probe per non-state event in the window.
-            event_state_key_clause = ""
-            if events_state_key_populated:
-                event_state_key_clause = "AND e.state_key IS NOT NULL"
-
+            # Only state events can match the delta join, so restrict the scan to
+            # them. `events.state_key` is reliable here: background updates run in
+            # `ordering` order, so `events_populate_state_key_rejections` (7203)
+            # has completed before the index this query needs (9411) has.
             by_event_position_sql = f"""
                 UNION ALL
                 SELECT d.instance_name, d.stream_id, d.type, d.state_key,
@@ -427,7 +423,7 @@ class StateDeltasStore(SQLBaseStore):
                 FROM events AS e
                 INNER JOIN current_state_delta_stream AS d
                     ON d.event_id = e.event_id AND d.room_id = e.room_id
-                WHERE e.room_id = ? {event_state_key_clause}
+                WHERE e.room_id = ? AND e.state_key IS NOT NULL
                     AND ? < e.stream_ordering {event_position_to_clause}
                     AND d.stream_id <= ?
             """
@@ -548,26 +544,12 @@ class StateDeltasStore(SQLBaseStore):
                 to_token=to_token,
             )
 
-        # `events.state_key` is back-populated by a schema-72 background
-        # update (`delta/72/03bg_populate_events_columns.py`); until it has
-        # completed, old state events may have a NULL state_key and the
-        # event-driven query must not filter on it.
-        # (`has_completed_background_update` memoises completion, so once the
-        # update has finished this costs nothing; until then it is one
-        # `background_updates` lookup per call, as for the index check above.)
-        events_state_key_populated = (
-            await self.db_pool.updates.has_completed_background_update(
-                _BackgroundUpdates.EVENTS_POPULATE_STATE_KEY_REJECTIONS
-            )
-        )
-
         return await self.db_pool.runInteraction(
             "get_current_state_deltas_for_room_by_event_position",
             self.get_current_state_deltas_for_room_by_event_position_txn,
             room_id,
             from_token=from_token,
             to_token=to_token,
-            events_state_key_populated=events_state_key_populated,
         )
 
     @trace
