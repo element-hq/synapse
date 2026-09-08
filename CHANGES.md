@@ -9,7 +9,7 @@ as this release deprecates `matrix_rtc.livekit_service_url`.
 - Don't validate signatures with unknown algorithms for master keys, and allow updates to signatures. ([\#19915](https://github.com/element-hq/synapse/issues/19915))
 - [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Add an endpoint for getting a single delayed event. ([\#19926](https://github.com/element-hq/synapse/issues/19926))
 - Add experimental support for letting application services proxy namespaces in the C-S and S-S API as per MSC4512. ([\#19972](https://github.com/element-hq/synapse/issues/19972))
-- Add experimental support for sending federation requests from app services as per MSC4512. ([\#19977](https://github.com/element-hq/synapse/issues/19977))
+- Add experimental support for sending federation requests from application services as per MSC4512. ([\#19977](https://github.com/element-hq/synapse/issues/19977))
 - Add experimental federation client support for [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242): State DAGs. ([\#20127](https://github.com/element-hq/synapse/issues/20127))
 - Add a config option that limits the time period in which local users can redact their own messages. Contributed by @defaultdino. ([\#20138](https://github.com/element-hq/synapse/issues/20138))
 - Deprecate `livekit_service_url` and add support for specifying the SFU WebSocket URL for configured LiveKit transports. Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11610). ([\#20146](https://github.com/element-hq/synapse/issues/20146))
