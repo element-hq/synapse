@@ -618,6 +618,8 @@ impl LoggingContext {
     }
 
     /// Get a *copy* of the resources used by this logcontext so far.
+    ///
+    /// Should only be called from the main thread (it will return None otherwise).
     fn get_resource_usage(slf: Bound<'_, Self>) -> PyResult<ContextResourceUsage> {
         let py = slf.py();
 
