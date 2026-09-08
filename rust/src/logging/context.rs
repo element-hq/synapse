@@ -592,11 +592,11 @@ impl LoggingContext {
             logcontext_error(py, format!("Re-starting finished log context {name}"))?;
         }
 
-        // If we haven't already started, record the thread resource usage so far.
         if slf.borrow().usage_start.is_some() {
             let name = slf.borrow().name_string(py);
             logcontext_error(py, format!("Re-starting already-active log context {name}"))?;
         } else {
+            // If we haven't already started, record the thread resource usage so far.
             slf.borrow_mut().usage_start = rusage;
         }
 
