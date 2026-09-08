@@ -21,6 +21,9 @@
 //! reactor. Rust consumers (e.g. the HTTP client) clone the inner
 //! [`Arc<RustRuntimeInner>`] at construction time and don't need the GIL (or
 //! the Python-facing object) to reach it afterwards.
+//!
+//! The tokio runtime is shut down with the homeserver, via a handler
+//! registered with `HomeServer.register_sync_shutdown_handler`.
 
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, Weak};
@@ -30,10 +33,16 @@ use anyhow::Context;
 use pyo3::{exceptions::PyRuntimeError, prelude::*};
 use tokio::runtime::{Handle, Runtime};
 
+use crate::homeserver::HomeServer;
 use crate::reactor::Reactor;
 
-/// How long to wait for in-flight tokio tasks when shutting down with the
-/// reactor.
+/// How long to wait for in-flight tokio tasks to be cancelled when shutting
+/// down with the reactor.
+///
+/// Note that any [`Runtime::spawn_blocking`] work that is still running when
+/// the timeout expires is leaked, along with the worker thread running it.
+///
+/// See [`tokio::runtime`] for details.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// State of the lazily-started tokio runtime.
@@ -41,7 +50,7 @@ enum TokioState {
     /// Not started yet; the runtime is built on first use.
     NotStarted,
     Running(Runtime),
-    /// Shut down after the reactor stopped. Cannot be restarted.
+    /// Shut down with the homeserver. Cannot be restarted.
     Shutdown,
 }
 
@@ -85,9 +94,12 @@ impl RustRuntimeInner {
         }
     }
 
-    /// Shut the tokio runtime down, waiting (with the GIL released) for
-    /// in-flight tasks to finish. Called via [`ShutdownHook`] when the
-    /// reactor shuts down.
+    /// Shut the tokio runtime down, cancelling all in-flight tasks and waiting
+    /// for up to [`SHUTDOWN_TIMEOUT`] for them to finish. Called via
+    /// [`ShutdownHook`] when the reactor shuts down.
+    ///
+    /// Note that any [`Runtime::spawn_blocking`] work is leaked until it is
+    /// finished, along with the worker thread running it.
     fn shutdown(&self, py: Python<'_>) -> PyResult<()> {
         let mut state = self
             .tokio
@@ -99,7 +111,9 @@ impl RustRuntimeInner {
 
         if let TokioState::Running(runtime) = previous_state {
             // Shutdown the runtime, waiting for a small grace period for
-            // in-flight tasks to finish (mimicking Twisted's behaviour).
+            // in-flight tasks to be cancelled.
+            //
+            // See [`tokio::runtime`] for details.
             py.detach(|| runtime.shutdown_timeout(SHUTDOWN_TIMEOUT));
         }
 
@@ -109,11 +123,10 @@ impl RustRuntimeInner {
 
 impl Drop for RustRuntimeInner {
     fn drop(&mut self) {
-        // Backstop for reactors whose shutdown trigger never fires (e.g.
-        // `MemoryReactorClock` in tests, which is never actually run).
-        // `shutdown_background` rather than a blocking shutdown, because the
-        // last `Arc` may be dropped from a task running on this very
-        // runtime, where blocking would panic.
+        // Backstop for homeservers whose shutdown trigger never fires (e.g. in
+        // tests). We use `shutdown_background` rather than a blocking shutdown,
+        // because the last `Arc` may be dropped from a task running on this
+        // very runtime, where blocking would panic.
         if let Ok(state) = self.tokio.get_mut() {
             if let TokioState::Running(runtime) = std::mem::replace(state, TokioState::Shutdown) {
                 runtime.shutdown_background();
@@ -146,35 +159,32 @@ impl Deref for RustRuntime {
 #[pymethods]
 impl RustRuntime {
     #[new]
-    #[pyo3(signature = (reactor, worker_threads = 4))]
-    fn py_new(py: Python<'_>, reactor: Reactor, worker_threads: usize) -> PyResult<Self> {
+    #[pyo3(signature = (hs, worker_threads = 4))]
+    fn py_new(py: Python<'_>, hs: HomeServer, worker_threads: usize) -> PyResult<Self> {
         let inner = Arc::new(RustRuntimeInner {
-            reactor,
+            reactor: hs.get_reactor(py)?,
             tokio: Mutex::new(TokioState::NotStarted),
             worker_threads,
         });
 
-        // Shut the tokio runtime down when the reactor does. The trigger
-        // holds only a `Weak` reference. Twisted keeping the hook alive must
-        // not keep the runtime (nor, via it, the reactor) alive, as that
-        // would be a reference cycle passing through a Rust field that
-        // Python's GC cannot see into.
+        // Shut the tokio runtime down when the homeserver is shut down. The
+        // trigger holds only a `Weak` reference, as otherwise we risk a
+        // reference cycle passing through a Rust field that Python's GC cannot
+        // see into.
         let hook = Py::new(
             py,
             ShutdownHook {
                 inner: Arc::downgrade(&inner),
             },
         )?;
-        inner
-            .reactor
-            .add_shutdown_trigger(py, hook.bind(py).as_any())?;
+        hs.register_sync_shutdown_handler(py, hook.bind(py).as_any())?;
 
         Ok(RustRuntime { inner })
     }
 }
 
-/// The callable registered with
-/// `reactor.addSystemEventTrigger("after", "shutdown", ...)`.
+/// The callable registered with `HomeServer.register_sync_shutdown_handler`,
+/// which runs it on `HomeServer.shutdown()` or when the reactor stops.
 #[pyclass(frozen)]
 struct ShutdownHook {
     inner: Weak<RustRuntimeInner>,

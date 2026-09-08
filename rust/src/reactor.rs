@@ -49,21 +49,6 @@ impl Reactor {
         Ok(())
     }
 
-    /// Register `callable` to run after the reactor has shut down, via
-    /// `reactor.addSystemEventTrigger("after", "shutdown", callable)`.
-    pub fn add_shutdown_trigger(
-        &self,
-        py: Python<'_>,
-        callable: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
-        self.0.bind(py).call_method1(
-            intern!(py, "addSystemEventTrigger"),
-            (intern!(py, "after"), intern!(py, "shutdown"), callable),
-        )?;
-
-        Ok(())
-    }
-
     pub fn clone_ref(&self, py: Python<'_>) -> Reactor {
         Reactor(self.0.clone_ref(py))
     }

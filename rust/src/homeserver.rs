@@ -15,9 +15,10 @@
 
 //! A typed wrapper around the Python `HomeServer`.
 
-use pyo3::{intern, prelude::*};
+use pyo3::{intern, prelude::*, types::PyDict};
 
 use crate::config::SynapseHomeServerConfig;
+use crate::reactor::Reactor;
 use crate::runtime::RustRuntime;
 
 /// The Python `HomeServer`, as seen from Rust.
@@ -35,6 +36,34 @@ impl<'a, 'py> FromPyObject<'a, 'py> for HomeServer {
 }
 
 impl HomeServer {
+    /// Fetch the Twisted reactor in use by this HomeServer.
+    pub fn get_reactor(&self, py: Python<'_>) -> PyResult<Reactor> {
+        self.0
+            .bind(py)
+            .call_method0(intern!(py, "get_reactor"))?
+            .extract()
+    }
+
+    /// Register a system event trigger with the HomeServer so it can be cleanly
+    /// removed when the HomeServer is shutdown.
+    pub fn register_sync_shutdown_handler(
+        &self,
+        py: Python<'_>,
+        callable: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let kwargs = PyDict::new(py);
+        kwargs.set_item(intern!(py, "phase"), intern!(py, "after"))?;
+        kwargs.set_item(intern!(py, "eventType"), intern!(py, "shutdown"))?;
+        kwargs.set_item(intern!(py, "shutdown_func"), callable)?;
+        self.0.bind(py).call_method(
+            intern!(py, "register_sync_shutdown_handler"),
+            (),
+            Some(&kwargs),
+        )?;
+
+        Ok(())
+    }
+
     /// The per-homeserver Rust state (`hs.get_rust_runtime()`), which gives
     /// access to the tokio runtime and the reactor.
     pub fn get_rust_runtime(&self, py: Python<'_>) -> PyResult<RustRuntime> {

@@ -968,14 +968,14 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_rust_runtime(self) -> RustRuntime:
         """The per-homeserver state for the Rust side of Synapse: the tokio
-        thread pool, plus anything else Rust code keeps for the lifetime of
-        the homeserver.
+        thread pool, plus anything else Rust code keeps for the lifetime of the
+        homeserver.
 
-        The tokio runtime is started lazily on first use, and shut down by a
-        reactor shutdown trigger.
+        The tokio runtime is started lazily on first use, and shut down when
+        this homeserver is shut down.
         """
         # TODO: make the number of worker threads configurable
-        return RustRuntime(reactor=self.get_reactor(), worker_threads=4)
+        return RustRuntime(hs=self, worker_threads=4)
 
     @cache_in_self
     def get_event_sources(self) -> EventSources:
