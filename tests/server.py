@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import os.path
+import select
 import sqlite3
 import time
 import uuid
@@ -69,6 +70,7 @@ from twisted.internet.interfaces import (
     IPushProducer,
     IReactorPluggableNameResolver,
     IReactorTime,
+    IReadDescriptor,
     IResolverSimple,
     ITCPTransport,
     ITransport,
@@ -756,6 +758,29 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
             # reactor.callFromThread to feed results back from the db functions to the
             # main thread.
             super().advance(0)
+
+        # Now poll anything registered with `addReader`. A real reactor does
+        # this in its poll loop, but `MemoryReactor` only stores the readers, so
+        # results from Rust futures (see `rust/src/twisted_dispatch.rs`) would
+        # never reach their deferreds. Firing those deferreds can in turn queue
+        # more callbacks hence the recursive `advance(0)`.
+        readable = self._poll_readers()
+        if readable:
+            for reader in readable:
+                reader.doRead()
+            self.advance(0)
+
+    def _poll_readers(self) -> list[IReadDescriptor]:
+        """The readers registered with `addReader` that have data waiting."""
+        readers = {reader.fileno(): reader for reader in self.getReaders()}
+        if not readers:
+            return []
+
+        # Now poll the readers to see if any have data waiting.
+        poller = select.poll()
+        for fileno in readers:
+            poller.register(fileno, select.POLLIN)
+        return [readers[fileno] for fileno, _event in poller.poll(0)]
 
 
 def cleanup_test_reactor_system_event_triggers(
