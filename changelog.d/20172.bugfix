@@ -1,0 +1,1 @@
+Fix a bug where a server admin setting a custom profile field for a user with no profile received a 500 error; this now succeeds for existing (e.g. deactivated) users and returns a 404 error if the user does not exist.
