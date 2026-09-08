@@ -20,7 +20,10 @@
 #
 from unittest.mock import Mock, call
 
+from signedjson.key import generate_signing_key, get_verify_key
+
 from synapse.storage.database import LoggingTransaction
+from synapse.storage.keys import FetchKeyResult
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.unittest import HomeserverTestCase
@@ -122,3 +125,51 @@ class CacheInvalidationOverReplicationTestCase(BaseMultiWorkerStreamTestCase):
             [call(key_list) for key_list in keys_to_invalidate],
             any_order=True,
         )
+
+    def test_server_keys_json_invalidation_replicates(self) -> None:
+        """`_get_server_keys_json` takes a single argument which is itself a
+        tuple, and we can't send nested keys over replication: the keys are
+        JSON-encoded on the sending side and decoded again in
+        `process_replication_rows`. Check the round trip invalidates the right
+        cache entry on the worker.
+        """
+        master_invalidate = Mock()
+        worker_invalidate = Mock()
+
+        self.store._get_server_keys_json.invalidate = master_invalidate
+        worker = self.make_worker_hs("synapse.app.generic_worker")
+        worker_ds = worker.get_datastores().main
+        worker_ds._get_server_keys_json.invalidate = worker_invalidate
+
+        signing_key = generate_signing_key("ver1")
+        verify_key = get_verify_key(signing_key)
+        key_id = f"{verify_key.alg}:{verify_key.version}"
+
+        assert self.store._cache_id_gen is not None
+        initial_token = self.store._cache_id_gen.get_current_token()
+
+        self.get_success(
+            self.store.store_server_keys_response(
+                "server1",
+                from_server="server2",
+                ts_added_ms=self.clock.time_msec(),
+                verify_keys={
+                    key_id: FetchKeyResult(
+                        verify_key=verify_key, valid_until_ts=200_000
+                    ),
+                },
+                response_json={},
+            )
+        )
+        second_token = self.store._cache_id_gen.get_current_token()
+        self.assertGreater(second_token, initial_token)
+
+        self.get_success(
+            worker.get_replication_data_handler().wait_for_stream_position(
+                "master", "caches", second_token
+            )
+        )
+
+        expected_key = (("server1", key_id),)
+        master_invalidate.assert_called_once_with(expected_key)
+        worker_invalidate.assert_called_once_with(expected_key)

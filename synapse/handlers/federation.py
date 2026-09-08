@@ -53,6 +53,7 @@ from synapse.api.errors import (
     PartialStateConflictError,
     RequestSendFailed,
     SynapseError,
+    UnsupportedRoomVersionError,
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
@@ -582,8 +583,8 @@ class FederationHandler:
 
         return pdu
 
-    async def on_event_auth(self, event_id: str) -> list[EventBase]:
-        event = await self.store.get_event(event_id)
+    async def on_event_auth(self, event_id: str, room_id: str) -> list[EventBase]:
+        event = await self.store.get_event(event_id, check_room_id=room_id)
         auth = await self.store.get_auth_chain(
             event.room_id, list(event.auth_event_ids()), include_given=True
         )
@@ -668,6 +669,12 @@ class FederationHandler:
                 already_partial_state_room = await self.store.is_partial_state_room(
                     room_id
                 )
+
+                # See related restriction in /createRoom requests in handlers/room.py
+                if room_version_obj.msc4242_state_dags:
+                    raise UnsupportedRoomVersionError(
+                        "Homeserver does not support this room version over federation"
+                    )
 
                 ret = await self.federation_client.send_join(
                     host_list,
@@ -797,9 +804,54 @@ class FederationHandler:
             if not predecessor or not isinstance(predecessor.get("room_id"), str):
                 return event.event_id, max_stream_id
             old_room_id = predecessor["room_id"]
-            logger.debug(
-                "Found predecessor for %s during remote join: %s", room_id, old_room_id
+
+            # We can't take the new room's word for it.
+            # Check to see that the predecessor room consents to the
+            # room upgrade.
+            if not await self._event_auth_handler.is_host_in_room(
+                room_id=old_room_id, host=self.hs.hostname
+            ):
+                logger.info(
+                    "Ignoring unverified predecessor for %s during remote join: %s (not in old room)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            tombstone = await self._state_storage_controller.get_current_state_event(
+                old_room_id,
+                event_type=EventTypes.Tombstone,
+                state_key="",
             )
+
+            if tombstone is None:
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: %s (no tombstone in old room)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            intended_successor_room = tombstone.content.get(
+                EventContentFields.TOMBSTONE_SUCCESSOR_ROOM, None
+            )
+
+            if not isinstance(intended_successor_room, str):
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: %s (tombstone is invalid)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            if intended_successor_room != room_id:
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: predecessor defined as %s (the old room ID) but the old room's tombstone points to %r which doesn't match",
+                    room_id,
+                    old_room_id,
+                    intended_successor_room,
+                )
+                return event.event_id, max_stream_id
 
             # We retrieve the room member handler here as to not cause a cyclic dependency
             member_handler = self.hs.get_room_member_handler()
@@ -1216,6 +1268,7 @@ class FederationHandler:
         assert event.sender == user_id
         assert event.state_key == user_id
         assert event.room_id == room_id
+        assert event.content.get("membership") == membership
         return origin, event, room_version
 
     async def on_make_leave_request(
@@ -1539,7 +1592,14 @@ class FederationHandler:
                     if i == max_retries - 1:
                         raise e
         else:
-            destinations = {x.split(":", 1)[-1] for x in (sender_user_id, room_id)}
+            # The sender always tells us a server to try. Pre-v12 room IDs also
+            # encode the resident server's domain, but v12+ room IDs are a hash
+            # with no domain component, so we must not treat them as a server
+            # name -- doing so raises an invalid-destination error which can
+            # abort the whole exchange before the valid destination is tried.
+            destinations = {get_domain_from_id(sender_user_id)}
+            if ":" in room_id:
+                destinations.add(get_domain_from_id(room_id))
 
             try:
                 await self.federation_client.forward_third_party_invite(

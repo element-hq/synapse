@@ -344,7 +344,12 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                         code=e.code,
                         **{SERVER_NAME_LABEL: server_name},
                     ).inc()
-                    raise e.to_synapse_error()
+                    # This error is coming from another worker, so we trust it to be safe
+                    # to relay to clients directly.
+                    # In fact, we rely relaying verbatim at the very least to tell
+                    # clients when they are rate-limited,
+                    # but most likely other things too.
+                    raise e.unsafe_to_verbatim_synapse_error()
                 except Exception as e:
                     _outgoing_request_counter.labels(
                         name=cls.NAME,

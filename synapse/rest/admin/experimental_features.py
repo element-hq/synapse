@@ -62,7 +62,7 @@ class ExperimentalFeaturesRestServlet(RestServlet):
     for a given user
     """
 
-    PATTERNS = admin_patterns("/experimental_features/(?P<user_id>[^/]*)")
+    PATTERNS = admin_patterns("/experimental_features/(?P<user_id>[^/]*)$")
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()

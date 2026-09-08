@@ -39,7 +39,7 @@ class TokenRefreshRestServlet(RestServlet):
     token.
     """
 
-    PATTERNS = client_patterns("/tokenrefresh")
+    PATTERNS = client_patterns("/tokenrefresh$")
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()

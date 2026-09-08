@@ -317,7 +317,11 @@ class TestCase(unittest.TestCase):
         )
         diff_message = f"{first_message}\n{expected_string}\n{actual_string}"
 
-        self.fail(f"{diff_message}\n{message}")
+        extra_message = ""
+        if message is not None:
+            extra_message = "f\n{message}"
+
+        self.fail(f"{diff_message}{extra_message}")
 
 
 def DEBUG(target: TV) -> TV:
@@ -571,7 +575,6 @@ class HomeserverTestCase(TestCase):
         await_result: bool = True,
         custom_headers: Iterable[CustomHeaderType] | None = None,
         client_ip: str = "127.0.0.1",
-        timeout_ms: int = 1000,
     ) -> FakeChannel:
         """
         Create a SynapseRequest at the path using the method and containing the
@@ -600,8 +603,6 @@ class HomeserverTestCase(TestCase):
 
             client_ip: The IP to use as the requesting IP. Useful for testing
                 ratelimiting.
-            timeout_ms: if `await_result` is `True`, the amount of time to wait on
-                the request before timing out. Ignored otherwise.
 
         Returns:
             The FakeChannel object which stores the result of the request.
@@ -621,7 +622,6 @@ class HomeserverTestCase(TestCase):
             await_result,
             custom_headers,
             client_ip,
-            timeout_ms,
         )
 
     def setup_test_homeserver(

@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 class AppservicePingRestServlet(RestServlet):
     PATTERNS = client_patterns(
-        "/appservice/(?P<appservice_id>[^/]*)/ping",
+        "/appservice/(?P<appservice_id>[^/]*)/ping$",
         releases=("v1",),
     )
 

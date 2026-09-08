@@ -336,6 +336,17 @@ Example configuration:
 include_profile_data_on_invite: false
 ```
 ---
+### `include_profile_updates_in_sync`
+
+*(boolean)* Use this option to include updates of other users' profiles in sync responses, for users who share rooms.
+For legacy sync clients, requires [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatibility. For sliding sync clients, requires [MSC4262](https://github.com/matrix-org/matrix-spec-proposals/pull/4262) compatibility. Note, profile updates via sync are currently limited to local users only.
+This feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms. Defaults to `false`.
+
+Example configuration:
+```yaml
+include_profile_updates_in_sync: true
+```
+---
 ### `allow_public_rooms_without_auth`
 
 *(boolean)* If set to true, removes the need for authentication to access the server's public rooms directory through the client API, meaning that anyone can query the room directory. Defaults to `false`.
@@ -363,8 +374,9 @@ Known room versions are listed [here](https://spec.matrix.org/latest/rooms/#comp
 For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
+_Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
 
-Defaults to `"10"`.
+Defaults to `"11"`.
 
 Example configuration:
 ```yaml
@@ -1061,6 +1073,21 @@ Example configuration:
 redaction_retention_period: 28d
 ```
 ---
+### `redaction_allowed_period`
+
+How long after an `m.room.message` was sent a local user is still allowed to redact it. If a local user tries to redact a `m.room.message` older than this period Synapse responds with `403 M_FORBIDDEN` and does not redact the event.
+
+Only applies to `m.room.message` events redacted by local users.  Redactions of other event types and redactions received over federation are unaffected. When the target of the redaction is an edit (`m.replace`), the age and type are taken from the original event and not the edit.
+
+Set to `null` (the default) to disable, allowing events to be redacted at any time.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+redaction_allowed_period: 7d
+```
+---
 ### `forgotten_room_retention_period`
 
 How long to keep locally forgotten rooms before purging them from the DB. A value of `null` means it's disabled. Defaults to `null`.
@@ -1275,11 +1302,15 @@ Options related to federation.
 ---
 ### `federation_domain_whitelist`
 
-*(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.
+*(null|array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.
+
+If specified as an empty list (`[]`), federation will be denied with all servers. Specifying an empty list (`[]`) here is the recommended way of disabling federation.
+
+If unset or null, allows federation with all servers.
 
 Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
 
-Defaults to `[]`.
+Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -2227,13 +2258,26 @@ These settings can be overridden using the `get_media_upload_limits_for_user` mo
 
 Defaults to `[]`.
 
+Options for each entry include:
+
+* `time_period` (duration): The time period over which the limit applies. Required.
+
+* `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
+
+* `info_uri` (string): URI returned to the client for where the user can find information about the upload limit and how users can reduce their upload usage or request an upload limit increase. Optional. If not set, Synapse serves a built-in page (customisable via the `media_upload_limit_exceeded.html` template) and uses its URL instead.
+
+* `can_upgrade` (boolean): Value returned to the client for whether the limit can be increased. Defaults to `false`.
+
 Example configuration:
 ```yaml
 media_upload_limits:
 - time_period: 1h
   max_size: 100M
+  info_uri: https://example.com/quota#hour
 - time_period: 1w
   max_size: 500M
+  info_uri: https://example.com/quota
+  can_upgrade: true
 ```
 ---
 ### `max_image_pixels`
@@ -2638,13 +2682,20 @@ This setting has the following sub-options:
 
   * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
 
-  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+  * `url` (string): The WebSocket URL of the LiveKit SFU. If type is "livekit", either this or `livekit_service_url` is required.
+
+    Clients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.
+
+  * `livekit_service_url` (string): Deprecated. The HTTP URL of the LiveKit authorization service. If type is "livekit", either this or `url` is required.
+
+    Clients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.
 
 Example configuration:
 ```yaml
 matrix_rtc:
   transports:
   - type: livekit
+    url: wss://livekit.example.com
     livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
@@ -3808,7 +3859,7 @@ This setting has the following sub-options:
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every  SSO login, and are updated if necessary. Note that enabling this  option will override user profile information, regardless of whether  users have opted-out of syncing that information when first signing  in. Fields that will be synced:
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Fields that will be synced:
     * displayname
     * picture - only if Synapse media repository is running in the main
        process (i.e. not workerized) and media is stored locally Defaults to `false`.
@@ -3938,6 +3989,25 @@ push:
   jitter_delay: 10s
 ```
 ---
+### `push_rules`
+
+*(object)* Options for push rules
+
+This setting has the following sub-options:
+
+* `limits` (object): Limits on the size of push rules that users can have
+
+  This setting has the following sub-options:
+
+  * `rule_count` (integer): This is the total number of push rules that each user can have. Power users may expect to have one push rule per room. Defaults to `10000`.
+
+  * `rule_id_length` (integer): This is the maximum length of a push rule ID, in bytes. Push rule IDs need to be allowed to be at least as long as a room ID (which are [limited to 255 bytes per specification](https://spec.matrix.org/v1.19/appendices/#room-ids))
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit. Defaults to `300`.
+
+  * `rule_size` (integer): This is the maximum size of a push rule's body, in bytes.
+    The exact mechanism for calculating this size is currently an implementation detail, subject to change. This limit should be treated as a coarse sanity limit rather than something to fine-tune.
+    It's recommended to leave this option as it is. We expect to remove this option if/when the specification standardises on a limit and a mechanism for calculating it. Defaults to `1024`.
+---
 ## Rooms
 
 Config options relating to rooms.
@@ -3954,6 +4024,8 @@ Possible options are "all", "invite", and "off". They are defined as:
 * "off": this option will take no effect
 
 Note that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.
+
+A client may supply its own `m.room.encryption` event in the `initial_state` of its `/createRoom` request. If that event is valid (it specifies an `algorithm` as a string), it takes precedence and this option will not overwrite it, allowing the client to, for example, choose a different encryption algorithm. An empty or otherwise invalid `m.room.encryption` event does not disable forced encryption: the default will still be applied on top of it.
 
 Defaults to `"off"`.
 
@@ -4307,6 +4379,16 @@ forget_rooms_on_leave: true
 Example configuration:
 ```yaml
 exclude_rooms_from_sync:
+- '!foo:example.com'
+```
+---
+### `exclude_rooms_from_presence`
+
+*(array)* A list of rooms to exclude from presence updates. Presence will not be routed between two users solely because they share one of these rooms. Users who also share a non-excluded room continue to exchange presence as normal. Defaults to `[]`.
+
+Example configuration:
+```yaml
+exclude_rooms_from_presence:
 - '!foo:example.com'
 ```
 ---

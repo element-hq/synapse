@@ -1,0 +1,1 @@
+Declare types that already appear in the module API's public signatures (such as `Requester`, `SynapseRequest` and `UserInfo`) in `synapse.module_api.__all__`.

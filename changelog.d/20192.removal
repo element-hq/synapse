@@ -1,0 +1,1 @@
+Remove support for the unstable `org.matrix.msc3202.device_id` query parameter for application service device masquerading.

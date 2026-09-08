@@ -1,0 +1,1 @@
+Fix missing validation of `membership` when making `make_*` requests over federation. Contributed by @tulir @ Beeper.

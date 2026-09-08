@@ -26,13 +26,15 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    TypeVar,
+    Sequence,
+    Union,
 )
 
 import attr
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, ProfileUpdateAction
 from synapse.replication.http.streams import ReplicationGetStreamUpdates
+from synapse.types import UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -49,11 +51,36 @@ _STREAM_UPDATE_TARGET_ROW_COUNT = 100
 # A stream position token
 Token = int
 
+RdataSafeValue = Union[
+    str,
+    int,
+    bool,
+    float,
+    None,
+    # We could probably expand to support immutable types of these, but
+    # when they come off the wire they will deserialise to the mutable
+    # types again.
+    # Since nobody is using it right now, stick to `list` and `dict`
+    list["RdataSafeValue"],
+    dict[str, "RdataSafeValue"],
+]
+"""
+Safe types that can be used in RDATA commands and thus used as
+the wire format of stream rows.
+
+Prevents you from thinking you can push e.g. a `frozenset` over
+the wire and get it back on the other end.
+
+At the moment, to be safe, a type has to roundtrip correctly with our JSON codec.
+Consult the RdataCommand `from_line` and `to_line` for information.
+"""
+
 # The type of a stream update row, after JSON deserialisation, but before
 # parsing with Stream.parse_row (which turns it into a `ROW_TYPE`). Normally it's
 # just a row from a database query, though this is dependent on the stream in question.
 #
-StreamRow = TypeVar("StreamRow", bound=tuple)
+# NOTE: Prefer to use tuples, but since we have some streams still using list, support those for now.
+StreamRow = Union[tuple[RdataSafeValue, ...], list[RdataSafeValue]]
 
 # The type returned by the update_function of a stream, as well as get_updates(),
 # get_updates_since, etc.
@@ -63,7 +90,7 @@ StreamRow = TypeVar("StreamRow", bound=tuple)
 #   * `new_last_token` is the new position in stream.
 #   * `limited` is whether there are more updates to fetch.
 #
-StreamUpdateResult = tuple[list[tuple[Token, StreamRow]], Token, bool]
+StreamUpdateResult = tuple[Sequence[tuple[Token, StreamRow]], Token, bool]
 
 # The type of an update_function for a stream
 #
@@ -406,9 +433,9 @@ class TypingStream(Stream):
         if hs.get_instance_name() in hs.config.worker.writers.typing:
             # On the writer, query the typing handler
             typing_writer_handler = hs.get_typing_writer_handler()
-            update_function: Callable[
-                [str, int, int, int], Awaitable[tuple[list[tuple[int, Any]], int, bool]]
-            ] = typing_writer_handler.get_all_typing_updates
+            update_function: UpdateFunction = (
+                typing_writer_handler.get_all_typing_updates
+            )
             self.current_token_function = typing_writer_handler.get_current_token
         else:
             # Query the typing writer process
@@ -757,6 +784,80 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
                 (user_id, room_id, event_id),
             )
             for stream_id, user_id, room_id, event_id in updates
+        ]
+
+        if not rows:
+            return [], to_token, False
+
+        return rows, rows[-1][0], len(updates) == limit
+
+
+def _convert_affected_fields(
+    wire: list[str] | frozenset[str] | None,
+) -> frozenset[str] | None:
+    return (
+        frozenset(wire)
+        if wire is not None and not isinstance(wire, frozenset)
+        else None
+    )
+
+
+@attr.s(slots=True, auto_attribs=True)
+class ProfileUpdatesStreamRow:
+    """Profile update stream row detailing what the profile update changes."""
+
+    user_id: UserID
+    """The full user ID with the profile update."""
+    action: ProfileUpdateAction
+    """The action, either 'update' for a field update, 'left_room' if the user left
+    a room or `joined_room` if the user joined a room, see ProfileUpdateAction enum.
+    """
+    affected_fields: frozenset[str] | None = attr.ib(
+        # Convert list back to frozenset from wire format
+        converter=_convert_affected_fields
+    )
+    """Names of the profile fields that were added, updated or removed, see https://spec.matrix.org/unstable/client-server-api/#profiles.
+    This is None if `action` is not `update`.
+    """
+
+
+class ProfileUpdatesStream(_StreamFromIdGen):
+    """Stream to inform users about profile updates."""
+
+    # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+    # for concerns around the current implementation of the profile
+    # updates stream.
+
+    NAME = "profile_updates"
+    ROW_TYPE = ProfileUpdatesStreamRow
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        super().__init__(
+            hs.get_instance_name(),
+            self._update_function,
+            self.store._profile_updates_id_gen,
+        )
+
+    async def _update_function(
+        self, instance_name: str, from_token: int, to_token: int, limit: int
+    ) -> StreamUpdateResult:
+        updates = await self.store.get_updated_profile_updates(
+            from_id=from_token, to_id=to_token, limit=limit
+        )
+        rows: list[tuple[int, tuple[RdataSafeValue, ...]]] = [
+            (
+                stream_id,
+                # These are the args to `ProfileUpdatesStreamRow`
+                (
+                    user_id,
+                    action,
+                    # Must convert `field_names` to a list for transport over the wire
+                    # It will be reconstructed as a frozenset on the other end
+                    list(field_names) if field_names is not None else None,
+                ),
+            )
+            for stream_id, user_id, action, field_names in updates
         ]
 
         if not rows:

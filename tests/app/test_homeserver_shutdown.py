@@ -58,6 +58,11 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
             homeserver_to_use=SynapseHomeServer,
             clock=self.clock,
         )
+        # Since we're driving the entire homeserver creation in these tests (something
+        # normally handled by `HomeserverTestCase` if we defined some `servlets`), make
+        # sure we get the Rust side instantiated to verify nothing on the Rust side is
+        # holding onto a Python reference that would prevent shutdown.
+        self.hs.get_rust_handlers()
         self.wait_for_background_updates()
 
         hs_ref = weakref.ref(self.hs)
@@ -109,6 +114,11 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
             homeserver_to_use=SynapseHomeServer,
             clock=self.clock,
         )
+        # Since we're driving the entire homeserver creation in these tests (something
+        # normally handled by `HomeserverTestCase` if we defined some `servlets`), make
+        # sure we get the Rust side instantiated to verify nothing on the Rust side is
+        # holding onto a Python reference that would prevent shutdown.
+        self.hs.get_rust_handlers()
 
         # Pump the background updates by a single iteration, just to ensure any extra
         # resources it uses have been started.

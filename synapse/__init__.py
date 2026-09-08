@@ -49,7 +49,9 @@ if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
 
     from twisted.internet import asyncioreactor
 
-    asyncioreactor.install(asyncio.get_event_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    asyncioreactor.install(loop)
 
 # Twisted and canonicaljson will fail to import when this file is executed to
 # get the __version__ during a fresh install. That's OK and subsequent calls to

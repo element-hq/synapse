@@ -45,6 +45,7 @@ from mypy.types import (
     AnyType,
     CallableType,
     Instance,
+    LiteralType,
     NoneType,
     Options,
     TupleType,
@@ -812,6 +813,10 @@ def is_cacheable(
     # This should probably be done via a TypeVisitor. Apologies to the reader!
     if isinstance(rt, AnyType):
         return True, ("may be mutable" if verbose else None)
+
+    elif isinstance(rt, LiteralType):
+        # Literal[True] etc
+        return True, None
 
     elif isinstance(rt, Instance):
         if (

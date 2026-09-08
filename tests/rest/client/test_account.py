@@ -30,7 +30,7 @@ from twisted.internet.interfaces import IReactorTCP
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import LoginType, Membership
+from synapse.api.constants import LoginType, Membership, ProfileFields
 from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest import admin
@@ -42,7 +42,7 @@ from synapse.types import JsonDict, UserID, create_requester
 from synapse.util.clock import Clock
 
 from tests import unittest
-from tests.server import FakeSite, make_request
+from tests.server import FakeChannel, FakeSite, make_request
 from tests.unittest import override_config
 
 
@@ -325,13 +325,8 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         email = "test@example.com"
 
         client_secret = "foobar"
-        session_id = self._request_token(
-            email,
-            client_secret,
-            # The endpoint intentionally adds up to 1000ms of jitter to avoid
-            # leaking whether the email address is bound to an account.
-            timeout_ms=3000,
-        )
+
+        session_id = self._request_token(email, client_secret)
 
         self.assertIsNotNone(session_id)
 
@@ -364,24 +359,47 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
 
         self._validate_token(link, next_link)
 
+    def test_password_reset_invalid_email(self) -> None:
+        """A malformed email address is reported with M_INVALID_PARAM, as on
+        /account/3pid/email/requestToken (the two endpoints share the request
+        body model).
+        """
+        channel = self.make_request(
+            "POST",
+            b"account/password/email/requestToken",
+            {
+                "client_secret": "foobar",
+                "email": "address-without-at.bar",
+                "send_attempt": 1,
+            },
+        )
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+        self.assertIn("Unable to parse email address", channel.json_body["error"])
+
     def _request_token(
         self,
         email: str,
         client_secret: str,
         ip: str = "127.0.0.1",
         next_link: str | None = None,
-        timeout_ms: int = 1000,
     ) -> str:
         body = {"client_secret": client_secret, "email": email, "send_attempt": 1}
         if next_link is not None:
             body["next_link"] = next_link
+
         channel = self.make_request(
             "POST",
             b"account/password/email/requestToken",
             body,
             client_ip=ip,
-            timeout_ms=timeout_ms,
+            await_result=False,
         )
+        # Note: The endpoint intentionally adds up to 1000ms of jitter to avoid
+        # leaking whether the email address is bound to an account.
+        channel.await_result(timeout_ms=1000)
 
         if channel.code != 200:
             raise HttpResponseException(
@@ -522,13 +540,19 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
 
         # Set some profile data that can be checked for after the user is erased
         self.get_success(
-            profile_handler.set_displayname(
-                user_id, create_requester(user_id), "Kermit the Frog"
+            profile_handler.set_field(
+                target_user=user_id,
+                requester=create_requester(user_id),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Kermit the Frog",
             )
         )
         self.get_success(
-            profile_handler.set_avatar_url(
-                user_id, create_requester(user_id), "http://test/Kermit.jpg"
+            profile_handler.set_field(
+                target_user=user_id,
+                requester=create_requester(user_id),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://test/Kermit.jpg",
             )
         )
         # Verify it is set
@@ -580,9 +604,19 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         # Can not use the profile handler to set a display name when it is disabled. Use
         # the database directly
         store = self.hs.get_datastores().main
-        self.get_success(store.set_profile_displayname(user_id, "Kermit the Frog"))
         self.get_success(
-            store.set_profile_avatar_url(user_id, "http://test/Kermit.jpg")
+            store.set_profile_field(
+                user_id=user_id,
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Kermit the Frog",
+            )
+        )
+        self.get_success(
+            store.set_profile_field(
+                user_id=user_id,
+                field_name=ProfileFields.AVATAR_URL,
+                new_value="http://test/Kermit.jpg",
+            )
         )
 
         # Verify it is set
@@ -996,21 +1030,21 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
     def test_add_email_no_at(self) -> None:
         self._request_token_invalid_email(
             "address-without-at.bar",
-            expected_errcode=Codes.BAD_JSON,
+            expected_errcode=Codes.INVALID_PARAM,
             expected_error="Unable to parse email address",
         )
 
     def test_add_email_two_at(self) -> None:
         self._request_token_invalid_email(
             "foo@foo@test.bar",
-            expected_errcode=Codes.BAD_JSON,
+            expected_errcode=Codes.INVALID_PARAM,
             expected_error="Unable to parse email address",
         )
 
     def test_add_email_bad_format(self) -> None:
         self._request_token_invalid_email(
             "user@bad.example.net@good.example.com",
-            expected_errcode=Codes.BAD_JSON,
+            expected_errcode=Codes.INVALID_PARAM,
             expected_error="Unable to parse email address",
         )
 
@@ -1419,6 +1453,69 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
 
         threepids = {threepid["address"] for threepid in channel.json_body["threepids"]}
         self.assertIn(expected_email, threepids)
+
+
+class ThreepidMsisdnRestTestCase(unittest.HomeserverTestCase):
+    """Tests the error codes of /account/3pid/msisdn/requestToken.
+
+    See https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3account3pidmsisdnrequesttoken
+    (error codes added in Matrix v1.13 by MSC4178).
+    """
+
+    servlets = [
+        account.register_servlets,
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.user_id = self.register_user("kermit", "test")
+
+    def _request_token(self, country: str, phone_number: str) -> FakeChannel:
+        return self.make_request(
+            "POST",
+            b"account/3pid/msisdn/requestToken",
+            {
+                "client_secret": "foobar",
+                "country": country,
+                "phone_number": phone_number,
+                "send_attempt": 1,
+            },
+        )
+
+    @override_config({"account_threepid_delegates": {"msisdn": "https://id_server"}})
+    def test_invalid_country_code(self) -> None:
+        """A malformed country code is reported with M_INVALID_PARAM."""
+        channel = self._request_token("gb", "07700900001")
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
+    @override_config({"account_threepid_delegates": {"msisdn": "https://id_server"}})
+    def test_invalid_phone_number(self) -> None:
+        """An unparseable phone number is reported with M_INVALID_PARAM."""
+        channel = self._request_token("GB", "not a phone number")
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
+
+    @override_config({"allowed_local_3pids": [{"medium": "email", "pattern": ".*"}]})
+    def test_medium_not_supported_checked_before_denied(self) -> None:
+        """When the server cannot send validation SMSes, it reports
+        M_THREEPID_MEDIUM_NOT_SUPPORTED even if the phone number would be
+        denied: the unsupported-medium check comes first, as on the email
+        variant.
+        """
+        channel = self._request_token("GB", "07700900001")
+        self.assertEqual(
+            HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
+        )
+        self.assertEqual(
+            Codes.THREEPID_MEDIUM_NOT_SUPPORTED, channel.json_body["errcode"]
+        )
 
 
 class AccountStatusTestCase(unittest.HomeserverTestCase):

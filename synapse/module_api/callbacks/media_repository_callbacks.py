@@ -150,7 +150,10 @@ class MediaRepositoryModuleApiCallbacks:
             ):
                 # Use a copy of the data in case the module modifies it
                 limit_copy = MediaUploadLimit(
-                    max_bytes=limit.max_bytes, time_period_ms=limit.time_period_ms
+                    max_bytes=limit.max_bytes,
+                    time_period_ms=limit.time_period_ms,
+                    info_uri=limit.info_uri,
+                    can_upgrade=limit.can_upgrade,
                 )
                 await delay_cancellation(
                     callback(user_id, limit_copy, sent_bytes, attempted_bytes)

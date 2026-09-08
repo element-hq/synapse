@@ -34,7 +34,9 @@ use pyo3::{
     exceptions::{PyAssertionError, PyRuntimeError, PyTypeError},
     intern,
     prelude::*,
-    types::{PyBool, PyCFunction, PyFloat, PyInt, PyList, PyString},
+    types::{
+        PyBool, PyCFunction, PyFloat, PyInt, PyList, PyString, PyWeakrefMethods, PyWeakrefReference,
+    },
 };
 
 use crate::deferred::run_python_awaitable;
@@ -95,23 +97,32 @@ impl DatabaseEngine {
 
 /// Wrapper for a `DatabasePool` from the Python side of Synapse.
 pub struct PythonDatabasePoolWrapper {
-    /// The underlying Python `DatabasePool`
-    database_pool_py: Py<PyAny>,
+    /// A *weak* reference to the underlying Python `DatabasePool`.
+    ///
+    /// We use a *weak* reference to ensure the homeserver can cleanly shut down as
+    /// otherwise we hold onto `DatabasePool` which references the homeserver and keeps
+    /// the homeserver from being garbage collected.
+    database_pool_py_ref: Py<PyWeakrefReference>,
 
-    /// The Twisted reactor. We need this to marshal back onto the reactor thread
-    /// (via `callFromThread`) when starting transactions, since Twisted's thread
-    /// pool machinery must be driven from there.
+    /// The Twisted reactor. We need this to marshal database work back onto the
+    /// reactor thread (via `callFromThread`) when starting transactions, since
+    /// Twisted's thread pool machinery must be driven from there.
+    ///
+    /// A strong reference is fine here: the reactor is a process-global singleton that
+    /// never gets garbage collected and never points back at the homeserver, so it is
+    /// not part of any reference cycle. Ideally, we could worry about it but
+    /// practically probably doesn't matter.
     reactor: Py<PyAny>,
 }
 
 impl PythonDatabasePoolWrapper {
     /// Build a wrapper around the Python `DatabasePool` (e.g.
     /// `hs.get_datastores().main.db_pool`) and the Twisted `reactor`.
-    pub fn new(database_pool_py: Py<PyAny>, reactor: Py<PyAny>) -> Self {
-        Self {
-            database_pool_py,
+    pub fn new(database_pool: &Bound<'_, PyAny>, reactor: Py<PyAny>) -> PyResult<Self> {
+        Ok(Self {
+            database_pool_py_ref: PyWeakrefReference::new(database_pool)?.unbind(),
             reactor,
-        }
+        })
     }
 }
 
@@ -193,9 +204,24 @@ impl DatabasePool for PythonDatabasePoolWrapper {
                 )?
                 .unbind();
 
+                // Upgrade our weak reference to the Python `DatabasePool` into a strong
+                // one for the duration of this interaction.
+                let database_pool_py = self
+                    .database_pool_py_ref
+                    .bind(py)
+                    .upgrade()
+                    .ok_or_else(|| {
+                        PyRuntimeError::new_err(
+                            "The Python `DatabasePool` has already been dropped \
+                            (the homeserver is likely shutdown), so we cannot \
+                            run the database interaction.",
+                        )
+                    })?
+                    .unbind();
+
                 Ok((
                     callback,
-                    self.database_pool_py.clone_ref(py),
+                    database_pool_py,
                     self.reactor.clone_ref(py),
                 ))
             })

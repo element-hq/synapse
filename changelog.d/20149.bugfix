@@ -1,0 +1,1 @@
+Fix the `/profile` endpoint, when querying custom fields, returning a 500 error instead of 404 when the profile does not exist at all.

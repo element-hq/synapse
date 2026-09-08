@@ -459,7 +459,6 @@ def make_request(
     await_result: bool = True,
     custom_headers: Iterable[CustomHeaderType] | None = None,
     client_ip: str = "127.0.0.1",
-    timeout_ms: int = 1000,
 ) -> FakeChannel:
     """
     Make a web request using the given method, path and content, and render it
@@ -488,8 +487,6 @@ def make_request(
         custom_headers: (name, value) pairs to add as request headers
         client_ip: The IP to use as the requesting IP. Useful for testing
             ratelimiting.
-        timeout_ms: if `await_result` is `True`, the amount of time to wait on
-            the request before timing out. Ignored otherwise.
 
     Returns:
         channel
@@ -574,7 +571,7 @@ def make_request(
     req.requestReceived(method, path, b"1.1")
 
     if await_result:
-        channel.await_result(timeout_ms=timeout_ms)
+        channel.await_result()
 
     return channel
 
@@ -1251,18 +1248,34 @@ def setup_test_homeserver(
         global PREPPED_SQLITE_DB_CONN
         if PREPPED_SQLITE_DB_CONN is None:
             temp_engine = create_engine(database_config)
-            PREPPED_SQLITE_DB_CONN = LoggingDatabaseConnection(
+            prepped_conn = LoggingDatabaseConnection(
                 conn=sqlite3.connect(":memory:"),
                 engine=temp_engine,
                 default_txn_name="PREPPED_CONN",
                 server_name=server_name,
             )
 
-            database = DatabaseConnectionConfig("master", database_config)
-            config.database.databases = [database]
             prepare_database(
-                PREPPED_SQLITE_DB_CONN, create_engine(database_config), config
+                prepped_conn,
+                create_engine(database_config),
+                # We pass `config=None` here so that the template database is prepared the
+                # same way regardless of which test happens to be the first one to run.
+                #
+                # Notably, `prepare_database` refuses to initialise an empty database
+                # when given a worker config, which would otherwise make any test using
+                # `homeserver_to_use=GenericWorkerServer` fail when run on its own.
+                #
+                # Each test still runs `prepare_database` with its own config against its own
+                # copy of this template (via `hs.setup()`), so anything config specific (like
+                # module schemas) is still applied per-test.
+                config=None,
             )
+
+            # Only publish the template once it's fully prepared. Previously, this was
+            # assigned before `prepare_database(...)` ran which meant that if
+            # `prepare_database(...)` failed, we ended up with an unitialized/partial
+            # database state and never tried to re-create it for subsequent tests.
+            PREPPED_SQLITE_DB_CONN = prepped_conn
 
         database_config["_TEST_PREPPED_CONN"] = PREPPED_SQLITE_DB_CONN
 

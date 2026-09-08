@@ -1,2 +1,0 @@
-Fix a bug introduced in Synapse v1.150.0 where reactivating a deactivated and erased user did not restore their profile, breaking login, name changes, and invitations.
-Contributed by @m4us1ne.

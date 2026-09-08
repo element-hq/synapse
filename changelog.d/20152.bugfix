@@ -1,0 +1,1 @@
+When not using MSC3866, omit the approval flag from the response of `GET /_synapse/admin/v2/users`.

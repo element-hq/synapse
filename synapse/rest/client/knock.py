@@ -46,7 +46,7 @@ class KnockRoomAliasServlet(RestServlet):
     POST /knock/{roomIdOrAlias}
     """
 
-    PATTERNS = client_patterns("/knock/(?P<room_identifier>[^/]*)")
+    PATTERNS = client_patterns("/knock/(?P<room_identifier>[^/]*)$")
     CATEGORY = "Event sending requests"
 
     def __init__(self, hs: "HomeServer"):

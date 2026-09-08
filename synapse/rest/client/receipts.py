@@ -20,6 +20,7 @@
 #
 
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
@@ -50,6 +51,7 @@ class ReceiptRestServlet(RestServlet):
         self.read_marker_handler = hs.get_read_marker_handler()
         self.presence_handler = hs.get_presence_handler()
         self._main_store = hs.get_datastores().main
+        self._msc4446_enabled = hs.config.experimental.msc4446_enabled
 
         self._known_receipt_types = {
             ReceiptTypes.READ,
@@ -72,6 +74,25 @@ class ReceiptRestServlet(RestServlet):
             )
 
         body = parse_json_object_from_request(request)
+
+        if self._msc4446_enabled:
+            allow_backward = body.get("com.beeper.allow_backward", False)
+            if not isinstance(allow_backward, bool):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "com.beeper.allow_backward must be a boolean.",
+                    Codes.INVALID_PARAM,
+                )
+
+            if allow_backward and receipt_type != ReceiptTypes.FULLY_READ:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "com.beeper.allow_backward is only allowed to be true for "
+                    f"{ReceiptTypes.FULLY_READ}.",
+                    Codes.INVALID_PARAM,
+                )
+        else:
+            allow_backward = False
 
         # Pull the thread ID, if one exists.
         thread_id = None
@@ -108,6 +129,7 @@ class ReceiptRestServlet(RestServlet):
                 room_id,
                 user_id=requester.user.to_string(),
                 event_id=event_id,
+                allow_backward=allow_backward,
             )
         else:
             await self.receipts_handler.received_client_receipt(

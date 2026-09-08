@@ -22,7 +22,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from prometheus_client import Counter
 
@@ -317,7 +317,7 @@ class ReplicationStreamer:
 
 
 def _batch_updates(
-    updates: list[tuple[Token, StreamRow]],
+    updates: Sequence[tuple[Token, StreamRow]],
 ) -> list[tuple[Token | None, StreamRow]]:
     """Takes a list of updates of form [(token, row)] and sets the token to
     None for all rows where the next row has the same token. This is used to

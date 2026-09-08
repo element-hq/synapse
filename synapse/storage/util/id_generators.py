@@ -906,14 +906,44 @@ class _MultiWriterCtxManager:
     stream_ids: list[int] = attr.Factory(list)
 
     async def __aenter__(self) -> int | list[int]:
+        def _load(txn: LoggingTransaction) -> list[int]:
+            ids = self.id_gen._load_next_mult_id_txn(txn, self.multiple_ids or 1)
+            # Record the allocated IDs on the context manager as a side effect
+            # (rather than only via the return value), so that if this coroutine
+            # is cancelled after the transaction has committed we still know
+            # which IDs to release below.
+            self.stream_ids = ids
+            return ids
+
         # It's safe to run this in autocommit mode as fetching values from a
         # sequence ignores transaction semantics anyway.
-        self.stream_ids = await self.id_gen._db.runInteraction(
-            "_load_next_mult_id",
-            self.id_gen._load_next_mult_id_txn,
-            self.multiple_ids or 1,
-            db_autocommit=True,
-        )
+        try:
+            await self.id_gen._db.runInteraction(
+                "_load_next_mult_id",
+                _load,
+                db_autocommit=True,
+            )
+        except BaseException:
+            # We catch `BaseException` rather than `Exception`,
+            # because request cancellation surfaces here as exceptions that are
+            # not `Exception` subclasses: `asyncio.CancelledError`
+            # and `GeneratorExit` (raised when a paused coroutine is garbage
+            # collected).
+            #
+            # If we're interrupted (e.g. the enclosing request was cancelled)
+            # after the transaction allocated the IDs but before we returned,
+            # then `__aexit__` will never run, because Python only invokes it
+            # once `__aenter__` has returned. The allocated IDs would then be
+            # leaked into `_unfinished_ids` forever, permanently pinning the
+            # persisted stream position and, e.g., wedging presence.
+            #
+            # So mark them as finished here to unblock the position. This mirrors
+            # what `__aexit__` does on the failure path (marking the IDs finished
+            # and notifying replication, but not persisting a new position).
+            if self.stream_ids:
+                self.id_gen._mark_ids_as_finished(self.stream_ids)
+                self.notifier.notify_replication()
+            raise
 
         if self.multiple_ids is None:
             return self.stream_ids[0] * self.id_gen._return_factor

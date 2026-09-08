@@ -121,6 +121,7 @@ class DeviceMessageHandler:
                 origin,
                 sender_user_id,
             )
+            return
         message_type = content["type"]
         message_id = content["message_id"]
         for user_id, by_device in content["messages"].items():

@@ -3,6 +3,7 @@
 #
 # Copyright 2022 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2024 New Vector, Ltd
+# Copyright (C) 2026 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -29,6 +30,7 @@ from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
+from matrix_common.types.mxc_uri import MXCUri
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
 
@@ -57,6 +59,10 @@ from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.module_api import MediaUploadLimit
 from synapse.rest import admin
 from synapse.rest.client import login, media
+from synapse.rest.synapse.client import build_synapse_client_resource_tree
+from synapse.rest.synapse.client.media_upload_limit_exceeded import (
+    MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
@@ -2932,11 +2938,20 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
 
         config["media_storage_providers"] = [provider_config]
 
-        # These are the limits that we are testing
-        config["media_upload_limits"] = [
-            {"time_period": "1d", "max_size": "1K"},
-            {"time_period": "1w", "max_size": "3K"},
-        ]
+        # These are the limits that we are testing unless overridden
+        if config.get("media_upload_limits") is None:
+            config["media_upload_limits"] = [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "info_uri": "https://example.com/limits#daily",
+                },
+                {
+                    "time_period": "1w",
+                    "max_size": "3K",
+                    "info_uri": "https://example.com/limits#weekly",
+                },
+            ]
 
         return self.setup_test_homeserver(config=config)
 
@@ -2950,6 +2965,9 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
     def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        # Mount the `/_synapse/client` tree, which includes the fallback page
+        # served at `MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH` which we use in the tests.
+        resources.update(build_synapse_client_resource_tree(self.hs))
         return resources
 
     def upload_media(self, size: int) -> FakeChannel:
@@ -2974,7 +2992,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         channel = self.upload_media(800)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
     def test_under_daily_limit(self) -> None:
         """Test that uploading media under the daily limit fails."""
@@ -3012,7 +3031,8 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
 
         # This will fail as the weekly limit has been exceeded
         channel = self.upload_media(900)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
 
         # Reset the weekly limit by advancing a week
         self.reactor.advance(7 * 60 * 60 * 24)  # Advance by 7 days
@@ -3020,6 +3040,104 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         # This will succeed as the weekly limit has reset
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
+
+    @override_config(
+        {
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    # No `info_uri` is configured, so the fallback resource
+                    # should be used instead.
+                }
+            ],
+        }
+    )
+    def test_falls_back_to_served_page_when_no_info_uri(self) -> None:
+        """When no info_uri is configured, the error should point at a page
+        served by Synapse, and that page should return HTML."""
+        channel = self.upload_media(1300)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+
+        expected_info_uri = (
+            self.hs.config.server.public_baseurl
+            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
+        )
+        self.assertEqual(channel.json_body["info_uri"], expected_info_uri)
+
+        # The fallback page should be served by Synapse and return HTML.
+        page = self.make_request(
+            "GET",
+            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
+            shorthand=False,
+        )
+        self.assertEqual(page.code, 200)
+        self.assertEqual(
+            page.headers.getRawHeaders("Content-Type"),
+            ["text/html; charset=utf-8"],
+        )
+        self.assertIn(b"upload limit", page.result["body"])
+
+    def test_fallback_page_mounted(self) -> None:
+        """The fallback resource should always be mounted, even if every configured
+        limit has an explicit info_uri, since module callbacks can return
+        limits without an info_uri at any time."""
+        # The default config for this test case sets an info_uri on every limit.
+        page = self.make_request(
+            "GET",
+            MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH,
+            shorthand=False,
+        )
+        self.assertEqual(page.code, 200)
+        self.assertEqual(
+            page.headers.getRawHeaders("Content-Type"),
+            ["text/html; charset=utf-8"],
+        )
+
+    @override_config(
+        {
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "info_uri": "https://example.com",
+                }
+            ],
+        }
+    )
+    def test_returns_hard_user_limit_exceeded_by_default(self) -> None:
+        """Test that the error is returned with can_upgrade False by default."""
+        channel = self.upload_media(1300)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+        self.assertEqual(channel.json_body["info_uri"], "https://example.com/")
+        # the spec says that can_upgrade should not be included if it is False
+        self.assertIsNone(channel.json_body.get("can_upgrade"))
+
+    @override_config(
+        {
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "info_uri": "https://example.com",
+                    "can_upgrade": True,
+                }
+            ],
+        }
+    )
+    def test_returns_soft_user_limit_exceeded(self) -> None:
+        """Test that the M_USER_LIMIT_EXCEEDED error is returned with
+        can_upgrade True when specified in config."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+        self.assertEqual(channel.json_body["info_uri"], "https://example.com/")
+        self.assertEqual(channel.json_body["can_upgrade"], True)
 
 
 class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
@@ -3053,10 +3171,19 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         config["media_storage_providers"] = [provider_config]
 
         # default limits to use
-        config["media_upload_limits"] = [
-            {"time_period": "1d", "max_size": "1K"},
-            {"time_period": "1w", "max_size": "3K"},
-        ]
+        if config.get("media_upload_limits") is None:
+            config["media_upload_limits"] = [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "info_uri": "https://example.com/limits#daily",
+                },
+                {
+                    "time_period": "1w",
+                    "max_size": "3K",
+                    "info_uri": "https://example.com/limits#weekly",
+                },
+            ]
 
         return self.setup_test_homeserver(config=config)
 
@@ -3069,10 +3196,14 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
             # n.b. we return these in increasing duration order and Synapse will need to sort them correctly
             return [
                 MediaUploadLimit(
-                    time_period_ms=Config.parse_duration("1d"), max_bytes=5000
+                    time_period_ms=Config.parse_duration("1d"),
+                    max_bytes=5000,
+                    info_uri="https://override.example.com/limits#daily",
                 ),
                 MediaUploadLimit(
-                    time_period_ms=Config.parse_duration("1w"), max_bytes=15000
+                    time_period_ms=Config.parse_duration("1w"),
+                    max_bytes=15000,
+                    info_uri="https://override.example.com/limits#weekly",
                 ),
             ]
         # user2 has no limits
@@ -3153,13 +3284,16 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
 
         # User 1 attempts to upload 4000 bytes taking it over the limit
         channel = self.upload_media(4000, self.tok1)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
         assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
             MediaUploadLimit(
-                max_bytes=5000, time_period_ms=Config.parse_duration("1d")
+                max_bytes=5000,
+                time_period_ms=Config.parse_duration("1d"),
+                info_uri="https://override.example.com/limits#daily",
+                can_upgrade=False,
             ),
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
@@ -3168,13 +3302,16 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         # User 1 attempts to upload 20000 bytes which is over the weekly limit
         # This tests that the limits have been sorted as expected
         channel = self.upload_media(20000, self.tok1)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
         assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
             MediaUploadLimit(
-                max_bytes=15000, time_period_ms=Config.parse_duration("1w")
+                max_bytes=15000,
+                time_period_ms=Config.parse_duration("1w"),
+                info_uri="https://override.example.com/limits#weekly",
+                can_upgrade=False,
             ),
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
@@ -3197,14 +3334,253 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
 
         # User 3 uploads 800 bytes which is over the limit
         channel = self.upload_media(800, self.tok3)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
         assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user3)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
             MediaUploadLimit(
-                max_bytes=1024, time_period_ms=Config.parse_duration("1d")
+                max_bytes=1024,
+                time_period_ms=Config.parse_duration("1d"),
+                info_uri="https://example.com/limits#daily",
+                can_upgrade=False,
             ),
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 500)
         self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 800)
+
+    def test_module_limit_without_info_uri_falls_back(self) -> None:
+        """A limit returned by a module callback without an info_uri falls back
+        to the static page served by Synapse when the error is generated."""
+
+        async def _limits_without_info_uri(
+            user_id: str,
+        ) -> list[MediaUploadLimit] | None:
+            # info_uri is omitted (defaults to None).
+            return [
+                MediaUploadLimit(
+                    time_period_ms=Config.parse_duration("1d"),
+                    max_bytes=123,
+                )
+            ]
+
+        self.hs.get_module_api().register_media_repository_callbacks(
+            get_media_upload_limits_for_user=_limits_without_info_uri,
+        )
+
+        # This is over the limit of 123 bytes, but below the default limit of 1k bytes
+        channel = self.upload_media(130, self.tok3)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(channel.json_body["errcode"], "M_USER_LIMIT_EXCEEDED")
+
+        # Assert that the upload limit from the module callback was used (identified by
+        # max_bytes=123) (as opposed to the global default).
+        assert self.last_media_upload_limit_exceeded is not None
+        limit = self.last_media_upload_limit_exceeded["limit"]
+        assert isinstance(limit, MediaUploadLimit)
+        self.assertEqual(limit.max_bytes, 123)
+
+        # Assert that the info_uri was correctly populated (even though not provided by the module)
+        expected_info_uri = (
+            self.hs.config.server.public_baseurl
+            + MEDIA_UPLOAD_LIMIT_EXCEEDED_PATH.lstrip("/")
+        )
+        self.assertEqual(channel.json_body["info_uri"], expected_info_uri)
+
+
+class AnimatedThumbnailTestCase(unittest.HomeserverTestCase):
+    """End-to-end tests for the `animated` query parameter on the local
+    thumbnail endpoint."""
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+
+        config = self.default_config()
+        config["media_store_path"] = self.media_store_path
+        config["media_storage_providers"] = [
+            {
+                "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+                "store_local": True,
+                "store_synchronous": False,
+                "store_remote": True,
+                "config": {"directory": self.storage_path},
+            }
+        ]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.repo = hs.get_media_repository()
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+        self.content_uri = self._upload(self._make_animated_gif(), "image/gif")
+
+    def _make_animated_gif(self) -> bytes:
+        frames = [
+            Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))
+        ]
+        out = io.BytesIO()
+        frames[0].save(
+            out,
+            format="GIF",
+            save_all=True,
+            append_images=frames[1:],
+            duration=100,
+            loop=0,
+        )
+        return out.getvalue()
+
+    def _make_mpo(self, stale: bool = False) -> bytes:
+        """Build a two-image MPO: a JPEG holding a stereo pair, not an
+        animation. If `stale` is set, the trailing image is stripped but still
+        advertised."""
+        frames = [
+            Image.new("RGB", (64, 64), color) for color in ((255, 0, 0), (0, 0, 255))
+        ]
+        out = io.BytesIO()
+        frames[0].save(out, format="MPO", save_all=True, append_images=frames[1:])
+        data = out.getvalue()
+        if not stale:
+            return data
+
+        with Image.open(io.BytesIO(data)) as image:
+            primary_size = image.mpinfo[0xB002][0]["Size"]  # type: ignore[attr-defined]
+        return data[:primary_size]
+
+    def _upload(self, data: bytes, content_type: str) -> MXCUri:
+        return self.get_success(
+            self.repo.create_or_update_content(
+                content_type,
+                "test",
+                io.BytesIO(data),
+                len(data),
+                UserID.from_string(self.user),
+            )
+        )
+
+    def _thumbnail(self, content_uri: MXCUri, animated: str | None) -> FakeChannel:
+        params = "?width=32&height=32&method=scale"
+        if animated is not None:
+            params += f"&animated={animated}"
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{content_uri.server_name}"
+            f"/{content_uri.media_id}{params}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.pump()
+        self.assertEqual(channel.code, 200, channel.result)
+        return channel
+
+    def test_default_is_static(self) -> None:
+        """Without the `animated` parameter a static thumbnail is returned."""
+        channel = self._thumbnail(self.content_uri, animated=None)
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    def test_animated_false_is_static(self) -> None:
+        channel = self._thumbnail(self.content_uri, animated="false")
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    def test_animated_true_is_animated(self) -> None:
+        """With `animated=true` an animated WebP thumbnail is returned."""
+        channel = self._thumbnail(self.content_uri, animated="true")
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Content-Type"), [b"image/webp"]
+        )
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertEqual(result.format, "WEBP")
+        self.assertTrue(getattr(result, "is_animated", False))
+        self.assertEqual(result.n_frames, 2)
+
+    def test_animated_thumbnail_is_cached(self) -> None:
+        """Animated thumbnails are generated at upload and served from cache,
+        not regenerated on each request."""
+        # The animated (WebP) thumbnail is stored alongside the static ones at
+        # upload time.
+        thumbnails = self.get_success(
+            self.store.get_local_media_thumbnails(self.content_uri.media_id)
+        )
+        self.assertTrue(
+            any(info.type == "image/webp" for info in thumbnails),
+            thumbnails,
+        )
+
+        # Two consecutive requests return identical cached bytes.
+        first = self._thumbnail(self.content_uri, animated="true")
+        second = self._thumbnail(self.content_uri, animated="true")
+        self.assertEqual(first.result["body"], second.result["body"])
+
+    def test_non_animatable_source_falls_back_to_static(self) -> None:
+        """`animated=true` on a non-animatable source behaves as `animated=false`."""
+        png_uri = self._upload(SMALL_PNG, "image/png")
+        channel = self._thumbnail(png_uri, animated="true")
+        self.assertEqual(channel.headers.getRawHeaders(b"Content-Type"), [b"image/png"])
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    @parameterized.expand([("intact", False), ("stale_index", True)])
+    def test_mpo_is_thumbnailed_as_a_still(self, _name: str, stale: bool) -> None:
+        """An MPO holds several stills rather than an animation, so it never
+        gets an animated thumbnail.
+
+        Regression test for https://github.com/element-hq/synapse/issues/20024.
+        """
+        mpo_uri = self._upload(self._make_mpo(stale=stale), "image/jpeg")
+
+        thumbnails = self.get_success(
+            self.store.get_local_media_thumbnails(mpo_uri.media_id)
+        )
+        self.assertTrue(thumbnails)
+        self.assertNotIn("image/webp", [info.type for info in thumbnails])
+
+        channel = self._thumbnail(mpo_uri, animated="true")
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    @parameterized.expand([("intact", False), ("stale_index", True)])
+    @override_config({"dynamic_thumbnails": True})
+    def test_dynamic_thumbnails_of_mpo_are_static(
+        self, _name: str, stale: bool
+    ) -> None:
+        """The same holds when the thumbnail is generated on demand."""
+        mpo_uri = self._upload(self._make_mpo(stale=stale), "image/jpeg")
+
+        channel = self._thumbnail(mpo_uri, animated="true")
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertFalse(getattr(result, "is_animated", False))
+
+    @override_config({"dynamic_thumbnails": True})
+    def test_dynamic_thumbnails_generates_and_caches_animated(self) -> None:
+        """With dynamic thumbnails, animated thumbnails are generated on demand
+        and then cached."""
+        content_uri = self._upload(self._make_animated_gif(), "image/gif")
+
+        channel = self._thumbnail(content_uri, animated="true")
+        self.assertEqual(
+            channel.headers.getRawHeaders(b"Content-Type"), [b"image/webp"]
+        )
+        result = Image.open(io.BytesIO(channel.result["body"]))
+        self.assertTrue(getattr(result, "is_animated", False))
+
+        # The on-demand generated thumbnail is now cached.
+        thumbnails = self.get_success(
+            self.store.get_local_media_thumbnails(content_uri.media_id)
+        )
+        self.assertTrue(
+            any(info.type == "image/webp" for info in thumbnails),
+            thumbnails,
+        )

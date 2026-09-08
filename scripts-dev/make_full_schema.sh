@@ -7,11 +7,14 @@ export PGHOST="localhost"
 POSTGRES_MAIN_DB_NAME="synapse_full_schema_main.$$"
 POSTGRES_COMMON_DB_NAME="synapse_full_schema_common.$$"
 POSTGRES_STATE_DB_NAME="synapse_full_schema_state.$$"
-REQUIRED_DEPS=("matrix-synapse" "psycopg2")
+
+# Python package names that must be importable
+REQUIRED_DEPS=("synapse" "sqlite3" "psycopg2")
 
 usage() {
   echo
   echo "Usage: $0 -p <postgres_username> -o <path> [-c] [-n <schema number>] [-h]"
+  echo "It is the caller's responsibility to be in the correct Python environment (e.g. using \`poetry run scripts-dev/make_full_schema.sh\`)."
   echo
   echo "-p <postgres_username>"
   echo "  Username to connect to local postgres instance. The password will be requested"
@@ -24,14 +27,19 @@ usage() {
   echo "-n <schema number>"
   echo "  Schema number for the new snapshot. Used to set the location of files within "
   echo "  the output directory, mimicking that of synapse/storage/schemas."
+  echo "  NOTE: This does not influence which schema deltas are applied to build the full schema."
+  echo "        Schema deltas past this version will still be applied; if you want to build a"
+  echo "        full schema at a particular version, later deltas first need to be"
+  echo "        temporarily deleted (as well as homeserver code temporarily tweaked"
+  echo "        not to rely on any of those changes when applying background updates)"
   echo "  Defaults to 9999."
   echo "-h"
   echo "  Display this help text."
   echo ""
   echo ""
   echo "You probably want to invoke this with something like"
-  echo "  docker run --rm -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=synapse -p 5432:5432 postgres:11-alpine"
-  echo "  echo postgres | scripts-dev/make_full_schema.sh -p postgres -n MY_SCHEMA_NUMBER -o synapse/storage/schema"
+  echo "  docker run --rm -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=synapse -p 5432:5432 postgres:14-alpine"
+  echo "  echo postgres | poetry run scripts-dev/make_full_schema.sh -p postgres -n MY_SCHEMA_NUMBER -o synapse/storage/schema"
   echo ""
   echo "  NB: make sure to run this against the *oldest* supported version of postgres,"
   echo "  or else pg_dump might output non-backwards-compatible syntax."
@@ -69,10 +77,10 @@ done
 # Check that required dependencies are installed
 unsatisfied_requirements=()
 for dep in "${REQUIRED_DEPS[@]}"; do
-  pip show "$dep" --quiet || unsatisfied_requirements+=("$dep")
+  python -c "import $dep" &> /dev/null || unsatisfied_requirements+=("$dep")
 done
 if [ ${#unsatisfied_requirements} -ne 0 ]; then
-  echo "Please install the following python packages: ${unsatisfied_requirements[*]}"
+  echo 'Please `poetry install --extras postgres` first as the following Python modules are not importable: '"${unsatisfied_requirements[*]}"
   exit 1
 fi
 
@@ -232,34 +240,33 @@ psql "$POSTGRES_MAIN_DB_NAME" -w <<< "$DROP_COMMON_TABLES"
 psql "$POSTGRES_STATE_DB_NAME" -w <<< "$DROP_COMMON_TABLES"
 
 # For Reasons(TM), SQLite's `.schema` also dumps out "shadow tables", the implementation
-# details behind full text search tables. Omit these from the dumps.
-
-sqlite3 "$SQLITE_MAIN_DB" <<< "
-DROP TABLE event_search_content;
-DROP TABLE event_search_segments;
-DROP TABLE event_search_segdir;
-DROP TABLE event_search_docsize;
-DROP TABLE event_search_stat;
-DROP TABLE user_directory_search_content;
-DROP TABLE user_directory_search_segments;
-DROP TABLE user_directory_search_segdir;
-DROP TABLE user_directory_search_docsize;
-DROP TABLE user_directory_search_stat;
-"
+# details behind full text search tables.
+# Previously we omitted these from the dumps by dropping them beforehand,
+# but nowadays it seems to be forbidden to drop those.
+# The emitted dump adds `IF NOT EXISTS` text for them, so it's harmless.
 
 echo "Dumping SQLite3 schema..."
 
 mkdir -p "$OUTPUT_DIR/"{common,main,state}"/full_schemas/$SCHEMA_NUMBER"
-sqlite3 "$SQLITE_COMMON_DB" ".schema"                    > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
+# `--nosys` prevents emitting (some) SQLite internal tables like `sqlite_sequence` that
+# aren't managed by the Synapse application and don't need to be part of our full schema.
+#
+# (SQLite creates `sqlite_sequence` automatically when the database contains at least one
+# table with an AUTOINCREMENT column.)
+sqlite3 "$SQLITE_COMMON_DB" ".schema --nosys"            > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_COMMON_DB" ".dump --data-only --nosys" >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
-sqlite3 "$SQLITE_MAIN_DB"   ".schema"                    > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
+sqlite3 "$SQLITE_MAIN_DB"   ".schema --nosys"            > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_MAIN_DB"   ".dump --data-only --nosys" >> "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
-sqlite3 "$SQLITE_STATE_DB"  ".schema"                    > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
+sqlite3 "$SQLITE_STATE_DB"  ".schema --nosys"            > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 sqlite3 "$SQLITE_STATE_DB"  ".dump --data-only --nosys" >> "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.sqlite"
 
 cleanup_pg_schema() {
   # Cleanup as follows:
   # - Remove empty lines. pg_dump likes to output a lot of these.
+  # - Remove the `\restrict` and `\unrestrict` psql meta-commands.
+  #   We don't run the pg_dump output through psql so no meta-commands are
+  #   supported and so the security feature (which doesn't apply anyway
+  #   as we trust the source database) is not relevant.
   # - Remove comment-only lines. pg_dump also likes to output a lot of these to visually
   #   separate tables etc.
   # - Remove "public." prefix --- the schema name.
@@ -284,6 +291,8 @@ cleanup_pg_schema() {
   #   is `true` or omitted, this marks the given integer as having been consumed and
   #   will NOT appear as the nextval.
    sed -e '/^$/d' \
+   -e '/^\\restrict REMOVEME$/d' \
+   -e '/^\\unrestrict REMOVEME$/d' \
    -e '/^--/d' \
    -e 's/public\.//g' \
    -e '/^SET /d' \
@@ -292,12 +301,13 @@ cleanup_pg_schema() {
 
 echo "Dumping Postgres schema..."
 
-pg_dump --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema  > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema  > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema >> "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema  > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
-pg_dump --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema >> "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+# --restrict-key: set the \restrict key to a static value (normally a random string) for easy find/replacement in the code above.
+pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema  > "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_COMMON_DB_NAME" | cleanup_pg_schema >> "$OUTPUT_DIR/common/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema  > "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_MAIN_DB_NAME"   | cleanup_pg_schema >> "$OUTPUT_DIR/main/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --schema-only         --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema  > "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
+pg_dump --restrict-key=REMOVEME --format=plain --data-only --inserts --no-tablespaces --no-acl --no-owner "$POSTGRES_STATE_DB_NAME"  | cleanup_pg_schema >> "$OUTPUT_DIR/state/full_schemas/$SCHEMA_NUMBER/full.sql.postgres"
 
 if [[ "$OUTPUT_DIR" == *synapse/storage/schema ]]; then
   echo "Updating contrib/datagrip symlinks..."

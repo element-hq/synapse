@@ -278,7 +278,7 @@ class SynapseRequest(Request):
         # See: https://github.com/element-hq/synapse/security/advisories/GHSA-rfq8-j7rh-8hf2
         if command == b"POST":
             ctype = self.requestHeaders.getRawHeaders(b"content-type")
-            if ctype and b"multipart/form-data" in ctype[0]:
+            if ctype and b"multipart/form-data" in ctype[0].lower():
                 logger.warning(
                     "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
                     self.client,

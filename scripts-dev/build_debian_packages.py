@@ -27,12 +27,12 @@ from typing import Collection, Sequence
 # to remove references to the distibution across Synapse (search for "bookworm" for
 # example)
 DISTS = (
-    "debian:bookworm",  # (EOL 2026-06) (our EOL forced by Python 3.11 is 2027-10-24)
+    "debian:bookworm",  # (EOL 2028-06-30) (our EOL forced by Python 3.11 is 2027-10-31)
     "debian:sid",  # (rolling distro, no EOL)
-    "ubuntu:jammy",  # 22.04 LTS (EOL 2027-04) (our EOL forced by Python 3.10 is 2026-10-04)
-    "ubuntu:noble",  # 24.04 LTS (EOL 2029-06)
-    "ubuntu:questing",  # 25.10 (EOL 2026-07)
-    "debian:trixie",  # (EOL not specified yet)
+    "ubuntu:jammy",  # 22.04 LTS (EOL 2027-04-01) (our EOL forced by Python 3.10 is 2026-10-31)
+    "ubuntu:noble",  # 24.04 LTS (EOL 2029-05-31) (our EOL forced by Python 3.12 is 2028-10-31)
+    "debian:trixie",  # (EOL 2030-06-30) (our EOL forced by Python 3.13 is 2029-10-31)
+    "ubuntu:resolute",  # 26.04 (EOL 2031-04-30) (our EOL forced by Python 3.14 is 2030-10-31)
 )
 
 DESC = """\
