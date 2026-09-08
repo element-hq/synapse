@@ -1147,8 +1147,8 @@ class HomeserverTestCase(TestCase):
             differences_str = "\n".join(f" {diff}" for diff in labels_differences_dicts)
 
             raise AssertionError(
-                f"Multiple metrics found for '{metric}' with labels {labels}\n"
-                f"The labels of the metrics that matched are (excluding common labels that are in all metrics):\n"
+                f"Multiple metrics found for '{metric}' with labels {labels}\n\n"
+                f"Specify extra labels to match the specific metric under test. The extra labels on the matching metrics are:\n"
                 f"{differences_str}"
             )
         else:
