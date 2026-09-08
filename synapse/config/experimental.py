@@ -256,8 +256,11 @@ class ExperimentalConfig(Config):
         # MSC4210: Remove legacy mentions. Merged into Matrix v1.17, which removes
         # `.m.rule.contains_display_name`, `.m.rule.contains_user_name` and
         # `.m.rule.roomnotif` from the base push rule set. Enabled by default;
-        # this flag is kept as a temporary opt-out for deployments that still
-        # rely on the legacy rules and will be removed in a future release.
+        # this flag is only kept as a temporary opt-out for deployments whose
+        # senders still omit `m.mentions`, so that they can plan their migration.
+        # Tracked in: https://github.com/element-hq/synapse/issues/19415
+        # TODO: Remove the flag (and the code paths it gates) after 2026-12-01,
+        # a couple of releases after it started defaulting to enabled.
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", True)
 
         # MSC4222: Adding `state_after` to sync v2
