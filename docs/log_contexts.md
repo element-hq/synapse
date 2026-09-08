@@ -573,12 +573,11 @@ the tokio runtime, the current logcontext must be captured and carried along, so
 that log records emitted while the future is polled (including any `log::`
 records from dependencies, and any Python invoked back from Rust) are attributed
 correctly. Don't use a bare `tokio::spawn`. Instead use
-`LogContextHandle::capture(py)` plus `LogContextHandle::scope` (in
-`rust/src/logging/context.rs`), which capture the caller's logcontext from the
-Python side and record it on the spawned task; this is what `create_deferred`
-does. `current_context()` returns the task's captured context first, so
-`LoggingContextFilter` — and therefore `pyo3-log` — sees the right context on
-worker threads without any per-log-record work.
+`LogContextHandle::capture(py)` plus `LogContextHandle::scope`, which capture
+the caller's logcontext from the Python side and record it on the spawned task;
+this is what `create_deferred` does. `current_context()` returns the task's
+captured context first, so `LoggingContextFilter` — and therefore `pyo3-log` —
+sees the right context on worker threads without any per-log-record work.
 
 ## Debugging logcontext issues
 

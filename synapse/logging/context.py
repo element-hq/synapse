@@ -170,9 +170,9 @@ LoggingContextOrSentinel = Union[LoggingContext, _Sentinel]
 def current_context() -> LoggingContextOrSentinel:
     """Get the current logging context.
 
-    The storage lives in the Rust extension (see `rust/src/logging/context.rs`),
-    which represents "no context" as `None`. This wrapper maps that to
-    `SENTINEL_CONTEXT`, so callers never see `None`.
+    The storage lives in the Rust extension, which represents "no context" as
+    `None`. This wrapper maps that to `SENTINEL_CONTEXT`, so callers never see
+    `None`.
     """
     context = _rust_current_context()
     return SENTINEL_CONTEXT if context is None else context

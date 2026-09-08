@@ -13,7 +13,7 @@
 """Tests for logcontext attribution across the Python/Rust boundary.
 
 The current logcontext is stored on the Rust side
-(`synapse.synapse_rust.logcontext` / `rust/src/logging/context.rs`), visible
+(`synapse.synapse_rust.logcontext`), visible
 from both Python (reactor/threadpool threads) and Rust (tokio tasks). These
 tests exercise the two guarantees that gives us:
 
