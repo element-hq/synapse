@@ -140,6 +140,8 @@ pub struct ContextResourceUsage {
 }
 
 impl ContextResourceUsage {
+    /// Add the stats from `other` to `self`, mutating in place. Equivalent to
+    /// `self += other`.
     fn add_assign(&mut self, other: &ContextResourceUsage) {
         self.ru_utime += other.ru_utime;
         self.ru_stime += other.ru_stime;
@@ -149,6 +151,8 @@ impl ContextResourceUsage {
         self.evt_db_fetch_count += other.evt_db_fetch_count;
     }
 
+    /// Subtract the stats from `other` from `self`, mutating in place.
+    /// Equivalent to `self -= other`.
     fn sub_assign(&mut self, other: &ContextResourceUsage) {
         self.ru_utime -= other.ru_utime;
         self.ru_stime -= other.ru_stime;
