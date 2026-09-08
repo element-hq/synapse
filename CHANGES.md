@@ -44,7 +44,7 @@ as this release deprecates `matrix_rtc.livekit_service_url`.
 
 ## Internal Changes
 
-- Add storage functions for future [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242) work. ([\#19718](https://github.com/element-hq/synapse/issues/19718))
+- Add storage functions for future [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242): State DAG work. ([\#19718](https://github.com/element-hq/synapse/issues/19718))
 - Put the `redacts` key under `content` when generating [MSC3912](https://github.com/matrix-org/matrix-spec-proposals/pull/3912) (relation based redactions) for room versions greater than 10. Contributed by @famedly. ([\#19782](https://github.com/element-hq/synapse/issues/19782))
 - Declare types that already appear in the module API's public signatures (such as `Requester`, `SynapseRequest` and `UserInfo`) in `synapse.module_api.__all__`. ([\#20107](https://github.com/element-hq/synapse/issues/20107))
 - Add missing tests for parse_stripped_state_event. Contributed by @guillemo12. ([\#20136](https://github.com/element-hq/synapse/issues/20136))
