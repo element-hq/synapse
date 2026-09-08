@@ -238,7 +238,7 @@ class RelationsWorkerStore(SQLBaseStore):
         # for direct children of the requested event.
         if recurse:
             # The events table is joined inside the recursion rather than
-            # after it: Postgres cannot estimate the size of a recursive CTE,
+            # after it: Postgres cannot accurately estimate the size of a recursive CTE,
             # and when the guess is large it joins the CTE against a scan of
             # *every* event in the room, which takes seconds in busy rooms.
             # Joining per step keeps every events lookup an index probe.
