@@ -663,7 +663,7 @@ impl LoggingContext {
     fn add_database_transaction(&self, py: Python<'_>, duration_sec: f64) -> PyResult<()> {
         if duration_sec < 0.0 {
             return Err(PyValueError::new_err(
-                "DB txn time can only be non-negative",
+                "DB txn time can only be zero or non-negative",
             ));
         }
         {
@@ -684,7 +684,7 @@ impl LoggingContext {
     fn add_database_scheduled(&self, py: Python<'_>, sched_sec: f64) -> PyResult<()> {
         if sched_sec < 0.0 {
             return Err(PyValueError::new_err(
-                "DB scheduling time can only be non-negative",
+                "DB scheduling time can only be zero or non-negative",
             ));
         }
         {
@@ -750,7 +750,7 @@ impl LoggingContext {
         self.name.bind(py).to_string_lossy().into_owned()
     }
 
-    /// Inner implemetnation of [`Self::stop`], which does not clear
+    /// Inner implementation of [`Self::stop`], which does not clear
     /// `usage_start`.
     ///
     /// Note that the this takes a `Bound<..>` rather than `&self` as it can
@@ -891,6 +891,7 @@ pub(crate) fn with_logcontext<R>(
 ) -> PyResult<R> {
     let previous = set_current_context(py, context)?;
     let result = f();
+    // Run before checking success/failure of `f()`.
     let restored = set_current_context(py, previous);
 
     let value = result?;
