@@ -1672,10 +1672,10 @@ class FederationEventHandler:
 
     @trace
     @tag_args
-    async def _get_events_and_persist(
+    async def _get_events_from_remote(
         self, destination: str, room_id: str, event_ids: StrCollection
-    ) -> None:
-        """Fetch the given events from a server, and persist them as outliers.
+    ) -> list[EventBase]:
+        """Fetch the given events from a server.
 
         This function *does not* recursively get missing auth events of the
         newly fetched events. Callers must include in the `event_ids` argument
@@ -1714,6 +1714,20 @@ class FederationEventHandler:
                     )
 
         await concurrently_execute(get_event, event_ids, 5)
+        return events
+
+    async def _get_events_and_persist(
+        self, destination: str, room_id: str, event_ids: StrCollection
+    ) -> None:
+        """Fetch the given events from a server, and persist them as outliers.
+
+        This function *does not* recursively get missing auth events of the
+        newly fetched events. Callers must include in the `event_ids` argument
+        any missing events from the auth chain.
+
+        Logs a warning if we can't find the given event.
+        """
+        events = await self._get_events_from_remote(destination, room_id, event_ids)
         logger.info("Fetched %i events of %i requested", len(events), len(event_ids))
         await self._auth_and_persist_outliers(room_id, events)
 
