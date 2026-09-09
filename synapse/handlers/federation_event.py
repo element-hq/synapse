@@ -2648,8 +2648,17 @@ class FederationEventHandler:
             # partial and full state and may not be accurate.
             return
 
-        extrem_ids = await self._store.get_latest_event_ids_in_room(event.room_id)
-        prev_event_ids = set(event.prev_event_ids())
+        if supports_msc4242_state_dag(event):
+            # In MSC4242 State DAG rooms the "current state" lives in the state DAG rather
+            # than the timeline, so compare the state DAG extremities against the event's
+            # `prev_state_events`.
+            extrem_ids: frozenset[str] = await self._store.get_state_dag_extremities(
+                event.room_id
+            )
+            prev_event_ids = set(event.prev_state_events)
+        else:
+            extrem_ids = await self._store.get_latest_event_ids_in_room(event.room_id)
+            prev_event_ids = set(event.prev_event_ids())
 
         if extrem_ids == prev_event_ids:
             # If they're the same then the current state is the same as the
@@ -2663,23 +2672,13 @@ class FederationEventHandler:
         auth_types = auth_types_for_event(room_version_obj, event)
 
         # Calculate the "current state".
-        seen_event_ids = await self._store.have_events_in_timeline(prev_event_ids)
-        has_missing_prevs = bool(prev_event_ids - seen_event_ids)
-        if has_missing_prevs:
-            # We don't have all the prev_events of this event, which means we have a
-            # gap in the graph, and the new event is going to become a new backwards
-            # extremity.
-            #
-            # In this case we want to be a little careful as we might have been
-            # down for a while and have an incorrect view of the current state,
-            # however we still want to do checks as gaps are easy to
-            # maliciously manufacture.
-            #
-            # So we use a "current state" that is actually a state
-            # resolution across the current forward extremities and the
-            # given state at the event. This should correctly handle cases
-            # like bans, especially with state res v2.
-
+        if supports_msc4242_state_dag(event):
+            # Because we may have just come back online after a long time, we don't know
+            # which is newer: our state DAG extremities or the event's state. As such, we
+            # state resolve across those state sets to try to ensure we are seeing the
+            # 'current' state, particularly for catching bans. This is the same reasoning
+            # as the `has_missing_prevs` branch below, but in a state DAG world we always
+            # have the event's `prev_state_events` so we always do it.
             state_sets_d = await self._state_storage_controller.get_state_groups_ids(
                 event.room_id, extrem_ids
             )
@@ -2698,11 +2697,48 @@ class FederationEventHandler:
                 )
             )
         else:
-            current_state_ids = (
-                await self._state_storage_controller.get_current_state_ids(
-                    event.room_id, StateFilter.from_types(auth_types)
+            seen_event_ids = await self._store.have_events_in_timeline(prev_event_ids)
+            has_missing_prevs = bool(prev_event_ids - seen_event_ids)
+            if has_missing_prevs:
+                # We don't have all the prev_events of this event, which means we have a
+                # gap in the graph, and the new event is going to become a new backwards
+                # extremity.
+                #
+                # In this case we want to be a little careful as we might have been
+                # down for a while and have an incorrect view of the current state,
+                # however we still want to do checks as gaps are easy to
+                # maliciously manufacture.
+                #
+                # So we use a "current state" that is actually a state
+                # resolution across the current forward extremities and the
+                # given state at the event. This should correctly handle cases
+                # like bans, especially with state res v2.
+
+                state_sets_d = (
+                    await self._state_storage_controller.get_state_groups_ids(
+                        event.room_id, extrem_ids
+                    )
                 )
-            )
+                state_sets = list(state_sets_d.values())
+                state_ids = await context.get_prev_state_ids()
+                state_sets.append(state_ids)
+                current_state_ids = (
+                    await self._state_resolution_handler.resolve_events_with_store(
+                        event.room_id,
+                        room_version,
+                        state_sets,
+                        event_map=None,
+                        state_res_store=StateResolutionStore(
+                            self._store, self._state_deletion_store
+                        ),
+                    )
+                )
+            else:
+                current_state_ids = (
+                    await self._state_storage_controller.get_current_state_ids(
+                        event.room_id, StateFilter.from_types(auth_types)
+                    )
+                )
 
         logger.debug(
             "Doing soft-fail check for %s: state %s",
