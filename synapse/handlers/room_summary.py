@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 import attr
 
+from twisted.internet.defer import Deferred
+
 from synapse.api.constants import (
     EventTypes,
     HistoryVisibility,
@@ -44,8 +46,12 @@ from synapse.api.errors import (
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.events import EventBase
-from synapse.types import JsonDict, Requester, StrCollection
+from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.storage.databases.main.state import RoomHierarchyState
+from synapse.types import JsonDict, JsonMapping, Requester, StateMap, StrCollection
 from synapse.types.state import StateFilter
+from synapse.util import unwrapFirstError
+from synapse.util.async_helpers import concurrently_execute, gather_results
 from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
@@ -61,6 +67,14 @@ MAX_ROOMS_PER_SPACE = 50
 
 # max number of federation servers to hit per room
 MAX_SERVERS_PER_SPACE = 3
+
+# number of upcoming rooms whose summaries (local DB reads or remote federation
+# requests) are fetched concurrently, ahead of the strictly-ordered traversal.
+PREFETCH_SUMMARIES = 10
+
+# how many of a space's children are summarised at once when responding to a
+# federation hierarchy request.
+CHILD_SUMMARY_CONCURRENCY = 10
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -291,9 +305,62 @@ class RoomSummaryHandler:
         else:
             limit = min(limit, MAX_ROOMS)
 
+        # Prefetched summaries for upcoming rooms, keyed by room ID. The next rooms
+        # in traversal order sit at the top of the stack, so their summaries (DB
+        # reads for local rooms, federation requests for remote subspaces) can be
+        # fetched concurrently while results are still emitted strictly in
+        # traversal order. Values are ("ok", result) / ("err", exception) so that a
+        # prefetch which is never consumed (page limit hit first) cannot produce an
+        # unhandled error.
+        #
+        # The queue entry a summary was computed for is kept alongside it: the
+        # same room can be queued more than once (linked from two spaces; the
+        # queue is only deduplicated when popped), each entry carrying the
+        # via/depth to summarise that edge with, and an entry queued later can
+        # be popped first. A prefetch is therefore only usable by the very entry
+        # it was started for.
+        prefetched: dict[str, tuple[_RoomQueueEntry, "Deferred"]] = {}
+
+        async def prefetch(
+            entry: _RoomQueueEntry,
+        ) -> tuple[str, object]:
+            try:
+                return (
+                    "ok",
+                    await self._summarize_queue_entry(
+                        entry,
+                        requester,
+                        suggested_only,
+                        max_depth,
+                        omit_remote_room_hierarchy,
+                        admin_skip_room_visibility_check,
+                    ),
+                )
+            except Exception as e:
+                return ("err", e)
+
         # Iterate through the queue until we reach the limit or run out of
         # rooms to include.
         while room_queue and len(rooms_result) < limit:
+            # Kick off summary fetches for the next few rooms in traversal
+            # order, but never for more rooms than are still needed to fill the
+            # page: each one may be a federation request, and any we do not
+            # consume is wasted (and would be re-issued for the next page).
+            window = min(PREFETCH_SUMMARIES, limit - len(rooms_result))
+            # NB reversed(): the queue is a stack, so the LAST entries are
+            # processed first, and prefetching them in that order means the
+            # entry that is popped next is the one whose summary is furthest
+            # along.
+            for upcoming in reversed(room_queue[-window:]):
+                if (
+                    upcoming.room_id not in processed_rooms
+                    and upcoming.room_id not in prefetched
+                ):
+                    prefetched[upcoming.room_id] = (
+                        upcoming,
+                        run_in_background(prefetch, upcoming),
+                    )
+
             queue_entry = room_queue.pop()
             room_id = queue_entry.room_id
             current_depth = queue_entry.depth
@@ -303,62 +370,35 @@ class RoomSummaryHandler:
 
             logger.debug("Processing room %s", room_id)
 
-            # A map of summaries for children rooms that might be returned over
-            # federation. The rationale for caching these and *maybe* using them
-            # is to prefer any information local to the homeserver before trusting
-            # data received over federation.
-            children_room_entries: dict[str, JsonDict] = {}
-            # A set of room IDs which are children that did not have information
-            # returned over federation and are known to be inaccessible to the
-            # current server. We should not reach out over federation to try to
-            # summarise these rooms.
-            inaccessible_children: set[str] = set()
+            # Only use a prefetch that was started for THIS entry: another
+            # entry for the same room carries a different via/depth, and would
+            # summarise a different edge. Any other prefetch is discarded (its
+            # errors are already captured in its result tuple).
+            prefetch_entry, deferred = prefetched.pop(room_id, (None, None))
+            if prefetch_entry is not queue_entry or deferred is None:
+                deferred = run_in_background(prefetch, queue_entry)
+            status, value = await make_deferred_yieldable(deferred)
+            if status == "err":
+                assert isinstance(value, Exception)
+                raise value
+            assert isinstance(value, tuple)
+            (
+                room_entry,
+                children_room_entries,
+                inaccessible_children,
+                is_remote,
+            ) = value
 
-            # If the room is known locally, summarise it!
-            is_in_room = await self._store.is_host_joined(room_id, self._server_name)
-            if is_in_room:
-                room_entry = await self._summarize_local_room(
-                    requester,
-                    None,
-                    room_id,
-                    suggested_only,
-                    admin_skip_room_visibility_check=admin_skip_room_visibility_check,
+            # Ensure a remote room is accessible to the requester (and not just
+            # the homeserver).
+            if (
+                is_remote
+                and room_entry
+                and not await self._is_remote_room_accessible(
+                    requester, room_id, room_entry.room
                 )
-
-            # Otherwise, attempt to use information for federation.
-            else:
-                # A previous call might have included information for this room.
-                # It can be used if either:
-                #
-                # 1. The room is not a space.
-                # 2. The maximum depth has been achieved (since no children
-                #    information is needed).
-                if queue_entry.remote_room and (
-                    queue_entry.remote_room.get("room_type") != RoomTypes.SPACE
-                    or (max_depth is not None and current_depth >= max_depth)
-                ):
-                    room_entry = _RoomEntry(
-                        queue_entry.room_id, queue_entry.remote_room
-                    )
-
-                # If the above isn't true, attempt to fetch the room
-                # information over federation.
-                elif not omit_remote_room_hierarchy:
-                    (
-                        room_entry,
-                        children_room_entries,
-                        inaccessible_children,
-                    ) = await self._summarize_remote_room_hierarchy(
-                        queue_entry,
-                        suggested_only,
-                    )
-
-                # Ensure this room is accessible to the requester (and not just
-                # the homeserver).
-                if room_entry and not await self._is_remote_room_accessible(
-                    requester, queue_entry.room_id, room_entry.room
-                ):
-                    room_entry = None
+            ):
+                room_entry = None
 
             # This room has been processed and should be ignored if it appears
             # elsewhere in the hierarchy.
@@ -413,6 +453,57 @@ class RoomSummaryHandler:
 
         return result
 
+    async def _summarize_queue_entry(
+        self,
+        entry: "_RoomQueueEntry",
+        requester: str,
+        suggested_only: bool,
+        max_depth: int | None,
+        omit_remote_room_hierarchy: bool,
+        admin_skip_room_visibility_check: bool,
+    ) -> tuple[Optional["_RoomEntry"], dict[str, JsonDict], set[str], bool]:
+        """Fetch the summary for one hierarchy queue entry.
+
+        Returns (room entry, child summaries received over federation, children
+        known to be inaccessible over federation, whether the room is remote).
+        The remote-room *requester* accessibility check is left to the caller.
+        """
+        # If the room is known locally, summarise it!
+        is_in_room = await self._store.is_host_joined(entry.room_id, self._server_name)
+        if is_in_room:
+            room_entry = await self._summarize_local_room(
+                requester,
+                None,
+                entry.room_id,
+                suggested_only,
+                admin_skip_room_visibility_check=admin_skip_room_visibility_check,
+            )
+            return room_entry, {}, set(), False
+
+        # Otherwise, a previous call might have included information for this
+        # room. It can be used if either:
+        #
+        # 1. The room is not a space.
+        # 2. The maximum depth has been achieved (since no children
+        #    information is needed).
+        if entry.remote_room and (
+            entry.remote_room.get("room_type") != RoomTypes.SPACE
+            or (max_depth is not None and entry.depth >= max_depth)
+        ):
+            return _RoomEntry(entry.room_id, entry.remote_room), {}, set(), True
+
+        # If the above isn't true, attempt to fetch the room information over
+        # federation.
+        if not omit_remote_room_hierarchy:
+            (
+                room_entry,
+                children_room_entries,
+                inaccessible_children,
+            ) = await self._summarize_remote_room_hierarchy(entry, suggested_only)
+            return room_entry, children_room_entries, inaccessible_children, True
+
+        return None, {}, set(), True
+
     async def get_federation_hierarchy(
         self,
         origin: str,
@@ -445,20 +536,42 @@ class RoomSummaryHandler:
         children_rooms_result: list[JsonDict] = []
         inaccessible_children: list[str] = []
 
-        # Iterate through each child and potentially add it, but not its children,
-        # to the response.
+        child_ids: list[str] = []
         for child_room in itertools.islice(
             root_room_entry.children_state_events, MAX_ROOMS_PER_SPACE
         ):
             room_id = child_room.get("state_key")
             assert isinstance(room_id, str)
+            child_ids.append(room_id)
+
+        summaries: list[tuple[str, Optional["_RoomEntry"]] | None] = [None] * len(
+            child_ids
+        )
+
+        async def summarize_child(indexed_room_id: tuple[int, str]) -> None:
+            index, room_id = indexed_room_id
             # If the room is unknown, skip it.
             if not await self._store.is_host_joined(room_id, self._server_name):
-                continue
-
-            room_entry = await self._summarize_local_room(
-                None, origin, room_id, suggested_only, include_children=False
+                return
+            summaries[index] = (
+                room_id,
+                await self._summarize_local_room(
+                    None, origin, room_id, suggested_only, include_children=False
+                ),
             )
+
+        # Summarise each child (but not its children) concurrently, adding them
+        # to the response in their original order. This endpoint is reachable by
+        # any federating server and each summary itself fans out, so cap how
+        # many run at once rather than issuing all MAX_ROOMS_PER_SPACE at once.
+        await concurrently_execute(
+            summarize_child, list(enumerate(child_ids)), CHILD_SUMMARY_CONCURRENCY
+        )
+
+        for result in summaries:
+            if result is None:
+                continue
+            room_id, room_entry = result
             # If the room is accessible, include it in the results.
             #
             # Note that only the room summary (without information on children)
@@ -507,20 +620,132 @@ class RoomSummaryHandler:
         Returns:
             A room entry if the room should be returned. None, otherwise.
         """
+
+        # Fast path: serve the entry entirely from the cached room hierarchy
+        # state + room stats (both invalidated when the underlying data
+        # changes), so a warm request does no DB work at all. Partial-state
+        # rooms fall back to the uncached path, as their cached current state
+        # may be incomplete; unknown rooms fall back for the pending-invite
+        # handling.
+        #
+        # The per-room lookups are independent, so run them (including warming
+        # the room-stats / room-version caches read later in this path)
+        # concurrently: on a cold cache a serial chain here would otherwise
+        # undo the traversal-level parallelism on latency-bound deployments.
+        async def prime_room_version() -> None:
+            try:
+                await self._store.get_room_version(room_id)
+            except (NotFoundError, UnsupportedRoomVersionError):
+                pass
+
+        is_partial_state, hierarchy_state, stats, _ = await make_deferred_yieldable(
+            gather_results(
+                (
+                    # NB lambdas as run_in_background's typing rejects @cached methods.
+                    run_in_background(
+                        lambda: self._store.is_partial_state_room(room_id)
+                    ),
+                    run_in_background(
+                        lambda: self._store.get_room_hierarchy_state(room_id)
+                    ),
+                    run_in_background(lambda: self._store.get_room_with_stats(room_id)),
+                    run_in_background(prime_room_version),
+                ),
+                consumeErrors=True,
+            )
+        ).addErrback(unwrapFirstError)
+        if is_partial_state:
+            # The value cached just now may have been computed from partial
+            # state: drop it and use the uncached path (which resolves state
+            # via the storage controllers).
+            self._store.get_room_hierarchy_state.invalidate((room_id,))
+            hierarchy_state = None
+        if hierarchy_state is None:
+            return await self._summarize_local_room_uncached(
+                requester,
+                origin,
+                room_id,
+                suggested_only,
+                include_children,
+                admin_skip_room_visibility_check,
+            )
+
+        if stats is None:
+            # We have state for the room but no row in the rooms table, so there
+            # is nothing to summarise. _build_room_entry would assert.
+            logger.info("room %s has no room entry, omitting from summary", room_id)
+            return None
+
         if (
             not admin_skip_room_visibility_check
-            and not await self._is_local_room_accessible(room_id, requester, origin)
+            and not await self._is_local_room_accessible_from_summary(
+                room_id, hierarchy_state, requester, origin
+            )
         ):
             return None
 
-        room_entry = await self._build_room_entry(room_id)
+        room_entry = await self._build_room_entry(
+            room_id, hierarchy_state.join_rules_state_ids
+        )
+
+        # If the room is not a space return just the room information.
+        if room_entry.get("room_type") != RoomTypes.SPACE or not include_children:
+            return _RoomEntry(room_id, room_entry)
+
+        child_events = sorted(
+            filter(_stripped_child_has_valid_via, hierarchy_state.children),
+            key=_stripped_child_comparison_key,
+        )
+        if suggested_only:
+            child_events = [
+                e for e in child_events if e["content"].get("suggested") is True
+            ]
+        return _RoomEntry(room_id, room_entry, child_events)
+
+    async def _summarize_local_room_uncached(
+        self,
+        requester: str | None,
+        origin: str | None,
+        room_id: str,
+        suggested_only: bool,
+        include_children: bool = True,
+        admin_skip_room_visibility_check: bool = False,
+    ) -> Optional["_RoomEntry"]:
+        """The uncached path of `_summarize_local_room` (see its docstring):
+        used for partial-state rooms and rooms with no local state.
+        """
+        # A single filtered current-state fetch covers the accessibility check,
+        # the restricted-join-rules lookup in _build_room_entry AND the
+        # space-child edges, instead of three separate (and, for the child
+        # events, previously unfiltered) current-state fetches per room.
+        event_types: list[tuple[str, str | None]] = [
+            (EventTypes.JoinRules, ""),
+            (EventTypes.RoomHistoryVisibility, ""),
+        ]
+        if requester:
+            event_types.append((EventTypes.Member, requester))
+        if include_children:
+            event_types.append((EventTypes.SpaceChild, None))
+        state_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id, state_filter=StateFilter.from_types(event_types)
+        )
+
+        if (
+            not admin_skip_room_visibility_check
+            and not await self._is_local_room_accessible(
+                room_id, requester, origin, state_ids
+            )
+        ):
+            return None
+
+        room_entry = await self._build_room_entry(room_id, state_ids)
 
         # If the room is not a space return just the room information.
         if room_entry.get("room_type") != RoomTypes.SPACE or not include_children:
             return _RoomEntry(room_id, room_entry)
 
         # Otherwise, look for child rooms/spaces.
-        child_events = await self._get_child_events(room_id)
+        child_events = await self._get_child_events(room_id, state_ids)
 
         if suggested_only:
             # we only care about suggested children
@@ -593,7 +818,11 @@ class RoomSummaryHandler:
         )
 
     async def _is_local_room_accessible(
-        self, room_id: str, requester: str | None, origin: str | None = None
+        self,
+        room_id: str,
+        requester: str | None,
+        origin: str | None = None,
+        state_ids: StateMap[str] | None = None,
     ) -> bool:
         """
         Calculate whether the room should be shown to the requester.
@@ -616,16 +845,17 @@ class RoomSummaryHandler:
         Returns:
              True if the room is accessible to the requesting user or server.
         """
-        event_types = [
-            (EventTypes.JoinRules, ""),
-            (EventTypes.RoomHistoryVisibility, ""),
-        ]
-        if requester:
-            event_types.append((EventTypes.Member, requester))
+        if state_ids is None:
+            event_types = [
+                (EventTypes.JoinRules, ""),
+                (EventTypes.RoomHistoryVisibility, ""),
+            ]
+            if requester:
+                event_types.append((EventTypes.Member, requester))
 
-        state_ids = await self._storage_controllers.state.get_current_state_ids(
-            room_id, state_filter=StateFilter.from_types(event_types)
-        )
+            state_ids = await self._storage_controllers.state.get_current_state_ids(
+                room_id, state_filter=StateFilter.from_types(event_types)
+            )
 
         # If there's no state for the room, it isn't known.
         if not state_ids:
@@ -723,6 +953,93 @@ class RoomSummaryHandler:
         )
         return False
 
+    async def _is_local_room_accessible_from_summary(
+        self,
+        room_id: str,
+        hierarchy_state: RoomHierarchyState,
+        requester: str | None,
+        origin: str | None = None,
+    ) -> bool:
+        """The cached-path equivalent of `_is_local_room_accessible` (same
+        semantics, see its docstring): decides access from the cached
+        authoritative join rule / history visibility plus per-user (or
+        per-server) cached membership lookups, without fetching room state.
+        """
+        try:
+            room_version = await self._store.get_room_version(room_id)
+        except UnsupportedRoomVersionError:
+            # If a room with an unsupported room version is encountered, ignore
+            # it to avoid breaking the entire summary response.
+            return False
+
+        # Include the room if it has join rules of public or knock.
+        join_rule = hierarchy_state.join_rule
+        if (
+            join_rule == JoinRules.PUBLIC
+            or (room_version.knock_join_rule and join_rule == JoinRules.KNOCK)
+            or (
+                room_version.knock_restricted_join_rule
+                and join_rule == JoinRules.KNOCK_RESTRICTED
+            )
+        ):
+            return True
+
+        # Include the room if it is peekable.
+        if hierarchy_state.history_visibility == HistoryVisibility.WORLD_READABLE:
+            return True
+
+        # Otherwise we need to check information specific to the user or server.
+        if requester:
+            # If they're in the room (or invited) they can see info on it.
+            if room_id in await self._store.get_rooms_for_user(requester):
+                return True
+            if await self._store.get_invite_for_local_user_in_room(requester, room_id):
+                return True
+
+            # Otherwise, check if they should be allowed access via membership in a space.
+            if await self._event_auth_handler.has_restricted_join_rules(
+                hierarchy_state.join_rules_state_ids, room_version
+            ):
+                allowed_rooms = (
+                    await self._event_auth_handler.get_rooms_that_allow_join(
+                        hierarchy_state.join_rules_state_ids
+                    )
+                )
+                if await self._event_auth_handler.is_user_in_rooms(
+                    allowed_rooms, requester
+                ):
+                    return True
+
+        # If this is a request over federation, check if the host is in the room or
+        # has a user who could join the room.
+        elif origin:
+            if await self._event_auth_handler.is_host_in_room(
+                room_id, origin
+            ) or await self._store.is_host_invited(room_id, origin):
+                return True
+
+            # Alternately, if the host has a user in any of the spaces specified
+            # for access, then the host can see this room (and should do filtering
+            # if the requester cannot see it).
+            if await self._event_auth_handler.has_restricted_join_rules(
+                hierarchy_state.join_rules_state_ids, room_version
+            ):
+                allowed_rooms = (
+                    await self._event_auth_handler.get_rooms_that_allow_join(
+                        hierarchy_state.join_rules_state_ids
+                    )
+                )
+                for space_id in allowed_rooms:
+                    if await self._event_auth_handler.is_host_in_room(space_id, origin):
+                        return True
+
+        logger.info(
+            "room %s is unpeekable and requester %s is not a member / not allowed to join, omitting from summary",
+            room_id,
+            requester or origin,
+        )
+        return False
+
     async def _is_remote_room_accessible(
         self, requester: str | None, room_id: str, room: JsonDict
     ) -> bool:
@@ -771,12 +1088,16 @@ class RoomSummaryHandler:
         # pending invite, etc.
         return await self._is_local_room_accessible(room_id, requester)
 
-    async def _build_room_entry(self, room_id: str) -> JsonDict:
+    async def _build_room_entry(
+        self, room_id: str, state_ids: StateMap[str] | None = None
+    ) -> JsonDict:
         """
         Generate en entry summarising a single room.
 
         Args:
             room_id: The room ID to summarize.
+            state_ids: A current-state map for the room which includes the join
+                rules event, if already fetched by the caller.
 
         Returns:
             The JSON dictionary for the room.
@@ -809,12 +1130,15 @@ class RoomSummaryHandler:
         # clients can determine which memberships grant access.
         # Only the join rules event is needed for both has_restricted_join_rules
         # and get_rooms_that_allow_join, so avoid fetching full state.
-        join_rules_state_ids = (
-            await self._storage_controllers.state.get_current_state_ids(
-                room_id,
-                state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
+        if state_ids is not None:
+            join_rules_state_ids = state_ids
+        else:
+            join_rules_state_ids = (
+                await self._storage_controllers.state.get_current_state_ids(
+                    room_id,
+                    state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
+                )
             )
-        )
 
         try:
             room_version = await self._store.get_room_version(room_id)
@@ -835,7 +1159,9 @@ class RoomSummaryHandler:
 
         return room_entry
 
-    async def _get_child_events(self, room_id: str) -> Iterable[EventBase]:
+    async def _get_child_events(
+        self, room_id: str, state_ids: StateMap[str] | None = None
+    ) -> Iterable[EventBase]:
         """
         Get the child events for a given room.
 
@@ -843,15 +1169,26 @@ class RoomSummaryHandler:
 
         Args:
             room_id: The room id to get the children of.
+            state_ids: A current-state map for the room which includes the
+                m.space.child events, if already fetched by the caller.
 
         Returns:
             An iterable of sorted child events.
         """
 
-        # look for child rooms/spaces.
-        current_state_ids = await self._storage_controllers.state.get_current_state_ids(
-            room_id
-        )
+        # look for child rooms/spaces. Filter to just the m.space.child events
+        # rather than fetching the room's full current state.
+        if state_ids is not None:
+            current_state_ids = state_ids
+        else:
+            current_state_ids = (
+                await self._storage_controllers.state.get_current_state_ids(
+                    room_id,
+                    state_filter=StateFilter.from_types(
+                        [(EventTypes.SpaceChild, None)]
+                    ),
+                )
+            )
 
         events = await self._store.get_events_as_list(
             [
@@ -978,7 +1315,7 @@ class _RoomEntry:
     # An iterable of the sorted, stripped children events for children of this room.
     #
     # This may not include all children.
-    children_state_events: Sequence[JsonDict] = ()
+    children_state_events: Sequence[JsonMapping] = ()
 
     def as_json(self, for_client: bool = False) -> JsonDict:
         """
@@ -1001,6 +1338,30 @@ class _RoomEntry:
 
         result["children_state"] = self.children_state_events
         return result
+
+
+def _stripped_child_has_valid_via(e: JsonMapping) -> bool:
+    """`_has_valid_via` for the stripped child dicts of a cached RoomHierarchyState."""
+    via = e["content"].get("via")
+    if not via or not isinstance(via, list):
+        return False
+    return all(isinstance(v, str) for v in via)
+
+
+def _stripped_child_comparison_key(
+    child: JsonMapping,
+) -> tuple[bool, str | None, int, str]:
+    """`_child_events_comparison_key` for the stripped child dicts of a cached
+    RoomHierarchyState. Ties beyond origin_server_ts break on the child room id
+    (the state key), per MSC2946.
+    """
+    order = child["content"].get("order")
+    if not isinstance(order, str):
+        order = None
+    elif len(order) > 50 or _INVALID_ORDER_CHARS_RE.search(order):
+        order = None
+
+    return order is None, order, child["origin_server_ts"], child["state_key"]
 
 
 def _has_valid_via(e: EventBase) -> bool:
@@ -1036,7 +1397,7 @@ def _child_events_comparison_key(
 
     1. The 'order' key, if it is valid.
     2. The 'origin_server_ts' of the 'm.space.child' event.
-    3. The 'room_id'.
+    3. The child room ID (the event's state key).
 
     Args:
         child: The event for generating a comparison key.
@@ -1046,7 +1407,7 @@ def _child_events_comparison_key(
             False if the ordering is valid.
             The 'order' field or None if it is not given or invalid.
             The 'origin_server_ts' field.
-            The room ID.
+            The child room ID.
     """
     order = child.content.get("order")
     # If order is not a string or doesn't meet the requirements, ignore it.
@@ -1056,4 +1417,8 @@ def _child_events_comparison_key(
         order = None
 
     # Items without an order come last.
-    return order is None, order, child.origin_server_ts, child.room_id
+    #
+    # NB the final tie-break is the CHILD room id (the state key), not the room
+    # the event lives in — that is the same for every child of a space, so it
+    # never actually broke a tie.
+    return order is None, order, child.origin_server_ts, child.state_key

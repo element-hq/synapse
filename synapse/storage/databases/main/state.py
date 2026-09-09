@@ -28,6 +28,7 @@ from typing import (
     Iterable,
     Mapping,
     MutableMapping,
+    Optional,
     TypeVar,
     cast,
     overload,
@@ -76,6 +77,25 @@ class Sentinel:
 
 
 ROOM_UNKNOWN_SENTINEL = Sentinel()
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class RoomHierarchyState:
+    """The current-state inputs to a room's hierarchy (space summary) entry.
+
+    Immutable so it can be used as a cache value; the stripped child event
+    dicts must not be mutated by consumers.
+    """
+
+    # The room's join rule / history visibility, from CURRENT STATE (the room
+    # stats copies lag behind, which matters for access-control decisions).
+    join_rule: str | None
+    history_visibility: str | None
+    # A state map containing just the m.room.join_rules event id (if any), in
+    # the shape the restricted-join-rules helpers expect.
+    join_rules_state_ids: StateMap[str]
+    # The stripped m.space.child events of the room (unsorted, unfiltered).
+    children: tuple[JsonMapping, ...]
 
 
 def _retrieve_and_check_room_version(room_id: str, room_version_id: str) -> RoomVersion:
@@ -589,6 +609,87 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return await self.db_pool.runInteraction(
             "get_filtered_current_state_ids", _get_filtered_current_state_ids_txn
+        )
+
+    # NB max_entries is lower than the sibling state caches: each value holds
+    # every m.space.child event of the room, so entries are not uniformly small.
+    @cached(max_entries=10000)
+    async def get_room_hierarchy_state(
+        self, room_id: str
+    ) -> Optional["RoomHierarchyState"]:
+        """Get the parts of a room's current state that the room hierarchy
+        (space summary) endpoints need, in a form that can be cached.
+
+        The cache is invalidated whenever a state event is persisted in the room
+        (see `_invalidate_caches_for_event`), so the returned join rule /
+        history visibility are authoritative (unlike the room stats, which are
+        updated asynchronously).
+
+        Returns None if the room has no current state (i.e. is unknown).
+        """
+        state_ids = await self.get_partial_filtered_current_state_ids(
+            room_id,
+            StateFilter.from_types(
+                [
+                    (EventTypes.JoinRules, ""),
+                    (EventTypes.RoomHistoryVisibility, ""),
+                    (EventTypes.SpaceChild, None),
+                ]
+            ),
+        )
+        if not state_ids:
+            return None
+
+        join_rules_event_id = state_ids.get((EventTypes.JoinRules, ""))
+        hist_vis_event_id = state_ids.get((EventTypes.RoomHistoryVisibility, ""))
+        child_event_ids = [
+            event_id
+            for key, event_id in state_ids.items()
+            if key[0] == EventTypes.SpaceChild
+        ]
+
+        to_fetch = list(child_event_ids)
+        if join_rules_event_id:
+            to_fetch.append(join_rules_event_id)
+        if hist_vis_event_id:
+            to_fetch.append(hist_vis_event_id)
+        events = {e.event_id: e for e in await self.get_events_as_list(to_fetch)}
+
+        join_rule = None
+        if join_rules_event_id and join_rules_event_id in events:
+            join_rule = events[join_rules_event_id].content.get("join_rule")
+        history_visibility = None
+        if hist_vis_event_id and hist_vis_event_id in events:
+            history_visibility = events[hist_vis_event_id].content.get(
+                "history_visibility"
+            )
+
+        # Stripped m.space.child events, in the form the hierarchy endpoints
+        # return them. Unsorted and unfiltered: ordering, via-validity and
+        # suggested-only filtering are request-time concerns.
+        children = tuple(
+            {
+                "type": e.type,
+                "state_key": e.state_key,
+                "content": e.content,
+                "sender": e.sender,
+                "origin_server_ts": e.origin_server_ts,
+            }
+            for event_id in child_event_ids
+            if (e := events.get(event_id)) is not None
+        )
+
+        join_rules_state_ids: StateMap[str] = (
+            {(EventTypes.JoinRules, ""): join_rules_event_id}
+            if join_rules_event_id
+            else {}
+        )
+
+        return RoomHierarchyState(
+            join_rule=join_rule,
+            history_visibility=history_visibility,
+            join_rules_state_ids=join_rules_state_ids,
+            children=children,
         )
 
     @cached(max_entries=50000)

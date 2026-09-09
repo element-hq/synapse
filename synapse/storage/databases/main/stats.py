@@ -284,12 +284,23 @@ class StatsStore(StateDeltasStore):
             if field is not sentinel and (not isinstance(field, str) or "\0" in field):
                 fields[col] = None
 
-        await self.db_pool.simple_upsert(
-            table="room_stats_state",
-            keyvalues={"room_id": room_id},
-            values=fields,
-            desc="update_room_state",
-        )
+        def update_room_state_txn(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_upsert_txn(
+                txn,
+                table="room_stats_state",
+                keyvalues={"room_id": room_id},
+                values=fields,
+            )
+            # The room summary / hierarchy endpoints serve room state fields
+            # (name, topic, ...) from this table via the get_room_with_stats
+            # cache.
+            self._invalidate_cache_and_stream(  # type: ignore[attr-defined]
+                txn,
+                self.get_room_with_stats,  # type: ignore[attr-defined]
+                (room_id,),
+            )
+
+        await self.db_pool.runInteraction("update_room_state", update_room_state_txn)
 
     @cached()
     async def get_earliest_token_for_stats(
@@ -440,6 +451,15 @@ class StatsStore(StateDeltasStore):
             absolutes=absolute_field_overrides,
             additive_relatives=deltas_of_absolute_fields,
         )
+
+        if stats_type == "room":
+            # The room summary / hierarchy endpoints serve joined_members from
+            # room_stats_current via the get_room_with_stats cache.
+            self._invalidate_cache_and_stream(  # type: ignore[attr-defined]
+                txn,
+                self.get_room_with_stats,  # type: ignore[attr-defined]
+                (stats_id,),
+            )
 
     def _upsert_with_additive_relatives_txn(
         self,

@@ -1,0 +1,1 @@
+Speed up the room hierarchy endpoints by parallelising the traversal and caching per-room summaries, invalidated when the underlying data changes.

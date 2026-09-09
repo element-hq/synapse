@@ -404,6 +404,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             logger.error("store_room with room_id=%s failed: %s", room_id, e)
             raise StoreError(500, "Problem creating room.")
 
+        # NB no get_room_with_stats invalidation here, unlike the paths that
+        # store a room we learn about over federation: this is only reached for
+        # a room we are creating ourselves, whose (freshly generated) id nothing
+        # can have looked up yet, so there is no negative cache entry to clear.
+
     async def get_room(self, room_id: str) -> tuple[bool, bool] | None:
         """Retrieve a room.
 
@@ -430,8 +435,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             return row
         return bool(row[0]), bool(row[1])
 
+    @cached(max_entries=10000)
     async def get_room_with_stats(self, room_id: str) -> RoomStats | None:
         """Retrieve room with statistics.
+
+        Cached; invalidated when the room's stats rows are written
+        (`update_room_state` / `_update_stats_delta_txn`), when the room's
+        directory visibility changes, and on room purge.
 
         Args:
             room_id: The ID of the room to retrieve.
@@ -2371,12 +2381,16 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         return True
 
     async def set_room_is_public(self, room_id: str, is_public: bool) -> None:
-        await self.db_pool.simple_update_one(
-            table="rooms",
-            keyvalues={"room_id": room_id},
-            updatevalues={"is_public": is_public},
-            desc="set_room_is_public",
-        )
+        def set_room_is_public_txn(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn,
+                table="rooms",
+                keyvalues={"room_id": room_id},
+                updatevalues={"is_public": is_public},
+            )
+            self._invalidate_cache_and_stream(txn, self.get_room_with_stats, (room_id,))
+
+        await self.db_pool.runInteraction("set_room_is_public", set_room_is_public_txn)
 
     async def set_room_is_public_appservice(
         self, room_id: str, appservice_id: str, network_id: str, is_public: bool
@@ -2480,6 +2494,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 "has_auth_chain_index": has_auth_chain_index,
             },
         )
+        # As in store_room: drop any negative entry cached before the room row
+        # existed.
+        await self.invalidate_cache_and_stream("get_room_with_stats", (room_id,))
 
 
 class _BackgroundUpdates:
@@ -2987,6 +3004,10 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "has_auth_chain_index": has_auth_chain_index,
             },
         )
+        # The room may have been looked up before we had a row for it (e.g. a
+        # remote server asking us to summarise it), caching a None; the stats
+        # writer only invalidates once it catches up.
+        await self.invalidate_cache_and_stream("get_room_with_stats", (room_id,))
 
     async def store_partial_state_room(
         self,
