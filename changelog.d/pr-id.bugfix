@@ -1,0 +1,1 @@
+Fix a bug where server-default push rules that are disabled by the server's configuration, and thus not served to clients, could still be modified through the client API instead of returning a 404.

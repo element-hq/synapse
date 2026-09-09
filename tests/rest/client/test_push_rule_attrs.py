@@ -29,7 +29,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login, push_rule, room
 from synapse.types import JsonDict
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, override_config
 
 
 class PushRuleAttributesTestCase(HomeserverTestCase):
@@ -426,6 +426,172 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+    def _assert_default_rule_absent(self, token: str, rule_path: str) -> None:
+        """Checks that a server-default rule is neither served nor modifiable."""
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/enabled",
+            {"enabled": False},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/actions",
+            {"actions": ["notify"]},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        _, kind, rule_id = rule_path.split("/")
+        channel = self.make_request("GET", "/pushrules/", access_token=token)
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn(
+            rule_id,
+            [rule["rule_id"] for rule in channel.json_body["global"].get(kind, [])],
+        )
+
+    def _assert_default_rule_modifiable(self, token: str, rule_path: str) -> None:
+        """Checks that a server-default rule is served and can be modified."""
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/actions",
+            {"actions": ["notify"]},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/enabled",
+            {"enabled": False},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["actions"], ["notify"])
+        self.assertEqual(channel.json_body["enabled"], False)
+
+    def test_msc3381_poll_rules_disabled(self) -> None:
+        """
+        Tests that the MSC3381 poll rules are neither served nor modifiable
+        while the feature is disabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_absent(
+            token, "global/underride/.org.matrix.msc3930.rule.poll_start"
+        )
+
+    @override_config({"experimental_features": {"msc3381_polls_enabled": True}})
+    def test_msc3381_poll_rules_enabled(self) -> None:
+        """
+        Tests that the MSC3381 poll rules are served and modifiable once the
+        feature is enabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_modifiable(
+            token, "global/underride/.org.matrix.msc3930.rule.poll_start"
+        )
+
+    def test_msc4028_encrypted_event_rule_disabled(self) -> None:
+        """
+        Tests that the MSC4028 encrypted event rule is neither served nor
+        modifiable while the feature is disabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_absent(
+            token, "global/override/.org.matrix.msc4028.encrypted_event"
+        )
+
+    @override_config({"experimental_features": {"msc4028_push_encrypted_events": True}})
+    def test_msc4028_encrypted_event_rule_enabled(self) -> None:
+        """
+        Tests that the MSC4028 encrypted event rule is served and modifiable
+        once the feature is enabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_modifiable(
+            token, "global/override/.org.matrix.msc4028.encrypted_event"
+        )
+
+    @parameterized.expand(
+        [
+            ("global/override/.m.rule.contains_display_name",),
+            ("global/content/.m.rule.contains_user_name",),
+            ("global/override/.m.rule.roomnotif",),
+        ]
+    )
+    @override_config({"experimental_features": {"msc4210_enabled": True}})
+    def test_msc4210_legacy_mention_rules_removed(self, rule_path: str) -> None:
+        """
+        Tests that the legacy mention rules are neither served nor modifiable
+        once MSC4210 removes them.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_absent(token, rule_path)
+
+    @parameterized.expand(
+        [
+            ("global/override/.m.rule.contains_display_name",),
+            ("global/content/.m.rule.contains_user_name",),
+            ("global/override/.m.rule.roomnotif",),
+        ]
+    )
+    def test_msc4210_legacy_mention_rules_present(self, rule_path: str) -> None:
+        """
+        Tests that the legacy mention rules are served and modifiable while
+        MSC4210 is disabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_modifiable(token, rule_path)
+
+    def test_msc4306_thread_subscription_rules_disabled(self) -> None:
+        """
+        Tests that the MSC4306 thread subscription rules are neither served
+        nor modifiable while the feature is disabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_absent(
+            token, "global/postcontent/.io.element.msc4306.rule.subscribed_thread"
+        )
+
+    @override_config({"experimental_features": {"msc4306_enabled": True}})
+    def test_msc4306_thread_subscription_rules_enabled(self) -> None:
+        """
+        Tests that the MSC4306 thread subscription rules are served and
+        modifiable once the feature is enabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_modifiable(
+            token, "global/postcontent/.io.element.msc4306.rule.subscribed_thread"
+        )
 
     def test_contains_user_name(self) -> None:
         """
