@@ -1731,6 +1731,239 @@ class FederationEventHandler:
         logger.info("Fetched %i events of %i requested", len(events), len(event_ids))
         await self._auth_and_persist_outliers(room_id, events)
 
+    async def _fetch_missing_state_dag_events(
+        self,
+        destination: str,
+        event: MSC4242Event,
+    ) -> Iterable[EventBase]:
+        """If we are missing some of an event's prev state events, request them until we
+        fill in the complete state DAG.
+
+        Args:
+            destination: where to fetch the state dag from
+            event: The event we're missing prev_state_events for.
+        Returns:
+            The missed state DAG events.
+        """
+        # The logic for this is gnarly but the general idea is to hit /get_missing_events
+        # with the event ID (hence known as the "back set") to walk back up the state DAG
+        # breadth first. We then need to see if we have seen any of these events, in which
+        # case they can be removed from the back set.
+        # When the back set size reaches 0, we have filled in the entire DAG. It's gnarly
+        # because we don't have a clear idea when we have filled in the state DAG without
+        # checking with the database for potentially a lot of events. Consider the graph:
+        #                  .-- E <- F <- G
+        #  A <- B <- C <- D
+        #                  `-- H <- I <- J
+        # Assume this server knows A-G and receives J. Knowing the forwards extremities in
+        # the room (G) does nothing to help us know when we have connected up the state DAG
+        # at D. Thus, this function queries the database for all returned events to see if
+        # we have seen them, and then filters them out.
+        #
+        # This function terminates when either:
+        # - the back set size is 0 (we filled in the gap)
+        # - the back set entries do not change after a round of /get_missing_events
+        #   (we're not making forward progress), in which case this indicates the remote
+        #   server is lying to us and not sending us events we need.
+        #
+        # There are tradeoffs here between # round trips, amount of memory consumed and # DB
+        # hits. We could reduce memory consumed by persisting intermediate events in a
+        # staging area on disk. We could reduce DB hits by only querying a subset of events
+        # (and using the topological ordering) which may mean we try to process events we've
+        # already seen. We try to reduce the # round trips by exponentially increasing the
+        # limit in each request. Better algorithms exist here (search for "set
+        # reconciliation") but as of today, we don't do any of them.
+
+        # this function is expensive. See if we need to do it at all.
+        seen = await self._store.have_seen_events(
+            event.room_id, event.prev_state_events
+        )
+        if seen == set(event.prev_state_events):
+            return []
+
+        room_id = event.room_id
+        # we allow this amount of time for each event we're going to receive.
+        # This dynamically adjusts the timeout to account for very large responses.
+        timeout_ms_per_event = 100
+        iteration = 0
+        limit = 8
+        # we maintain 3 sets: the back set is what the next /gme request will be, and the
+        # /gme response events get bucketed into one of these 3 (seen, missed, back) sets.
+        missed_events: dict[str, MSC4242Event] = {}
+        seen_event_ids: set[str] = set()
+        # we operate on state events, but we may have originally hit the backwards
+        # extremity with a message event. If we do, we need to grab the prev_state_events
+        # first to seed the back set. /get_missing_events will not return the event we
+        # provide to it in latest_events.
+        back_set: dict[str, MSC4242Event] = {}
+        if event.is_state():
+            back_set = {event.event_id: event}
+        else:
+            prev_state_events = await self._get_events_from_remote(
+                destination, room_id, event.prev_state_events
+            )
+            back_set = {
+                e.event_id: e
+                for e in prev_state_events
+                if e.event_id not in seen
+                and e.room_id == room_id
+                and supports_msc4242_state_dag(e)
+            }
+            # the back set now consists of state events we have not seen, so ensure we
+            # return them to the caller
+            missed_events = {e.event_id: e for e in back_set.values()}
+
+        while len(back_set) > 0:
+            logger.info(
+                "missed=%s seen=%s back_set=%s",
+                missed_events.keys(),
+                seen_event_ids,
+                back_set.keys(),
+            )
+            # remember which events we're querying for. If we don't make forward progress
+            # we'll bail.
+            before_back_set = set(back_set)
+            max_events_per_req = limit * pow(2, iteration)  # 8x1, 8x2, 8x4, ...
+            try:
+                # 10s base then +(100ms x # events) on top e.g 64 events = +6400ms = 16.4s
+                timeout = 10000 + (max_events_per_req * timeout_ms_per_event)
+                remote_events = await self._federation_client.get_missing_events(
+                    destination,
+                    room_id,
+                    earliest_events_ids=[],
+                    latest_events=list(back_set.values()),
+                    limit=max_events_per_req,
+                    min_depth=0,
+                    timeout=timeout,
+                    state_dag=True,
+                )
+                # the remote server is untrusted, so discard anything that isn't a state
+                # DAG event in the room we asked about.
+                remote_events_map = {
+                    ev.event_id: ev
+                    for ev in remote_events
+                    if ev.room_id == room_id and supports_msc4242_state_dag(ev)
+                }
+            except (
+                RequestSendFailed,
+                HttpResponseException,
+                NotRetryingDestination,
+            ) as e1:
+                logger.warning(
+                    "Failed to get missing state dag events from remote: %s", e1
+                )
+                # by returning nothing we all but guarantee that the processing of the
+                # event received over federation will fail. We'll try doing this again the
+                # next time this server sends an event to us.
+                # TODO(kegan): Having a staging area of auth events we have got but not yet
+                # authed would help us stop doing repeat work.
+                return []
+
+            # bucket the remote events into seen / unseen. We include each event's
+            # prev_state_events here because that way we might be able to skip another
+            # request i.e we know we have seen the prev_state_events so don't bother
+            # fetching them again.
+            remote_event_ids = {
+                event_id
+                for ev in remote_events_map.values()
+                for event_id in ev.prev_state_events
+            }
+            remote_event_ids.update(remote_events_map.keys())
+            # no need to ask the database about events we already know we've seen in a
+            # previous iteration.
+            remote_event_ids.difference_update(seen_event_ids)
+            seen_remotes = await self._store.have_seen_events(
+                room_id,
+                remote_event_ids,
+            )
+            seen_event_ids.update(seen_remotes)
+            unseen_remotes = set(remote_events_map).difference(seen_event_ids)
+
+            # all unseen events must be returned
+            missed_events.update(
+                {k: v for (k, v) in remote_events_map.items() if k in unseen_remotes}
+            )
+
+            # now figure out what the new back set is. In the common case, remote events
+            # will have a long chain of new events e.g A <- B <- C <- D so we want to walk
+            # up this graph if all the events are unseen. If there are seen events (e.g A)
+            # then when we reach A we terminate that branch as we have filled in the gap.
+            # In order to avoid mutating the dict whilst iterating, we iterate over the back
+            # set snapshot we took earlier, and try to exhaust it (i.e it maps an event ID
+            # to a new earlier event ID(s) or None if we filled in the gap.)
+            back_queue = collections.deque(before_back_set)
+            new_back_set: set[str] = set()
+            while back_queue:
+                # If the prevs are:
+                #  - All seen: we've filled in the gap, don't add this event to the back set.
+                #  - All fetched: add all the prevs to the back set.
+                #  - Mixed seen/fetched: add all the fetched prevs to the back set
+                #  - Any unseen: keep this event in the back set.
+                back_event_id = back_queue.popleft()
+                back_event = missed_events.get(
+                    back_event_id, back_set.get(back_event_id)
+                )
+                if back_event is None:
+                    continue
+                seen_all_prevs = all(
+                    pae in seen_event_ids for pae in back_event.prev_state_events
+                )
+                if seen_all_prevs:
+                    continue
+                has_any_unseen_prev = any(
+                    pae not in seen_event_ids and pae not in missed_events
+                    for pae in back_event.prev_state_events
+                )
+                if has_any_unseen_prev:
+                    new_back_set.add(back_event_id)
+                    continue
+
+                # if we reach here then we have a mixture of seen/fetched prevs. Add the
+                # fetched prevs to the queue
+                back_queue.extend(
+                    pae
+                    for pae in back_event.prev_state_events
+                    if pae not in seen_event_ids
+                )
+
+            # if there is an event with lots of prev_state_events, so many that our limit
+            # won't pull them all in, then we have a problem if we give up trying to walk
+            # backwards. Ensure the limit is at least that large before giving up.
+            max_prev_state_events_on_single_event = max(
+                len(ev.prev_state_events) for ev in back_set.values()
+            )
+            if (
+                new_back_set == before_back_set
+                and max_events_per_req > max_prev_state_events_on_single_event
+            ):
+                # we didn't make forward progress, give up.
+                logger.warning(
+                    "Failed to make forward progress when walking back through state dag, "
+                    "stuck at back set %s",
+                    before_back_set,
+                )
+                return []
+            iteration += 1  # let the limit exponentially increase
+
+            # edge case: the initial event we put as latest_events has so many
+            # prev_state_events that we did not make forward progress yet. In this case,
+            # missed_events does NOT have the initial event, as it was not returned from
+            # /get_missing_events. Therefore, we just special case this scenario and set the
+            # back set accordingly.
+            if new_back_set == {event.event_id}:
+                back_set = {event.event_id: event}
+            else:
+                back_set = {
+                    event_id: missed_events[event_id] for event_id in new_back_set
+                }
+
+        logger.info(
+            "fetch_missing_state_dag_events returning %s events from %s",
+            len(missed_events),
+            event.event_id,
+        )
+        return missed_events.values()
+
     @trace
     async def _auth_and_persist_outliers(
         self,
