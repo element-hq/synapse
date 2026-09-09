@@ -218,8 +218,8 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         )
 
     def test_legacy_overrides_are_left_in_place(self) -> None:
-        """The legacy overrides are not deleted, so that they still apply if
-        the legacy rules are restored with `msc4210_enabled: false`."""
+        """The legacy overrides are not deleted, so that they still apply
+        while the legacy rules are served."""
         user_id = "@alice:test"
         self._set_enabled(user_id, PushRuleIds.ROOMNOTIF, False)
         self._set_actions(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY)

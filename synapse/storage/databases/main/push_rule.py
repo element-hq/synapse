@@ -280,9 +280,10 @@ class PushRulesWorkerStore(
 
         Matrix v1.17 (MSC4210) removed `.m.rule.contains_display_name`,
         `.m.rule.contains_user_name` and `.m.rule.roomnotif` from the base rule
-        set (https://spec.matrix.org/v1.19/client-server-api/#predefined-rules),
-        so any `enabled` or `actions` override a user had on them stopped
-        having an effect. Each override is copied onto the replacement rule
+        set (https://spec.matrix.org/v1.19/client-server-api/#predefined-rules).
+        Once Synapse stops serving them, any `enabled` or `actions` override a
+        user had on them stops having an effect. Each override is copied onto
+        the replacement rule
         unless the user has already customised the replacement rule themselves,
         in which case their explicit choice is kept:
 
@@ -296,9 +297,8 @@ class PushRulesWorkerStore(
           `.m.rule.contains_user_name`, as it did at evaluation time (override
           rules run before content rules).
 
-        The legacy overrides themselves are left in place: they are harmless
-        while the rules are withheld, and still apply if the legacy rules are
-        restored with `msc4210_enabled: false`.
+        The legacy overrides themselves are left in place: they still apply
+        for as long as the legacy rules are served, and are harmless afterwards.
 
         Only the push rule caches are invalidated; no push rules stream entry is
         written, as the background worker is not necessarily the push rules
