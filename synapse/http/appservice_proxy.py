@@ -13,6 +13,7 @@
 #
 
 import logging
+import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, cast
 from urllib.parse import parse_qs, unquote_to_bytes, urlencode, urlsplit
@@ -21,7 +22,13 @@ from twisted.python import failure
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IBodyProducer, IResponse
 
-from synapse.api.errors import Codes, SynapseError
+from synapse.api.errors import (
+    Codes,
+    FederationDeniedError,
+    HttpResponseException,
+    RequestSendFailed,
+    SynapseError,
+)
 from synapse.appservice import ApplicationService
 from synapse.http.proxy import (
     HOP_BY_HOP_HEADERS_LOWERCASE,
@@ -30,8 +37,11 @@ from synapse.http.proxy import (
 )
 from synapse.http.server import return_json_error, set_cors_headers
 from synapse.http.site import SynapseRequest
+from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.types import JsonDict
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -192,3 +202,99 @@ def _send_response(request: SynapseRequest, response: IResponse) -> None:
         request.responseHeaders.setRawHeaders(header_name, header_values)
 
     response.deliverBody(_ProxyResponseBody(request))
+
+
+async def send_federation_request_from_appservice(
+    hs: "HomeServer",
+    appservice: ApplicationService,
+    method: str,
+    destination: str,
+    path: str,
+    data: JsonDict | None,
+    args: QueryParams | None,
+) -> tuple[int, JsonDict | None]:
+    """Sign and send a federation request on behalf of an appservice.
+
+    Returns:
+        A `(status, content)` tuple describing the destination's actual HTTP response.
+    """
+    _check_path_allowed_for_appservice(appservice, path)
+
+    if hs.is_mine_server_name(destination):
+        raise SynapseError(
+            HTTPStatus.FORBIDDEN,
+            "Cannot target this homeserver itself",
+            Codes.AS_FEDPROXY_DESTINATION_DENIED,
+        )
+
+    if method not in ("GET", "PUT", "POST", "DELETE"):
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            f"Unsupported method {method}",
+            Codes.INVALID_PARAM,
+        )
+
+    client = hs.get_federation_http_client()
+
+    try:
+        content = await client.send_direct_request(
+            method, destination, path, args=args, json_body=data
+        )
+        return HTTPStatus.OK, content
+    except HttpResponseException as e:
+        try:
+            content = json_decoder.decode(e.response.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            content = None
+        return e.code, content
+    except FederationDeniedError as e:
+        raise SynapseError(
+            HTTPStatus.FORBIDDEN,
+            e.msg,
+            Codes.AS_FEDPROXY_DESTINATION_DENIED,
+        )
+    except RequestSendFailed as e:
+        raise SynapseError(
+            HTTPStatus.BAD_GATEWAY,
+            str(e),
+            Codes.AS_FEDPROXY_CONNECTION_FAILED,
+        )
+
+
+def _check_path_allowed_for_appservice(
+    appservice: ApplicationService, path: str
+) -> None:
+    # Deny relative paths.
+    if has_dot_segments(path.encode("utf-8")):
+        raise SynapseError(
+            HTTPStatus.FORBIDDEN,
+            "Path must not contain '.' or '..' segments",
+            Codes.AS_FEDPROXY_PATH_NOT_ALLOWED,
+        )
+
+    # Deny query parameters or fragments smuggled in via the path.
+    split_path = urlsplit(path)
+    if split_path.query or split_path.fragment:
+        raise SynapseError(
+            HTTPStatus.FORBIDDEN,
+            "Path must not contain a query string or fragment",
+            Codes.AS_FEDPROXY_PATH_NOT_ALLOWED,
+        )
+
+    # Ensure the path is under the appservice's own proxy prefix.
+    if appservice.proxy_prefix is None:
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            "Application service does not have a proxy prefix",
+            Codes.AS_FEDPROXY_NO_PROXY_PREFIX,
+        )
+    pattern = re.compile(
+        r"^/_matrix/federation/(?:unstable/[^/]+|v[^/]+)/%s(/.*)?$"
+        % (re.escape(appservice.proxy_prefix),)
+    )
+    if pattern.match(path) is None:
+        raise SynapseError(
+            HTTPStatus.FORBIDDEN,
+            f"Path must be under /_matrix/federation/<version>/{appservice.proxy_prefix}",
+            Codes.AS_FEDPROXY_PATH_NOT_ALLOWED,
+        )

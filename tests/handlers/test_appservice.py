@@ -36,7 +36,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.storage
-from synapse.api.constants import EduTypes, EventTypes
+from synapse.api.constants import EduTypes, EventTypes, ReceiptTypes
 from synapse.appservice import (
     ApplicationService,
     TransactionOneTimeKeysCount,
@@ -702,6 +702,105 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         event_id = list(latest_read_receipt["content"].keys())[0]
         self.assertEqual(
             latest_read_receipt["content"][event_id]["m.read"], {self.local_user: {}}
+        )
+
+    def test_application_services_receive_private_read_receipts_of_namespaced_users_only(
+        self,
+    ) -> None:
+        """Tests that private read receipts are only sent to an application
+        service for users within the appservice's namespaces, while public read
+        receipts are sent regardless of the sending user.
+
+        See https://spec.matrix.org/v1.19/application-service-api/#pushing-ephemeral-data
+        """
+        # Register an application service that's interested in a certain user
+        # and room prefix
+        interested_appservice = self._register_application_service(
+            namespaces={
+                ApplicationService.NS_USERS: [
+                    {
+                        "regex": "@exclusive_as_user:.+",
+                        "exclusive": True,
+                    }
+                ],
+                ApplicationService.NS_ROOMS: [
+                    {
+                        "regex": "!fakeroom_.*",
+                        "exclusive": True,
+                    }
+                ],
+            },
+        )
+
+        room_id = "!fakeroom_private:test"
+        event_id = "$eventid"
+
+        # A public read receipt from a user outside the appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ,
+                user_id=self.local_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+        # A private read receipt from a user within the appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ_PRIVATE,
+                user_id=self.exclusive_as_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+        # A private read receipt on the same event from a user outside the
+        # appservice's namespaces.
+        self.get_success(
+            self.hs.get_datastores().main.insert_receipt(
+                room_id=room_id,
+                receipt_type=ReceiptTypes.READ_PRIVATE,
+                user_id=self.local_user,
+                event_ids=[event_id],
+                thread_id=None,
+                data={},
+            )
+        )
+
+        # Notify the appservice handler about the receipts in one go.
+        # note: stream tokens start at 2, so the three receipts above have
+        # stream IDs 2, 3 and 4.
+        self.get_success(
+            self.hs.get_application_service_handler()._notify_interested_services_ephemeral(
+                services=[interested_appservice],
+                stream_key=StreamKeyType.RECEIPT,
+                new_token=MultiWriterStreamToken(stream=4),
+                users=[self.local_user, self.exclusive_as_user],
+            )
+        )
+
+        self.send_mock.assert_called_once()
+        ephemeral_events = self.send_mock.call_args[0][2]
+
+        # All receipts for the room are batched into a single m.receipt event.
+        self.assertEqual(len(ephemeral_events), 1)
+        receipt_event = ephemeral_events[0]
+        self.assertEqual(receipt_event["type"], EduTypes.RECEIPT)
+        self.assertEqual(receipt_event["room_id"], room_id)
+
+        # The public read receipt and the namespaced user's private read receipt
+        # should have been sent, but not the other user's private read receipt.
+        self.assertEqual(
+            receipt_event["content"],
+            {
+                event_id: {
+                    ReceiptTypes.READ: {self.local_user: {}},
+                    ReceiptTypes.READ_PRIVATE: {self.exclusive_as_user: {}},
+                },
+            },
         )
 
     @unittest.override_config(
