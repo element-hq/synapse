@@ -719,12 +719,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=2,
-                    user_id="@roger:test",
-                    action="joined_room",
-                    affected_fields=None,
-                ),
-                ProfileUpdate(
                     stream_id=4,
                     user_id="@roger:test",
                     action="left_room",

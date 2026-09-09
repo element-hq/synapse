@@ -2246,9 +2246,22 @@ class PersistEventsStore:
             field_names=[],
             target_users=users_no_longer_sharing_rooms,
         )
+
         # We also need to record things in reverse. The user, who left the
         # room, needs to get profile update rows for every user they no longer
         # share a room with.
+        # First clear old rows between these users.
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE user_id = ?
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE {user_clause}
+                    )
+            """,
+            (user_id.to_string(), *user_args),
+        )
+        # Then add the left room action rows in the stream.
         for user in users_no_longer_sharing_rooms:
             self.store.record_profile_updates_txn(
                 txn=txn,
