@@ -1,0 +1,1 @@
+Remove the `msc4210_enabled` experimental option and the legacy mention push rules it could restore, which Matrix v1.17 removed from the base push rule set.
