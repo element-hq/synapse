@@ -25,14 +25,10 @@ import attr
 from synapse.api.errors import SynapseError, UnrecognizedRequestError
 from synapse.push.clientformat import format_push_rules_for_user
 from synapse.storage.push_rule import RuleNotFoundException
-from synapse.synapse_rust.push import get_base_rule_ids
 from synapse.types import JsonDict, StreamKeyType, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
-
-
-BASE_RULE_IDS = get_base_rule_ids()
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -63,7 +59,9 @@ class PushRulesHandler:
             val: the value to change the attribute to.
 
         Raises:
-            RuleNotFoundException if the rule being modified doesn't exist.
+            RuleNotFoundException if the rule being modified doesn't exist, or is a
+                server-default rule that is not served to the user (e.g. one gated
+                behind a disabled experimental feature).
             SynapseError(400) if the value is malformed.
             UnrecognizedRequestError if the attribute to change is unknown.
             InvalidRuleException if we're trying to change the actions on a rule but
@@ -79,7 +77,16 @@ class PushRulesHandler:
         rule_id = spec.rule_id
         is_default_rule = rule_id.startswith(".")
         if is_default_rule:
-            if namespaced_rule_id not in BASE_RULE_IDS:
+            # Check against the rules served to the user rather than the full
+            # base rule set: server-default rules disabled by the server's
+            # configuration are not served, so must not be modifiable either.
+            # `rule.default` keeps rejecting user-created rules whose ID happens
+            # to start with ".", as before.
+            rules = await self._main_store.get_push_rules_for_user(user_id)
+            if not any(
+                rule.rule_id == namespaced_rule_id and rule.default
+                for rule, _ in rules.rules()
+            ):
                 raise RuleNotFoundException("Unknown rule %r" % (namespaced_rule_id,))
         if spec.attr == "enabled":
             if isinstance(val, dict) and "enabled" in val:
@@ -99,13 +106,6 @@ class PushRulesHandler:
             if not isinstance(actions, list):
                 raise SynapseError(400, "Value for 'actions' must be dict")
             check_actions(actions)
-            rule_id = spec.rule_id
-            is_default_rule = rule_id.startswith(".")
-            if is_default_rule:
-                if namespaced_rule_id not in BASE_RULE_IDS:
-                    raise RuleNotFoundException(
-                        "Unknown rule %r" % (namespaced_rule_id,)
-                    )
             await self._main_store.set_push_rule_actions(
                 user_id, namespaced_rule_id, actions, is_default_rule
             )

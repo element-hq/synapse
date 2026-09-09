@@ -29,7 +29,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login, push_rule, room
 from synapse.types import JsonDict
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, override_config
 
 
 class PushRuleAttributesTestCase(HomeserverTestCase):
@@ -426,6 +426,146 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
         )
         self.assertEqual(channel.code, 404)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+    def _assert_default_rule_absent(self, token: str, rule_path: str) -> None:
+        """Checks that a server-default rule is neither served nor modifiable."""
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/enabled",
+            {"enabled": False},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/actions",
+            {"actions": ["notify"]},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 404)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
+
+        _, kind, rule_id = rule_path.split("/")
+        channel = self.make_request("GET", "/pushrules/", access_token=token)
+        self.assertEqual(channel.code, 200)
+        self.assertNotIn(
+            rule_id,
+            [rule["rule_id"] for rule in channel.json_body["global"].get(kind, [])],
+        )
+
+    def _assert_default_rule_modifiable(self, token: str, rule_path: str) -> None:
+        """Checks that a server-default rule is served and can be modified."""
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/actions",
+            {"actions": ["notify"]},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/pushrules/{rule_path}/enabled",
+            {"enabled": False},
+            access_token=token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "GET", f"/pushrules/{rule_path}", access_token=token
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["actions"], ["notify"])
+        self.assertEqual(channel.json_body["enabled"], False)
+
+    # Server-default rules gated behind an experimental feature, as
+    # (feature flag, rule path). Each is only served, and thus only
+    # modifiable, while its flag is set.
+    #
+    # The MSC1767 rules are not covered: enabling that flag also registers a
+    # room version in the global `KNOWN_ROOM_VERSIONS`, which leaks into other
+    # tests.
+    GATED_DEFAULT_RULES = [
+        (
+            "msc3381_polls_enabled",
+            "global/underride/.org.matrix.msc3930.rule.poll_start",
+        ),
+        ("msc3664_enabled", "global/override/.im.nheko.msc3664.reply"),
+        (
+            "msc4028_push_encrypted_events",
+            "global/override/.org.matrix.msc4028.encrypted_event",
+        ),
+        (
+            "msc4306_enabled",
+            "global/postcontent/.io.element.msc4306.rule.subscribed_thread",
+        ),
+    ]
+
+    # Server-default rules that MSC4210 removes: served and modifiable only
+    # while that flag is unset.
+    MSC4210_LEGACY_MENTION_RULES = [
+        "global/override/.m.rule.contains_display_name",
+        "global/content/.m.rule.contains_user_name",
+        "global/override/.m.rule.roomnotif",
+    ]
+
+    @parameterized.expand(GATED_DEFAULT_RULES)
+    def test_gated_default_rule_disabled(self, flag: str, rule_path: str) -> None:
+        """
+        Tests that a server-default rule gated behind an experimental feature
+        is neither served nor modifiable while the feature is disabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_absent(token, rule_path)
+
+    @parameterized.expand(GATED_DEFAULT_RULES)
+    def test_gated_default_rule_enabled(self, flag: str, rule_path: str) -> None:
+        """
+        Tests that a server-default rule gated behind an experimental feature
+        is served and modifiable once the feature is enabled.
+        """
+        # `override_config` can't take the flag from a test parameter, so set it
+        # directly. The rule set is only built once the user's rules are loaded,
+        # which happens after this.
+        setattr(self.hs.config.experimental, flag, True)
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_modifiable(token, rule_path)
+
+    @parameterized.expand(MSC4210_LEGACY_MENTION_RULES)
+    @override_config({"experimental_features": {"msc4210_enabled": True}})
+    def test_msc4210_legacy_mention_rules_removed(self, rule_path: str) -> None:
+        """
+        Tests that the legacy mention rules are neither served nor modifiable
+        once MSC4210 removes them.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_absent(token, rule_path)
+
+    @parameterized.expand(MSC4210_LEGACY_MENTION_RULES)
+    def test_msc4210_legacy_mention_rules_present(self, rule_path: str) -> None:
+        """
+        Tests that the legacy mention rules are served and modifiable while
+        MSC4210 is disabled.
+        """
+        self.register_user("bob", "pass")
+        token = self.login("bob", "pass")
+        self._assert_default_rule_modifiable(token, rule_path)
 
     def test_contains_user_name(self) -> None:
         """
