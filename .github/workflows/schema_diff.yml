@@ -96,7 +96,7 @@ jobs:
             > "${{ runner.temp }}/schema_diff.md"
 
       - name: Post sticky PR comment
-        uses: marocchino/sticky-pull-request-comment@3d7b8546315c63df45a03981d50a43ec19237f80 # v3
+        uses: marocchino/sticky-pull-request-comment@28ad303d6acb4ccfc50f20c0044188e7e294b8c4 # v3
         if: always()
         with:
           header: schema-diff
