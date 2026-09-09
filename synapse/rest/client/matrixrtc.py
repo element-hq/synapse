@@ -42,7 +42,7 @@ class MatrixRTCRestServlet(RestServlet):
         await self._auth.get_user_by_req(request)
 
         if self._transports:
-            return 200, {"rtc_transports": self._transports}
+            return 200, {"transports": self._transports}
 
         return 200, {}
 
