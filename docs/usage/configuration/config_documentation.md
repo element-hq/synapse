@@ -534,6 +534,21 @@ Options for each entry include:
 
 * `x_forwarded` (boolean): Only valid for an `http` listener. Set to true to use the X-Forwarded-For header as the client IP. Useful when Synapse is behind a [reverse-proxy](../../reverse_proxy.md).
 
+* `trusted_proxies` (array): Only valid for an `http` listener with `x_forwarded` enabled. A list of IP addresses or CIDR ranges of reverse proxies that Synapse should trust when resolving the client IP from the X-Forwarded-For header. The chain is walked from right to left, starting at the address the connection was received from, and each hop is only followed while the address to its right is a trusted proxy. Clients can spoof their IP address if this is not configured (or if the reverse proxy does not itself sanitise the header). Defaults to no trusted proxies, in which case the first address in the X-Forwarded-For header is used, as before.
+
+  Example:
+  ```yaml
+  listeners:
+    - port: 8008
+      x_forwarded: true
+      trusted_proxies:
+        - 127.0.0.1
+        - ::1
+        - 10.0.0.0/8
+      resources:
+        - names: [client, federation]
+  ```
+
 * `request_id_header` (string|null): The header extracted from each incoming request that is used as the basis for the request ID. The request ID is used in [logs](../administration/request_log.md#request-log-format) and tracing to correlate and match up requests. When unset, Synapse will automatically generate sequential request IDs. This option is useful when Synapse is behind a [reverse-proxy](../../reverse_proxy.md).
 
   _Added in Synapse 1.68.0._

@@ -1,0 +1,1 @@
+Fix client IP spoofing when `x_forwarded` is enabled by adding a `trusted_proxies` listener option which safely resolves the client address from the X-Forwarded-For chain. Configuring it is strongly recommended; without it the previous behaviour is kept.

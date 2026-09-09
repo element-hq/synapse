@@ -322,3 +322,70 @@ class GenerateIpSetTestCase(unittest.TestCase):
         # The following get treated as empty data.
         self.assertFalse(generate_ip_set(None))
         self.assertFalse(generate_ip_set({}))
+
+
+class TrustedProxiesConfigTestCase(unittest.TestCase):
+    def _read_listeners(self, listeners: list[JsonDict]) -> ServerConfig:
+        config = ServerConfig(RootConfig())
+        config.read_config(
+            {"server_name": "test.example.com", "listeners": listeners},
+        )
+        return config
+
+    def test_trusted_proxies_passed_through(self) -> None:
+        config = self._read_listeners(
+            [
+                {
+                    "port": 8008,
+                    "type": "http",
+                    "x_forwarded": True,
+                    "trusted_proxies": ["127.0.0.1", "::1", "10.0.0.0/8"],
+                    "resources": [{"names": ["client"]}],
+                }
+            ]
+        )
+        self.assertEqual(
+            config.listeners[0].http_options.trusted_proxies,
+            ["127.0.0.1", "::1", "10.0.0.0/8"],
+        )
+
+    def test_trusted_proxies_default_to_none(self) -> None:
+        config = self._read_listeners(
+            [
+                {
+                    "port": 8008,
+                    "type": "http",
+                    "x_forwarded": True,
+                    "resources": [{"names": ["client"]}],
+                }
+            ]
+        )
+        self.assertIsNone(config.listeners[0].http_options.trusted_proxies)
+
+    def test_trusted_proxies_must_be_a_list(self) -> None:
+        with self.assertRaises(ConfigError):
+            self._read_listeners(
+                [
+                    {
+                        "port": 8008,
+                        "type": "http",
+                        "x_forwarded": True,
+                        "trusted_proxies": "127.0.0.1",
+                        "resources": [{"names": ["client"]}],
+                    }
+                ]
+            )
+
+    def test_trusted_proxies_must_be_valid_addresses(self) -> None:
+        with self.assertRaises(ConfigError):
+            self._read_listeners(
+                [
+                    {
+                        "port": 8008,
+                        "type": "http",
+                        "x_forwarded": True,
+                        "trusted_proxies": ["not-an-ip"],
+                        "resources": [{"names": ["client"]}],
+                    }
+                ]
+            )

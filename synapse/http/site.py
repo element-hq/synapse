@@ -23,9 +23,10 @@ import json
 import logging
 import time
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any, Collection, Generator
 
 import attr
+from netaddr import AddrFormatError, IPAddress, IPNetwork
 from zope.interface import implementer
 
 from twisted.internet.address import UNIXAddress
@@ -733,13 +734,24 @@ class XForwardedForRequest(SynapseRequest):
         if not headers:
             return
 
-        # for now, we just use the first x-forwarded-for header. Really, we ought
-        # to start from the client IP address, and check whether it is trusted; if it
-        # is, work backwards through the headers until we find an untrusted address.
-        # see https://github.com/matrix-org/synapse/issues/9471
-        self._forwarded_for = _XForwardedForAddress(
-            headers[0].split(b",")[0].strip().decode("ascii")
-        )
+        # Multiple X-Forwarded-For headers are equivalent to one comma-separated
+        # list, in the order the headers appear.
+        entries = [entry.strip() for header in headers for entry in header.split(b",")]
+
+        trusted_proxies = self.synapse_site.trusted_proxies
+        if not trusted_proxies:
+            # No trusted proxies are configured, so the chain cannot be verified.
+            # Keep the historical behaviour of taking the first address in the
+            # list; configuring `trusted_proxies` is required to safely resolve
+            # the client IP from the chain.
+            # See https://github.com/matrix-org/synapse/issues/9471
+            self._forwarded_for = _XForwardedForAddress(
+                headers[0].split(b",")[0].strip().decode("ascii")
+            )
+        else:
+            self._forwarded_for = _XForwardedForAddress(
+                self._get_forwarded_client_ip(entries, trusted_proxies)
+            )
 
         # if we got an x-forwarded-for header, also look for an x-forwarded-proto header
         header = self.getHeader(b"x-forwarded-proto")
@@ -757,6 +769,50 @@ class XForwardedForRequest(SynapseRequest):
         if self._forwarded_https:
             return True
         return super().isSecure()
+
+    def _get_forwarded_client_ip(
+        self,
+        entries: list[bytes],
+        trusted_proxies: Collection[IPNetwork],
+    ) -> str:
+        """Resolve the client IP from an X-Forwarded-For chain.
+
+        The chain is walked from right to left, starting at the peer address of
+        the connection: each hop is only followed (moving left) while the
+        address on its right is a trusted proxy. The first untrusted address —
+        or the leftmost entry if the whole chain is trusted — is returned.
+
+        An attacker can only influence the result by injecting entries which
+        are then mistaken for trusted proxies, which requires control of a
+        trusted proxy itself.
+        """
+        peer = super().getClientAddress()
+        if isinstance(peer, UNIXAddress):
+            # A connection over a unix socket necessarily comes from a local
+            # (and therefore trusted) process.
+            current: str | None = None
+            current_is_trusted = True
+        else:
+            current = peer.host
+            current_is_trusted = _is_trusted_proxy(current, trusted_proxies)
+
+        for raw_entry in reversed(entries):
+            if not current_is_trusted:
+                break
+            try:
+                candidate = IPAddress(raw_entry.decode("ascii"))
+            except (AddrFormatError, ValueError):
+                # Not a valid IP address, so we cannot tell whether it is a
+                # trusted proxy: stop trusting the rest of the chain.
+                break
+            current = str(candidate)
+            current_is_trusted = _is_trusted_proxy(current, trusted_proxies)
+
+        if current is None:
+            # Degenerate case (eg. an empty chain on a unix socket listener):
+            # fall back to the first entry, as without trusted proxies.
+            return entries[0].decode("ascii", errors="replace")
+        return current
 
     def getClientIP(self) -> str:
         """
@@ -781,6 +837,15 @@ class XForwardedForRequest(SynapseRequest):
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class _XForwardedForAddress:
     host: str
+
+
+def _is_trusted_proxy(host: str, trusted_proxies: Collection[IPNetwork]) -> bool:
+    """Whether the given IP address (as a string) is one of the trusted proxies."""
+    try:
+        ip = IPAddress(host)
+    except (AddrFormatError, ValueError):
+        return False
+    return any(ip in network for network in trusted_proxies)
 
 
 class SynapseProtocol(HTTPChannel):
@@ -899,6 +964,14 @@ class SynapseSite(ProxySite):
         assert config.http_options is not None
         proxied = config.http_options.x_forwarded
         self.request_class = XForwardedForRequest if proxied else SynapseRequest
+
+        # Networks whose proxies we trust to provide an accurate
+        # X-Forwarded-For chain. Empty if `trusted_proxies` was not configured,
+        # in which case the whole chain is treated as untrusted.
+        self.trusted_proxies: tuple[IPNetwork, ...] = tuple(
+            IPNetwork(trusted_proxy)
+            for trusted_proxy in (config.http_options.trusted_proxies or ())
+        )
 
         self.request_id_header = config.http_options.request_id_header
         self.max_request_body_size = max_request_body_size
