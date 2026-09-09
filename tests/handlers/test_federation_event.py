@@ -23,7 +23,7 @@ from unittest import mock
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.errors import AuthError, StoreError
+from synapse.api.errors import AuthError, StoreError, SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.event_auth import (
     check_state_dependent_auth_rules,
@@ -1494,6 +1494,14 @@ class FetchMissingStateDagEventsTests(unittest.FederatingHomeserverTestCase):
         )
         self._prepare_handler({"A", "B", "C", "D"}, seen_all, {})
         self._assert_fetches(seen_all, "D", [])
+
+    def test_sanity_check_rejects_too_many_prev_state_events(self) -> None:
+        event = self._make_event([f"$prev{i}" for i in range(21)])
+        self.assertRaises(
+            SynapseError,
+            self.hs.get_federation_event_handler()._sanity_check_event,
+            event,
+        )
 
     def test_ignores_events_from_other_rooms(self) -> None:
         linear = self._make_state_dag(

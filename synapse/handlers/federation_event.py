@@ -1824,6 +1824,11 @@ class FederationEventHandler:
         timeout_ms_per_event = 100
         iteration = 0
         limit = 8
+        # #matrix:matrix.org has ~77k state events, so a server that joined at the start and is
+        # only now syncing up should still be able to fill in the gap. Beyond this we give
+        # up rather than let a malicious server walk us backwards forever.
+        # TODO(kegan): we need a staging area else we'll OOM well before this point
+        max_state_dag_events = 100_000
         # we maintain 3 sets: the back set is what the next /gme request will be, and the
         # /gme response events get bucketed into one of these 3 (seen, missed, back) sets.
         missed_events: dict[str, MSC4242Event] = {}
@@ -1920,6 +1925,13 @@ class FederationEventHandler:
             missed_events.update(
                 {k: v for (k, v) in remote_events_map.items() if k in unseen_remotes}
             )
+
+            if len(missed_events) > max_state_dag_events:
+                logger.warning(
+                    "Giving up walking back through state dag: more than %i events to fetch",
+                    max_state_dag_events,
+                )
+                return []
 
             # now figure out what the new back set is. In the common case, remote events
             # will have a long chain of new events e.g A <- B <- C <- D so we want to walk
@@ -3136,6 +3148,14 @@ class FederationEventHandler:
                 len(ev.prev_event_ids()),
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many prev_events")
+
+        if supports_msc4242_state_dag(ev) and len(ev.prev_state_events) > 20:
+            logger.warning(
+                "Rejecting event %s which has %i prev_state_events",
+                ev.event_id,
+                len(ev.prev_state_events),
+            )
+            raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many prev_state_events")
 
         # MSC4242 State DAG events don't list their auth events (they're calculated from
         # the state DAG), so there's nothing to bound here for them.
