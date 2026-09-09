@@ -12,7 +12,8 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-import json
+from collections.abc import Mapping
+from typing import Any
 
 from twisted.internet.testing import MemoryReactor
 
@@ -21,25 +22,45 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.push_rule import (
     _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME,
 )
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
-NOTIFY_ONLY = ["notify"]
-NOTIFY_LOUDLY = ["notify", {"set_tweak": "sound", "value": "default"}]
+NOTIFY_ONLY: list[str | JsonDict] = ["notify"]
+NOTIFY_LOUDLY: list[str | JsonDict] = [
+    "notify",
+    {"set_tweak": "sound", "value": "default"},
+]
 
 # The default actions of the mention rules.
-USER_MENTION_DEFAULT_ACTIONS = [
+USER_MENTION_DEFAULT_ACTIONS: list[str | JsonDict] = [
     "notify",
     {"set_tweak": "highlight"},
     {"set_tweak": "sound", "value": "default"},
 ]
-ROOM_MENTION_DEFAULT_ACTIONS = ["notify", {"set_tweak": "highlight"}]
+ROOM_MENTION_DEFAULT_ACTIONS: list[str | JsonDict] = [
+    "notify",
+    {"set_tweak": "highlight"},
+]
+
+# With the fake clock, every batch appears to take no time at all, so after the
+# first batch the updater falls back to the minimum batch size: pinning both to
+# the same value makes the number of batches deterministic.
+BATCH_SIZE = 2
 
 
 class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
     """Tests the background update which carries customisations of the legacy
     mention rules (removed by MSC4210) over to the intentional mention rules."""
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["background_updates"] = {
+            "default_batch_size": BATCH_SIZE,
+            "min_batch_size": BATCH_SIZE,
+        }
+        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
@@ -51,14 +72,18 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
             )
         )
 
-    def _set_actions(self, user_id: str, rule_id: str, actions: list) -> None:
+    def _set_actions(
+        self, user_id: str, rule_id: str, actions: list[str | JsonDict]
+    ) -> None:
         self.get_success(
             self.store.set_push_rule_actions(
                 user_id, rule_id, actions, is_default_rule=True
             )
         )
 
-    def _get_rule(self, user_id: str, rule_id: str) -> tuple[bool, list]:
+    def _get_rule(
+        self, user_id: str, rule_id: str
+    ) -> tuple[bool, list[str | Mapping[str, Any]]]:
         """Returns the effective enabled state and actions of a rule, as seen
         by the push rule evaluator."""
         rules = self.get_success(self.store.get_push_rules_for_user(user_id))
@@ -79,50 +104,17 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         )
         self.store.db_pool.updates._all_done = False
 
-    def _run_migration(self) -> None:
-        """Runs the background update to completion."""
-        self._schedule_migration()
-        self.wait_for_background_updates()
-
-    def _run_migration_in_batches(self, batch_size: int) -> int:
-        """Runs the background update to completion with a fixed batch size,
-        returning the number of batches it took."""
+    def _run_migration(self) -> int:
+        """Runs the background update to completion, returning the number of
+        batches it took."""
         self._schedule_migration()
         updater = self.store.db_pool.updates
-        # Batch sizes are normally adaptive; drive the handler ourselves so
-        # that we control them. The updater must consider the update to be the
-        # current one for the handler to be able to mark it as complete.
-        updater._current_background_update = (
-            _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME
-        )
 
         batches = 0
-        progress: dict = {}
-        while True:
+        while not self.get_success(updater.has_completed_background_updates()):
+            self.get_success(updater.do_next_background_update(False))
             batches += 1
-            processed = self.get_success(
-                self.store._migrate_legacy_mention_push_rules(progress, batch_size)
-            )
-            if processed < batch_size:
-                break
-            progress = json.loads(
-                self.get_success(
-                    self.store.db_pool.simple_select_one_onecol(
-                        "background_updates",
-                        {"update_name": _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME},
-                        "progress_json",
-                    )
-                )
-            )
 
-        self.assertIsNone(updater._current_background_update)
-        self.assertTrue(
-            self.get_success(
-                updater.has_completed_background_update(
-                    _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME
-                )
-            )
-        )
         return batches
 
     def test_room_mention(self) -> None:
@@ -244,13 +236,16 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
                 PushRuleIds.IS_USER_MENTION: True,
             },
         )
-        self.assertEqual(
-            self.get_success(
-                self.store.db_pool.simple_select_onecol(
-                    "push_rules", {"user_name": user_id}, "rule_id"
-                )
+        self.assertIncludes(
+            set(
+                self.get_success(
+                    self.store.db_pool.simple_select_onecol(
+                        "push_rules", {"user_name": user_id}, "rule_id"
+                    )
+                ),
             ),
-            [PushRuleIds.CONTAINS_DISPLAY_NAME, PushRuleIds.IS_USER_MENTION],
+            {PushRuleIds.CONTAINS_DISPLAY_NAME, PushRuleIds.IS_USER_MENTION},
+            exact=True,
         )
 
     def test_batching(self) -> None:
@@ -264,7 +259,7 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         # A user with no legacy customisation is left alone.
         self._set_enabled("@other:test", PushRuleIds.IS_USER_MENTION, False)
 
-        self.assertEqual(self._run_migration_in_batches(batch_size=2), 3)
+        self.assertEqual(self._run_migration(), 3)
 
         for user_id in users[:3]:
             self.assertEqual(
@@ -286,7 +281,7 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         rules."""
         self._set_enabled("@alice:test", PushRuleIds.IS_USER_MENTION, False)
 
-        self.assertEqual(self._run_migration_in_batches(batch_size=2), 1)
+        self.assertEqual(self._run_migration(), 1)
         self.assertEqual(
             self._get_rule("@alice:test", PushRuleIds.IS_USER_MENTION),
             (False, USER_MENTION_DEFAULT_ACTIONS),

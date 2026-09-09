@@ -73,6 +73,20 @@ logger = logging.getLogger(__name__)
 # `PushRulesWorkerStore._migrate_legacy_mention_push_rules`.
 _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME = "migrate_legacy_mention_push_rules"
 
+# A user's override of the `actions` of a server-default rule is stored as a dummy
+# row in `push_rules`: the rule id identifies the base rule, `actions` holds the
+# override and there are no conditions. The rule id is what marks the row as an
+# override: when the rules are loaded, any row whose id is a base rule's is
+# merged onto that base rule, which keeps its own class and priority (see
+# `PushRules::new` in `rust/src/push/mod.rs`). The priority class is kept out
+# of the real classes (see `synapse.push.rulekinds.PRIORITY_CLASS_MAP`) so that
+# a row whose id ever stops matching a base rule is dropped with a warning
+# rather than evaluated as a user-defined rule. The priority is therefore
+# arbitrary.
+_DEFAULT_RULE_OVERRIDE_PRIORITY_CLASS = -1
+_DEFAULT_RULE_OVERRIDE_PRIORITY = 1
+_DEFAULT_RULE_OVERRIDE_CONDITIONS_JSON = "[]"
+
 
 def _load_rules(
     rawrules: list[tuple[str, int, str, str]],
@@ -266,7 +280,8 @@ class PushRulesWorkerStore(
 
         Matrix v1.17 (MSC4210) removed `.m.rule.contains_display_name`,
         `.m.rule.contains_user_name` and `.m.rule.roomnotif` from the base rule
-        set, so any `enabled` or `actions` override a user had on them stopped
+        set (https://spec.matrix.org/v1.19/client-server-api/#predefined-rules),
+        so any `enabled` or `actions` override a user had on them stopped
         having an effect. Each override is copied onto the replacement rule
         unless the user has already customised the replacement rule themselves,
         in which case their explicit choice is kept:
@@ -361,9 +376,10 @@ class PushRulesWorkerStore(
             for user_name, rule_id, enabled in txn:
                 enabled_by_user.setdefault(user_name, {})[rule_id] = bool(enabled)
 
-            # Work out which overrides to copy onto the mention rules.
-            new_actions: list[tuple[str, str, str]] = []
-            new_enabled: list[tuple[str, str, bool]] = []
+            # Work out which overrides to copy onto the mention rules, keyed by
+            # `(user_name, rule_id)`.
+            actions_to_insert: dict[tuple[str, str], str] = {}
+            enabled_to_insert: dict[tuple[str, str], bool] = {}
             for user_name in users:
                 actions = actions_by_user.get(user_name, {})
                 enabled = enabled_by_user.get(user_name, {})
@@ -402,18 +418,17 @@ class PushRulesWorkerStore(
                 # Setting the actions of a rule also ensures it has a
                 # `push_rules_enable` row (see `_upsert_push_rule_txn`); keep
                 # the same invariant for the rows we insert.
-                for rule_id in user_new_actions:
-                    if rule_id not in enabled and rule_id not in user_new_enabled:
-                        user_new_enabled[rule_id] = True
+                for mention_rule_id in user_new_actions:
+                    if (
+                        mention_rule_id not in enabled
+                        and mention_rule_id not in user_new_enabled
+                    ):
+                        user_new_enabled[mention_rule_id] = True
 
-                new_actions.extend(
-                    (user_name, rule_id, rule_actions)
-                    for rule_id, rule_actions in user_new_actions.items()
-                )
-                new_enabled.extend(
-                    (user_name, rule_id, rule_enabled)
-                    for rule_id, rule_enabled in user_new_enabled.items()
-                )
+                for mention_rule_id, rule_actions in user_new_actions.items():
+                    actions_to_insert[(user_name, mention_rule_id)] = rule_actions
+                for mention_rule_id, rule_enabled in user_new_enabled.items():
+                    enabled_to_insert[(user_name, mention_rule_id)] = rule_enabled
 
             # A user customising a mention rule concurrently would race these
             # inserts on the `(user_name, rule_id)` unique constraint. Their row
@@ -445,35 +460,43 @@ class PushRulesWorkerStore(
             else:
                 raise RuntimeError("Unknown database engine")
 
-            if new_actions:
-                ids = self._push_rule_id_gen.get_next_mult_txn(txn, len(new_actions))
+            if actions_to_insert:
+                row_ids = self._push_rule_id_gen.get_next_mult_txn(
+                    txn, len(actions_to_insert)
+                )
                 txn.execute_batch(
                     insert_rule_sql,
                     [
-                        # Overrides of server-default rules are stored as dummy
-                        # rules with no conditions, see `set_push_rule_actions`.
-                        (rule_id, user_name, rule_id_, -1, 1, "[]", actions)
-                        for rule_id, (user_name, rule_id_, actions) in zip(
-                            ids, new_actions
+                        (
+                            row_id,
+                            user_name,
+                            mention_rule_id,
+                            _DEFAULT_RULE_OVERRIDE_PRIORITY_CLASS,
+                            _DEFAULT_RULE_OVERRIDE_PRIORITY,
+                            _DEFAULT_RULE_OVERRIDE_CONDITIONS_JSON,
+                            rule_actions,
+                        )
+                        for row_id, ((user_name, mention_rule_id), rule_actions) in zip(
+                            row_ids, actions_to_insert.items()
                         )
                     ],
                 )
-            if new_enabled:
-                ids = self._push_rules_enable_id_gen.get_next_mult_txn(
-                    txn, len(new_enabled)
+            if enabled_to_insert:
+                row_ids = self._push_rules_enable_id_gen.get_next_mult_txn(
+                    txn, len(enabled_to_insert)
                 )
                 txn.execute_batch(
                     insert_enable_sql,
                     [
-                        (row_id, user_name, rule_id, 1 if enabled else 0)
-                        for row_id, (user_name, rule_id, enabled) in zip(
-                            ids, new_enabled
+                        (row_id, user_name, mention_rule_id, 1 if rule_enabled else 0)
+                        for row_id, ((user_name, mention_rule_id), rule_enabled) in zip(
+                            row_ids, enabled_to_insert.items()
                         )
                     ],
                 )
 
-            changed_users = {user_name for user_name, _, _ in new_actions} | {
-                user_name for user_name, _, _ in new_enabled
+            changed_users = {user_name for user_name, _ in actions_to_insert} | {
+                user_name for user_name, _ in enabled_to_insert
             }
             if changed_users:
                 self._invalidate_cache_and_stream_bulk(
@@ -1185,17 +1208,15 @@ class PushRulesWorkerStore(
             if is_default_rule:
                 # Add a dummy rule to the rules table with the user specified
                 # actions.
-                priority_class = -1
-                priority = 1
                 self._upsert_push_rule_txn(
                     txn,
                     stream_id,
                     event_stream_ordering,
                     user_id,
                     rule_id,
-                    priority_class,
-                    priority,
-                    "[]",
+                    _DEFAULT_RULE_OVERRIDE_PRIORITY_CLASS,
+                    _DEFAULT_RULE_OVERRIDE_PRIORITY,
+                    _DEFAULT_RULE_OVERRIDE_CONDITIONS_JSON,
                     actions_json,
                     update_stream=False,
                 )
