@@ -2805,9 +2805,17 @@ class FederationEventHandler:
             missing_auth_event_ids,
         )
         try:
-            await self._get_remote_auth_chain_for_event(
-                destination, event.room_id, event.event_id
-            )
+            if supports_msc4242_state_dag(event):
+                # MSC4242 events don't list auth events, so the "missing auth events" are
+                # really missing `prev_state_events`: walk the state DAG to fill them in.
+                missed_events = await self._fetch_missing_state_dag_events(
+                    destination, event
+                )
+                await self._auth_and_persist_outliers(event.room_id, missed_events)
+            else:
+                await self._get_remote_auth_chain_for_event(
+                    destination, event.room_id, event.event_id
+                )
         except Exception as e:
             logger.warning("Failed to get auth chain for %s: %s", event, e)
             # in this case, it's very likely we still won't have all the auth
