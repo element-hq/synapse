@@ -60,6 +60,7 @@ from twisted.internet.defer import CancelledError
 from twisted.internet.interfaces import (
     IReactorCore,
     IReactorPluggableNameResolver,
+    IReactorSocket,
     IReactorSSL,
     IReactorTCP,
     IReactorThreads,
@@ -267,6 +268,7 @@ class ISynapseThreadlessReactor(
     IReactorTCP,
     IReactorSSL,
     IReactorUNIX,
+    IReactorSocket,
     IReactorPluggableNameResolver,
     IReactorTime,
     IReactorCore,

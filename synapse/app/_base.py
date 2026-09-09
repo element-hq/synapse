@@ -24,6 +24,7 @@ import logging
 import os
 import signal
 import socket
+import stat
 import sys
 import traceback
 import warnings
@@ -45,7 +46,8 @@ from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec, assert_never
 
 import twisted
-from twisted.internet import defer, error, reactor as _reactor
+from twisted.internet import defer, error, reactor as _reactor, unix
+from twisted.internet.endpoints import _SystemdParser
 from twisted.internet.interfaces import (
     IOpenSSLContextFactory,
     IReactorSSL,
@@ -56,6 +58,7 @@ from twisted.internet.protocol import ServerFactory
 from twisted.internet.tcp import Port
 from twisted.logger import LoggingFile, LogLevel
 from twisted.protocols.tls import TLSMemoryBIOFactory
+from twisted.python.failure import Failure
 from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
@@ -68,6 +71,7 @@ from synapse.config.homeserver import HomeServerConfig
 from synapse.config.server import (
     ListenerConfig,
     ManholeConfig,
+    SystemdListenerConfig,
     TCPListenerConfig,
     UnixListenerConfig,
 )
@@ -419,6 +423,94 @@ def listen_unix(
     ]
 
 
+class _AdoptedUnixPort(unix.Port):
+    """A `unix.Port` for a socket file owned by systemd.
+
+    Twisted currently hardcodes a few behaviours that break systemd socket support:
+
+    - `startListening()` chmods the path to `unix.Port`'s own default mode.
+    - `connectionLost()` unlinks the path on shutdown, which leaves systemd's
+      socket unit listening on an unlinked inode.
+    - `_SocketCloser._closeSocket()` (mixed in via `tcp.Port`) calls
+      `socket.shutdown(SHUT_RDWR)` before `close()` on an "orderly" teardown.
+
+    This overridden class makes sure that we avoid all of these problems.
+
+    It may be possible to drop this once this upstream issue is fixed:
+    sockets: https://github.com/twisted/twisted/issues/10261
+    """
+
+    _shouldShutdown = False
+
+    def startListening(self) -> None:
+        if unix._inFilesystemNamespace(self.port):
+            self.mode = stat.S_IMODE(os.stat(self.port).st_mode)
+        super().startListening()
+
+    def connectionLost(self, reason: Failure) -> None:
+        Port.connectionLost(self, reason)
+
+
+def listen_systemd(
+    fd_name: str,
+    factory: ServerFactory,
+    reactor: ISynapseReactor = reactor,
+    context_factory: Optional[IOpenSSLContextFactory] = None,
+) -> list[Port]:
+    """
+    Adopt a file descriptor inherited from systemd via socket activation.
+
+    Returns:
+        list of twisted.internet.tcp.Port (or unix.Port) listening on the
+        inherited descriptor.
+    """
+    # `twisted.internet.endpoints` parses the systemd environment at import time,
+    # deleting LISTEN_PID/LISTEN_FDS in the process, so calling `ListenFDs.fromEnvironment()`
+    # ourselves here would find nothing. This private singleton is unfortunately the only
+    # place the inherited descriptors survive. We *could* in theory extract it directly
+    # from /proc/self/environ instead, but woul just be a different hack around the problem.
+    named_descriptors = _SystemdParser._sddaemon.inheritedNamedDescriptors()
+
+    if fd_name not in named_descriptors:
+        raise ConfigError(
+            f"No socket named {fd_name} was passed to Synapse by systemd."
+            f"Sockets available: {sorted(named_descriptors) or '(none)'}"
+            "Check the 'FileDescriptorName=' setting (or the unit name)"
+            "in the relevant .socket unit, and that Synapse was "
+            "started via socket activation."
+        )
+
+    fd = named_descriptors[fd_name]
+
+    # socket.socket(fileno=) doesn't dup the fd, and detach() hands it back
+    # without closing it, so this doesn't disturb the inherited descriptor.
+    sock = socket.socket(fileno=fd)
+    family = sock.family
+    sock.setblocking(False)
+    sock.detach()
+
+    listen_factory: ServerFactory = factory
+    if context_factory is not None:
+        if family == socket.AF_UNIX:
+            raise ConfigError(
+                "Can not use TLS with the systemd socket named %r: it is a "
+                "Unix domain socket, not a TCP socket." % (fd_name,)
+            )
+        # This is what `reactor.listenSSL` does internally too.
+        listen_factory = TLSMemoryBIOFactory(context_factory, False, factory)
+
+    # This piece of code was taken from `PosixReactorBase.adoptStreamPort`,
+    # so that we can compensate for the chmod/unlink problems upstream.
+    # See the docstring of `_AdoptedUnixPort` for more details.
+    if family == socket.AF_UNIX:
+        port = _AdoptedUnixPort._fromListeningDescriptor(reactor, fd, listen_factory)
+    else:
+        port = Port._fromListeningDescriptor(reactor, fd, family, listen_factory)
+    port.startListening()
+
+    return [port]
+
+
 class ListenerException(RuntimeError):
     """
     An exception raised when we fail to listen with the given `ListenerConfig`.
@@ -439,6 +531,9 @@ class ListenerException(RuntimeError):
         elif isinstance(listener_config, UnixListenerConfig):
             listener_human_name = "unix socket"
             port = listener_config.path
+        elif isinstance(listener_config, SystemdListenerConfig):
+            listener_human_name = "systemd socket"
+            port = listener_config.fd_name
         else:
             assert_never(listener_config)
 
@@ -520,6 +615,23 @@ def listen_http(
             logger.info(
                 "Synapse now listening on Unix Socket at: %s",
                 ports[0].getHost().name.decode("utf-8"),
+            )
+        elif isinstance(listener_config, SystemdListenerConfig):
+            is_tls = listener_config.is_tls()
+            if is_tls:
+                # refresh_certificate should have been called before this.
+                assert context_factory is not None
+            ports = listen_systemd(
+                listener_config.fd_name,
+                site,
+                reactor=reactor,
+                context_factory=context_factory if is_tls else None,
+            )
+            logger.info(
+                "Synapse now listening on systemd socket %r (%s)%s",
+                listener_config.fd_name,
+                ports[0].getHost(),
+                " (TLS)" if is_tls else "",
             )
         else:
             assert_never(listener_config)
