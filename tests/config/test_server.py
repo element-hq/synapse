@@ -26,7 +26,15 @@ from parameterized import parameterized
 
 from synapse.config._base import ConfigError, RootConfig
 from synapse.config.homeserver import HomeServerConfig
-from synapse.config.server import ServerConfig, generate_ip_set, is_threepid_reserved
+from synapse.config.server import (
+    ServerConfig,
+    SystemdListenerConfig,
+    TCPListenerConfig,
+    UnixListenerConfig,
+    generate_ip_set,
+    is_threepid_reserved,
+    parse_listener_def,
+)
 from synapse.types import JsonDict
 
 from tests import unittest
@@ -264,6 +272,57 @@ def _read_config(config_values: JsonDict) -> None:
         )
         | config_values
     )
+
+
+class ParseListenerDefTestCase(unittest.TestCase):
+    def test_tcp_listener(self) -> None:
+        config = parse_listener_def(0, {"type": "http", "port": 8008})
+        self.assertIsInstance(config, TCPListenerConfig)
+        assert isinstance(config, TCPListenerConfig)
+        self.assertEqual(config.port, 8008)
+
+    def test_unix_socket_listener(self) -> None:
+        config = parse_listener_def(
+            0, {"type": "http", "path": "/var/run/synapse.sock"}
+        )
+        self.assertIsInstance(config, UnixListenerConfig)
+        assert isinstance(config, UnixListenerConfig)
+        self.assertEqual(config.path, "/var/run/synapse.sock")
+
+    def test_systemd_listener(self) -> None:
+        config = parse_listener_def(
+            0, {"type": "http", "path": "systemd:matrix-federation"}
+        )
+        self.assertIsInstance(config, SystemdListenerConfig)
+        assert isinstance(config, SystemdListenerConfig)
+        self.assertEqual(config.fd_name, "matrix-federation")
+        self.assertEqual(config.type, "http")
+        self.assertFalse(config.is_tls())
+        self.assertEqual(config.get_site_tag(), "matrix-federation")
+
+    def test_systemd_listener_tls(self) -> None:
+        config = parse_listener_def(
+            0,
+            {"type": "http", "path": "systemd:matrix-federation", "tls": True},
+        )
+        self.assertIsInstance(config, SystemdListenerConfig)
+        assert isinstance(config, SystemdListenerConfig)
+        self.assertTrue(config.is_tls())
+
+    def test_systemd_listener_requires_a_name(self) -> None:
+        with self.assertRaises(ConfigError):
+            parse_listener_def(0, {"type": "http", "path": "systemd:"})
+
+    def test_systemd_listener_rejects_port(self) -> None:
+        with self.assertRaises(ConfigError):
+            parse_listener_def(
+                0,
+                {
+                    "type": "http",
+                    "path": "systemd:matrix-federation",
+                    "port": 8448,
+                },
+            )
 
 
 class GenerateIpSetTestCase(unittest.TestCase):
