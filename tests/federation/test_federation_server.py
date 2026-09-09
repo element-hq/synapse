@@ -61,7 +61,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             "enabled": True,
             "search_all_users": True,
         }
-        # The federation user directory search responder is only registered when
+        # The federation user directory fetch responder is only registered when
         # the experimental feature is enabled.
         config["experimental_features"] = {
             "bwi_federated_user_dir_enabled": True,
@@ -106,14 +106,14 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(500, channel.code, channel.result)
 
-    def test_federation_user_directory_search_servlet(self) -> None:
-        """Test that the federation user directory search servlet works correctly."""
+    def test_federation_user_directory_fetch_servlet(self) -> None:
+        """Test that the federation user directory fetch servlet works correctly."""
         self.register_user("userlambda", "password")
 
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
             "GET",
-            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch",
         )
 
         # Check that the response is correct
@@ -123,14 +123,14 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].get("user_id"), "@userlambda:test")
 
-    def test_federation_user_directory_search_servlet_no_results(self) -> None:
+    def test_federation_user_directory_fetch_servlet_no_results(self) -> None:
         """An empty local directory yields no results."""
         # No local users are registered, so the directory is empty.
 
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
             "GET",
-            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch",
         )
 
         # Check that the response is correct

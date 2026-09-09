@@ -35,7 +35,7 @@ from synapse.federation.transport.server.federation import (
     FederationMediaThumbnailServlet,
     FederationUnstableClientKeysClaimServlet,
     FederationUnstableGetExtremitiesServlet,
-    FederationUserDirectorySearchServlet,
+    FederationUserDirectoryFetchServlet,
 )
 from synapse.http.server import HttpServer, JsonResource
 from synapse.http.servlet import (
@@ -336,7 +336,7 @@ def register_servlets(
                 continue
 
             if (
-                servletclass == FederationUserDirectorySearchServlet
+                servletclass == FederationUserDirectoryFetchServlet
                 and not hs.config.experimental.bwi_federated_user_dir_enabled
             ):
                 continue

@@ -334,9 +334,9 @@ class FederationClientTest(FederatingHomeserverTestCase):
         # other from "yet.another.server"
         self.assertEqual(backfill_num_attempts, 2)
 
-    def test_user_directory_search(self) -> None:
-        """Test that the federation client correctly handles user directory search requests."""
-        # Mock the transport layer's user_directory_search method
+    def test_user_directory_fetch(self) -> None:
+        """Test that the federation client fetches a remote user directory."""
+        # Mock the transport layer's user_directory_fetch method
         mock_results = {
             "results": [
                 {
@@ -346,27 +346,27 @@ class FederationClientTest(FederatingHomeserverTestCase):
                 }
             ],
         }
-        self.transport_layer.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             return_value=mock_results
         )
 
         # Call the federation client method
         result = self.get_success(
-            self.federation_client.user_directory_search("other.example.com", 2000)
+            self.federation_client.user_directory_fetch("other.example.com", 2000)
         )
 
         # Check that the result is correct
         self.assertEqual(result, mock_results)
 
-        # Check that user_directory_search was called with the correct arguments
-        self.transport_layer.user_directory_search.assert_called_once_with(
+        # Check that user_directory_fetch was called with the correct arguments
+        self.transport_layer.user_directory_fetch.assert_called_once_with(
             "other.example.com", 2000
         )
 
-    def test_user_directory_search_endpoint_not_found(self) -> None:
+    def test_user_directory_fetch_endpoint_not_found(self) -> None:
         """Test that the federation client handles 404 responses correctly."""
         # Mock the transport layer to raise a 404 error
-        self.transport_layer.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             side_effect=HttpResponseException(
                 404, "Not Found", b'{"errcode": "M_NOT_FOUND"}'
             )
@@ -374,7 +374,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         # Call the federation client method
         result = self.get_success(
-            self.federation_client.user_directory_search("other.example.com", 10)
+            self.federation_client.user_directory_fetch("other.example.com", 10)
         )
 
         # A failed fetch returns an empty result set (never None), as some
@@ -415,7 +415,7 @@ class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
             self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
         )
 
-        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             return_value={
                 "results": [
                     {
@@ -429,9 +429,9 @@ class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
 
         self.get_success(self.federation_client._sync_federated_user_directory())
 
-        self.federation_client.user_directory_search.assert_called_once_with(
+        self.federation_client.user_directory_fetch.assert_called_once_with(
             "remote.example.com",
-            self.hs.config.experimental.bwi_federated_user_dir_federation_search_timeout,
+            self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout,
         )
 
         profiles = self.get_success(
@@ -447,11 +447,11 @@ class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
         # Our own server name should never be queried, even if present in the DB.
         self.get_success(self.store.set_destination_retry_timings("test", None, 0, 0))
 
-        self.federation_client.user_directory_search = AsyncMock()  # type: ignore[method-assign]
+        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
 
         self.get_success(self.federation_client._sync_federated_user_directory())
 
-        self.federation_client.user_directory_search.assert_not_called()
+        self.federation_client.user_directory_fetch.assert_not_called()
 
     def _run_sync_returning(self, results: list[dict]) -> None:
         """Run a single sync where the remote returns the given results.
@@ -459,7 +459,7 @@ class FederatedUserDirectorySyncTestCase(FederatingHomeserverTestCase):
         An empty list simulates a failed fetch, since our logic treats an
         empty result as a failure and skips pruning.
         """
-        self.federation_client.user_directory_search = AsyncMock(  # type: ignore[method-assign]
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
             return_value={"results": results}
         )
         self.get_success(self.federation_client._sync_federated_user_directory())

@@ -310,17 +310,13 @@ class ExperimentalConfig(Config):
         # MSC4491: Invite reasons in room creation
         self.msc4491_enabled: bool = experimental.get("msc4491_enabled", False)
 
-        # Pre-MSC implementation of federated user search.
+        # Pre-MSC implementation of federated user directory fetching.
         self.bwi_federated_user_dir_enabled: bool = experimental.get(
             "bwi_federated_user_dir_enabled", False
         )
 
-        self.bwi_federated_user_dir_federation_search_timeout: int = (
-            self.parse_duration(
-                experimental.get(
-                    "bwi_federated_user_dir_federation_search_timeout", 2000
-                )
-            )
+        self.bwi_federated_user_dir_federation_fetch_timeout: int = self.parse_duration(
+            experimental.get("bwi_federated_user_dir_federation_fetch_timeout", 2000)
         )
 
         self.bwi_federated_user_dir_sync_interval_ms: int = self.parse_duration(

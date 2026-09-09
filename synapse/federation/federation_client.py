@@ -141,8 +141,8 @@ class FederationClient(FederationBase):
         self._clock.looping_call(self._clear_tried_cache, Duration(minutes=1))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
-        self.user_directory_search_timeout = (
-            hs.config.experimental.bwi_federated_user_dir_federation_search_timeout
+        self.user_directory_fetch_timeout = (
+            hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout
         )
 
         self.server_name = hs.hostname
@@ -1939,7 +1939,7 @@ class FederationClient(FederationBase):
 
         return filtered_statuses, filtered_failures
 
-    async def user_directory_search(
+    async def user_directory_fetch(
         self,
         destination: str,
         timeout: int,
@@ -1954,16 +1954,14 @@ class FederationClient(FederationBase):
             The results containing a list of users from the remote directory.
         """
         try:
-            return await self.transport_layer.user_directory_search(
-                destination, timeout
-            )
+            return await self.transport_layer.user_directory_fetch(destination, timeout)
         except (RequestSendFailed, HttpResponseException) as e:
             # A failing or unreachable destination shouldn't break the sync. The
             # endpoint is rate-limited, and the transport layer surfaces a 429 as
             # a RequestSendFailed after exhausting retries, so log without a
             # stack trace.
             logger.warning(
-                "Failed to search remote user directory [destination=%s]: %s",
+                "Failed to fetch remote user directory [destination=%s]: %s",
                 destination,
                 e,
             )
@@ -1971,7 +1969,7 @@ class FederationClient(FederationBase):
         except Exception:
             # Unexpected error; log with a stack trace for debugging.
             logger.exception(
-                "Unexpected error searching remote user directory [destination=%s]",
+                "Unexpected error fetching remote user directory [destination=%s]",
                 destination,
             )
             return {"results": []}
@@ -1980,7 +1978,7 @@ class FederationClient(FederationBase):
     def _parse_remote_user_directory_results(
         response: JsonDict,
     ) -> list[RemoteUserDirectoryEntry]:
-        """Parse a remote user directory search response into typed entries.
+        """Parse a remote user directory fetch response into typed entries.
 
         Malformed entries are skipped. This keeps the federation wire format
         contained within the federation layer.
@@ -2056,9 +2054,9 @@ class FederationClient(FederationBase):
             if self._is_mine_server_name(destination):
                 continue
 
-            response = await self.user_directory_search(
+            response = await self.user_directory_fetch(
                 destination,
-                self.user_directory_search_timeout,
+                self.user_directory_fetch_timeout,
             )
 
             # De-duplicate by user id within a single destination's results.
@@ -2067,7 +2065,7 @@ class FederationClient(FederationBase):
                 entries_by_user[entry.user_id] = entry
 
             # In our logic we treat an empty result as a failed fetch and skip
-            # reconciliation for this destination. `user_directory_search`
+            # reconciliation for this destination. `user_directory_fetch`
             # cannot signal failure via `None` (some callers rely on the dict
             # shape) and returns `{"results": []}` on error, which is
             # indistinguishable from a genuinely empty directory. Skipping the

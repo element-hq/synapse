@@ -1483,7 +1483,7 @@ class FederationServer(FederationBase):
         ):
             raise AuthError(code=403, msg="Server is banned from room")
 
-    async def on_user_directory_search_request(
+    async def on_user_directory_fetch_request(
         self, origin: str
     ) -> tuple[int, JsonMapping]:
         """Handle a user directory request from a remote server.
@@ -1497,9 +1497,9 @@ class FederationServer(FederationBase):
         Returns:
             A tuple of (response code, response json)
         """
-        return 200, await self._search_all_users()
+        return 200, await self._fetch_all_users()
 
-    async def _search_all_users(self) -> JsonDict:
+    async def _fetch_all_users(self) -> JsonDict:
         """Return all of this server's own users from the user directory.
 
         Reads the directory straight from the database and filters to locally

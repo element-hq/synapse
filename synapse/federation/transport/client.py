@@ -853,7 +853,7 @@ class TransportLayerClient:
             destination=destination, path=path, data={"user_ids": user_ids}
         )
 
-    async def user_directory_search(
+    async def user_directory_fetch(
         self,
         destination: str,
         timeout: int,
@@ -869,18 +869,17 @@ class TransportLayerClient:
             timeout: timeout in milliseconds to get the response from destination.
 
         Returns:
-            The search results.
+            The directory entries.
         """
         path = _create_path(
             FEDERATION_UNSTABLE_PREFIX,
-            "/de.bwi.federated_user_dir" + "/user_directory/search",
+            "/de.bwi.federated_user_dir" + "/user_directory/fetch",
         )
-        # This endpoint takes no parameters and always returns the remote
-        # server's full local directory, so it is a plain GET with no body.
+
         return await self.client.get_json(
             destination,
             path=path,
-            # ignore backoff for user search as we will set a small user_directory_search_timeout
+            # Ignore backoff because this fetch uses a small, dedicated timeout.
             ignore_backoff=True,
             timeout=timeout,
         )

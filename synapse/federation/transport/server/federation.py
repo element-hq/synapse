@@ -903,14 +903,14 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         self.media_repo.mark_recently_accessed(None, media_id)
 
 
-class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
+class FederationUserDirectoryFetchServlet(BaseFederationServerServlet):
     """
     Implements a federation API endpoint for fetching a server's user directory.
 
     The endpoint takes no parameters and always returns the responding server's
     full local directory, so it is a plain GET without a request body.
 
-    GET /_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/search
+    GET /_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch
     Response:
     {
         "results": [
@@ -923,7 +923,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
     }
     """
 
-    PATH = "/user_directory/search"
+    PATH = "/user_directory/fetch"
     PREFIX = FEDERATION_UNSTABLE_PREFIX + "/de.bwi.federated_user_dir"
     RATELIMIT = True
 
@@ -933,7 +933,7 @@ class FederationUserDirectorySearchServlet(BaseFederationServerServlet):
         content: Literal[None],
         query: dict[bytes, list[bytes]],
     ) -> tuple[int, JsonMapping]:
-        return await self.handler.on_user_directory_search_request(origin)
+        return await self.handler.on_user_directory_fetch_request(origin)
 
 
 FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
@@ -968,5 +968,5 @@ FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
-    FederationUserDirectorySearchServlet,
+    FederationUserDirectoryFetchServlet,
 )
