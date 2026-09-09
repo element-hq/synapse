@@ -1167,6 +1167,14 @@ class FederationEventHandler:
             FederationError if we fail to get the state from the remote server after any
                 missing `prev_event`s.
         """
+        if supports_msc4242_state_dag(event):
+            # MSC4242 State DAG rooms carry their state as the event's `prev_state_events`
+            # rather than in the timeline, so we fill in the state DAG rather than asking
+            # the remote server for the state after each missing `prev_event`.
+            return await self._compute_event_context_with_maybe_missing_prevs_state_dag(
+                dest, event
+            )
+
         room_id = event.room_id
         event_id = event.event_id
 
@@ -1279,6 +1287,35 @@ class FederationEventHandler:
         return await self._state_handler.compute_event_context(
             event, state_ids_before_event=state_map, partial_state=partial_state
         )
+
+    async def _compute_event_context_with_maybe_missing_prevs_state_dag(
+        self, dest: str, event: MSC4242Event
+    ) -> EventContext:
+        """Build an EventContext for a pulled MSC4242 State DAG event whose
+        `prev_state_events` may be missing.
+
+        Unlike the timeline-based path, we don't trust the remote server to tell us the
+        state at the event. Instead we fill in the event's state DAG by fetching any
+        missing `prev_state_events`, persist them as outliers, and then calculate the
+        state (and hence the auth events) before the event ourselves. The calculated auth
+        event IDs are remembered on the event so we don't recompute them when persisting.
+
+        Params:
+            dest: the remote server to fetch missing state DAG events from. Typically the
+                server we got `event` from.
+            event: the pulled event to compute a context for.
+
+        Returns:
+            The event context.
+        """
+        missed_events = await self._fetch_missing_state_dag_events(dest, event)
+        await self._auth_and_persist_outliers(event.room_id, missed_events)
+        (
+            context,
+            calculated_auth_event_ids,
+        ) = await self._calculate_state_dag_context(event)
+        event.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
+        return context
 
     @trace
     @tag_args
@@ -3056,7 +3093,9 @@ class FederationEventHandler:
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many prev_events")
 
-        if len(ev.auth_event_ids()) > 10:
+        # MSC4242 State DAG events don't list their auth events (they're calculated from
+        # the state DAG), so there's nothing to bound here for them.
+        if not supports_msc4242_state_dag(ev) and len(ev.auth_event_ids()) > 10:
             logger.warning(
                 "Rejecting event %s which has %i auth_events",
                 ev.event_id,
