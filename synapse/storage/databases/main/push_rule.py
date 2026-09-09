@@ -282,58 +282,22 @@ class PushRulesWorkerStore(
         Matrix v1.17 (MSC4210) removed `.m.rule.contains_display_name`,
         `.m.rule.contains_user_name` and `.m.rule.roomnotif` from the base rule
         set (https://spec.matrix.org/v1.19/client-server-api/#predefined-rules).
-        Once Synapse stops serving them, any `enabled` or `actions` override a
-        user had on them stops having an effect. Each override is copied onto
-        the replacement rule unless the user has already customised the
-        replacement rule themselves, in which case their explicit choice is
-        kept:
 
-        - `.m.rule.roomnotif` maps one-to-one onto `.m.rule.is_room_mention`.
-        - `.m.rule.contains_display_name` and `.m.rule.contains_user_name` both
-          map onto `.m.rule.is_user_mention`. It is only disabled if the user
-          had disabled *both* legacy rules, i.e. opted out of mention
-          notifications entirely; a user who silenced just one of them still
-          wanted to be notified of mentions. For `actions`, an override on
-          `.m.rule.contains_display_name` takes precedence over one on
-          `.m.rule.contains_user_name`, as it did at evaluation time (override
-          rules run before content rules).
+        - `.m.rule.roomnotif` overrides are copied onto `.m.rule.is_room_mention`.
+        - `.m.rule.contains_display_name` and `.m.rule.contains_user_name`
+          overrides are copied onto `.m.rule.is_user_mention`: it is disabled
+          only if both were disabled, and the `.m.rule.contains_display_name`
+          actions win when both were customised.
+        - A user's own customisation of a mention rule is kept as is.
+        - The legacy overrides are left in place.
+        - Only the push rule caches are invalidated; no push rules stream entry
+          is written, so clients see the change on their next full fetch.
 
-        The legacy overrides themselves are left in place: they still apply
-        for as long as the legacy rules are served, and are harmless afterwards.
-
-        Only the push rule caches are invalidated; no push rules stream entry is
-        written, as the background worker is not necessarily the push rules
-        writer. Clients therefore see the migrated overrides on their next full
-        fetch of the rule set rather than through an incremental sync.
-
-        Known shortcomings, which cannot be addressed by a migration:
-
-        - The legacy rules matched on the plain text of a message, whereas the
-          intentional mention rules match on its `m.mentions` property. Events
-          from senders which do not set `m.mentions` (older clients, bridges,
-          bots) no longer trigger a mention notification, whatever the user's
-          customisations, and nothing here changes that.
-        - Two legacy rules map onto `.m.rule.is_user_mention`, so a user who
-          had disabled only one of them, or set different actions on each, does
-          not get a faithful copy: the disabled state is not carried over, and
-          only the `.m.rule.contains_display_name` actions are.
-        - A user who had already customised an intentional mention rule keeps
-          that customisation; their legacy override is ignored rather than
-          merged.
-        - Legacy overrides created after this update has processed a user
-          (possible while the legacy rules are still served) are not migrated.
-        - Until this update completes, users are notified under the default
-          intentional mention rules regardless of their legacy customisations.
-        - If this update runs while the legacy rules are still served, a user
-          who had disabled both `.m.rule.contains_display_name` and
-          `.m.rule.contains_user_name` immediately stops being notified of
-          intentional mentions too, which the legacy rules never affected.
-        - Clients which cache the rule set keep showing the pre-migration state
-          until they fetch it again.
-        - The rows inserted here are not counted against the limit on the
-          number of push rules a user may have (`_upsert_push_rule_txn`
-          enforces it). A user at the limit ends up over it, and cannot add a
-          rule until they delete one.
+        Best effort because two legacy rules fold into one, because senders
+        which do not set `m.mentions` no longer trigger mention notifications
+        whatever the user's customisations, and because users who had disabled
+        both legacy user mention rules stop being notified of intentional
+        mentions as soon as this runs.
         """
         last_user = progress.get("last_user", "")
 
