@@ -320,8 +320,13 @@ class TestCase(unittest.TestCase):
         # (as it could be a sign of something unexpected), but not enough to make it seem wrong.
         EXTRA_MARKER = f"{DIM_BLUE}   extra{RESET}"
 
+        used_markers = set()
         expected_lines: list[str] = []
 
+        # Sort the items in the sets for ease of reading. Motivation:
+        # - keeps `(A, B)` and `(A, C)` next to each other in sets of tuples
+        # - makes it easier to cross-compare the two sets visually if they are in the same order
+        #
         # sorted() only accepts objects that support at least `<` or `>`.
         # Virtually every immutable data type in Python supports these, so virtually
         # everything inside a set supports these.
@@ -331,10 +336,10 @@ class TestCase(unittest.TestCase):
 
             marker = MISSING_MARKER if is_missing else CORRECT_MARKER
 
+            used_markers.add(marker)
             expected_lines.append(f"{marker}   {expected_item!r}{RESET}")
 
         actual_lines: list[str] = []
-        used_markers = set()
         # See note above about type ignore.
         for actual_item in sorted(actual_items):  # type: ignore[type-var]
             is_expected = actual_item in expected_items
@@ -347,8 +352,8 @@ class TestCase(unittest.TestCase):
             else:
                 # Harmless 'extra'
                 marker = EXTRA_MARKER
-            used_markers.add(marker)
 
+            used_markers.add(marker)
             actual_lines.append(f"{marker}   {actual_item!r}{RESET}")
 
         newline = "\n"
@@ -390,6 +395,8 @@ class TestCase(unittest.TestCase):
         Override of `assertEqual` to make it print better errors.
 
         Note that `first` is treated as 'actual' and `second` as 'expected`.
+        (We can't rename them in our override because that is not a compatible change,
+        Mypy forbids it.)
 
         Specifically:
             - better errors for set inequality
