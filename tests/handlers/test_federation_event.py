@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from typing import Iterable
 from unittest import mock
 
 from twisted.internet.testing import MemoryReactor
@@ -28,6 +29,7 @@ from synapse.event_auth import (
     check_state_dependent_auth_rules,
     check_state_independent_auth_rules,
 )
+from synapse.events import EventBase
 from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventContext
 from synapse.federation.transport.client import StateRequestResponse
@@ -1242,3 +1244,279 @@ class IsStateDagConnectedTests(unittest.TestCase):
         third = self._make_event([second.event_id])
 
         self.assertFalse(is_state_dag_connected([create, third]))
+
+
+STATE_DAG_ROOM_ID = "!test:test"
+
+
+class FetchMissingStateDagEventsTests(unittest.FederatingHomeserverTestCase):
+    """Tests for `_fetch_missing_state_dag_events`, which walks back an MSC4242 state
+    DAG over federation via /get_missing_events until every prev state event is filled
+    in.
+
+    The federation client and the store's `have_seen_events` are mocked so the walk-back
+    algorithm can be driven against synthetic graphs without any real networking or
+    persistence.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._origin_server_ts = 0
+
+    def _make_event(self, prev_state_events: list[str]) -> MSC4242Event:
+        """Build an MSC4242 state event with the given `prev_state_events`."""
+        # Event IDs are hashes of the event, so vary a field to keep them distinct.
+        self._origin_server_ts += 1
+        event = make_test_event(
+            {
+                "type": "m.room.topic",
+                "state_key": "",
+                "content": {},
+                "sender": "@alice:test",
+                "origin_server_ts": self._origin_server_ts,
+                "room_id": STATE_DAG_ROOM_ID,
+                "prev_state_events": prev_state_events,
+            },
+            room_version=RoomVersions.MSC4242v12,
+        )
+        assert supports_msc4242_state_dag(event)
+        return event
+
+    def _make_state_dag(self, graph: dict[str, list[str]]) -> dict[str, MSC4242Event]:
+        """Build a state DAG from a graph of fake ID -> fake prev_state_event IDs.
+
+        Returns a map of fake ID to the real event. The graph must be listed
+        topologically (parents before children) else a lookup will fail.
+        """
+        fake_to_real_id: dict[str, str] = {}
+        result: dict[str, MSC4242Event] = {}
+        for fake_id, fake_prev_state_events in graph.items():
+            prevs = [fake_to_real_id[fpae] for fpae in fake_prev_state_events]
+            event = self._make_event(prevs)
+            fake_to_real_id[fake_id] = event.event_id
+            result[fake_id] = event
+        return result
+
+    def _prepare_handler(
+        self,
+        seen_fake_events: set[str],
+        graph: dict[str, MSC4242Event],
+        gme_req_resps: dict[tuple[str, ...], list[str]],
+    ) -> None:
+        """Mock the federation client and store to serve the given state DAG.
+
+        Args:
+            seen_fake_events: fake IDs of events this homeserver already has.
+            graph: the state DAG, mapping fake ID to the real event.
+            gme_req_resps: the /get_missing_events responses to return. Keys are the
+                fake IDs passed as `latest_events`; values are the fake IDs to return.
+        """
+        handler = self.hs.get_federation_event_handler()
+
+        async def get_missing_events(
+            destination: str,
+            room_id: str,
+            earliest_events_ids: Iterable[str],
+            latest_events: Iterable[EventBase],
+            limit: int,
+            min_depth: int,
+            timeout: int,
+            state_dag: bool = False,
+        ) -> list[EventBase]:
+            assert state_dag
+            assert room_id == STATE_DAG_ROOM_ID
+            target_key = sorted(ev.event_id for ev in latest_events)
+            assert target_key
+            for req, resp in gme_req_resps.items():
+                if sorted(graph[x].event_id for x in req) == target_key:
+                    return [graph[x] for x in resp]
+            raise AssertionError(
+                f"get_missing_events with latest={target_key} but no matching "
+                f"response found (tested {len(gme_req_resps)})"
+            )
+
+        handler._federation_client.get_missing_events = mock.AsyncMock(  # type: ignore[method-assign]
+            side_effect=get_missing_events
+        )
+
+        seen_event_ids = {graph[fake_id].event_id for fake_id in seen_fake_events}
+
+        async def have_seen_events(room_id: str, event_ids: Iterable[str]) -> set[str]:
+            return seen_event_ids.intersection(event_ids)
+
+        store = self.hs.get_datastores().main
+        store.have_seen_events = mock.AsyncMock(side_effect=have_seen_events)  # type: ignore[method-assign]
+
+    def _assert_fetches(
+        self,
+        graph: dict[str, MSC4242Event],
+        start_fake_id: str,
+        want_fake_ids: list[str],
+    ) -> None:
+        """Fetch the missing DAG for `start_fake_id` and assert we got `want_fake_ids`."""
+        got = self.get_success(
+            self.hs.get_federation_event_handler()._fetch_missing_state_dag_events(
+                "unknown", graph[start_fake_id]
+            )
+        )
+        self.assertEqual(
+            {ev.event_id for ev in got},
+            {graph[x].event_id for x in want_fake_ids},
+        )
+
+    def test_linear(self) -> None:
+        linear = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["B"],
+            }
+        )
+        self._prepare_handler(set(), linear, {("C",): ["A", "B"]})
+        self._assert_fetches(linear, "C", ["A", "B"])
+
+    def test_linear_seen(self) -> None:
+        linear = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["B"],
+                "D": ["C"],
+            }
+        )
+        self._prepare_handler(
+            {"A", "B"},
+            linear,
+            {
+                ("D",): ["C"],
+                ("C",): ["B"],
+            },
+        )
+        self._assert_fetches(linear, "D", ["C"])
+
+    def test_fork_merge(self) -> None:
+        fork_merge = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C"],
+                "E": ["B"],
+                "F": ["D", "E"],
+            }
+        )
+        self._prepare_handler(
+            set(),
+            fork_merge,
+            {
+                ("F",): ["D", "E"],
+                ("D", "E"): ["C", "A"],
+                ("E",): ["B", "A"],
+            },
+        )
+        self._assert_fetches(fork_merge, "F", ["A", "B", "C", "D", "E"])
+
+    def test_give_up_no_forward_progress(self) -> None:
+        fork_merge = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C", "B"],
+            }
+        )
+        # never provide B, so we can't connect the DAG and must give up.
+        self._prepare_handler(set(), fork_merge, {("D",): ["C"]})
+        self._assert_fetches(fork_merge, "D", [])
+
+    def test_seen(self) -> None:
+        fork_merge = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C"],
+                "E": ["B"],
+                "F": ["D", "E"],
+            }
+        )
+        self._prepare_handler(
+            {"A", "B"},
+            fork_merge,
+            {
+                ("F",): ["D", "E"],
+                # NB: not D,E as we've seen E's prev_state_events => B.
+                ("D",): ["C", "A"],
+                ("E",): ["B", "A"],
+            },
+        )
+        self._assert_fetches(fork_merge, "F", ["C", "D", "E"])
+
+    def test_memoise(self) -> None:
+        # There are two paths to A: via D and via EFGH. Both converge at C and then go to
+        # A. The first path to reach C should be remembered so we don't request it again.
+        # A <- B <- C <- D <------------------------ I
+        #           `----- E <-- F <-- G <-- H <--`
+        memoise = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["B"],
+                "D": ["C"],
+                "E": ["C"],
+                "F": ["E"],
+                "G": ["F"],
+                "H": ["G"],
+                "I": ["D", "H"],
+            }
+        )
+        self._prepare_handler(
+            set(),
+            memoise,
+            {
+                ("I",): ["D", "H"],
+                ("D", "H"): ["C", "G"],
+                ("C", "G"): ["B", "F"],
+                ("B", "F"): ["A", "E"],
+                # we should never request C on its own as we remember we visited it already.
+            },
+        )
+        self._assert_fetches(memoise, "I", ["A", "B", "C", "D", "E", "F", "G", "H"])
+
+    def test_seen_all(self) -> None:
+        seen_all = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["A"],
+                "D": ["C"],
+            }
+        )
+        self._prepare_handler({"A", "B", "C", "D"}, seen_all, {})
+        self._assert_fetches(seen_all, "D", [])
+
+    def test_ignores_events_from_other_rooms(self) -> None:
+        linear = self._make_state_dag(
+            {
+                "A": [],
+                "B": ["A"],
+                "C": ["B"],
+            }
+        )
+        # a malicious remote slips an event from an unrelated room into the response.
+        foreign = make_test_event(
+            {
+                "type": "m.room.topic",
+                "state_key": "",
+                "content": {},
+                "sender": "@evil:test",
+                "origin_server_ts": 1000,
+                "room_id": "!other:test",
+                "prev_state_events": [],
+            },
+            room_version=RoomVersions.MSC4242v12,
+        )
+        assert supports_msc4242_state_dag(foreign)
+        linear["FOREIGN"] = foreign
+        self._prepare_handler(set(), linear, {("C",): ["A", "B", "FOREIGN"]})
+        self._assert_fetches(linear, "C", ["A", "B"])
