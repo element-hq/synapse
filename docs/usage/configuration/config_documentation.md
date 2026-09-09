@@ -555,6 +555,12 @@ Options for each entry include:
 
   _Added in Synapse 1.89.0_: Unix socket support
 
+  Instead of a filesystem path, `path` may also be set to `systemd:<name>` to have Synapse adopt a socket that was passed to it by systemd via [socket activation](https://www.freedesktop.org/software/systemd/man/latest/systemd.socket.html), rather than binding its own. `<name>` must match the corresponding `FileDescriptorName=` setting in the relevant `.socket` unit, or the unit's own name if `FileDescriptorName=` isn't set.
+
+  `bind_addresses` and `mode` don't apply for systemd sockets. `tls` *is* supported, but only if the inherited socket turns out to be TCP-backed. Synapse doesn't know which kind of socket it was handed until startup, so requesting `tls: true` on a Unix-socket-backed systemd socket is an error raised at runtime. As with plain Unix sockets, this is currently only supported for `type: http` (not `metrics` or `manhole`). See [`contrib/systemd/`](https://github.com/element-hq/synapse/tree/develop/contrib/systemd) for an example `.socket` unit.
+
+  _Added in Synapse 1.162.0_: systemd socket activation support
+
 * `mode` (integer|null): The file permissions to set on the UNIX socket. Defaults to `666` if unset or null.
 
   **Note:** Must be set as `type: http` (does not support `metrics` and `manhole`). Also make sure that `metrics` is not included in `resources` -> `names`
@@ -606,6 +612,26 @@ listeners:
   - names:
     - client
     - federation
+```
+
+```yaml
+listeners:
+- path: "systemd:matrix-federation"
+  type: http
+  resources:
+  - names:
+    - federation
+```
+
+with a matching `.socket` unit:
+
+```ini
+[Socket]
+ListenStream=8448
+FileDescriptorName=matrix-federation
+
+[Install]
+WantedBy=sockets.target
 ```
 ---
 ### `manhole`
