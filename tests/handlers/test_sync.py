@@ -903,6 +903,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 request_key=generate_request_key(),
             )
         )
+        # A state change before the leave, which has a delta of its own.
+        topic_event = self.helper.send_state(
+            room_id, "m.room.topic", {"topic": "before leaving"}, tok=alice_tok
+        )["event_id"]
 
         # Alice leaves. She is the last local user, so the server clears
         # current_state_events for this room.
