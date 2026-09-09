@@ -1,0 +1,1 @@
+Fix slow recursive `/relations` requests in large rooms by joining events inside the recursive query.
