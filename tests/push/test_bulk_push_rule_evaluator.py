@@ -264,19 +264,6 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
             "alice should be notified (intentional mention)",
         )
 
-    @override_config({"experimental_features": {"msc4210_enabled": False}})
-    def test_legacy_mention_rules_opt_out(self) -> None:
-        """
-        The legacy mention rules can temporarily be restored, in which case an
-        event which contains the user's name in its body notifies again.
-        """
-        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
-
-        self.assertTrue(
-            self._create_and_process(bulk_evaluator, {"body": "hello alice"}),
-            "alice should be notified (legacy mention)",
-        )
-
     def test_user_mentions(self) -> None:
         """Test the behavior of an event which includes invalid user mentions."""
         bulk_evaluator = BulkPushRuleEvaluator(self.hs)

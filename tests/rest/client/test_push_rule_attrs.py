@@ -537,39 +537,6 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
             token, "global/override/.org.matrix.msc4028.encrypted_event"
         )
 
-    @parameterized.expand(
-        [
-            ("global/override/.m.rule.contains_display_name",),
-            ("global/content/.m.rule.contains_user_name",),
-            ("global/override/.m.rule.roomnotif",),
-        ]
-    )
-    def test_msc4210_legacy_mention_rules_removed(self, rule_path: str) -> None:
-        """
-        Tests that the legacy mention rules, which Matrix v1.17 (MSC4210) removed
-        from the base rule set, are neither served nor modifiable by default.
-        """
-        self.register_user("bob", "pass")
-        token = self.login("bob", "pass")
-        self._assert_default_rule_absent(token, rule_path)
-
-    @parameterized.expand(
-        [
-            ("global/override/.m.rule.contains_display_name",),
-            ("global/content/.m.rule.contains_user_name",),
-            ("global/override/.m.rule.roomnotif",),
-        ]
-    )
-    @override_config({"experimental_features": {"msc4210_enabled": False}})
-    def test_msc4210_legacy_mention_rules_present(self, rule_path: str) -> None:
-        """
-        Tests that the legacy mention rules are served and modifiable when
-        they are restored with `msc4210_enabled: false`.
-        """
-        self.register_user("bob", "pass")
-        token = self.login("bob", "pass")
-        self._assert_default_rule_modifiable(token, rule_path)
-
     def test_msc4306_thread_subscription_rules_disabled(self) -> None:
         """
         Tests that the MSC4306 thread subscription rules are neither served
@@ -591,39 +558,6 @@ class PushRuleAttributesTestCase(HomeserverTestCase):
         token = self.login("bob", "pass")
         self._assert_default_rule_modifiable(
             token, "global/postcontent/.io.element.msc4306.rule.subscribed_thread"
-        )
-
-    @override_config({"experimental_features": {"msc4210_enabled": False}})
-    def test_contains_user_name_with_legacy_mentions(self) -> None:
-        """
-        Tests that, when the legacy mention rules are restored, the
-        `contains_user_name` rule is present and has the proper value in `pattern`.
-        """
-        username = "bob"
-        self.register_user(username, "pass")
-        token = self.login(username, "pass")
-
-        channel = self.make_request(
-            "GET",
-            "/pushrules/global/content/.m.rule.contains_user_name",
-            access_token=token,
-        )
-
-        self.assertEqual(channel.code, 200)
-
-        self.assertEqual(
-            {
-                "rule_id": ".m.rule.contains_user_name",
-                "default": True,
-                "enabled": True,
-                "pattern": username,
-                "actions": [
-                    "notify",
-                    {"set_tweak": "highlight"},
-                    {"set_tweak": "sound", "value": "default"},
-                ],
-            },
-            channel.json_body,
         )
 
     def test_is_user_mention(self) -> None:

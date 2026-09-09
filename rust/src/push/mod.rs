@@ -557,7 +557,6 @@ pub struct FilteredPushRules {
     msc3381_polls_enabled: bool,
     msc3664_enabled: bool,
     msc4028_push_encrypted_events: bool,
-    msc4210_enabled: bool,
     msc4306_enabled: bool,
 }
 
@@ -572,7 +571,6 @@ impl FilteredPushRules {
         msc3381_polls_enabled: bool,
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
-        msc4210_enabled: bool,
         msc4306_enabled: bool,
     ) -> Self {
         Self {
@@ -582,7 +580,6 @@ impl FilteredPushRules {
             msc3381_polls_enabled,
             msc3664_enabled,
             msc4028_push_encrypted_events,
-            msc4210_enabled,
             msc4306_enabled,
         }
     }
@@ -622,14 +619,6 @@ impl FilteredPushRules {
 
                 if !self.msc4028_push_encrypted_events
                     && rule.rule_id == "global/override/.org.matrix.msc4028.encrypted_event"
-                {
-                    return false;
-                }
-
-                if self.msc4210_enabled
-                    && (rule.rule_id == "global/override/.m.rule.contains_display_name"
-                        || rule.rule_id == "global/content/.m.rule.contains_user_name"
-                        || rule.rule_id == "global/override/.m.rule.roomnotif")
                 {
                     return false;
                 }

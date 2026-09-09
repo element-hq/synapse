@@ -159,14 +159,6 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         default_enabled: true,
     },
     PushRule {
-        rule_id: Cow::Borrowed("global/override/.m.rule.contains_display_name"),
-        priority_class: 5,
-        conditions: Cow::Borrowed(&[Condition::Known(KnownCondition::ContainsDisplayName)]),
-        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION, SOUND_ACTION]),
-        default: true,
-        default_enabled: true,
-    },
-    PushRule {
         rule_id: Cow::Borrowed("global/override/.m.rule.is_room_mention"),
         priority_class: 5,
         conditions: Cow::Borrowed(&[
@@ -177,22 +169,6 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
             Condition::Known(KnownCondition::SenderNotificationPermission {
                 key: Cow::Borrowed("room"),
             }),
-        ]),
-        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION]),
-        default: true,
-        default_enabled: true,
-    },
-    PushRule {
-        rule_id: Cow::Borrowed("global/override/.m.rule.roomnotif"),
-        priority_class: 5,
-        conditions: Cow::Borrowed(&[
-            Condition::Known(KnownCondition::SenderNotificationPermission {
-                key: Cow::Borrowed("room"),
-            }),
-            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
-                key: Cow::Borrowed("content.body"),
-                pattern: Cow::Borrowed("@room"),
-            })),
         ]),
         actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION]),
         default: true,
@@ -275,19 +251,9 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
     },
 ];
 
-pub const BASE_APPEND_CONTENT_RULES: &[PushRule] = &[PushRule {
-    rule_id: Cow::Borrowed("global/content/.m.rule.contains_user_name"),
-    priority_class: 4,
-    conditions: Cow::Borrowed(&[Condition::Known(KnownCondition::EventMatchType(
-        EventMatchTypeCondition {
-            key: Cow::Borrowed("content.body"),
-            pattern_type: Cow::Borrowed(&EventMatchPatternType::UserLocalpart),
-        },
-    ))]),
-    actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION, SOUND_ACTION]),
-    default: true,
-    default_enabled: true,
-}];
+/// The spec no longer defines any default content rule: `.m.rule.contains_user_name`,
+/// the only one there ever was, was removed in Matrix v1.17 (MSC4210).
+pub const BASE_APPEND_CONTENT_RULES: &[PushRule] = &[];
 
 pub const BASE_APPEND_POSTCONTENT_RULES: &[PushRule] = &[
     PushRule {

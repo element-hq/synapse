@@ -48,7 +48,6 @@ class FilteredPushRules:
         msc3381_polls_enabled: bool,
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
-        msc4210_enabled: bool,
         msc4306_enabled: bool,
     ): ...
     def rules(self) -> Collection[tuple[PushRule, bool]]: ...
@@ -59,7 +58,6 @@ class PushRuleEvaluator:
     def __init__(
         self,
         flattened_keys: Mapping[str, JsonValue],
-        has_mentions: bool,
         room_member_count: int,
         sender_power_level: int | None,
         notification_power_levels: Mapping[str, int],
@@ -67,7 +65,6 @@ class PushRuleEvaluator:
         related_event_match_enabled: bool,
         room_version_feature_flags: list[str],
         msc3931_enabled: bool,
-        msc4210_enabled: bool,
         msc4306_enabled: bool,
     ): ...
     def run(

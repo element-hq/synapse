@@ -161,7 +161,6 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         content: JsonMapping,
         *,
         related_events: JsonDict | None = None,
-        msc4210: bool = False,
         msc4306: bool = False,
     ) -> PushRuleEvaluator:
         event = make_test_event(
@@ -180,7 +179,6 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         power_levels: dict[str, int | dict[str, int]] = {}
         return PushRuleEvaluator(
             _flatten_dict(event),
-            False,
             room_member_count,
             sender_power_level,
             cast(dict[str, int], power_levels.get("notifications", {})),
@@ -188,7 +186,6 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             related_event_match_enabled=True,
             room_version_feature_flags=event.room_version.msc3931_push_features,
             msc3931_enabled=True,
-            msc4210_enabled=msc4210,
             msc4306_enabled=msc4306,
         )
 

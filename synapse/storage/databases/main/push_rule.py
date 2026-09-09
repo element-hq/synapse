@@ -106,7 +106,6 @@ def _load_rules(
         msc3664_enabled=experimental_config.msc3664_enabled,
         msc3381_polls_enabled=experimental_config.msc3381_polls_enabled,
         msc4028_push_encrypted_events=experimental_config.msc4028_push_encrypted_events,
-        msc4210_enabled=experimental_config.msc4210_enabled,
         msc4306_enabled=experimental_config.msc4306_enabled,
     )
 

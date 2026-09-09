@@ -35,7 +35,6 @@ from twisted.internet.defer import Deferred
 
 from synapse.api.constants import (
     MAIN_TIMELINE,
-    EventContentFields,
     EventTypes,
     Membership,
     RelationTypes,
@@ -458,12 +457,8 @@ class BulkPushRuleEvaluator:
                     except (TypeError, ValueError):
                         del notification_levels[key]
 
-        # Pull out any user and room mentions.
-        has_mentions = EventContentFields.MENTIONS in event.content
-
         evaluator = PushRuleEvaluator(
             _flatten_dict(event),
-            has_mentions,
             room_member_count,
             sender_power_level,
             notification_levels,
@@ -471,7 +466,6 @@ class BulkPushRuleEvaluator:
             self._related_event_match_enabled,
             event.room_version.msc3931_push_features,
             self.hs.config.experimental.msc1767_enabled,  # MSC3931 flag
-            self.hs.config.experimental.msc4210_enabled,
             self.hs.config.experimental.msc4306_enabled,
         )
 

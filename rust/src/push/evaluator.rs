@@ -48,11 +48,8 @@ lazy_static! {
     /// The "safe" rule IDs which are not affected by MSC3932's behaviour (room versions which
     /// declare Extensible Events support ultimately *disable* push rules which do not declare
     /// *any* MSC3931 room_version_supports condition).
-    static ref SAFE_EXTENSIBLE_EVENTS_RULE_IDS: Vec<String> = vec![
-        "global/override/.m.rule.master".to_string(),
-        "global/override/.m.rule.roomnotif".to_string(),
-        "global/content/.m.rule.contains_user_name".to_string(),
-    ];
+    static ref SAFE_EXTENSIBLE_EVENTS_RULE_IDS: Vec<String> =
+        vec!["global/override/.m.rule.master".to_string()];
 }
 
 enum RoomVersionFeatures {
@@ -76,11 +73,6 @@ pub struct PushRuleEvaluator {
 
     /// The "content.body", if any.
     body: String,
-
-    /// True if the event has a m.mentions property. (Note that this is a separate
-    /// flag instead of checking flattened_keys since the m.mentions property
-    /// might be an empty map and not appear in flattened_keys.
-    has_mentions: bool,
 
     /// The number of users in the room.
     room_member_count: u64,
@@ -106,9 +98,6 @@ pub struct PushRuleEvaluator {
     /// flag as MSC1767 (extensible events core).
     msc3931_enabled: bool,
 
-    /// If MSC4210 (remove legacy mentions) is enabled.
-    msc4210_enabled: bool,
-
     /// If MSC4306 (thread subscriptions) is enabled.
     msc4306_enabled: bool,
 }
@@ -120,7 +109,6 @@ impl PushRuleEvaluator {
     #[new]
     #[pyo3(signature = (
         flattened_keys,
-        has_mentions,
         room_member_count,
         sender_power_level,
         notification_power_levels,
@@ -128,12 +116,10 @@ impl PushRuleEvaluator {
         related_event_match_enabled,
         room_version_feature_flags,
         msc3931_enabled,
-        msc4210_enabled,
         msc4306_enabled,
     ))]
     pub fn py_new(
         flattened_keys: BTreeMap<String, JsonValue>,
-        has_mentions: bool,
         room_member_count: u64,
         sender_power_level: Option<i64>,
         notification_power_levels: BTreeMap<String, i64>,
@@ -141,7 +127,6 @@ impl PushRuleEvaluator {
         related_event_match_enabled: bool,
         room_version_feature_flags: Vec<String>,
         msc3931_enabled: bool,
-        msc4210_enabled: bool,
         msc4306_enabled: bool,
     ) -> Result<Self, Error> {
         let body = match flattened_keys.get("content.body") {
@@ -152,7 +137,6 @@ impl PushRuleEvaluator {
         Ok(PushRuleEvaluator {
             flattened_keys,
             body,
-            has_mentions,
             room_member_count,
             notification_power_levels,
             sender_power_level,
@@ -160,7 +144,6 @@ impl PushRuleEvaluator {
             related_event_match_enabled,
             room_version_feature_flags,
             msc3931_enabled,
-            msc4210_enabled,
             msc4306_enabled,
         })
     }
@@ -193,17 +176,6 @@ impl PushRuleEvaluator {
             }
 
             let rule_id = &push_rule.rule_id().to_string();
-
-            // For backwards-compatibility the legacy mention rules are disabled
-            // if the event contains the 'm.mentions' property.
-            // Additionally, MSC4210 always disables the legacy rules.
-            if (self.has_mentions || self.msc4210_enabled)
-                && (rule_id == "global/override/.m.rule.contains_display_name"
-                    || rule_id == "global/content/.m.rule.contains_user_name"
-                    || rule_id == "global/override/.m.rule.roomnotif")
-            {
-                continue;
-            }
 
             let extev_flag = &RoomVersionFeatures::ExtensibleEvents.as_str().to_string();
             let supports_extensible_events = self.room_version_feature_flags.contains(extev_flag);
@@ -557,9 +529,14 @@ fn push_rule_evaluator() {
         "content.body".to_string(),
         JsonValue::Value(SimpleJsonValue::Str(Cow::Borrowed("foo bar bob hello"))),
     );
+    flattened_keys.insert(
+        r"content.m\.mentions.user_ids".to_string(),
+        JsonValue::Array(vec![SimpleJsonValue::Str(Cow::Borrowed(
+            "@bob:example.org",
+        ))]),
+    );
     let evaluator = PushRuleEvaluator::py_new(
         flattened_keys,
-        false,
         10,
         Some(0),
         BTreeMap::new(),
@@ -568,11 +545,16 @@ fn push_rule_evaluator() {
         vec![],
         true,
         false,
-        false,
     )
     .unwrap();
 
-    let result = evaluator.run(&FilteredPushRules::default(), None, Some("bob"), None);
+    // `.m.rule.is_user_mention` matches: notify, highlight and sound.
+    let result = evaluator.run(
+        &FilteredPushRules::default(),
+        Some("@bob:example.org"),
+        Some("bob"),
+        None,
+    );
     assert_eq!(result.len(), 3);
 }
 
@@ -587,10 +569,15 @@ fn test_requires_room_version_supports_condition() {
         "content.body".to_string(),
         JsonValue::Value(SimpleJsonValue::Str(Cow::Borrowed("foo bar bob hello"))),
     );
+    flattened_keys.insert(
+        r"content.m\.mentions.user_ids".to_string(),
+        JsonValue::Array(vec![SimpleJsonValue::Str(Cow::Borrowed(
+            "@bob:example.org",
+        ))]),
+    );
     let flags = vec![RoomVersionFeatures::ExtensibleEvents.as_str().to_string()];
     let evaluator = PushRuleEvaluator::py_new(
         flattened_keys,
-        false,
         10,
         Some(0),
         BTreeMap::new(),
@@ -599,19 +586,19 @@ fn test_requires_room_version_supports_condition() {
         flags,
         true,
         false,
-        false,
     )
     .unwrap();
 
-    // first test: are the master and contains_user_name rules excluded from the "requires room
-    // version condition" check?
+    // first test: in a room version which supports extensible events, base rules
+    // which do not declare a `room_version_supports` condition are disabled, so
+    // the user mention does not notify.
     let mut result = evaluator.run(
         &FilteredPushRules::default(),
         Some("@bob:example.org"),
         None,
         None,
     );
-    assert_eq!(result.len(), 3);
+    assert_eq!(result.len(), 0);
 
     // second test: if an appropriate push rule is in play, does it get handled?
     let custom_rule = PushRule {
@@ -628,16 +615,7 @@ fn test_requires_room_version_supports_condition() {
     };
     let rules = PushRules::new(vec![custom_rule]);
     result = evaluator.run(
-        &FilteredPushRules::py_new(
-            rules,
-            BTreeMap::new(),
-            true,
-            false,
-            true,
-            false,
-            false,
-            false,
-        ),
+        &FilteredPushRules::py_new(rules, BTreeMap::new(), true, false, true, false, false),
         None,
         None,
         None,
