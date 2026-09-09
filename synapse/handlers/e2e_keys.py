@@ -1272,21 +1272,27 @@ class E2eKeysHandler:
         master_key_signature_list = []
         sigs = signed_master_key["signatures"]
         for signing_key_id, signature in sigs[user_id].items():
-            _, signing_device_id = signing_key_id.split(":", 1)
-            if (
-                signing_device_id not in devices
-                or signing_key_id not in devices[signing_device_id]["keys"]
-            ):
-                # signed by an unknown device, or the
-                # device does not have the key
-                raise SynapseError(400, "Invalid signature", Codes.INVALID_SIGNATURE)
+            algorithm, signing_device_id = signing_key_id.split(":", 1)
+            # we only check the signature for known algorithms
+            if algorithm == "ed25519":
+                if (
+                    signing_device_id not in devices
+                    or signing_key_id not in devices[signing_device_id]["keys"]
+                ):
+                    # signed by an unknown device, or the
+                    # device does not have the key
+                    raise SynapseError(
+                        400, "Invalid signature", Codes.INVALID_SIGNATURE
+                    )
 
-            # get the key and check the signature
-            pubkey = devices[signing_device_id]["keys"][signing_key_id]
-            verify_key = decode_verify_key_bytes(signing_key_id, decode_base64(pubkey))
-            _check_device_signature(
-                user_id, verify_key, signed_master_key, stored_master_key
-            )
+                # get the key and check the signature
+                pubkey = devices[signing_device_id]["keys"][signing_key_id]
+                verify_key = decode_verify_key_bytes(
+                    signing_key_id, decode_base64(pubkey)
+                )
+                _check_device_signature(
+                    user_id, verify_key, signed_master_key, stored_master_key
+                )
 
             master_key_signature_list.append(
                 SignatureListItem(signing_key_id, user_id, master_key_id, signature)

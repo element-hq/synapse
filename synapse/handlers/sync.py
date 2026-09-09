@@ -1249,6 +1249,7 @@ class SyncHandler:
                     end_token,
                     members_to_fetch,
                     timeline_state,
+                    joined,
                 )
 
             # If we only have partial state for the room, `state_ids` may be missing the
@@ -1471,6 +1472,7 @@ class SyncHandler:
         end_token: StreamToken,
         members_to_fetch: set[str] | None,
         timeline_state: StateMap[str],
+        joined: bool,
     ) -> StateMap[str]:
         """Calculate the state events to be included in an incremental sync response.
 
@@ -1495,6 +1497,7 @@ class SyncHandler:
                 events in the timeline. Otherwise, `None`.
             timeline_state: The contribution to the room state from state events in
                 `batch`. Only contains the last event for any given state key.
+            joined: whether the user is currently joined to the room
 
         Returns:
             A map from (type, state_key) to event_id, for each event that we believe
@@ -1520,13 +1523,28 @@ class SyncHandler:
                 # events to understand the events in this timeline. So we always
                 # fish out all the member events corresponding to the timeline
                 # here. The caller will then dedupe any redundant ones.
-                member_ids = await self._state_storage_controller.get_current_state_ids(
-                    room_id=room_id,
-                    state_filter=StateFilter.from_types(
-                        (EventTypes.Member, member) for member in members_to_fetch
-                    ),
-                    await_full_state=await_full_state,
+                member_filter = StateFilter.from_types(
+                    (EventTypes.Member, member) for member in members_to_fetch
                 )
+                if joined:
+                    member_ids = (
+                        await self._state_storage_controller.get_current_state_ids(
+                            room_id=room_id,
+                            state_filter=member_filter,
+                            await_full_state=await_full_state,
+                        )
+                    )
+                else:
+                    # The user is no longer in the room, so `end_token` points
+                    # at the user's leave/etc event, and the current state may
+                    # include state from after that point. Use state groups to
+                    # get the memberships as of `end_token` instead.
+                    member_ids = await self._state_storage_controller.get_state_ids_at(
+                        room_id,
+                        stream_position=end_token,
+                        state_filter=member_filter,
+                        await_full_state=await_full_state,
+                    )
                 delta_state_ids.update(member_ids)
 
             # We don't do LL filtering for incremental syncs - see
@@ -2420,8 +2438,22 @@ class SyncHandler:
                 if include_users and other_user_id in include_users:
                     # Include all the fields the client asked for, as this user
                     # has events in a lazy loaded sync response, except for
-                    # fields we've recently sent in a previous lazy loaded sync response
-                    fields = set(profile_data.keys()).intersection(profile_fields)
+                    # fields we've recently sent in a previous lazy loaded sync response.
+                    # We must include _updated_ fields even if the profile doesn't have
+                    # this field. The value will be sent down as `None`. We must do
+                    # this as currently legacy sync delivers field removals by
+                    # delivering a null value to clients, and if a field is completely
+                    # deleted, we can't otherwise do that. The fact this field has
+                    # a `ProfileUpdateAction.UPDATE` is enough to tell us it should
+                    # be sent down.
+                    # TODO once removals are sent down in a dedicated key instead of
+                    # null values, the `.union(updated_user_fields.get(other_user_id, []))`
+                    # part here can be removed.
+                    fields = (
+                        set(profile_data.keys())
+                        .union(updated_user_fields.get(other_user_id, []))
+                        .intersection(profile_fields)
+                    )
                     for field_name in fields:
                         cache_key = (
                             sync_config.user.to_string(),
@@ -2469,9 +2501,24 @@ class SyncHandler:
                         if other_user_id in joined_room_user_ids
                         else set(updated_user_fields.get(other_user_id, []))
                     )
-                    fields = set(profile_data.keys()).intersection(fields)
+                    # We must include _updated_ fields even if the profile doesn't have
+                    # this field. The value will be sent down as `None`. We must do
+                    # this as currently legacy sync delivers field removals by
+                    # delivering a null value to clients, and if a field is completely
+                    # deleted, we can't otherwise do that. The fact this field has
+                    # a `ProfileUpdateAction.UPDATE` is enough to tell us it should
+                    # be sent down.
+                    # TODO once removals are sent down in a dedicated key instead of
+                    # null values, the `.union(updated_user_fields.get(other_user_id, []))`
+                    # part here can be removed.
+                    fields = (
+                        set(profile_data.keys())
+                        .union(updated_user_fields.get(other_user_id, []))
+                        .intersection(fields)
+                    )
+                    # fields.update(set(updated_user_fields.get(other_user_id, [])))
                     for field_name in fields:
-                        per_user_updates[field_name] = profile_data[field_name]
+                        per_user_updates[field_name] = profile_data.get(field_name)
 
                 if per_user_updates:
                     profile_updates[other_user_id] = per_user_updates
