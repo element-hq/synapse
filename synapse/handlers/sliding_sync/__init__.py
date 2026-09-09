@@ -113,6 +113,22 @@ class SlidingSyncHandler:
         self.extensions = SlidingSyncExtensionHandler(hs)
         self.room_lists = SlidingSyncRoomLists(hs)
 
+        # Whether an increase in a room's `timeline_limit` between requests causes
+        # historical events to be re-sent with `unstable_expanded_timeline` (see
+        # "XXX: Odd behavior" in `get_room_sync_data`). Paginated sync turns this
+        # off: history is fetched via `/messages` instead, and its per-room
+        # effective limit varies between requests by design.
+        self.expanded_timeline_on_limit_increase = True
+
+        # Whether to persist each room's request config (`timeline_limit` +
+        # `required_state`) in the per-connection state, in order to detect
+        # config changes between requests. Paginated sync turns this off: its
+        # `required_state` is immutable for the life of a connection and
+        # `timeline_limit` changes carry no special semantics, so the previous
+        # config is taken to be the current request's config instead of being
+        # persisted.
+        self.track_room_configs = True
+
     async def wait_for_sync_for_user(
         self,
         requester: Requester,
@@ -635,6 +651,15 @@ class SlidingSyncHandler:
             state_reset_out_of_room = True
 
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+        if not self.track_room_configs:
+            # Room configs are not tracked (MSC4525 paginated sync): the
+            # request config is immutable for the life of the connection, so
+            # the previous config is by definition the current one. With
+            # prev == current, `_required_state_changes` reduces to pure
+            # lazy-member accounting, which keeps `$LAZY` working on
+            # incremental sync (new-to-the-connection senders still have
+            # their membership pulled into `required_state`).
+            prev_room_sync_config = room_sync_config
 
         # Determine whether we should limit the timeline to the token range.
         #
@@ -684,7 +709,10 @@ class SlidingSyncHandler:
 
             log_kv({"sliding_sync.room_status": room_status})
 
-            if prev_room_sync_config is not None:
+            if (
+                prev_room_sync_config is not None
+                and self.expanded_timeline_on_limit_increase
+            ):
                 # Check if the timeline limit has increased, if so ignore the
                 # timeline bound and record the change (see "XXX: Odd behavior"
                 # above).
@@ -1491,7 +1519,7 @@ class SlidingSyncHandler:
                     required_state_map=room_sync_required_state_map_to_persist,
                 )
 
-        else:
+        elif self.track_room_configs:
             new_connection_state.room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=room_sync_config.timeline_limit,
                 required_state_map=room_sync_required_state_map_to_persist,
