@@ -659,7 +659,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     affected_fields=None,
                 ),
                 ProfileUpdate(
-                    stream_id=7,
+                    stream_id=9,
                     user_id="@gracie:test",
                     action="left_room",
                     affected_fields=None,
@@ -684,6 +684,51 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     user_id=self.frank.to_string(),
                     action="update",
                     affected_fields=frozenset({"m.status"}),
+                ),
+            ],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_left_room_event_if_we_leave_the_last_shared_room(
+        self,
+    ) -> None:
+        """Test that when we leave a room, we get profile update rows with a "left room"
+        action for users we no longer share a room with.
+        """
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+
+        # Make us leave the room
+        self.helper.leave(room_id, self.frank.to_string(), tok=self.frank_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id=self.frank.to_string(),
+                field_names={"m.status"},
+            )
+        )
+        # We're no longer in any rooms with roger, and the profile update stream
+        # should have an update regarding that.
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=2,
+                    user_id="@roger:test",
+                    action="joined_room",
+                    affected_fields=None,
+                ),
+                ProfileUpdate(
+                    stream_id=4,
+                    user_id="@roger:test",
+                    action="left_room",
+                    affected_fields=None,
                 ),
             ],
         )
