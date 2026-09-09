@@ -1,1 +1,0 @@
-Fix tests that use `homeserver_to_use=GenericWorkerServer` not being able to be run standalone.

@@ -53,6 +53,7 @@ from synapse.api.errors import (
     PartialStateConflictError,
     RequestSendFailed,
     SynapseError,
+    UnsupportedRoomVersionError,
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
@@ -669,6 +670,12 @@ class FederationHandler:
                     room_id
                 )
 
+                # See related restriction in /createRoom requests in handlers/room.py
+                if room_version_obj.msc4242_state_dags:
+                    raise UnsupportedRoomVersionError(
+                        "Homeserver does not support this room version over federation"
+                    )
+
                 ret = await self.federation_client.send_join(
                     host_list,
                     event,
@@ -1261,6 +1268,7 @@ class FederationHandler:
         assert event.sender == user_id
         assert event.state_key == user_id
         assert event.room_id == room_id
+        assert event.content.get("membership") == membership
         return origin, event, room_version
 
     async def on_make_leave_request(

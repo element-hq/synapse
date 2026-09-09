@@ -1,1 +1,0 @@
-Fix the `quarantined_media` replication stream never being sent when the configured `quarantined_media_changes` stream writer is a worker. Introduced in v1.152.0.

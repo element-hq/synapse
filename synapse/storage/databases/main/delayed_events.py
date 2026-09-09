@@ -64,6 +64,33 @@ class DelayedEventDetails(EventDetails):
     user_localpart: UserLocalpart
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class DelayedEventResponse:
+    """The representation of a delayed event in API format."""
+
+    delay_id: str
+    room_id: str
+    type: str
+    state_key: str | None
+    delay_ms: int
+    delayed_since_ts: int
+    content: JsonDict = attr.ib(converter=db_to_json)
+
+    def asdict(self) -> JsonDict:
+        return attr.asdict(self, filter=lambda _attr, v: v is not None)
+
+
+# TODO: Remove this class once the response format is stable
+class DelayedEventResponseLegacyCompat(DelayedEventResponse):
+    """For backwards compatibility with field names from earlier revisions of MSC4140."""
+
+    def asdict(self) -> JsonDict:
+        return super().asdict() | {
+            "delay": self.delay_ms,
+            "running_since": self.delayed_since_ts,
+        }
+
+
 class DelayedEventsStore(SQLBaseStore):
     def __init__(
         self,
@@ -290,11 +317,49 @@ class DelayedEventsStore(SQLBaseStore):
             _get_count_of_delayed_events,
         )
 
+    async def get_delayed_event_for_user(
+        self,
+        delay_id: str,
+        user_localpart: str,
+    ) -> DelayedEventResponse:
+        """
+        Returns the specified pending delayed event owned by the given user.
+
+        Raises:
+            NotFoundError: if there is no matching delayed event.
+        """
+        row = await self.db_pool.simple_select_one(
+            table="delayed_events",
+            keyvalues={
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+                "is_processed": False,
+            },
+            retcols=(
+                "room_id",
+                "event_type",
+                "state_key",
+                "delay",
+                "send_ts - delay",
+                "content",
+            ),
+            allow_none=True,
+            desc="get_delayed_event_for_user",
+        )
+        if row is None:
+            raise NotFoundError("Delayed event not found")
+        return DelayedEventResponse(delay_id, *row)
+
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,
-    ) -> list[JsonDict]:
-        """Returns all pending delayed events owned by the given user."""
+    ) -> list[DelayedEventResponseLegacyCompat]:
+        """
+        Return all pending delayed events owned by the given user.
+        Includes fields from earlier revisions of MSC4140 for
+        compatibility with clients that still expect them.
+        """
+        # TODO: Remove legacy fields once stable
         # TODO: Support Pagination stream API ("next_batch" field)
         rows = await self.db_pool.execute(
             "get_all_delayed_events_for_user",
@@ -305,7 +370,7 @@ class DelayedEventsStore(SQLBaseStore):
                 event_type,
                 state_key,
                 delay,
-                send_ts,
+                send_ts - delay,
                 content
             FROM delayed_events
             WHERE user_localpart = ? AND NOT is_processed
@@ -313,18 +378,7 @@ class DelayedEventsStore(SQLBaseStore):
             """,
             user_localpart,
         )
-        return [
-            {
-                "delay_id": DelayID(row[0]),
-                "room_id": str(RoomID.from_string(row[1])),
-                "type": EventType(row[2]),
-                **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
-                "delay": Delay(row[4]),
-                "running_since": Timestamp(row[5] - row[4]),
-                "content": db_to_json(row[6]),
-            }
-            for row in rows
-        ]
+        return [DelayedEventResponseLegacyCompat(*row) for row in rows]
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp, reprocess_events: bool = False

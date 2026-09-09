@@ -55,7 +55,13 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
-from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    Requester,
+    SlidingSyncStreamToken,
+    StreamToken,
+)
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
@@ -123,7 +129,9 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
-        self._msc4429_enabled = hs.config.server.include_profile_updates_in_sync
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
@@ -352,7 +360,7 @@ class SyncRestServlet(RestServlet):
         if sync_result.to_device:
             response["to_device"] = {"events": sync_result.to_device}
 
-        if self._msc4429_enabled and sync_result.profile_updates:
+        if self._include_profile_updates_in_sync and sync_result.profile_updates:
             # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
             # for concerns around the current implementation of the profile
             # updates stream.
@@ -1142,7 +1150,32 @@ class SlidingSyncRestServlet(RestServlet):
                 requester, extensions.sticky_events, ref_rooms_results
             )
 
+        if extensions.profiles:
+            serialized_extensions[
+                "org.matrix.msc4262.profiles"
+            ] = await self._serialise_profiles(
+                extensions.profiles,
+            )
+
         return serialized_extensions
+
+    async def _serialise_profiles(
+        self,
+        profiles: SlidingSyncResult.Extensions.ProfilesExtension,
+    ) -> JsonMapping:
+        """
+        Serialise the profiles extension response.
+
+        Args:
+            profiles: The generated profiles response object.
+
+        Returns:
+            A dictionary containing the response `users` with the
+            generated profile updates.
+        """
+        return {
+            "users": profiles.users,
+        }
 
     async def _serialise_sticky_events(
         self,

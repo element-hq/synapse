@@ -1,0 +1,31 @@
+--
+-- This file is licensed under the Affero General Public License (AGPL) version 3.
+--
+-- Copyright (C) 2026 Element Creations Ltd
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- See the GNU Affero General Public License for more details:
+-- <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+-- Record when we marked a state group as being persisted, so that we can clear
+-- out rows left behind by a persist that never finished.
+--
+-- On SQLite we must be in monolith mode, so every row already in the table was
+-- written by this process before it restarted, and is dead. Zero marks them as
+-- stale straight away, which is what we want. Contrast Postgres, where such a
+-- row may belong to a worker that is still running and so gets a grace period.
+--
+-- Note that this also correctly handles the case of Synapse version rolling
+-- back, as new rows will be written with a 0 inserted_ts, *but* since its
+-- running with the old code nothing deletes those row. On upgrade the restart
+-- will mean any rows are automatically stale as above.
+--
+-- The default only applies to an insert that omits the column, which our own
+-- code never does. SQLite only accepts a constant default in ADD COLUMN, so it
+-- could not be the current time in any case.
+ALTER TABLE state_groups_persisting
+    ADD COLUMN inserted_ts BIGINT NOT NULL DEFAULT 0;

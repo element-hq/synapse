@@ -1,3 +1,154 @@
+# Synapse 1.161.0rc1 (2026-09-08)
+
+Please check the [relevant section in the upgrade
+notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11610)
+as this release deprecates `matrix_rtc.livekit_service_url`.
+
+## Features
+
+- Don't validate signatures with unknown algorithms for master keys, and allow updates to signatures. ([\#19915](https://github.com/element-hq/synapse/issues/19915))
+- [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Add an endpoint for getting a single delayed event. ([\#19926](https://github.com/element-hq/synapse/issues/19926))
+- Add experimental support for letting application services proxy namespaces in the C-S and S-S API as per MSC4512. ([\#19972](https://github.com/element-hq/synapse/issues/19972))
+- Add experimental support for sending federation requests from application services as per MSC4512. ([\#19977](https://github.com/element-hq/synapse/issues/19977))
+- Add a config option that limits the time period in which local users can redact their own messages. Contributed by @defaultdino. ([\#20138](https://github.com/element-hq/synapse/issues/20138))
+
+## Bugfixes
+
+- Apply the `rc_reports` rate limit to the [room reporting endpoint](https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3roomsroomidreport), which the spec declares as rate-limited. ([\#20036](https://github.com/element-hq/synapse/issues/20036))
+- Fix `m.call.invite` state events not being given the proper power level on rooms created with the `public_chat` preset. Contributed by @famedly @itsoyou. ([\#20050](https://github.com/element-hq/synapse/issues/20050))
+- Return the `M_INVALID_PARAM` error code specified by Matrix v1.13 ([MSC4178](https://github.com/matrix-org/matrix-spec-proposals/pull/4178)) when a malformed email address or country code is submitted to `/account/3pid/{email,msisdn}/requestToken`, and report an unsupported medium ahead of the denied/in-use checks on the msisdn variant. ([\#20101](https://github.com/element-hq/synapse/issues/20101))
+- Fix a regression where `client_secret` request parameters were not validated against the character set required by the spec on Pydantic-validated endpoints, regressed in Synapse 1.66.0 (originally fixed for https://github.com/matrix-org/synapse/issues/6766). ([\#20104](https://github.com/element-hq/synapse/issues/20104))
+- Do not send a duplicate `m.room.encryption` event on room creation when the client already supplies one in the initial state and `encryption_enabled_by_default_for_room_type` is enabled. Contributed by @FrenchGithubUser @Famedly. ([\#20106](https://github.com/element-hq/synapse/issues/20106))
+- Fix a long-standing bug where private read receipts of users outside an application service's namespaces were sent to application services that opted in to receiving ephemeral events ([MSC2409](https://github.com/matrix-org/matrix-spec-proposals/pull/2409)). ([\#20114](https://github.com/element-hq/synapse/issues/20114))
+- Fix a bug where the `event_search` background reindex skipped all `m.room.topic` events, making room topics unsearchable after a search index rebuild. ([\#20119](https://github.com/element-hq/synapse/issues/20119))
+- Fixed joining rooms with unrecognized restricted join rules being rejected outright instead of returning the proper `M_UNABLE_TO_AUTHORISE_JOIN` error code. Contributed by @tulir @ Beeper. ([\#20132](https://github.com/element-hq/synapse/issues/20132))
+- Fix a bug where, until Synapse was restarted, new events in a room would fail to be persisted if the database went down while an event was being persisted in the room. Bug introduced in v1.124.0. ([\#20148](https://github.com/element-hq/synapse/issues/20148))
+- Fix the `/profile` endpoint, when querying custom fields, returning a 500 error instead of 404 when the profile does not exist at all. ([\#20149](https://github.com/element-hq/synapse/issues/20149))
+- When not using [MSC3866](https://github.com/matrix-org/matrix-spec-proposals/pull/3866), omit the approval flag from the response of `GET /_synapse/admin/v2/users`. ([\#20152](https://github.com/element-hq/synapse/issues/20152))
+- Fix `/sync` returning membership events from after the user's leave in `state_after` for left rooms when lazy-loading room members (experimental [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222) implementation). ([\#20169](https://github.com/element-hq/synapse/issues/20169))
+- Fix a bug where a server admin setting a custom profile field for a user with no profile received a 500 error; this now succeeds for existing (e.g. deactivated) users and returns a 404 error if the user does not exist. ([\#20172](https://github.com/element-hq/synapse/issues/20172))
+- Fix `PUT`/`DELETE` on a profile field returning HTTP 400 instead of 403 (with errcode `M_FORBIDDEN`) when profile changes are disabled via `enable_set_displayname` or `enable_set_avatar_url`. ([\#20173](https://github.com/element-hq/synapse/issues/20173))
+- Return the stable `M_APPSERVICE_LOGIN_UNSUPPORTED` error code, added in Matrix 1.17, instead of its unstable MSC4190-prefixed identifier. ([\#20180](https://github.com/element-hq/synapse/issues/20180))
+- Fix missing validation of `membership` when making `make_*` requests over federation. Contributed by @tulir @ Beeper. ([\#20189](https://github.com/element-hq/synapse/issues/20189))
+
+## Improved Documentation
+
+- Make `federation_domain_whitelist` nullable in config schema. ([\#20140](https://github.com/element-hq/synapse/issues/20140))
+
+## Deprecations and Removals
+
+- Deprecate `livekit_service_url` and add support for specifying the SFU WebSocket URL for configured LiveKit transports. Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11610). ([\#20146](https://github.com/element-hq/synapse/issues/20146))
+- Drop `GET /_matrix/client/unstable/org.matrix.msc2965/auth_issuer` endpoint which never ended up being used. ([\#20163](https://github.com/element-hq/synapse/issues/20163))
+- Remove support for the unstable `org.matrix.msc3202.device_id` query parameter for application service device masquerading. ([\#20192](https://github.com/element-hq/synapse/issues/20192))
+
+## Internal Changes
+
+- Add federation client support for experimental [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242): State DAGs. ([\#20127](https://github.com/element-hq/synapse/issues/20127))
+- Add storage functions for future [MSC4242](https://github.com/matrix-org/matrix-spec-proposals/pull/4242): State DAG work. ([\#19718](https://github.com/element-hq/synapse/issues/19718))
+- Put the `redacts` key under `content` when generating [MSC3912](https://github.com/matrix-org/matrix-spec-proposals/pull/3912) (relation based redactions) for room versions greater than 10. Contributed by @famedly. ([\#19782](https://github.com/element-hq/synapse/issues/19782))
+- Declare types that already appear in the module API's public signatures (such as `Requester`, `SynapseRequest` and `UserInfo`) in `synapse.module_api.__all__`. ([\#20107](https://github.com/element-hq/synapse/issues/20107))
+- Add missing tests for `parse_stripped_state_event`. Contributed by @guillemo12. ([\#20136](https://github.com/element-hq/synapse/issues/20136))
+- [MSC4140: Cancellable delayed events](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Update the error response for requesting to schedule a delayed event with a delay that exceeds the server-enforced maximum delay. ([\#20156](https://github.com/element-hq/synapse/issues/20156))
+
+
+
+
+# Synapse 1.160.0 (2026-09-02)
+
+No significant changes since 1.160.0rc2.
+
+
+
+
+# Synapse 1.160.0rc2 (2026-08-31)
+
+## Bugfixes
+
+- Fix sending custom profile field removals to legacy sync clients when the field is deleted using the profile field delete endpoint. ([\#20147](https://github.com/element-hq/synapse/issues/20147))
+
+
+
+# Synapse 1.160.0rc1 (2026-08-25)
+
+## Features
+
+- Add experimental support for [MSC4502](https://github.com/matrix-org/matrix-spec-proposals/pull/4502): Targeted and unrestricted room member queries. ([\#19974](https://github.com/element-hq/synapse/issues/19974))
+- Add optional support for [MSC4262: Profile Updates for Sliding Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4262).
+  Currently defaults to disabled, and is limited to local users only for the sync results. ([\#20003](https://github.com/element-hq/synapse/issues/20003))
+- Allow specifying multiple `action_name` and `status` query parameters when listing scheduled tasks via the admin API. ([\#20067](https://github.com/element-hq/synapse/issues/20067))
+
+## Bugfixes
+
+- Fix a bug where stream positions (presence, to-device message, etc.) could stop being sent to clients if a request was cancelled while a write was allocating a stream ID. Contributed by @FrenchGithubUser @Famedly. ([\#20090](https://github.com/element-hq/synapse/issues/20090))
+- Thumbnail WebP images that use transparency as PNG rather than JPEG, to preserve transparency during thumbnailing. Contributed by @catfromplan9. ([\#20094](https://github.com/element-hq/synapse/issues/20094))
+- Fix sync stream not being woken up when a user updates a profile field without belonging to any rooms. ([\#20135](https://github.com/element-hq/synapse/issues/20135))
+
+## Improved Documentation
+
+- Document lighttpd reverse proxy configuration example. Contributed by JaxLUG from the Jacksonville Linux Users Group Inc.. ([\#19875](https://github.com/element-hq/synapse/issues/19875))
+- Fix the documentation on the `federation_domain_whitelist` config option. ([\#20089](https://github.com/element-hq/synapse/issues/20089))
+
+## Internal Changes
+
+- Update release script to check more often for actions being completed so you don't have to wait around as much. ([\#20093](https://github.com/element-hq/synapse/issues/20093))
+- Speed up the conversion of device list changes into outbound federation pokes, and add a metric for how far behind the conversion is. ([\#20098](https://github.com/element-hq/synapse/issues/20098))
+- Fix the schema diff CI not using `faketime` for SQLite. ([\#20099](https://github.com/element-hq/synapse/issues/20099))
+- Fix the schema diff CI breaking when the Rust module was changed. ([\#20117](https://github.com/element-hq/synapse/issues/20117), [\#20129](https://github.com/element-hq/synapse/issues/20129))
+- Reduce database CPU usage when marking device list changes as sent over federation. ([\#20120](https://github.com/element-hq/synapse/issues/20120))
+- Fix cache `__len__` of Sliding Sync `PerConnectionState` ignoring account data entries. ([\#20124](https://github.com/element-hq/synapse/issues/20124))
+- Update Synapse repo link in inconsistent stream error. ([\#20128](https://github.com/element-hq/synapse/issues/20128))
+- Update rustls-webpki to address [GHSA-82j2-j2ch-gfr8](https://github.com/advisories/GHSA-82j2-j2ch-gfr8). ([\#20131](https://github.com/element-hq/synapse/issues/20131))
+- Update pyo3 to address [GHSA-36hh-v3qg-5jq4](https://github.com/advisories/GHSA-36hh-v3qg-5jq4) and [GHSA-chgr-c6px-7xpp](https://github.com/advisories/GHSA-chgr-c6px-7xpp). ([\#20131](https://github.com/element-hq/synapse/issues/20131))
+
+
+
+
+# Synapse 1.159.0 (2026-08-18)
+
+No significant changes since 1.159.0rc1.
+
+
+# Synapse 1.159.0rc1 (2026-08-11)
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
+[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.159/docs/upgrade.md#upgrading-to-v11590)
+as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2027-03-15`.
+
+## Features
+
+- Add optional support for [MSC4429: Profile Updates for Legacy Sync](https://github.com/matrix-org/matrix-spec-proposals/pull/4429).
+  Currently defaults to not enabled, and is limited to local users only for the sync results. ([\#19556](https://github.com/element-hq/synapse/issues/19556))
+
+## Bugfixes
+
+- Fix thumbnail generation failing for MPO images. Animations that cannot be decoded now fall back to a static thumbnail. ([\#20025](https://github.com/element-hq/synapse/issues/20025))
+- Fix the `quarantined_media` replication stream never being sent when the configured `quarantined_media_changes` stream writer is a worker. Introduced in v1.152.0. ([\#20085](https://github.com/element-hq/synapse/issues/20085))
+
+## Updates to the Docker image
+
+- Run with `PYTHONUNBUFFERED=1` to ensure that we can always see log output when things go wrong. ([\#20075](https://github.com/element-hq/synapse/issues/20075))
+
+## Improved Documentation
+
+- Correct the documentation for the `on_media_upload_limit_exceeded` module callback with regards to where it is called from. ([\#20018](https://github.com/element-hq/synapse/issues/20018))
+- Add upgrade notes to point out updated Debian package signing key. ([\#20066](https://github.com/element-hq/synapse/issues/20066))
+- Update stream cheatsheet docs to re-link `synapse/config/workers.py` which has more references. ([\#20086](https://github.com/element-hq/synapse/issues/20086))
+
+## Internal Changes
+
+- Fix tests that use `homeserver_to_use=GenericWorkerServer` not being able to be run standalone. ([\#20017](https://github.com/element-hq/synapse/issues/20017))
+- Fix `RemoteJoinHelper` test helper to handle room version "12" rooms. Contributed by @famedly @jason-famedly. ([\#20021](https://github.com/element-hq/synapse/issues/20021))
+- Fix release script announcement to link to correct release branch of changelog. ([\#20023](https://github.com/element-hq/synapse/issues/20023))
+- Dust off `make_full_schema` and add CI using it to show schema diffs. ([\#20027](https://github.com/element-hq/synapse/issues/20027))
+- Remove broken `DROP` statements for SQLite in `make_full_schema` script. ([\#20028](https://github.com/element-hq/synapse/issues/20028))
+- Document how to capture a JSON snapshot of a Grafana dashboard to aid in debugging. ([\#20048](https://github.com/element-hq/synapse/issues/20048))
+- Routinely purge old cancelled tasks from the database. ([\#20068](https://github.com/element-hq/synapse/issues/20068))
+- Introduce an `RdataSafeValue` type and correct some minor type annotation mistakes. ([\#20071](https://github.com/element-hq/synapse/issues/20071))
+- Set `idle_in_transaction_session_timeout` (default 30 minutes) on new PostgreSQL connections, so that wedged connections don't hold locks or block vacuum indefinitely. ([\#20077](https://github.com/element-hq/synapse/issues/20077))
+
+
+
+
 # Synapse 1.158.0 (2026-08-04)
 
 ## Deprecations and Removals

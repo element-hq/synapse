@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
 import typing
 
 from synapse.api.auth.mas import MasDelegatedAuth
@@ -24,61 +23,6 @@ from synapse.types import JsonDict
 
 if typing.TYPE_CHECKING:
     from synapse.server import HomeServer
-
-
-logger = logging.getLogger(__name__)
-
-
-class AuthIssuerServlet(RestServlet):
-    """
-    Advertises what OpenID Connect issuer clients should use to authorise users.
-    This endpoint was defined in a previous iteration of MSC2965, and is still
-    used by some clients.
-    """
-
-    PATTERNS = client_patterns(
-        "/org.matrix.msc2965/auth_issuer$",
-        unstable=True,
-        releases=(),
-    )
-
-    def __init__(self, hs: "HomeServer"):
-        super().__init__()
-        self._config = hs.config
-        self._auth = hs.get_auth()
-
-    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
-        # This endpoint is unauthenticated and the response only depends on
-        # the metadata we get from Matrix Authentication Service. Internally,
-        # MasDelegatedAuth.issuer() is already caching the
-        # response in memory anyway. Ideally we would follow any Cache-Control directive
-        # given by MAS, but this is fine for now.
-        #
-        # - `public` means it can be cached both in the browser and in caching proxies
-        # - `max-age` controls how long we cache on the browser side. 10m is sane enough
-        # - `s-maxage` controls how long we cache on the proxy side. Since caching
-        #   proxies usually have a way to purge caches, it is fine to cache there for
-        #   longer (1h), and issue cache invalidations in case we need it
-        # - `stale-while-revalidate` allows caching proxies to serve stale content while
-        #   revalidating in the background. This is useful for making this request always
-        #   'snappy' to end users whilst still keeping it fresh
-        request.setHeader(
-            b"Cache-Control",
-            b"public, max-age=600, s-maxage=3600, stale-while-revalidate=600",
-        )
-
-        if self._config.mas.enabled:
-            assert isinstance(self._auth, MasDelegatedAuth)
-            return 200, {"issuer": await self._auth.issuer()}
-
-        else:
-            # Wouldn't expect this to be reached: the servelet shouldn't have been
-            # registered. Still, fail gracefully if we are registered for some reason.
-            raise SynapseError(
-                404,
-                "OIDC discovery has not been configured on this homeserver",
-                Codes.NOT_FOUND,
-            )
 
 
 class AuthMetadataServlet(RestServlet):
@@ -139,5 +83,4 @@ class AuthMetadataServlet(RestServlet):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.mas.enabled:
-        AuthIssuerServlet(hs).register(http_server)
         AuthMetadataServlet(hs).register(http_server)

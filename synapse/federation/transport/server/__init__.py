@@ -24,6 +24,7 @@ import logging
 from typing import TYPE_CHECKING, Iterable, Literal
 
 from synapse.api.errors import FederationDeniedError, SynapseError
+from synapse.federation.transport.server import appservice_proxy
 from synapse.federation.transport.server._base import (
     Authenticator,
     BaseFederationServlet,
@@ -340,3 +341,6 @@ def register_servlets(
                 ratelimiter=ratelimiter,
                 server_name=hs.hostname,
             ).register(resource)
+
+    if "federation" in servlet_groups:
+        appservice_proxy.register_servlets(hs, resource, authenticator, ratelimiter)

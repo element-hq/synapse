@@ -190,3 +190,56 @@ class ScheduledTasksAdminApiTestCase(unittest.HomeserverTestCase):
         # only the task with the matching resource id should have been returned
         self.assertEqual(len(found_tasks), 1)
         self.assertEqual(found_tasks[0]["resource_id"], "failed_task")
+
+    def test_filtering_scheduled_tasks_multiple_values(self) -> None:
+        """
+        Test that the `action_name` and `status` filters can be given multiple
+        times, returning tasks matching any of the given values.
+        """
+        # filter via multiple statuses
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/scheduled_tasks?status=active&status=failed",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        found_tasks = self.check_scheduled_tasks_response(
+            channel.json_body["scheduled_tasks"]
+        )
+
+        # the active and failed tasks should have been returned
+        self.assertEqual(len(found_tasks), 2)
+        self.assertEqual({task["status"] for task in found_tasks}, {"active", "failed"})
+
+        # filter via multiple action names
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/scheduled_tasks?action_name=test_task&action_name=finished_test_task",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        found_tasks = self.check_scheduled_tasks_response(
+            channel.json_body["scheduled_tasks"]
+        )
+
+        # only the tasks with the given action names should have been returned
+        self.assertEqual(len(found_tasks), 2)
+        self.assertEqual(
+            {task["action"] for task in found_tasks},
+            {"test_task", "finished_test_task"},
+        )
+
+    def test_filtering_scheduled_tasks_invalid_status(self) -> None:
+        """
+        Test that an invalid `status` value is rejected with a 400 error.
+        """
+        channel = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/scheduled_tasks?status=unknown_status",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])

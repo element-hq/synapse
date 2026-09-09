@@ -251,6 +251,9 @@ pub struct UnstableFeatureMap {
     /// MSC4169: Backwards-compatible redaction sending using `/send`
     #[serde(rename = "com.beeper.msc4169")]
     msc4169: bool,
+    /// MSC4262: Profile updates for simplified sliding sync.
+    #[serde(rename = "org.matrix.msc4262")]
+    msc4262: bool,
     /// MSC4354: Sticky events
     #[serde(rename = "org.matrix.msc4354")]
     msc4354: bool,
@@ -272,6 +275,9 @@ pub struct UnstableFeatureMap {
     /// MSC4446: Allow moving the fully read marker backwards.
     #[serde(rename = "com.beeper.msc4446")]
     msc4446_enabled: bool,
+    /// MSC4502: Targeted and unrestricted room member queries
+    #[serde(rename = "io.element.msc4502")]
+    msc4502: bool,
 
     // Whether new rooms will be set to encrypted or not (based on presets).
     #[serde(rename = "io.element.e2ee_forced.public")]
@@ -317,6 +323,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4155: config.experimental.msc4155_enabled,
         msc4306: config.experimental.msc4306_enabled,
         msc4169: config.experimental.msc4169_enabled,
+        msc4262: config.server.include_profile_updates_in_sync,
         msc4354: config.experimental.msc4354_enabled,
         msc4380: true,
         msc4429: config.server.include_profile_updates_in_sync,
@@ -324,6 +331,7 @@ pub fn synapse_config_to_global_unstable_feature_map(
         msc4491_enabled: config.experimental.msc4491_enabled,
         msc4143_enabled: config.experimental.msc4143_enabled,
         msc4446_enabled: config.experimental.msc4446_enabled,
+        msc4502: config.experimental.msc4502_enabled,
         e2ee_forced_public: config
             .room
             .encryption_enabled_by_default_for_room_presets

@@ -24,7 +24,11 @@ from unittest.mock import AsyncMock, Mock
 
 from twisted.internet import defer
 
-from synapse.appservice import ApplicationService, Namespace
+from synapse.appservice import (
+    ApplicationService,
+    Namespace,
+    Scopes,
+)
 from synapse.types import UserID
 
 from tests import unittest
@@ -257,3 +261,99 @@ class ApplicationServiceTestCase(unittest.TestCase):
                 )
             )
         )
+
+
+class ApplicationServiceScopesTestCase(unittest.TestCase):
+    def test_has_no_scopes_by_default(self) -> None:
+        service = ApplicationService(
+            id="unique_identifier",
+            sender=UserID.from_string("@as:test"),
+            token="some_token",
+        )
+        self.assertEqual(len(service.scopes), 0)
+        self.assertFalse(service.has_scope(Scopes.QUERY_ROOM_MEMBERSHIP))
+
+    def test_has_valid_scope_if_specified(self) -> None:
+        service = ApplicationService(
+            id="unique_identifier",
+            sender=UserID.from_string("@as:test"),
+            token="some_token",
+            scopes=[Scopes.QUERY_ROOM_MEMBERSHIP],
+        )
+        self.assertEqual(len(service.scopes), 1)
+        self.assertTrue(service.has_scope(Scopes.QUERY_ROOM_MEMBERSHIP))
+
+    def test_unknown_scope_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            ApplicationService(
+                id="unique_identifier",
+                sender=UserID.from_string("@as:test"),
+                token="some_token",
+                scopes=["does:not:exist"],
+            )
+
+
+class ApplicationServiceProxyPrefixTestCase(unittest.TestCase):
+    """Tests the proxying configuration for application services from MSC4512."""
+
+    def _make_service(self, **kwargs: Any) -> ApplicationService:
+        kwargs.setdefault("id", "unique_identifier")
+        kwargs.setdefault("sender", UserID.from_string("@as:test"))
+        kwargs.setdefault("token", "some_token")
+        return ApplicationService(**kwargs)
+
+    def test_proxy_prefix_without_proxy_url_raises(self) -> None:
+        with self.assertRaises(KeyError):
+            self._make_service(proxy_url=None, proxy_prefix="rtc/livekit")
+
+    def test_proxy_prefix_with_empty_proxy_url_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self._make_service(proxy_url="", proxy_prefix="rtc/livekit")
+
+    def test_proxy_url_without_proxy_prefix_raises(self) -> None:
+        with self.assertRaises(KeyError):
+            self._make_service(proxy_url="http://proxy.example.com")
+
+    def test_proxy_url_with_empty_proxy_prefix_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self._make_service(proxy_url="http://proxy.example.com", proxy_prefix="")
+
+    def test_proxy_prefix_with_proxy_url_is_stored(self) -> None:
+        service = self._make_service(
+            proxy_url="http://proxy.example.com",
+            proxy_prefix="rtc/livekit",
+        )
+        self.assertEqual(service.proxy_prefix, "rtc/livekit")
+        self.assertEqual(service.proxy_url, "http://proxy.example.com")
+
+    def test_proxy_url_trailing_slash_is_stripped(self) -> None:
+        service = self._make_service(
+            proxy_url="http://proxy.example.com/",
+            proxy_prefix="rtc/livekit",
+        )
+        self.assertEqual(service.proxy_url, "http://proxy.example.com")
+
+    def test_nested_proxy_prefix_is_allowed(self) -> None:
+        service = self._make_service(
+            proxy_url="http://proxy.example.com",
+            proxy_prefix="rtc/livekit/foo",
+        )
+        self.assertEqual(service.proxy_prefix, "rtc/livekit/foo")
+
+    def test_disallowed_proxy_prefix_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self._make_service(
+                proxy_url="http://proxy.example.com", proxy_prefix="not/allowed"
+            )
+
+    def test_no_proxy_prefix_defaults_to_none(self) -> None:
+        service = self._make_service()
+        self.assertIsNone(service.proxy_prefix)
+        self.assertIsNone(service.proxy_url)
+
+    def test_trailing_slash_on_proxy_prefix_is_stripped(self) -> None:
+        service = self._make_service(
+            proxy_url="http://proxy.example.com",
+            proxy_prefix="rtc/livekit/foo/",
+        )
+        self.assertEqual(service.proxy_prefix, "rtc/livekit/foo")

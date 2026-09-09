@@ -1424,6 +1424,10 @@ class UsersListTestCase(unittest.HomeserverTestCase):
             self.assertIn("avatar_url", u)
             self.assertIn("creation_ts", u)
             self.assertIn("last_seen_ts", u)
+            if self.hs.config.experimental.msc3866.enabled:
+                self.assertIn("approved", u)
+            else:
+                self.assertNotIn("approved", u)
 
     def _create_users(self, number_users: int) -> None:
         """
