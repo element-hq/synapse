@@ -1,0 +1,1 @@
+Carry users' customisations of the legacy mention push rules (`.m.rule.contains_display_name`, `.m.rule.contains_user_name` and `.m.rule.roomnotif`), which Matrix v1.17 removed from the base push rule set, over to the intentional mention rules `.m.rule.is_user_mention` and `.m.rule.is_room_mention`.
