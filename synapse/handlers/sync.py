@@ -1550,7 +1550,9 @@ class SyncHandler:
                     # need to look up the actual state at the end of the
                     # timeline via state groups instead.
                     # See https://github.com/element-hq/synapse/issues/18793
-                    cleared_state_keys.append((delta.event_type, delta.state_key))
+                    key = (delta.event_type, delta.state_key)
+                    if key in timeline_state:
+                        cleared_state_keys.append(key)
                     continue
 
                 # Note that deltas are in stream ordering, so if there are
