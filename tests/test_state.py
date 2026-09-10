@@ -245,6 +245,7 @@ class StateTestCase(unittest.TestCase):
         )
         reactor, clock = get_clock()
         hs.config = default_config(server_name="tesths", parse=True)
+        hs.hostname = "tesths"
         hs.get_datastores.return_value = Mock(
             main=self.dummy_store,
             state_deletion=dummy_deletion_store,
