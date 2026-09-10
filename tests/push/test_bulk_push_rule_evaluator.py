@@ -31,7 +31,7 @@ from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.push.bulk_push_rule_evaluator import BulkPushRuleEvaluator
 from synapse.rest import admin
-from synapse.rest.client import login, push_rule, register, room
+from synapse.rest.client import knock, login, push_rule, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
@@ -650,3 +650,82 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                 type="m.room.message",
             )
         )
+
+
+class TestKnockPushRules(HomeserverTestCase):
+    """Tests for the MSC4506 knock push rule (`.org.matrix.msc4506.rule.knock`
+    with the `recipient_permission` condition): a knock should notify exactly
+    the members of the room whose power level lets them act on it.
+    """
+
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        push_rule.register_servlets,
+    ]
+
+    def _knock_and_get_event_id(self) -> str:
+        """Set up a knockable room and knock on it.
+
+        Alice (PL 100, can invite) and Bob (PL 0, cannot invite: the room
+        requires PL 50) are joined; Charlie knocks. Returns the knock event id.
+        """
+        self.alice = self.register_user("alice", "pass")
+        alice_token = self.login(self.alice, "pass")
+        self.bob = self.register_user("bob", "pass")
+        bob_token = self.login(self.bob, "pass")
+        self.charlie = self.register_user("charlie", "pass")
+        charlie_token = self.login(self.charlie, "pass")
+
+        room_id = self.helper.create_room_as(
+            self.alice, is_public=True, tok=alice_token
+        )
+        self.helper.join(room_id, self.bob, tok=bob_token)
+        self.helper.send_state(
+            room_id,
+            "m.room.power_levels",
+            {"users": {self.alice: 100}, "invite": 50},
+            alice_token,
+        )
+        self.helper.send_state(
+            room_id,
+            "m.room.join_rules",
+            {"join_rule": "knock"},
+            alice_token,
+        )
+        self.helper.knock(room=room_id, user=self.charlie, tok=charlie_token)
+
+        state = self.get_success(
+            self.hs.get_storage_controllers().state.get_current_state(room_id)
+        )
+        return state[("m.room.member", self.charlie)].event_id
+
+    def _push_actions_for(self, event_id: str, user_id: str) -> list:
+        return self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_list(
+                table="event_push_actions",
+                keyvalues={"event_id": event_id, "user_id": user_id, "notif": 1},
+                retcols=("*",),
+                desc="get_event_push_actions",
+            )
+        )
+
+    @override_config({"experimental_features": {"msc4506_enabled": True}})
+    def test_knock_notifies_only_users_who_can_act(self) -> None:
+        knock_event_id = self._knock_and_get_event_id()
+
+        # Alice can invite the knocker, so she is notified.
+        self.assertEqual(len(self._push_actions_for(knock_event_id, self.alice)), 1)
+        # Bob cannot, so he is not.
+        self.assertEqual(len(self._push_actions_for(knock_event_id, self.bob)), 0)
+        # The knocker is never notified of their own knock.
+        self.assertEqual(len(self._push_actions_for(knock_event_id, self.charlie)), 0)
+
+    def test_knock_notifies_nobody_when_disabled(self) -> None:
+        knock_event_id = self._knock_and_get_event_id()
+
+        for user_id in (self.alice, self.bob, self.charlie):
+            self.assertEqual(len(self._push_actions_for(knock_event_id, user_id)), 0)

@@ -92,6 +92,12 @@ pub struct PushRuleEvaluator {
     /// outlier.
     sender_power_level: Option<i64>,
 
+    /// MSC4506: the power level required to perform each of the room's
+    /// power-levels actions (e.g. "invite", "kick"), for the
+    /// `recipient_permission` condition. Includes the spec defaults for
+    /// actions absent from the `m.room.power_levels` content.
+    action_power_levels: BTreeMap<String, i64>,
+
     /// The related events, indexed by relation type. Flattened in the same manner as
     /// `flattened_keys`.
     related_events_flattened: BTreeMap<String, BTreeMap<String, JsonValue>>,
@@ -124,6 +130,7 @@ impl PushRuleEvaluator {
         room_member_count,
         sender_power_level,
         notification_power_levels,
+        action_power_levels,
         related_events_flattened,
         related_event_match_enabled,
         room_version_feature_flags,
@@ -137,6 +144,7 @@ impl PushRuleEvaluator {
         room_member_count: u64,
         sender_power_level: Option<i64>,
         notification_power_levels: BTreeMap<String, i64>,
+        action_power_levels: BTreeMap<String, i64>,
         related_events_flattened: BTreeMap<String, BTreeMap<String, JsonValue>>,
         related_event_match_enabled: bool,
         room_version_feature_flags: Vec<String>,
@@ -156,6 +164,7 @@ impl PushRuleEvaluator {
             room_member_count,
             notification_power_levels,
             sender_power_level,
+            action_power_levels,
             related_events_flattened,
             related_event_match_enabled,
             room_version_feature_flags,
@@ -179,13 +188,17 @@ impl PushRuleEvaluator {
     /// - `None` if the event is not in a thread, or if MSC4306 is disabled.
     /// - `Some(true)` if the event is in a thread and the user has a subscription for that thread
     /// - `Some(false)` if the event is in a thread and the user does NOT have a subscription for that thread
-    #[pyo3(signature = (push_rules, user_id=None, display_name=None, msc4306_thread_subscription_state=None))]
+    ///
+    /// recipient_power_level: the power level of the user the rules are being
+    /// evaluated for, used by the MSC4506 `recipient_permission` condition.
+    #[pyo3(signature = (push_rules, user_id=None, display_name=None, msc4306_thread_subscription_state=None, recipient_power_level=None))]
     pub fn run(
         &self,
         push_rules: &FilteredPushRules,
         user_id: Option<&str>,
         display_name: Option<&str>,
         msc4306_thread_subscription_state: Option<bool>,
+        recipient_power_level: Option<i64>,
     ) -> Vec<Action> {
         'outer: for (push_rule, enabled) in push_rules.iter() {
             if !enabled {
@@ -222,6 +235,7 @@ impl PushRuleEvaluator {
                     user_id,
                     display_name,
                     msc4306_thread_subscription_state,
+                    recipient_power_level,
                 ) {
                     Ok(true) => {}
                     Ok(false) => continue 'outer,
@@ -255,19 +269,21 @@ impl PushRuleEvaluator {
     }
 
     /// Check if the given condition matches.
-    #[pyo3(signature = (condition, user_id=None, display_name=None, msc4306_thread_subscription_state=None))]
+    #[pyo3(signature = (condition, user_id=None, display_name=None, msc4306_thread_subscription_state=None, recipient_power_level=None))]
     fn matches(
         &self,
         condition: Condition,
         user_id: Option<&str>,
         display_name: Option<&str>,
         msc4306_thread_subscription_state: Option<bool>,
+        recipient_power_level: Option<i64>,
     ) -> bool {
         match self.match_condition(
             &condition,
             user_id,
             display_name,
             msc4306_thread_subscription_state,
+            recipient_power_level,
         ) {
             Ok(true) => true,
             Ok(false) => false,
@@ -287,6 +303,7 @@ impl PushRuleEvaluator {
         user_id: Option<&str>,
         display_name: Option<&str>,
         msc4306_thread_subscription_state: Option<bool>,
+        recipient_power_level: Option<i64>,
     ) -> Result<bool, Error> {
         let known_condition = match condition {
             Condition::Known(known) => known,
@@ -405,6 +422,18 @@ impl PushRuleEvaluator {
                         .unwrap_or(50);
 
                     *sender_power_level >= required_level
+                } else {
+                    false
+                }
+            }
+            KnownCondition::RecipientPermission { key } => {
+                if let Some(recipient_power_level) = recipient_power_level {
+                    if let Some(required_level) = self.action_power_levels.get(key.as_ref()) {
+                        recipient_power_level >= *required_level
+                    } else {
+                        // Unknown action keys never match.
+                        false
+                    }
                 } else {
                     false
                 }
@@ -564,6 +593,7 @@ fn push_rule_evaluator() {
         Some(0),
         BTreeMap::new(),
         BTreeMap::new(),
+        BTreeMap::new(),
         true,
         vec![],
         true,
@@ -572,8 +602,66 @@ fn push_rule_evaluator() {
     )
     .unwrap();
 
-    let result = evaluator.run(&FilteredPushRules::default(), None, Some("bob"), None);
+    let result = evaluator.run(&FilteredPushRules::default(), None, Some("bob"), None, None);
     assert_eq!(result.len(), 3);
+}
+
+#[test]
+fn test_recipient_permission_condition() {
+    let mut action_power_levels = BTreeMap::new();
+    action_power_levels.insert("invite".to_string(), 50);
+
+    let evaluator = PushRuleEvaluator::py_new(
+        BTreeMap::new(),
+        false,
+        10,
+        Some(0),
+        BTreeMap::new(),
+        action_power_levels,
+        BTreeMap::new(),
+        true,
+        vec![],
+        true,
+        false,
+        false,
+    )
+    .unwrap();
+
+    let condition = Condition::Known(KnownCondition::RecipientPermission {
+        key: Cow::Borrowed("invite"),
+    });
+
+    // A recipient at or above the required level matches.
+    assert!(evaluator
+        .match_condition(&condition, Some("@bob:example.org"), None, None, Some(50))
+        .unwrap());
+    assert!(evaluator
+        .match_condition(&condition, Some("@bob:example.org"), None, None, Some(100))
+        .unwrap());
+
+    // A recipient below the required level does not match.
+    assert!(!evaluator
+        .match_condition(&condition, Some("@bob:example.org"), None, None, Some(0))
+        .unwrap());
+
+    // No recipient power level provided: never matches.
+    assert!(!evaluator
+        .match_condition(&condition, Some("@bob:example.org"), None, None, None)
+        .unwrap());
+
+    // An action key we don't have a level for never matches.
+    let unknown_key = Condition::Known(KnownCondition::RecipientPermission {
+        key: Cow::Borrowed("frobnicate"),
+    });
+    assert!(!evaluator
+        .match_condition(
+            &unknown_key,
+            Some("@bob:example.org"),
+            None,
+            None,
+            Some(100)
+        )
+        .unwrap());
 }
 
 #[test]
@@ -595,6 +683,7 @@ fn test_requires_room_version_supports_condition() {
         Some(0),
         BTreeMap::new(),
         BTreeMap::new(),
+        BTreeMap::new(),
         false,
         flags,
         true,
@@ -608,6 +697,7 @@ fn test_requires_room_version_supports_condition() {
     let mut result = evaluator.run(
         &FilteredPushRules::default(),
         Some("@bob:example.org"),
+        None,
         None,
         None,
     );
@@ -637,7 +727,9 @@ fn test_requires_room_version_supports_condition() {
             false,
             false,
             false,
+            false,
         ),
+        None,
         None,
         None,
         None,

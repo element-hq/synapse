@@ -156,6 +156,12 @@ class ExperimentalConfig(Config):
             "msc3381_polls_enabled", False
         )
 
+        # MSC4506: default push rule notifying room members
+        # who can act on a knock (MSC2403), via the new `recipient_permission`
+        # push rule condition. Unstable ids: .org.matrix.msc4506.rule.knock /
+        # org.matrix.msc4506.recipient_permission.
+        self.msc4506_enabled: bool = experimental.get("msc4506_enabled", False)
+
         # MSC3912: Relation-based redactions.
         self.msc3912_enabled: bool = experimental.get("msc3912_enabled", False)
 
