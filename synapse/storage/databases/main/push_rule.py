@@ -54,9 +54,7 @@ from synapse.storage.databases.main.receipts import ReceiptsWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.push_rule import InconsistentRuleException, RuleNotFoundException
-from synapse.storage.types import Cursor
-from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.storage.util.sequence import build_sequence_generator
+from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
 from synapse.synapse_rust.push import FilteredPushRules, PushRule, PushRules
 from synapse.types import JsonDict, StreamKeyType
 from synapse.util import unwrapFirstError
@@ -223,35 +221,8 @@ class PushRulesWorkerStore(
             prefilled_cache=push_rules_prefill,
         )
 
-        # The `id` columns of `push_rules` and `push_rules_enable` are allocated
-        # from database sequences rather than in-process, so that batches of
-        # IDs can be allocated at once (see the legacy mention rule migration)
-        # and the IDs stay correct should the writer ever move between workers.
-        def get_max_push_rule_id(txn: Cursor) -> int:
-            txn.execute("SELECT COALESCE(MAX(id), 0) FROM push_rules")
-            return cast(tuple[int], txn.fetchone())[0]
-
-        self._push_rule_id_gen = build_sequence_generator(
-            db_conn,
-            database.engine,
-            get_max_push_rule_id,
-            "push_rules_id_seq",
-            table="push_rules",
-            id_column="id",
-        )
-
-        def get_max_push_rules_enable_id(txn: Cursor) -> int:
-            txn.execute("SELECT COALESCE(MAX(id), 0) FROM push_rules_enable")
-            return cast(tuple[int], txn.fetchone())[0]
-
-        self._push_rules_enable_id_gen = build_sequence_generator(
-            db_conn,
-            database.engine,
-            get_max_push_rules_enable_id,
-            "push_rules_enable_id_seq",
-            table="push_rules_enable",
-            id_column="id",
-        )
+        self._push_rule_id_gen = IdGenerator(db_conn, "push_rules", "id")
+        self._push_rules_enable_id_gen = IdGenerator(db_conn, "push_rules_enable", "id")
 
         self._config = hs.config.push_rules
 
@@ -565,14 +536,11 @@ class PushRulesWorkerStore(
         next_stream_id = iter(stream_ids)
         changed_users: set[str] = set()
 
-        row_ids = self._push_rule_id_gen.get_next_mult_txn(txn, len(actions_to_insert))
-        for row_id, ((user_name, mention_rule_id), rule_actions) in zip(
-            row_ids, actions_to_insert.items()
-        ):
+        for (user_name, mention_rule_id), rule_actions in actions_to_insert.items():
             txn.execute(
                 insert_rule_sql,
                 (
-                    row_id,
+                    self._push_rule_id_gen.get_next(),
                     user_name,
                     mention_rule_id,
                     _DEFAULT_RULE_OVERRIDE_PRIORITY_CLASS,
@@ -594,15 +562,15 @@ class PushRulesWorkerStore(
             )
             changed_users.add(user_name)
 
-        row_ids = self._push_rules_enable_id_gen.get_next_mult_txn(
-            txn, len(enabled_to_insert)
-        )
-        for row_id, ((user_name, mention_rule_id), rule_enabled) in zip(
-            row_ids, enabled_to_insert.items()
-        ):
+        for (user_name, mention_rule_id), rule_enabled in enabled_to_insert.items():
             txn.execute(
                 insert_enable_sql,
-                (row_id, user_name, mention_rule_id, 1 if rule_enabled else 0),
+                (
+                    self._push_rules_enable_id_gen.get_next(),
+                    user_name,
+                    mention_rule_id,
+                    1 if rule_enabled else 0,
+                ),
             )
             if txn.rowcount == 0:
                 continue
@@ -1068,7 +1036,7 @@ class PushRulesWorkerStore(
                 )
 
             # We didn't update a row with the given rule_id so insert one
-            push_rule_id = self._push_rule_id_gen.get_next_id_txn(txn)
+            push_rule_id = self._push_rule_id_gen.get_next()
 
             self.db_pool.simple_insert_txn(
                 txn,
@@ -1116,7 +1084,7 @@ class PushRulesWorkerStore(
         else:
             raise RuntimeError("Unknown database engine")
 
-        new_enable_id = self._push_rules_enable_id_gen.get_next_id_txn(txn)
+        new_enable_id = self._push_rules_enable_id_gen.get_next()
         txn.execute(sql, (new_enable_id, user_id, rule_id))
 
     async def delete_push_rule(self, user_id: str, rule_id: str) -> None:
@@ -1211,7 +1179,7 @@ class PushRulesWorkerStore(
         if not self._is_push_writer:
             raise Exception("Not a push writer")
 
-        new_id = self._push_rules_enable_id_gen.get_next_id_txn(txn)
+        new_id = self._push_rules_enable_id_gen.get_next()
 
         if not is_default_rule:
             # first check it exists; we need to lock for key share so that a
