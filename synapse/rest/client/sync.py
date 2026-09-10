@@ -33,6 +33,7 @@ from synapse.events.utils import (
     EventFormat,
     FilteredEvent,
     SerializeEventConfig,
+    strip_event,
 )
 from synapse.handlers.presence import format_user_presence_state
 from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
@@ -477,7 +478,8 @@ class SyncRestServlet(RestServlet):
                 invited_state = []
 
             invited_state = list(invited_state)
-            invited_state.append(invite)
+            # MSC4319: Add the invite itself
+            invited_state.append(strip_event(room.invite))
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
         return invited
@@ -523,12 +525,11 @@ class SyncRestServlet(RestServlet):
                 knocked_state = []
             knocked_state = list(knocked_state)
 
-            # Append the actual knock membership event itself as well. This provides
-            # the client with:
+            # MSC4319: Append the actual knock membership event itself as well. This
+            # provides the client with:
             #
             # * A knock state event that they can use for easier internal tracking
-            # * The rough timestamp of when the knock occurred contained within the event
-            knocked_state.append(knock)
+            knocked_state.append(strip_event(room.knock))
 
             # Build the `knock_state` dictionary, which will contain the state of the
             # room that the client has knocked on
