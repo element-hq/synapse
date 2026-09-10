@@ -479,7 +479,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
     processes.
     """
 
-    __slots__ = ["_proc"]
+    __slots__ = ["_proc", "desc"]
 
     def __init__(
         self,
@@ -502,6 +502,9 @@ class BackgroundProcessLoggingContext(LoggingContext):
         if instance_id is None:
             instance_id = id(self)
         super().__init__(name="%s-%s" % (name, instance_id), server_name=server_name)
+        # `LoggingContext.name` has the instance id appended, so keep the bare
+        # description around for low-cardinality labelling.
+        self.desc = name
         self._proc: _BackgroundProcess | None = _BackgroundProcess(
             desc=name, server_name=server_name, ctx=self
         )
