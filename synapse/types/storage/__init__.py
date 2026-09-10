@@ -36,10 +36,6 @@ class _BackgroundUpdates:
 
     EVENTS_POPULATE_STATE_KEY_REJECTIONS = "events_populate_state_key_rejections"
 
-    CURRENT_STATE_DELTA_STREAM_EVENT_ID_INDEX = (
-        "current_state_delta_stream_event_id_index"
-    )
-
     EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
 
     CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME = (

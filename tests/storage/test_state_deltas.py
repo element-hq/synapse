@@ -12,6 +12,11 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+import random
+from typing import Any
+
+from immutabledict import immutabledict
+
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
@@ -20,11 +25,11 @@ from synapse.events import EventBase
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import RoomStreamToken
-from synapse.types.storage import _BackgroundUpdates
 from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils.event_injection import (
+    create_event,
     persist_message_and_state_event_in_one_batch,
 )
 
@@ -189,30 +194,144 @@ class StateDeltasByEventPositionTestCase(unittest.HomeserverTestCase):
             ),
         )
 
-    def test_falls_back_until_index_built(self) -> None:
-        """Until the `current_state_delta_stream(event_id)` index has been
-        built, the query falls back to the stamp-bounded behaviour (which can
-        miss mid-batch deltas but never scans without an index)."""
-        state_event_id, message_pos, state_pos = self._batch_positions()
+    def _persist_mixed_batch(self, kinds: list[bool], rng: random.Random) -> None:
+        """Persist one batch of events, a state event for each True in
+        `kinds` (over a handful of reused state keys) and a message for each
+        False, all forked off the same forward extremities."""
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        prev_event_ids = self.get_success(
+            self.store.get_prev_events_for_room(self.room_id)
+        )
+        events = []
+        for i, is_state in enumerate(kinds):
+            kwargs: dict[str, Any]
+            if is_state:
+                kwargs = {
+                    "type": "m.call.member",
+                    "state_key": f"k{rng.randrange(4)}",
+                    "content": {"memberships": [{"device_id": f"d{rng.random()}"}]},
+                }
+            else:
+                kwargs = {
+                    "type": "m.room.message",
+                    "content": {"msgtype": "m.text", "body": f"msg {i}"},
+                }
+            events.append(
+                self.get_success(
+                    create_event(
+                        self.hs,
+                        room_id=self.room_id,
+                        sender=self.alice,
+                        prev_event_ids=prev_event_ids,
+                        **kwargs,
+                    )
+                )
+            )
+        self.get_success(persistence.persist_events(events))
 
-        # Pretend the index's background update is still pending.
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
-                    "update_name": _BackgroundUpdates.CURRENT_STATE_DELTA_STREAM_EVENT_ID_INDEX,
-                    "progress_json": "{}",
-                },
+    def test_matches_brute_force_over_every_window(self) -> None:
+        """Cross-checks the query against a brute-force oracle.
+
+        Persists a mix of batches (lone messages, lone state events, batches of
+        two to four events with state events at varying positions, state keys
+        reused across batches), then for every pair of positions in the room's
+        stream -- and for tokens whose position for the room's writer is ahead
+        of their minimum, which is what a multi-writer token looks like --
+        checks that the deltas returned are exactly the rows whose effective
+        position (the maximum of the row's stamp and its event's stream
+        ordering) lies in the window, in stamp order.
+        """
+        rng = random.Random(4222)
+        for _ in range(20):
+            size = rng.choice([1, 1, 2, 3, 4])
+            kinds = [rng.random() < 0.6 for _ in range(size)]
+            if size == 1:
+                kinds = [rng.random() < 0.5]
+            self._persist_mixed_batch(kinds, rng)
+
+        # The oracle: every row's effective position, straight from the tables.
+        rows = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="current_state_delta_stream",
+                keyvalues={"room_id": self.room_id},
+                retcols=("stream_id", "event_id"),
+                desc="oracle_rows",
             )
         )
-        self.store.db_pool.updates._all_done = False
-
-        deltas = self.get_success(
-            self.store.get_current_state_deltas_for_room_by_event_position(
-                self.room_id,
-                from_token=RoomStreamToken(stream=message_pos),
-                to_token=RoomStreamToken(stream=state_pos),
+        event_positions = dict(
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    table="events",
+                    keyvalues={"room_id": self.room_id},
+                    retcols=("event_id", "stream_ordering"),
+                    desc="oracle_events",
+                )
             )
         )
-        # Stamp-bounded behaviour: the mid-batch delta is missed.
-        self.assertEqual([d.event_id for d in deltas], [])
+        effective = {
+            (stream_id, event_id): max(
+                stream_id, event_positions.get(event_id, stream_id)
+            )
+            for stream_id, event_id in rows
+        }
+        self.assertGreater(len(rows), 10)
+        self.assertTrue(
+            any(effective[key] > key[0] for key in effective),
+            "test setup: expected some rows stamped before their event",
+        )
+
+        lowest = min(event_positions.values()) - 1
+        highest = max(event_positions.values())
+        positions: list[int | None] = [None, *range(lowest, highest + 1)]
+
+        def check(
+            from_token: RoomStreamToken | None,
+            to_token: RoomStreamToken | None,
+            from_pos: int | None,
+            to_pos: int | None,
+        ) -> None:
+            expected = {
+                key
+                for key, pos in effective.items()
+                if (from_pos is None or from_pos < pos)
+                and (to_pos is None or pos <= to_pos)
+            }
+            deltas = self.get_success(
+                self.store.get_current_state_deltas_for_room_by_event_position(
+                    self.room_id, from_token=from_token, to_token=to_token
+                )
+            )
+            self.assertEqual(
+                {(d.stream_id, d.event_id) for d in deltas},
+                expected,
+                f"window ({from_token}, {to_token}]",
+            )
+            stamps = [d.stream_id for d in deltas]
+            self.assertEqual(stamps, sorted(stamps), "deltas not in stamp order")
+
+        for from_pos in positions:
+            for to_pos in positions:
+                if from_pos is not None and to_pos is not None and to_pos <= from_pos:
+                    continue
+                check(
+                    RoomStreamToken(stream=from_pos) if from_pos is not None else None,
+                    RoomStreamToken(stream=to_pos) if to_pos is not None else None,
+                    from_pos,
+                    to_pos,
+                )
+                # The same window as a multi-writer token: the room's writer
+                # ("master") sits at the position, the token's minimum behind.
+                if from_pos is not None and to_pos is not None and from_pos % 3 == 0:
+                    check(
+                        RoomStreamToken(
+                            stream=from_pos - 2,
+                            instance_map=immutabledict({"master": from_pos}),
+                        ),
+                        RoomStreamToken(
+                            stream=to_pos - 2,
+                            instance_map=immutabledict({"master": to_pos}),
+                        ),
+                        from_pos,
+                        to_pos,
+                    )
