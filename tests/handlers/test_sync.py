@@ -932,10 +932,15 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         sync_room_result = sync_result.archived[0]
         self.assertEqual(sync_room_result.room_id, room_id)
 
-        # state_after must include the leave membership event.
-        self.assertIn(("m.room.member", alice), sync_room_result.state)
+        # state_after must include the leave membership event and the state
+        # change that happened just before the leave, and nothing else (i.e.
+        # not the entire cleared room state).
         self.assertEqual(
-            sync_room_result.state[("m.room.member", alice)].event_id, leave_event
+            {key: event.event_id for key, event in sync_room_result.state.items()},
+            {
+                ("m.room.member", alice): leave_event,
+                ("m.room.topic", ""): topic_event,
+            },
         )
 
     def _patch_get_latest_events(self, latest_events: list[str]) -> ContextManager:
