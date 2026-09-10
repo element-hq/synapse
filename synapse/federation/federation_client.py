@@ -1934,27 +1934,12 @@ class FederationClient(FederationBase):
 
         Returns:
             The results containing a list of users from the remote directory.
+
+        Raises:
+            HttpResponseException: The remote server returned an HTTP error.
+            RequestSendFailed: The request to the remote server failed.
         """
-        try:
-            return await self.transport_layer.user_directory_fetch(destination, timeout)
-        except (RequestSendFailed, HttpResponseException) as e:
-            # A failing or unreachable destination shouldn't break the sync. The
-            # endpoint is rate-limited, and the transport layer surfaces a 429 as
-            # a RequestSendFailed after exhausting retries, so log without a
-            # stack trace.
-            logger.warning(
-                "Failed to fetch remote user directory [destination=%s]: %s",
-                destination,
-                e,
-            )
-            return {"results": []}
-        except Exception:
-            # Unexpected error; log with a stack trace for debugging.
-            logger.exception(
-                "Unexpected error fetching remote user directory [destination=%s]",
-                destination,
-            )
-            return {"results": []}
+        return await self.transport_layer.user_directory_fetch(destination, timeout)
 
     async def federation_download_media(
         self,

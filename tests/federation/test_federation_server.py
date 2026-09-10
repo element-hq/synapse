@@ -20,7 +20,7 @@
 #
 import logging
 from http import HTTPStatus
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized
 
@@ -138,6 +138,35 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertNotIn("limited", channel.json_body)
         results = channel.json_body.get("results", [])
         self.assertEqual(len(results), 0)
+
+    def test_federation_user_directory_fetch_servlet_internal_error(self) -> None:
+        """A server failure is returned as an error, not an empty directory."""
+        with patch.object(
+            self.hs.get_datastores().main,
+            "get_users_in_user_dir",
+            new=AsyncMock(side_effect=RuntimeError("database unavailable")),
+        ):
+            channel = self.make_signed_federation_request(
+                "GET",
+                "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+                "user_directory/fetch",
+            )
+
+        self.assertEqual(channel.code, HTTPStatus.INTERNAL_SERVER_ERROR)
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
+
+
+class FederationUserDirectoryDisabledTests(unittest.FederatingHomeserverTestCase):
+    def test_federation_user_directory_fetch_servlet_disabled(self) -> None:
+        """A disabled endpoint is exposed as an unrecognized endpoint."""
+        channel = self.make_signed_federation_request(
+            "GET",
+            "/_matrix/federation/unstable/de.bwi.federated_user_dir/"
+            "user_directory/fetch",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
 
 
 def _create_acl_event(content: JsonDict) -> EventBase:

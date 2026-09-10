@@ -26,7 +26,7 @@ import twisted.web.client
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.errors import HttpResponseException
+from synapse.api.errors import HttpResponseException, RequestSendFailed
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.rest import admin
@@ -363,19 +363,32 @@ class FederationClientTest(FederatingHomeserverTestCase):
         )
 
     def test_user_directory_fetch_endpoint_not_found(self) -> None:
-        """Test that the federation client handles 404 responses correctly."""
+        """The federation client propagates HTTP errors to its caller."""
         # Mock the transport layer to raise a 404 error
+        error = HttpResponseException(
+            404, "Not Found", b'{"errcode": "M_UNRECOGNIZED"}'
+        )
         self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
-            side_effect=HttpResponseException(
-                404, "Not Found", b'{"errcode": "M_NOT_FOUND"}'
-            )
+            side_effect=error
         )
 
-        # Call the federation client method
-        result = self.get_success(
-            self.federation_client.user_directory_fetch("other.example.com", 10)
+        failure = self.get_failure(
+            self.federation_client.user_directory_fetch("other.example.com", 10),
+            HttpResponseException,
         )
 
-        # A failed fetch returns an empty result set (never None), as some
-        # callers rely on the dict shape.
-        self.assertEqual(result, {"results": []})
+        self.assertIs(failure.value, error)
+
+    def test_user_directory_fetch_request_failure(self) -> None:
+        """The federation client propagates transport errors to its caller."""
+        error = RequestSendFailed(RuntimeError("connection failed"), can_retry=True)
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=error
+        )
+
+        failure = self.get_failure(
+            self.federation_client.user_directory_fetch("other.example.com", 10),
+            RequestSendFailed,
+        )
+
+        self.assertIs(failure.value, error)

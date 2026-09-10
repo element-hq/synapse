@@ -17,6 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from http import HTTPStatus
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
@@ -25,7 +26,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import UserTypes
-from synapse.api.errors import SynapseError
+from synapse.api.errors import HttpResponseException, RequestSendFailed, SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.rest.client import login, register, room, user_directory
@@ -1519,8 +1520,12 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
     def _run_sync_returning(self, results: list[dict]) -> None:
         """Run a sync with the supplied remote results."""
+        self._run_sync_response({"results": results})
+
+    def _run_sync_response(self, response: JsonDict) -> None:
+        """Run a sync with the supplied remote response."""
         self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
-            return_value={"results": results}
+            return_value=response
         )
         self.get_success(self.handler._sync_federated_user_directory())
 
@@ -1558,7 +1563,7 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         self.assertIn("@bob:remote.example.com", profiles)
         self.assertNotIn("@carol:remote.example.com", profiles)
 
-    def test_sync_empty_result_does_not_prune(self) -> None:
+    def test_sync_empty_result_prunes(self) -> None:
         self.get_success(
             self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
         )
@@ -1571,12 +1576,143 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             {("@bob:remote.example.com", "remote.example.com")},
         )
 
-        # An empty result is also returned for a failed request, so do not prune.
+        # A successful empty result is authoritative.
         self._run_sync_returning([])
 
         self.assertEqual(
             self.get_success(self.user_dir_helper.get_users_in_federated_search()),
-            {("@bob:remote.example.com", "remote.example.com")},
+            set(),
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertNotIn("@bob:remote.example.com", profiles)
+
+    def test_sync_invalid_response_does_not_reconcile(self) -> None:
+        """Any malformed entry invalidates the destination's whole response."""
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+
+        malformed_responses: list[tuple[str, JsonDict]] = [
+            ("missing results", {}),
+            ("results is not a list", {"results": "invalid"}),
+            ("entry is not an object", {"results": ["invalid"]}),
+            ("missing user ID", {"results": [{"display_name": "Missing"}]}),
+            ("invalid user ID", {"results": [{"user_id": "invalid"}]}),
+            (
+                "user belongs to another server",
+                {"results": [{"user_id": "@mallory:elsewhere.example.com"}]},
+            ),
+            (
+                "invalid optional field",
+                {
+                    "results": [
+                        {
+                            "user_id": "@carol:remote.example.com",
+                            "display_name": 123,
+                        }
+                    ]
+                },
+            ),
+            (
+                "duplicate user ID",
+                {
+                    "results": [
+                        {"user_id": "@carol:remote.example.com"},
+                        {"user_id": "@carol:remote.example.com"},
+                    ]
+                },
+            ),
+            (
+                "valid and invalid entries",
+                {
+                    "results": [
+                        {"user_id": "@carol:remote.example.com"},
+                        {"user_id": "invalid"},
+                    ]
+                },
+            ),
+        ]
+
+        for description, response in malformed_responses:
+            with self.subTest(description):
+                self._run_sync_response(response)
+
+                self.assertEqual(
+                    self.get_success(
+                        self.user_dir_helper.get_users_in_federated_search()
+                    ),
+                    {("@bob:remote.example.com", "remote.example.com")},
+                )
+
+    def test_sync_failures_are_isolated_per_destination(self) -> None:
+        """A failed destination does not prune its users or stop the sync."""
+        failures: dict[str, Exception] = {
+            "connection.example.com": RequestSendFailed(
+                RuntimeError("connection failed"), can_retry=True
+            ),
+            "unsupported.example.com": HttpResponseException(
+                HTTPStatus.NOT_FOUND,
+                "Not Found",
+                b'{"errcode":"M_UNRECOGNIZED"}',
+            ),
+            "http-error.example.com": HttpResponseException(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                b'{"errcode":"M_UNKNOWN"}',
+            ),
+            "unexpected.example.com": RuntimeError("unexpected failure"),
+        }
+        valid_destination = "valid.example.com"
+
+        for destination in [*failures, valid_destination]:
+            self.get_success(
+                self.store.set_destination_retry_timings(destination, None, 0, 0)
+            )
+
+        for destination in failures:
+            self.get_success(
+                self.handler.reconcile_remote_users(
+                    destination,
+                    [
+                        RemoteUserDirectoryEntry(
+                            user_id=f"@existing:{destination}",
+                            display_name="Existing",
+                            avatar_url=None,
+                        )
+                    ],
+                )
+            )
+
+        async def fetch(destination: str, _timeout: int) -> JsonDict:
+            error = failures.get(destination)
+            if error is not None:
+                raise error
+
+            return {"results": [{"user_id": f"@new:{destination}"}]}
+
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=fetch
+        )
+
+        self.get_success(self.handler._sync_federated_user_directory())
+
+        expected_users = {
+            (f"@existing:{destination}", destination) for destination in failures
+        }
+        expected_users.add((f"@new:{valid_destination}", valid_destination))
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            expected_users,
+        )
+        self.assertEqual(
+            self.federation_client.user_directory_fetch.call_count,
+            len(failures) + 1,
         )
 
     def test_sync_is_scheduled_on_background_worker(self) -> None:
