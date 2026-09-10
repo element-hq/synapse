@@ -217,7 +217,14 @@ class MacaroonGenerator:
         Raises:
             MacaroonVerificationFailedException if the verification failed
         """
-        macaroon = pymacaroons.Macaroon.deserialize(token)
+        try:
+            macaroon = pymacaroons.Macaroon.deserialize(token)
+        except IndexError:
+            # pymacaroons can raise a bare IndexError when asked to deserialize
+            # certain malformed tokens (e.g. ones that decode to empty bytes).
+            # Treat this the same as any other malformed/invalid macaroon.
+            raise MacaroonVerificationFailedException("Invalid macaroon token")
+
         user_id = get_value_from_macaroon(macaroon, "user_id")
 
         # At some point, Synapse would generate macaroons without the "guest"
