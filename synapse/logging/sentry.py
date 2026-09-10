@@ -143,6 +143,13 @@ def before_send(event: "Event", hint: "Hint") -> "Event | None":
         for key in _STRIPPED_EXTRA_KEYS:
             extra.pop(key, None)
 
+    record = hint.get("log_record")
+    if record is not None and "exception" not in event:
+        # Sentry groups these events on the formatted message, and its normalisation
+        # does not cover Matrix room or event IDs, so a `%s`-templated log line
+        # otherwise fragments into one issue per room. Group on the template instead.
+        event["fingerprint"] = [record.name, str(record.msg)]
+
     context = current_context()
     if not isinstance(context, LoggingContext):
         # The sentinel context has no request to describe.

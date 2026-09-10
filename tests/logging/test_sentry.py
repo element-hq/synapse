@@ -13,6 +13,7 @@
 #
 
 import hashlib
+import logging
 from typing import TYPE_CHECKING
 
 import unpaddedbase64
@@ -218,3 +219,52 @@ class BeforeSendTestCase(TestCase):
 
         assert result is not None
         self.assertEqual(result, {"extra": {}})
+
+
+class FingerprintTestCase(TestCase):
+    def _make_record(self) -> logging.LogRecord:
+        return logging.LogRecord(
+            name="synapse.storage.databases.main.event_federation",
+            level=logging.WARNING,
+            pathname=__file__,
+            lineno=1,
+            msg="Unexpectedly found that events don't have chain IDs in room %s: %s",
+            args=("!room:example.com", "$event"),
+            exc_info=None,
+        )
+
+    def test_message_event_grouped_by_template(self) -> None:
+        """Message events group on the logger name and the unformatted template."""
+        event: "Event" = {}
+        hint: "Hint" = {"log_record": self._make_record()}
+
+        result = before_send(event, hint)
+
+        assert result is not None
+        self.assertEqual(
+            result["fingerprint"],
+            [
+                "synapse.storage.databases.main.event_federation",
+                "Unexpectedly found that events don't have chain IDs in room %s: %s",
+            ],
+        )
+
+    def test_exception_event_keeps_default_grouping(self) -> None:
+        """Exceptions group on their stack trace, which is already specific."""
+        event: "Event" = {"exception": {"values": []}}
+        hint: "Hint" = {"log_record": self._make_record()}
+
+        result = before_send(event, hint)
+
+        assert result is not None
+        self.assertNotIn("fingerprint", result)
+
+    def test_event_without_log_record(self) -> None:
+        """Events that didn't come from a log record are left to group themselves."""
+        event: "Event" = {}
+        hint: "Hint" = {}
+
+        result = before_send(event, hint)
+
+        assert result is not None
+        self.assertNotIn("fingerprint", result)
