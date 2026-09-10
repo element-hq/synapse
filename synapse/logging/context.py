@@ -235,6 +235,10 @@ class ContextRequest:
     url: str
     protocol: str
     user_agent: str
+    # Unset until the request is routed; narrowed from the resource class name to
+    # the servlet class name as dispatch progresses (see
+    # `SynapseRequest.set_servlet_name`).
+    servlet_name: str | None = None
 
 
 LoggingContextOrSentinel = Union["LoggingContext", "_Sentinel"]
