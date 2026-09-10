@@ -32,7 +32,7 @@ from typing import (
 
 from twisted.internet import defer
 
-from synapse.api.constants import LEGACY_MENTION_PUSH_RULE_IDS, PushRuleIds
+from synapse.api.constants import PushRuleIds
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.config.homeserver import ExperimentalConfig
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -75,6 +75,17 @@ logger = logging.getLogger(__name__)
 # rules over to the intentional mention rules. See
 # `PushRulesWorkerStore._migrate_legacy_mention_push_rules`.
 _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME = "migrate_legacy_mention_push_rules"
+
+# Which intentional mention rule each legacy mention rule's customisations are
+# carried over to. The same pairing as Element Web, which keeps the two rules of
+# each pair in sync when the user changes one of them (`syncedRuleIds` in
+# `apps/web/src/notifications/VectorPushRulesDefinitions.ts`).
+# `.m.rule.contains_display_name` is deliberately absent: it has no counterpart,
+# as intentional mentions are by user ID, not by display name.
+_LEGACY_MENTION_PUSH_RULE_MAPPING: dict[str, str] = {
+    PushRuleIds.CONTAINS_USER_NAME: PushRuleIds.IS_USER_MENTION,
+    PushRuleIds.ROOMNOTIF: PushRuleIds.IS_ROOM_MENTION,
+}
 
 # A user's override of the `actions` of a server-default rule is stored as a dummy
 # row in `push_rules`: the rule id identifies the base rule, `actions` holds the
@@ -293,13 +304,12 @@ class PushRulesWorkerStore(
         `.m.rule.contains_user_name` and `.m.rule.roomnotif` from the base rule
         set (https://spec.matrix.org/v1.19/client-server-api/#predefined-rules).
 
-        - `.m.rule.roomnotif` overrides are copied onto `.m.rule.is_room_mention`.
-        - `.m.rule.contains_display_name` and `.m.rule.contains_user_name`
-          overrides are copied onto `.m.rule.is_user_mention`: it is disabled
-          only if both were disabled, and the `.m.rule.contains_display_name`
-          actions win when both were customised.
+        - `.m.rule.roomnotif` overrides are copied onto `.m.rule.is_room_mention`
+          and `.m.rule.contains_user_name` overrides onto
+          `.m.rule.is_user_mention` (`_LEGACY_MENTION_PUSH_RULE_MAPPING`).
+        - `.m.rule.contains_display_name` has no counterpart and is not copied.
         - A user's own customisation of a mention rule is kept as is. Clients
-          which know about intentional mentions customise both rule sets
+          which know about intentional mentions customise both rules of a pair
           together, so in practice only customisations made by older clients
           are copied.
         - The legacy overrides are left in place.
@@ -308,9 +318,8 @@ class PushRulesWorkerStore(
           another worker), which records each change on the push rules stream
           so that clients receive the new rules in their next incremental sync.
 
-        Best effort because two legacy rules fold into one, and because senders
-        which do not set `m.mentions` no longer trigger mention notifications
-        whatever the user's customisations.
+        Best effort because senders which do not set `m.mentions` no longer
+        trigger mention notifications whatever the user's customisations.
         """
         last_user = progress.get("last_user", "")
 
@@ -329,7 +338,9 @@ class PushRulesWorkerStore(
             # such user, which walks the remainder of the table in one go: the
             # updater cannot shrink that below the cost of a batch of one.
             legacy_clause, legacy_args = make_in_list_sql_clause(
-                self.database_engine, "rule_id", list(LEGACY_MENTION_PUSH_RULE_IDS)
+                self.database_engine,
+                "rule_id",
+                list(_LEGACY_MENTION_PUSH_RULE_MAPPING.keys()),
             )
             sql = f"""
                 SELECT user_name FROM (
@@ -452,19 +463,15 @@ class PushRulesWorkerStore(
         Returns:
             The users whose rules changed.
         """
-        legacy_rule_ids = list(LEGACY_MENTION_PUSH_RULE_IDS)
-        mention_rule_ids = [PushRuleIds.IS_USER_MENTION, PushRuleIds.IS_ROOM_MENTION]
-        legacy_user_mention_rule_ids = (
-            PushRuleIds.CONTAINS_DISPLAY_NAME,
-            PushRuleIds.CONTAINS_USER_NAME,
-        )
-
         # Fetch the overrides those users have on the legacy and mention rules.
         users_clause, users_args = make_in_list_sql_clause(
             self.database_engine, "user_name", user_ids
         )
         rules_clause, rules_args = make_in_list_sql_clause(
-            self.database_engine, "rule_id", legacy_rule_ids + mention_rule_ids
+            self.database_engine,
+            "rule_id",
+            list(_LEGACY_MENTION_PUSH_RULE_MAPPING.keys())
+            + list(_LEGACY_MENTION_PUSH_RULE_MAPPING.values()),
         )
 
         txn.execute(
@@ -500,33 +507,14 @@ class PushRulesWorkerStore(
             user_new_actions: dict[str, str] = {}
             user_new_enabled: dict[str, bool] = {}
 
-            if (
-                PushRuleIds.IS_ROOM_MENTION not in actions
-                and PushRuleIds.ROOMNOTIF in actions
-            ):
-                user_new_actions[PushRuleIds.IS_ROOM_MENTION] = actions[
-                    PushRuleIds.ROOMNOTIF
-                ]
-            if (
-                PushRuleIds.IS_ROOM_MENTION not in enabled
-                and PushRuleIds.ROOMNOTIF in enabled
-            ):
-                user_new_enabled[PushRuleIds.IS_ROOM_MENTION] = enabled[
-                    PushRuleIds.ROOMNOTIF
-                ]
-
-            if PushRuleIds.IS_USER_MENTION not in actions:
-                for legacy_rule_id in legacy_user_mention_rule_ids:
-                    if legacy_rule_id in actions:
-                        user_new_actions[PushRuleIds.IS_USER_MENTION] = actions[
-                            legacy_rule_id
-                        ]
-                        break
-            if PushRuleIds.IS_USER_MENTION not in enabled and all(
-                enabled.get(legacy_rule_id) is False
-                for legacy_rule_id in legacy_user_mention_rule_ids
-            ):
-                user_new_enabled[PushRuleIds.IS_USER_MENTION] = False
+            for (
+                legacy_rule_id,
+                mention_rule_id,
+            ) in _LEGACY_MENTION_PUSH_RULE_MAPPING.items():
+                if mention_rule_id not in actions and legacy_rule_id in actions:
+                    user_new_actions[mention_rule_id] = actions[legacy_rule_id]
+                if mention_rule_id not in enabled and legacy_rule_id in enabled:
+                    user_new_enabled[mention_rule_id] = enabled[legacy_rule_id]
 
             # Setting the actions of a rule also ensures it has a
             # `push_rules_enable` row (see `_upsert_push_rule_txn`); keep

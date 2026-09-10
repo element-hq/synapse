@@ -144,61 +144,35 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
             self._get_rule(user_id, PushRuleIds.IS_ROOM_MENTION), (False, NOTIFY_ONLY)
         )
 
-    def test_user_mention_disabled_only_if_both_legacy_rules_disabled(self) -> None:
-        """`.m.rule.is_user_mention` is only disabled for users who had disabled
-        both `.m.rule.contains_display_name` and `.m.rule.contains_user_name`."""
-        both = "@both:test"
-        self._set_enabled(both, PushRuleIds.CONTAINS_DISPLAY_NAME, False)
-        self._set_enabled(both, PushRuleIds.CONTAINS_USER_NAME, False)
-
-        only_display_name = "@displayname:test"
-        self._set_enabled(only_display_name, PushRuleIds.CONTAINS_DISPLAY_NAME, False)
-
-        only_user_name = "@username:test"
-        self._set_enabled(only_user_name, PushRuleIds.CONTAINS_USER_NAME, False)
-
-        # Explicitly re-enabled rules are not "disabled".
-        re_enabled = "@reenabled:test"
-        self._set_enabled(re_enabled, PushRuleIds.CONTAINS_DISPLAY_NAME, False)
-        self._set_enabled(re_enabled, PushRuleIds.CONTAINS_USER_NAME, True)
-
-        self._run_migration()
-
-        self.assertFalse(self._get_rule(both, PushRuleIds.IS_USER_MENTION)[0])
-        self.assertTrue(
-            self._get_rule(only_display_name, PushRuleIds.IS_USER_MENTION)[0]
-        )
-        self.assertTrue(self._get_rule(only_user_name, PushRuleIds.IS_USER_MENTION)[0])
-        self.assertTrue(self._get_rule(re_enabled, PushRuleIds.IS_USER_MENTION)[0])
-
-    def test_user_mention_actions(self) -> None:
-        """Custom actions on either legacy user mention rule are copied onto
-        `.m.rule.is_user_mention`, with `.m.rule.contains_display_name` taking
-        precedence when both were customised."""
-        both = "@both:test"
-        self._set_actions(both, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY)
-        self._set_actions(both, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_LOUDLY)
-
-        only_display_name = "@displayname:test"
-        self._set_actions(
-            only_display_name, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY
-        )
-
-        only_user_name = "@username:test"
-        self._set_actions(only_user_name, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_LOUDLY)
+    def test_user_mention(self) -> None:
+        """Customisations of `.m.rule.contains_user_name` are copied onto
+        `.m.rule.is_user_mention`."""
+        user_id = "@alice:test"
+        self._set_enabled(user_id, PushRuleIds.CONTAINS_USER_NAME, False)
+        self._set_actions(user_id, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_ONLY)
 
         self._run_migration()
 
         self.assertEqual(
-            self._get_rule(both, PushRuleIds.IS_USER_MENTION), (True, NOTIFY_ONLY)
+            self._get_rule(user_id, PushRuleIds.IS_USER_MENTION), (False, NOTIFY_ONLY)
+        )
+
+    def test_display_name_rule_is_not_copied(self) -> None:
+        """`.m.rule.contains_display_name` has no intentional mention
+        counterpart: its customisations are left where they are."""
+        user_id = "@alice:test"
+        self._set_enabled(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, False)
+        self._set_actions(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY)
+
+        self._run_migration()
+
+        self.assertEqual(
+            self._get_rule(user_id, PushRuleIds.IS_USER_MENTION),
+            (True, USER_MENTION_DEFAULT_ACTIONS),
         )
         self.assertEqual(
-            self._get_rule(only_display_name, PushRuleIds.IS_USER_MENTION),
-            (True, NOTIFY_ONLY),
-        )
-        self.assertEqual(
-            self._get_rule(only_user_name, PushRuleIds.IS_USER_MENTION),
-            (True, NOTIFY_LOUDLY),
+            self._get_rule(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME),
+            (False, NOTIFY_ONLY),
         )
 
     def test_existing_customisations_of_mention_rules_are_kept(self) -> None:
@@ -210,10 +184,9 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         self._set_actions(user_id, PushRuleIds.ROOMNOTIF, NOTIFY_ONLY)
         self._set_actions(user_id, PushRuleIds.IS_ROOM_MENTION, NOTIFY_LOUDLY)
 
-        self._set_enabled(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, False)
         self._set_enabled(user_id, PushRuleIds.CONTAINS_USER_NAME, False)
         self._set_enabled(user_id, PushRuleIds.IS_USER_MENTION, True)
-        self._set_actions(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY)
+        self._set_actions(user_id, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_ONLY)
         self._set_actions(user_id, PushRuleIds.IS_USER_MENTION, NOTIFY_LOUDLY)
 
         self._run_migration()
@@ -230,7 +203,7 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         while the legacy rules are served."""
         user_id = "@alice:test"
         self._set_enabled(user_id, PushRuleIds.ROOMNOTIF, False)
-        self._set_actions(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY)
+        self._set_actions(user_id, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_ONLY)
 
         self._run_migration()
 
@@ -240,7 +213,7 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
                 PushRuleIds.ROOMNOTIF: False,
                 PushRuleIds.IS_ROOM_MENTION: False,
                 # Setting actions on a rule also records it as enabled.
-                PushRuleIds.CONTAINS_DISPLAY_NAME: True,
+                PushRuleIds.CONTAINS_USER_NAME: True,
                 PushRuleIds.IS_USER_MENTION: True,
             },
         )
@@ -252,7 +225,7 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
                     )
                 ),
             ),
-            {PushRuleIds.CONTAINS_DISPLAY_NAME, PushRuleIds.IS_USER_MENTION},
+            {PushRuleIds.CONTAINS_USER_NAME, PushRuleIds.IS_USER_MENTION},
             exact=True,
         )
 
@@ -290,8 +263,8 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         users = [f"@user{i}:test" for i in range(BATCH_SIZE + 1)]
         for user_id in users:
             # Two `push_rules` rows (and two `push_rules_enable` rows) per user.
-            self._set_actions(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, NOTIFY_ONLY)
-            self._set_actions(user_id, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_LOUDLY)
+            self._set_actions(user_id, PushRuleIds.CONTAINS_USER_NAME, NOTIFY_ONLY)
+            self._set_actions(user_id, PushRuleIds.ROOMNOTIF, NOTIFY_LOUDLY)
 
         self.assertEqual(self._run_migration(), 2)
 
@@ -299,6 +272,10 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
             self.assertEqual(
                 self._get_rule(user_id, PushRuleIds.IS_USER_MENTION),
                 (True, NOTIFY_ONLY),
+            )
+            self.assertEqual(
+                self._get_rule(user_id, PushRuleIds.IS_ROOM_MENTION),
+                (True, NOTIFY_LOUDLY),
             )
 
     def test_nothing_to_migrate(self) -> None:
@@ -355,7 +332,7 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
         rules stream entry, so their incremental sync stays empty."""
         user_id = self.register_user("carol", "pass")
         access_token = self.login("carol", "pass")
-        # Disabling only one of the legacy user mention rules changes nothing.
+        # `.m.rule.contains_display_name` is not copied, so nothing changes.
         self._set_enabled(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, False)
         since, _ = self._sync_push_rules(access_token)
 
