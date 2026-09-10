@@ -1,0 +1,51 @@
+name: Post schema diff comment for forked PRs
+
+# The "Schema Diff" workflow can't post a PR comment for PRs from forks,
+# since GITHUB_TOKEN is downgraded to read-only in that context. Instead it
+# uploads the diff (and PR number) as an artifact, which we pick up here and
+# post as a comment.
+#
+# This workflow runs in the context of the base repository (not
+# `pull_request_target`), so its GITHUB_TOKEN has write access. The
+# downloaded artifact comes from an untrusted fork though, so it must only
+# ever be treated as inert comment text, never executed.
+on:
+  workflow_run:
+    workflows: ["Schema Diff"]
+    types: [completed]
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  comment:
+    name: Post schema diff comment
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+    steps:
+      # Only PRs from forks upload this artifact (see schema_diff.yml), so
+      # this step will fail for same-repo PRs, which already got their
+      # comment posted directly.
+      - name: Download schema diff artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: schema-diff
+          path: schema-diff
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read PR number
+        if: steps.download.outcome == 'success'
+        id: pr_number
+        run: echo "number=$(cat schema-diff/pr_number)" >> "$GITHUB_OUTPUT"
+
+      - name: Post sticky PR comment
+        if: steps.download.outcome == 'success'
+        uses: marocchino/sticky-pull-request-comment@3d7b8546315c63df45a03981d50a43ec19237f80 # v3
+        with:
+          header: schema-diff
+          number_force: ${{ steps.pr_number.outputs.number }}
+          path: schema-diff/schema_diff.md
