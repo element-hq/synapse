@@ -151,12 +151,44 @@ class RoomPolicyHandler:
         Returns:
             bool: True if the event is allowed in the room, False otherwise.
         """
+        try:
+            await self.raise_if_not_allowed(event)
+        except Exception as ex:
+            # We probably caught either a refusal to sign, an invalid signature, or
+            # some other transient or network error. These are all rejection cases.
+            logger.warning("Failed to get a signature from the policy server: %s", ex)
+            return False
+
+        return True
+
+    async def raise_if_not_allowed(self, event: EventBase) -> None:
+        """
+        Check if the given event is allowed in the room by the policy server, and raise
+        a SynapseError if not.
+
+        Note: This will *not* raise errors if the room's policy server is Synapse itself.
+        This is because Synapse can't be a policy server (currently).
+
+        If no policy server is configured in the room, this does not raise. Similarly, if
+        the policy server is invalid in any way (not joined, not a server, etc), this
+        does not raise.
+
+        If a valid and contactable policy server is configured in the room, this raises
+        a SynapseError if that server suggests the event is spammy, and returns nothing
+        otherwise.
+
+        Args:
+            event: The event to check. This should be a fully-formed PDU.
+
+        Raises:
+            SynapseError: If the event is spammy according to the policy server.
+        """
         if self._is_policy_server_state_event(event):
-            return True  # always allow policy server change events
+            return  # always allow policy server change events
 
         policy_server = await self._get_policy_server(event.room_id)
         if policy_server is None:
-            return True  # no policy server configured, so allow
+            return  # no policy server configured, so allow
 
         # Check if the event has been signed with the public key in the policy server
         # state event. If it is, the event is valid according to the policy server and
@@ -165,18 +197,13 @@ class RoomPolicyHandler:
             event, policy_server.server_name, policy_server.public_key
         )
         if valid:
-            return True  # valid signature == allow
+            return  # valid signature == allow
 
         # We couldn't save the HTTP hit, so do that hit.
-        try:
-            await self.ask_policy_server_to_sign_event(event, verify=True)
-        except Exception as ex:
-            # We probably caught either a refusal to sign, an invalid signature, or
-            # some other transient or network error. These are all rejection cases.
-            logger.warning("Failed to get a signature from the policy server: %s", ex)
-            return False
+        # This raises the SynapseError we mentioned in the docstring
+        await self.ask_policy_server_to_sign_event(event, verify=True)
 
-        return True  # passed all verifications and checks, so allow
+        return  # passed all verifications and checks, so allow
 
     async def _verify_policy_server_signature(
         self, event: EventBase, policy_server: str, public_key: str

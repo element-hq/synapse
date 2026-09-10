@@ -19,12 +19,15 @@
 #
 #
 
+from http import HTTPStatus
+from typing import Any
 from unittest import mock
 
 import twisted.web.client
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.rest import admin
@@ -317,3 +320,57 @@ class FederationClientTest(FederatingHomeserverTestCase):
         # This is 2 because it failed once from `self.OTHER_SERVER_NAME` and the
         # other from "yet.another.server"
         self.assertEqual(backfill_num_attempts, 2)
+
+    def test_send_invite_rejected_by_policy_server(self) -> None:
+        """
+        Tests that an outgoing invite is rejected if the policy server says it's spam.
+        """
+        # Create the room
+        user_id = self.register_user("kermit", "test")
+        tok = self.login("kermit", "test")
+        room_id = self.helper.create_room_as(room_creator=user_id, tok=tok)
+
+        # Instead of mocking the whole policy server, we'll just mock the policy handler.
+        # Other tests should cover whether a policy server is actually called.
+        # Note: this test relies on `raise_if_not_allowed` being called
+        # regardless of whether a policy server is actually enabled in the room. If the
+        # function ever does lose this no-op check, this test will need to be updated.
+        async def always_throw(*args: Any, **kwargs: Any) -> None:
+            raise SynapseError(
+                HTTPStatus.FORBIDDEN, "All events are rejected by this policy server"
+            )
+
+        self.hs.get_room_policy_handler().raise_if_not_allowed = mock.AsyncMock(  # type: ignore[method-assign]
+            side_effect=always_throw
+        )
+
+        # We need an event to send
+        invite_event, _ = self.get_success(
+            event_injection.create_event(
+                self.hs,
+                room_id=room_id,
+                type="m.room.member",
+                sender="@user:red",
+                state_key="@target:other.example.com",
+                content={"membership": "invite"},
+            )
+        )
+
+        # mock up the response from the remote server, and have the agent return it
+        self._mock_agent.request.side_effect = lambda *args, **kwargs: defer.succeed(
+            FakeResponse.json(
+                payload={
+                    "event": invite_event.get_pdu_json(),
+                }
+            )
+        )
+
+        # The send_invite call should fail with 403
+        f = self.get_failure(
+            self.hs.get_federation_client().send_invite(
+                "other.example.com", room_id, invite_event.event_id, invite_event
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, HTTPStatus.FORBIDDEN)
+        self.assertEqual(f.msg, "All events are rejected by this policy server")

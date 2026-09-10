@@ -109,6 +109,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.account_data_handler = hs.get_account_data_handler()
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self._room_policy_handler = hs.get_room_policy_handler()
 
         self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
@@ -500,6 +501,16 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     prev_state_events=prev_state_events,
                     delay_id=delay_id,
                 )
+
+                # Before we persist the event, run the event through the policy server
+                # to ensure the membership action can happen. This will raise a
+                # SynapseError if the policy server refused it, and otherwise append a
+                # signature to the event.
+                await self._room_policy_handler.ask_policy_server_to_sign_event(
+                    event,
+                    verify=True,
+                )
+
                 context = await unpersisted_context.persist(event)
                 prev_state_ids = await context.get_prev_state_ids(
                     StateFilter.from_types([(EventTypes.Member, user_id)])
