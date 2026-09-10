@@ -1,0 +1,1 @@
+Do not include a media ID in URL previews when the media was automatically quarantined by hash matching; such media is now discarded entirely rather than stored.
