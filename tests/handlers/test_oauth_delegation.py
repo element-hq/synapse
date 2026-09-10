@@ -216,8 +216,6 @@ class MasAuthDelegation(HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.server = FakeMasServer()
         hs = self.setup_test_homeserver()
-        # This triggers the server startup hooks, which starts the Tokio thread pool
-        reactor.run()
         self._auth = checked_cast(MasDelegatedAuth, hs.get_auth())
         return hs
 
