@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-bb6a4dbb.js";
+            window.path_to_searchindex_js = "searchindex-0e749d1b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -459,6 +459,9 @@ information.</p>
 
 # Unstable MSC4140 support
 ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$
+
+# Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
+^/_synapse/mas/
 </code></pre>
 <p>Additionally, the following REST endpoints can be handled for GET requests:</p>
 <pre><code># Push rules requests
@@ -482,7 +485,7 @@ for the room are in flight:</p>
 </code></pre>
 <p>Additionally, the following endpoints should be included if Synapse is configured
 to use SSO (you only need to include the ones for whichever SSO provider you’re
-using):</p>
+using) and delegated authentication isn’t enabled:</p>
 <pre><code># for all SSO providers
 ^/_matrix/client/(api/v1|r0|v3|unstable)/login/sso/redirect
 ^/_synapse/client/pick_idp$
