@@ -150,7 +150,54 @@ class ReplicationDeleteAllPushersForUserRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+class ReplicationMigrateLegacyMentionPushRulesRestServlet(ReplicationEndpoint):
+    """Carries the given users' customisations of the legacy mention push rules
+    over to the intentional mention rules, on the push rules writer.
+
+    Called by the `migrate_legacy_mention_push_rules` background update, which
+    runs on the background worker: only the writer may insert push rules and
+    record the change on the push rules stream.
+
+    Request format:
+
+        POST /_synapse/replication/migrate_legacy_mention_push_rules
+
+        {
+            "user_ids": ["@alice:example.org", ...]
+        }
+
+    Response format:
+
+        {
+            "changed_users": 1
+        }
+    """
+
+    NAME = "migrate_legacy_mention_push_rules"
+    PATH_ARGS = ()
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self._store = hs.get_datastores().main
+
+    @staticmethod
+    async def _serialize_payload(user_ids: list[str]) -> JsonDict:  # type: ignore[override]
+        return {"user_ids": user_ids}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict
+    ) -> tuple[int, JsonDict]:
+        changed_users = await self._store.migrate_legacy_mention_push_rules_for_users(
+            content["user_ids"]
+        )
+
+        return 200, {"changed_users": changed_users}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationRemovePusherRestServlet(hs).register(http_server)
     ReplicationCopyPusherRestServlet(hs).register(http_server)
     ReplicationDeleteAllPushersForUserRestServlet(hs).register(http_server)
+    ReplicationMigrateLegacyMentionPushRulesRestServlet(hs).register(http_server)

@@ -12,8 +12,9 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- The `id` columns of `push_rules` and `push_rules_enable` used to be allocated
--- in-process by the push rules writer. Move them to sequences so that rows can be
--- inserted from any worker (in particular, from background updates).
+-- in-process by the push rules writer, one at a time. Move them to sequences so
+-- that the legacy mention rule migration can allocate a batch of IDs at once,
+-- and so that the IDs stay correct should the writer ever move between workers.
 --
 -- An empty table starts its sequence at 1 rather than 0, as `setval` refuses
 -- values below the sequence's minimum.

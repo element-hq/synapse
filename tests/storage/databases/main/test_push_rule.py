@@ -17,7 +17,9 @@ from typing import Any
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import PushRuleIds
+from synapse.api.constants import AccountDataTypes, PushRuleIds
+from synapse.rest import admin
+from synapse.rest.client import login, sync
 from synapse.server import HomeServer
 from synapse.storage.databases.main.push_rule import (
     _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME,
@@ -53,6 +55,12 @@ BATCH_SIZE = 2
 class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
     """Tests the background update which carries customisations of the legacy
     mention rules (removed by MSC4210) over to the intentional mention rules."""
+
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
@@ -303,3 +311,55 @@ class LegacyMentionPushRulesMigrationTestCase(HomeserverTestCase):
             self._get_rule("@alice:test", PushRuleIds.IS_USER_MENTION),
             (False, USER_MENTION_DEFAULT_ACTIONS),
         )
+
+    def _sync_push_rules(
+        self, access_token: str, since: str | None = None
+    ) -> tuple[str, list[JsonDict]]:
+        """Syncs, returning the next batch token and the `m.push_rules` account
+        data events in the response."""
+        url = "/sync" if since is None else f"/sync?since={since}"
+        channel = self.make_request("GET", url, access_token=access_token)
+        self.assertEqual(channel.code, 200, channel.json_body)
+        events = channel.json_body.get("account_data", {}).get("events", [])
+        return (
+            channel.json_body["next_batch"],
+            [
+                ev["content"]
+                for ev in events
+                if ev["type"] == AccountDataTypes.PUSH_RULES
+            ],
+        )
+
+    def test_migrated_rules_reach_clients_through_incremental_sync(self) -> None:
+        """The writer records each migrated override on the push rules stream,
+        so a client which is already syncing receives the new rules in its next
+        incremental sync rather than on its next full fetch."""
+        user_id = self.register_user("alice", "pass")
+        access_token = self.login("alice", "pass")
+        self._set_enabled(user_id, PushRuleIds.ROOMNOTIF, False)
+        since, _ = self._sync_push_rules(access_token)
+
+        self._run_migration()
+
+        _, push_rules = self._sync_push_rules(access_token, since)
+        self.assertEqual(len(push_rules), 1, push_rules)
+        room_mention = next(
+            rule
+            for rule in push_rules[0]["global"]["override"]
+            if rule["rule_id"] == ".m.rule.is_room_mention"
+        )
+        self.assertFalse(room_mention["enabled"])
+
+    def test_untouched_users_are_not_woken_by_sync(self) -> None:
+        """A user the migration visits without changing anything gets no push
+        rules stream entry, so their incremental sync stays empty."""
+        user_id = self.register_user("carol", "pass")
+        access_token = self.login("carol", "pass")
+        # Disabling only one of the legacy user mention rules changes nothing.
+        self._set_enabled(user_id, PushRuleIds.CONTAINS_DISPLAY_NAME, False)
+        since, _ = self._sync_push_rules(access_token)
+
+        self._run_migration()
+
+        _, push_rules = self._sync_push_rules(access_token, since)
+        self.assertEqual(push_rules, [])
