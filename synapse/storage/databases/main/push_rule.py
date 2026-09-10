@@ -298,18 +298,19 @@ class PushRulesWorkerStore(
           overrides are copied onto `.m.rule.is_user_mention`: it is disabled
           only if both were disabled, and the `.m.rule.contains_display_name`
           actions win when both were customised.
-        - A user's own customisation of a mention rule is kept as is.
+        - A user's own customisation of a mention rule is kept as is. Clients
+          which know about intentional mentions customise both rule sets
+          together, so in practice only customisations made by older clients
+          are copied.
         - The legacy overrides are left in place.
         - This update selects the users on the background worker, but the rows
           are written by the push rules writer (over replication when that is
           another worker), which records each change on the push rules stream
           so that clients receive the new rules in their next incremental sync.
 
-        Best effort because two legacy rules fold into one, because senders
+        Best effort because two legacy rules fold into one, and because senders
         which do not set `m.mentions` no longer trigger mention notifications
-        whatever the user's customisations, and because users who had disabled
-        both legacy user mention rules stop being notified of intentional
-        mentions as soon as this runs.
+        whatever the user's customisations.
         """
         last_user = progress.get("last_user", "")
 
