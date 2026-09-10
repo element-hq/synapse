@@ -1,0 +1,1 @@
+Keep serving `/metrics` when a single metric collector raises, instead of failing the whole scrape with a 500. Introduced in v1.135.0.
