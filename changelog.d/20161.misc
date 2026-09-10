@@ -1,0 +1,1 @@
+Run the in-repo Complement test suite in CI, even when the standard Complement suite fails.
