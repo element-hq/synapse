@@ -23,18 +23,26 @@ restores, so everything here reads the logcontext at send time instead of using 
 scopes.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import sentry_sdk
+from sentry_sdk.serializer import serialize
 
-from synapse.logging.context import ContextRequest, LoggingContext, current_context
+from synapse.logging.context import (
+    ContextRequest,
+    LoggingContext,
+    current_context,
+    set_sentry_breadcrumb_ring_size,
+)
 from synapse.metrics.background_process_metrics import BackgroundProcessLoggingContext
 from synapse.types import UserID
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.hash import sha256_and_url_safe_base64
 
 if TYPE_CHECKING:
-    from sentry_sdk.types import Event, Hint
+    from collections import deque
+
+    from sentry_sdk.types import Breadcrumb, BreadcrumbHint, Event, Hint
 
     from synapse.server import HomeServer
 
@@ -63,6 +71,10 @@ _LOGCONTEXT_RECORD_ATTRIBUTES = frozenset(
 _UNINTERESTING_EXTRA_KEYS = frozenset({"sys.argv", "asctime"})
 
 _STRIPPED_EXTRA_KEYS = _LOGCONTEXT_RECORD_ATTRIBUTES | _UNINTERESTING_EXTRA_KEYS
+
+# Breadcrumb categories are logger names; these are the access log's, one per listener
+# protocol.
+_ACCESS_LOG_CATEGORY_PREFIXES = ("synapse.access.http.", "synapse.access.https.")
 
 
 def _pseudonymous_user_id(identifier: str) -> str:
@@ -130,6 +142,21 @@ def _attach_request(event: "Event", request: ContextRequest) -> None:
     }
 
 
+def _snapshot_breadcrumbs(breadcrumbs: "deque[Breadcrumb]") -> list["Breadcrumb"]:
+    """Copy a logcontext's breadcrumb ring.
+
+    Appends happen from database threads, which run in a child logcontext sharing the
+    ring, while this runs on the reactor thread. `list()` on a deque is a single
+    C-level loop, so the GIL is not released mid-iteration on the standard build, but
+    that is an implementation detail; if it ever does raise, losing the breadcrumbs is
+    better than losing the event.
+    """
+    try:
+        return list(breadcrumbs)
+    except RuntimeError:
+        return []
+
+
 def before_send(event: "Event", hint: "Hint") -> "Event | None":
     """Rewrite an outgoing Sentry event to carry the current logcontext's request.
 
@@ -161,21 +188,94 @@ def before_send(event: "Event", hint: "Hint") -> "Event | None":
     if context.request is not None:
         _attach_request(event, context.request)
 
+    if context.sentry_breadcrumbs is not None:
+        # Replace whatever the SDK collected in its shared ring with this request's
+        # own breadcrumbs.
+        event["breadcrumbs"] = {
+            "values": _snapshot_breadcrumbs(context.sentry_breadcrumbs)
+        }
+
     return event
+
+
+def before_breadcrumb(
+    crumb: "Breadcrumb", hint: "BreadcrumbHint"
+) -> "Breadcrumb | None":
+    """Record a breadcrumb against the current logcontext rather than the SDK.
+
+    Registered as `sentry_sdk.init(before_breadcrumb=...)`. The SDK keeps one
+    breadcrumb ring per isolation scope, which every request on a worker shares, so
+    returning `None` here keeps the crumb out of it; `before_send` reads the
+    logcontext's ring instead.
+    """
+    category = crumb.get("category")
+    if category is not None and category.startswith(_ACCESS_LOG_CATEGORY_PREFIXES):
+        # The access log names other users' request paths and Matrix IDs, and is
+        # already in the normal logs keyed by request ID.
+        return None
+
+    breadcrumbs = current_context().sentry_breadcrumbs
+    if breadcrumbs is None:
+        # Outside any logcontext, leave the SDK to its default behaviour; events
+        # captured there have no request to keep the crumbs apart from.
+        return crumb
+
+    # The SDK serialises the event and runs `EventScrubber` over it before it calls
+    # `before_send`, so crumbs attached there miss both passes: strip the
+    # `LoggingContextFilter` record attributes the SDK's breadcrumb handler copies
+    # into `data`, as `before_send` does for `extra`, and serialise the crumb so that
+    # the `datetime` the SDK leaves in `timestamp` cannot fail to JSON-encode in the
+    # transport and take the whole event down with it. `serialize` is
+    # `sentry_sdk`-internal API, and sees the crumb as a top-level object, so the SDK's
+    # databag trimming does not reach `data`; strings are still capped at
+    # `max_value_length`.
+    data = crumb.get("data")
+    if data is not None:
+        for key in _STRIPPED_EXTRA_KEYS:
+            data.pop(key, None)
+
+    options = sentry_sdk.get_client().options
+    breadcrumbs.append(
+        serialize(dict(crumb), max_value_length=options.get("max_value_length"))
+    )
+    return None
+
+
+def sentry_sdk_options(
+    *, dsn: str | None, environment: str | None, max_breadcrumbs: int
+) -> dict[str, Any]:
+    """The options Synapse initialises `sentry_sdk` with.
+
+    Kept out of `setup_sentry` so that tests can drive the SDK end to end with their
+    own transport and the options Synapse runs with.
+    """
+    return {
+        "dsn": dsn,
+        "release": SYNAPSE_VERSION,
+        "environment": environment,
+        # Everything the events say about the request is assembled by `before_send`,
+        # in a pseudonymised form.
+        "send_default_pii": False,
+        "before_send": before_send,
+        "before_breadcrumb": before_breadcrumb,
+        "max_breadcrumbs": max_breadcrumbs,
+    }
 
 
 def setup_sentry(hs: "HomeServer") -> None:
     """Enable the Sentry integration."""
 
+    max_breadcrumbs = hs.config.metrics.sentry_max_breadcrumbs
+
     sentry_sdk.init(
-        dsn=hs.config.metrics.sentry_dsn,
-        release=SYNAPSE_VERSION,
-        environment=hs.config.metrics.sentry_environment,
-        # Everything the events say about the request is assembled by `before_send`,
-        # in a pseudonymised form.
-        send_default_pii=False,
-        before_send=before_send,
+        **sentry_sdk_options(
+            dsn=hs.config.metrics.sentry_dsn,
+            environment=hs.config.metrics.sentry_environment,
+            max_breadcrumbs=max_breadcrumbs,
+        )
     )
+
+    set_sentry_breadcrumb_ring_size(max_breadcrumbs)
 
     # We set some default tags that give some context to this instance
     global_scope = sentry_sdk.Scope.get_global_scope()

@@ -74,6 +74,22 @@ class MetricsConfig(Config):
                     "sentry.dsn field is required when sentry integration is enabled"
                 )
 
+            # Half the `sentry_sdk` default of 100: the ring is kept per in-flight
+            # request rather than once per worker, so the memory cost scales with
+            # concurrency. Arbitrary beyond that.
+            self.sentry_max_breadcrumbs = config["sentry"].get("max_breadcrumbs", 50)
+            # `deque(maxlen=...)` would otherwise raise on the first request, well
+            # after the server has come up.
+            if (
+                not isinstance(self.sentry_max_breadcrumbs, int)
+                or isinstance(self.sentry_max_breadcrumbs, bool)
+                or self.sentry_max_breadcrumbs < 0
+            ):
+                raise ConfigError(
+                    "sentry.max_breadcrumbs must be a non-negative integer, got %r"
+                    % (self.sentry_max_breadcrumbs,)
+                )
+
     def generate_config_section(
         self,
         report_stats: bool | None = None,
