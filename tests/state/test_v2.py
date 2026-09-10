@@ -23,18 +23,21 @@ from typing import (
     Collection,
     Iterable,
     Mapping,
+    Sequence,
     TypeVar,
 )
 
 import attr
+from parameterized import parameterized
 
 from twisted.internet import defer
 
 from synapse.api.constants import EventTypes, JoinRules, Membership
-from synapse.api.room_versions import RoomVersions
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.event_auth import auth_types_for_event
 from synapse.events import EventBase
 from synapse.state.v2 import (
+    ConflictCache,
     _get_auth_chain_difference,
     _get_power_level_for_sender,
     lexicographical_topological_sort,
@@ -180,6 +183,59 @@ INITIAL_EVENTS = [
 ]
 
 INITIAL_EDGES = ["START", "IMZ", "IMC", "IMB", "IJR", "IPOWER", "IMA", "CREATE"]
+
+ZARA_KEY = (EventTypes.Member, ZARA)
+TOPIC_KEY = (EventTypes.Topic, "")
+
+
+def _member(node_id: str, sender: str, state_key: str, content: dict) -> FakeEvent:
+    return FakeEvent(
+        id=node_id,
+        sender=sender,
+        type=EventTypes.Member,
+        state_key=state_key,
+        content=content,
+    )
+
+
+# Events for the conflict cache tests, all hanging off START.
+#
+# Bob sets the topic twice. He has no power under IPOWER, so both fail auth
+# unless PA, which gives him some, is in the unconflicted state.
+#
+# Zara joins again on two branches and invites Evelyn from the end of each. The
+# invites are what put the second pair of Zara joins into the auth chain
+# difference. See `test_conflict_cache_key_repartitioned`.
+CACHE_TEST_CASE_EVENTS = [
+    FakeEvent(
+        id="PA",
+        sender=ALICE,
+        type=EventTypes.PowerLevels,
+        state_key="",
+        content={"users": {ALICE: 100, BOB: 50}},
+    ),
+    FakeEvent(id="T1", sender=BOB, type=EventTypes.Topic, state_key="", content={}),
+    FakeEvent(id="T2", sender=BOB, type=EventTypes.Topic, state_key="", content={}),
+    _member("ZJ1", ZARA, ZARA, MEMBERSHIP_CONTENT_JOIN),
+    _member("ZJ2", ZARA, ZARA, MEMBERSHIP_CONTENT_JOIN),
+    _member("INV1", ZARA, EVELYN, {"membership": Membership.INVITE}),
+    _member("INV2", ZARA, EVELYN, {"membership": Membership.INVITE}),
+]
+
+CACHE_TEST_CASE_EDGES = [
+    ["PA", "START"],
+    ["T1", "START"],
+    ["T2", "START"],
+    ["INV1", "ZJ1", "START"],
+    ["INV2", "ZJ2", "START"],
+]
+
+# A room version that resolves with plain v2, and one that resolves with v2.1.
+# They share their auth rules, so the two only differ in the way that matters
+# to the conflict cache: v2.1 starts the iterative auth checks from the empty
+# state, plain v2 from the unconflicted state.
+V2_ROOM = RoomVersions.V11
+V21_ROOM = RoomVersions.HydraV11
 
 
 class StateTestCase(unittest.TestCase):
@@ -453,21 +509,134 @@ class StateTestCase(unittest.TestCase):
 
         self.do_check(events, edges, expected_state_ids)
 
-    def do_check(
+    # The conflict cache tests below resolve `CACHE_TEST_CASE_EVENTS` with a plain dict
+    # as the cache. A miss adds an entry to it and a hit does not, so its size
+    # afterwards is the number of times the conflicted set was resolved.
+
+    def _build_cache_scenario(self) -> None:
+        self.event_map, self.state_at_event = self.build_event_graph(
+            CACHE_TEST_CASE_EVENTS, CACHE_TEST_CASE_EDGES
+        )
+
+    def _state(self, *node_ids: str) -> StateMap[str]:
+        """The state at START with the given events applied on top."""
+        state = dict(self.state_at_event["START"])
+        for node_id in node_ids:
+            event = self.event_map[EventID(node_id, "example.com").to_string()]
+            state[(event.type, event.state_key)] = event.event_id
+        return state
+
+    def _resolve_with_cache(
+        self,
+        room_version: RoomVersion,
+        state_sets: Sequence[StateMap[str]],
+        conflict_cache: ConflictCache,
+    ) -> StateMap[str]:
+        return self.successResultOf(
+            defer.ensureDeferred(
+                resolve_events_with_store(
+                    FakeClock(),
+                    ROOM_ID,
+                    room_version,
+                    state_sets,
+                    event_map=None,
+                    state_res_store=TestStateResolutionStore(self.event_map),
+                    conflict_cache=conflict_cache,
+                )
+            )
+        )
+
+    @parameterized.expand((V2_ROOM, V21_ROOM))
+    def test_conflict_cache_shared_across_unconflicted_state(
+        self, room_version: RoomVersion
+    ) -> None:
+        """Two calls with the same conflicted set share a cache entry, and each
+        still gets its own unconflicted state back.
+
+        Zara's membership is the unconflicted key that differs. Nothing in the
+        conflict over the topic is authed against it, so under plain v2 it
+        stays out of the cache key too.
+        """
+        self._build_cache_scenario()
+        conflict_cache: dict[bytes, StateMap[str]] = {}
+
+        with_zara = [self._state("PA", "T1"), self._state("PA", "T2")]
+        without_zara = [
+            {key: value for key, value in state.items() if key != ZARA_KEY}
+            for state in with_zara
+        ]
+
+        first = self._resolve_with_cache(room_version, with_zara, conflict_cache)
+        second = self._resolve_with_cache(room_version, without_zara, conflict_cache)
+        self.assertEqual(len(conflict_cache), 1, "expected a cache hit")
+
+        self.assertIn(ZARA_KEY, first)
+        self.assertNotIn(ZARA_KEY, second)
+
+        # Everything else agrees.
+        self.assertEqual({k: v for k, v in first.items() if k != ZARA_KEY}, second)
+
+    def test_conflict_cache_keys_on_base_state(self) -> None:
+        """Changing an unconflicted key that the auth checks read is a miss
+        under plain v2, and the two resolutions reach different answers."""
+        self._build_cache_scenario()
+
+        powerless = [self._state("T1"), self._state("T2")]
+        powered = [self._state("PA", "T1"), self._state("PA", "T2")]
+
+        conflict_cache: dict[bytes, StateMap[str]] = {}
+        under_ipower = self._resolve_with_cache(V2_ROOM, powerless, conflict_cache)
+        under_pa = self._resolve_with_cache(V2_ROOM, powered, conflict_cache)
+        self.assertEqual(len(conflict_cache), 2, "expected a cache miss")
+
+        # Bob's topics fail auth under IPOWER and pass under PA.
+        self.assertNotIn(TOPIC_KEY, under_ipower)
+        self.assertIn(TOPIC_KEY, under_pa)
+
+    def test_conflict_cache_key_repartitioned(self) -> None:
+        """The same conflicted set can split into different conflicted keys.
+
+        Zara's membership is unconflicted in the first call, with the joins
+        that compete for it reaching the conflicted set through the auth chain
+        difference of the two invites. In the second call it is a conflicted
+        key. Both calls have the same cache key, so what is cached has to carry
+        Zara's key even though the first call's own answer for it came from
+        its unconflicted state.
+        """
+        self._build_cache_scenario()
+
+        agreed = [self._state("INV1"), self._state("INV2")]
+        conflicting = [self._state("ZJ1", "INV1"), self._state("ZJ2", "INV2")]
+
+        conflict_cache: dict[bytes, StateMap[str]] = {}
+        agreed_result = self._resolve_with_cache(V21_ROOM, agreed, conflict_cache)
+        warm = self._resolve_with_cache(V21_ROOM, conflicting, conflict_cache)
+        self.assertEqual(len(conflict_cache), 1, "expected a cache hit")
+
+        # The unconflicted state wins for the call that had one.
+        self.assertEqual(agreed_result[ZARA_KEY], self._state()[ZARA_KEY])
+
+        # The second call gets the winner from the cached resolution, the same
+        # one it computes from cold.
+        conflict_cache.clear()
+        cold = self._resolve_with_cache(V21_ROOM, conflicting, conflict_cache)
+        self.assertNotEqual(warm[ZARA_KEY], agreed_result[ZARA_KEY])
+        self.assertEqual(warm, cold)
+
+    def build_event_graph(
         self,
         events: list[FakeEvent],
         edges: list[list[str]],
-        expected_state_ids: list[str],
-    ) -> None:
-        """Take a list of events and edges and calculate the state of the
-        graph at END, and asserts it matches `expected_state_ids`
+    ) -> tuple[dict[str, EventBase], dict[str, StateMap[str]]]:
+        """Build the graph of `INITIAL_EVENTS` plus `events`.
 
         Args:
             events
             edges: A list of chains of event edges, e.g.
                 `[[A, B, C]]` are edges A->B and B->C.
-            expected_state_ids: The expected state at END, (excluding
-                the keys that haven't changed since START).
+
+        Returns:
+            The events by event ID, and the state after each node ID.
         """
         # We want to sort the events into topological order for processing.
         graph: dict[str, set[str]] = {}
@@ -538,6 +707,26 @@ class StateTestCase(unittest.TestCase):
 
             state_at_event[node_id] = state_after
             event_map[event_id] = event
+
+        return event_map, state_at_event
+
+    def do_check(
+        self,
+        events: list[FakeEvent],
+        edges: list[list[str]],
+        expected_state_ids: list[str],
+    ) -> None:
+        """Take a list of events and edges and calculate the state of the
+        graph at END, and asserts it matches `expected_state_ids`
+
+        Args:
+            events
+            edges: A list of chains of event edges, e.g.
+                `[[A, B, C]]` are edges A->B and B->C.
+            expected_state_ids: The expected state at END, (excluding
+                the keys that haven't changed since START).
+        """
+        event_map, state_at_event = self.build_event_graph(events, edges)
 
         expected_state = {}
         for node_id in expected_state_ids:

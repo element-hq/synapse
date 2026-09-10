@@ -32,7 +32,6 @@ from typing import (
 )
 
 import attr
-from immutabledict import immutabledict
 from prometheus_client import Counter, Histogram
 
 from synapse.api.constants import EventTypes
@@ -113,18 +112,13 @@ class _StateCacheEntry:
         #
         # This can be None if we have a `state_group` (as then we can fetch the
         # state from the DB.)
-        self._state: StateMap[str] | None = (
-            immutabledict(state) if state is not None else None
-        )
-
+        self._state = state
         # the ID of a state group if one and only one is involved.
         # otherwise, None otherwise?
         self.state_group = state_group
 
         self.prev_group = prev_group
-        self.delta_ids: StateMap[str] | None = (
-            immutabledict(delta_ids) if delta_ids is not None else None
-        )
+        self.delta_ids = delta_ids
 
     async def get_state(
         self,
@@ -636,6 +630,33 @@ class StateResolutionHandler:
             )
         )
 
+        # The result of resolving a conflicted set of state, keyed on a digest
+        # of the room version, the conflicted set and the slice of the
+        # unconflicted state the resolution reads. See `v2._conflict_cache_key`.
+        #
+        # `_state_cache` above is keyed on the exact set of state groups, so
+        # adding or swapping one forward extremity misses it. Different subsets
+        # of a room's forward extremities often produce the same conflicted
+        # set, and all of those hit here. This cache also covers the callers
+        # that use `resolve_events_with_store` directly, without state groups,
+        # such as `FederationEventHandler`. Neither the keys nor the values
+        # mention state groups, so deleting state groups invalidates nothing.
+        #
+        # With `iterable=True`, `max_len` bounds the total number of state
+        # entries across all values rather than the number of values.
+        self._conflict_resolution_cache: ExpiringCache[bytes, StateMap[str]] = (
+            ExpiringCache(
+                cache_name="state_conflict_resolution_cache",
+                server_name=self.server_name,
+                hs=hs,
+                clock=self.clock,
+                max_len=100000,
+                expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,
+                iterable=True,
+                reset_expiry_on_get=True,
+            )
+        )
+
         #
         # stuff for tracking time spent on state-res by room
         #
@@ -798,6 +819,7 @@ class StateResolutionHandler:
                         state_sets,
                         event_map,
                         state_res_store,
+                        conflict_cache=self._conflict_resolution_cache,
                     )
         finally:
             self._record_state_res_metrics(room_id, m.get_resource_usage())
