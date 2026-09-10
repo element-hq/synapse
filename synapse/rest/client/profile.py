@@ -172,13 +172,21 @@ class ProfileFieldRestServlet(RestServlet):
         is_admin = await self.auth.is_server_admin(requester)
 
         if not field_name:
-            raise SynapseError(400, "Field name too short", errcode=Codes.INVALID_PARAM)
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Field name too short",
+                errcode=Codes.INVALID_PARAM,
+            )
 
         if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
-            raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Field name too long",
+                errcode=Codes.KEY_TOO_LARGE,
+            )
         if not is_namedspaced_grammar(field_name):
             raise SynapseError(
-                400,
+                HTTPStatus.BAD_REQUEST,
                 "Field name does not follow Common Namespaced Identifier Grammar",
                 errcode=Codes.INVALID_PARAM,
             )
@@ -188,7 +196,22 @@ class ProfileFieldRestServlet(RestServlet):
             new_value = content[field_name]
         except KeyError:
             raise SynapseError(
-                400, f"Missing key '{field_name}'", errcode=Codes.MISSING_PARAM
+                HTTPStatus.BAD_REQUEST,
+                f"Missing key '{field_name}'",
+                errcode=Codes.MISSING_PARAM,
+            )
+
+        if new_value is None:
+            # > Servers MAY reject null values.
+            # — https://spec.matrix.org/v1.19/client-server-api/#put_matrixclientv3profileuseridkeyname
+            #
+            # Although we can safely handle nulls internally, for interoperability reasons it is preferable if we
+            # reject them.
+            # That way, clients don't accidentally rely on being able to send them.
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                f"'{field_name}' can not be `null`.",
+                Codes.INVALID_PARAM,
             )
 
         propagate = _read_propagate(self.hs, request)
