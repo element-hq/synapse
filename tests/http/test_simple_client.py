@@ -46,15 +46,12 @@ class SimpleHttpClientTests(HomeserverTestCase):
         If the DNS lookup returns an error, it will bubble up.
         """
         d = defer.ensureDeferred(self.cl.get_json("http://testserv2:8008/foo/bar"))
-        self.pump()
 
         f = self.failureResultOf(d)
         self.assertIsInstance(f.value, DNSLookupError)
 
     def test_client_connection_refused(self) -> None:
         d = defer.ensureDeferred(self.cl.get_json("http://testserv:8008/foo/bar"))
-
-        self.pump()
 
         # Nothing happened yet
         self.assertNoResult(d)
@@ -78,8 +75,6 @@ class SimpleHttpClientTests(HomeserverTestCase):
         ConnectingCancelledError or TimeoutError.
         """
         d = defer.ensureDeferred(self.cl.get_json("http://testserv:8008/foo/bar"))
-
-        self.pump()
 
         # Nothing happened yet
         self.assertNoResult(d)
@@ -105,8 +100,6 @@ class SimpleHttpClientTests(HomeserverTestCase):
         timed out, it'll give a ResponseNeverReceived.
         """
         d = defer.ensureDeferred(self.cl.get_json("http://testserv:8008/foo/bar"))
-
-        self.pump()
 
         # Nothing happened yet
         self.assertNoResult(d)
