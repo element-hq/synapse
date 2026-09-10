@@ -349,40 +349,41 @@ class StateDeltasStore(SQLBaseStore):
         # A worker reading the events stream from replication advances one
         # event at a time, so its tokens routinely fall inside a batch:
         #
-        #                      stream_ordering  event          delta row `stream_id`
-        #   batch A              10             message
-        #     from_token = 11 -> 11             message
-        #                        12             state event X  X: 10
-        #   ...                                 any number of batches
-        #   batch Z              90             state event Y  Y: 90
-        #     to_token = 91   -> 91             message
-        #                        92             state event Z  Z: 90
+        #                            stream_ordering  event          delta row `stream_id`
+        #   from-token batch           10             message
+        #     from_token = 11 ->       11             message
+        #                              12             state event X  X: 10
+        #   ...                                       any number of batches
+        #   to-token batch             90             state event Y  Y: 90
+        #     to_token = 91   ->       91             message
+        #                              92             state event Z  Z: 90
         #
         # On `stream_id` alone, the window (11, 91] misses X's delta (10 <= 11,
         # though event 12 is in the window) and includes Z's (90 <= 91, though
         # event 92 is past it). Y's delta is right either way.
         #
         # Batches of a room follow each other in the stream, so only two of
-        # them can be cut by a token: the one that contains `from_token` (batch
-        # A) and the one that contains `to_token` (batch Z). Every other batch
-        # is entirely inside the window or entirely outside it, and so are its
-        # delta rows, whether judged on `stream_id` or on `stream_ordering`.
+        # them can be cut by a token: the one that contains `from_token` (the
+        # from-token batch) and the one that contains `to_token` (the to-token
+        # batch). Every other batch is entirely inside the window or entirely
+        # outside it, and so are its delta rows, whether judged on `stream_id`
+        # or on `stream_ordering`.
         #
-        # Batch A is found without looking at `events`: its rows in
+        # The from-token batch is found without looking at `events`: its rows in
         # `current_state_delta_stream` carry the latest `stream_id` <=
         # `from_token` in the room, since every later batch writes its rows
         # after `from_token`. So instead of fetching the delta rows with
-        # `from_token` < `stream_id`, fetch from batch A's `stream_id` inclusive
-        # (`from_batch_stream_id` below): the same delta rows plus those of
-        # batch A. (If batch A changed no state, this picks the previous batch
-        # that did; its events are all before `from_token`, so its delta rows
-        # are dropped below.)
+        # `from_token` < `stream_id`, fetch from that batch's `stream_id`
+        # inclusive (`from_batch_stream_id` below): the same delta rows plus
+        # those of the from-token batch. (If it changed no state, this picks the
+        # previous batch that did; its events are all before `from_token`, so
+        # its delta rows are dropped below.)
         #
-        # Among the fetched delta rows, batch A's are those at
-        # `from_batch_stream_id`, and batch Z's are found the same way, at the
-        # latest `stream_id` <= `to_token`. Only these need their event's
-        # `stream_ordering`, looked up in `events` by `event_id`; such a delta
-        # row is kept when
+        # Among the fetched delta rows, the from-token batch's are those at
+        # `from_batch_stream_id`, and the to-token batch's are found the same
+        # way, at the latest `stream_id` <= `to_token`. Only these need their
+        # event's `stream_ordering`, looked up in `events` by `event_id`; such a
+        # delta row is kept when
         #     `from_token` < max(`stream_id`, `stream_ordering`) <= `to_token`.
         # Every other delta row is kept when
         #     `from_token` < `stream_id` <= `to_token`.
@@ -390,7 +391,8 @@ class StateDeltasStore(SQLBaseStore):
 
         lower_clause = ""
         if from_token is not None:
-            # Batch A's `stream_id`: the latest `stream_id` <= `from_token`.
+            # The from-token batch's `stream_id`: the latest `stream_id` <=
+            # `from_token`.
             # (`from_token.stream` is the minimum over writers; the delta rows
             # of a writer that is further ahead are in the range anyway and are
             # judged against that writer's position below.)
@@ -405,8 +407,8 @@ class StateDeltasStore(SQLBaseStore):
             from_batch_stream_id: int | None = row[0] if row is not None else None
             if from_batch_stream_id is not None:
                 # No delta row has `from_batch_stream_id` < `stream_id` <=
-                # `from_token.stream`, so this is batch A plus everything after
-                # `from_token`.
+                # `from_token.stream`, so this is the from-token batch plus
+                # everything after `from_token`.
                 lower_clause = "AND ? <= stream_id"
                 args.append(from_batch_stream_id)
             else:
@@ -430,11 +432,11 @@ class StateDeltasStore(SQLBaseStore):
             txn.fetchall(),
         )
 
-        # The `stream_id` of batch A and of batch Z, per writer: the latest
-        # `stream_id` <= the writer's position in `from_token` and in
-        # `to_token`. Historic delta rows have no instance name and count as
-        # "master", as in `_filter_results_by_stream`.
-        cut_batch_stream_ids: set[tuple[str, int]] = set()
+        # The `stream_id` of the from-token batch and of the to-token batch,
+        # per writer: the latest `stream_id` <= the writer's position in
+        # `from_token` and in `to_token`. Historic delta rows have no instance
+        # name and count as "master", as in `_filter_results_by_stream`.
+        token_batch_stream_ids: set[tuple[str, int]] = set()
         for token in (from_token, to_token):
             if token is None:
                 continue
@@ -445,17 +447,18 @@ class StateDeltasStore(SQLBaseStore):
                     latest_by_instance[instance_name] = max(
                         latest_by_instance.get(instance_name, stream_id), stream_id
                     )
-            cut_batch_stream_ids.update(latest_by_instance.items())
+            token_batch_stream_ids.update(latest_by_instance.items())
 
-        # Only the delta rows of batches A and Z need their event's position.
-        cut_batch_event_ids = [
+        # Only the delta rows of the two token batches need their event's
+        # position.
+        token_batch_event_ids = [
             event_id
             for instance_name, stream_id, _, _, event_id, _ in rows
             if event_id is not None
-            and (instance_name or "master", stream_id) in cut_batch_stream_ids
+            and (instance_name or "master", stream_id) in token_batch_stream_ids
         ]
         event_positions: dict[str, tuple[str | None, int]] = {}
-        for chunk in batch_iter(cut_batch_event_ids, 1000):
+        for chunk in batch_iter(token_batch_event_ids, 1000):
             clause, clause_args = make_in_list_sql_clause(
                 self.database_engine, "event_id", chunk
             )
@@ -481,11 +484,11 @@ class StateDeltasStore(SQLBaseStore):
             prev_event_id,
         ) in rows:
             # The delta's position: its `stream_id`, unless it belongs to
-            # batch A or Z and its event sits later in the stream.
+            # a token batch and its event sits later in the stream.
             effective_instance, effective_stream = row_instance, row_stream
             if (
                 event_id is not None
-                and (row_instance or "master", row_stream) in cut_batch_stream_ids
+                and (row_instance or "master", row_stream) in token_batch_stream_ids
             ):
                 position = event_positions.get(event_id)
                 if position is not None and position[1] > row_stream:
