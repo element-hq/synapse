@@ -2451,9 +2451,9 @@ class EventCreationHandler:
             self.validator.validate_builder(builder)
 
         except SynapseError as e:
-            raise Exception(
-                "Third party rules module created an invalid event: " + e.msg,
-            )
+            # Prepend the error message with some context.
+            e.msg = "Third party rules module created an invalid event: " + e.msg
+            raise
 
         immutable_fields = [
             # changing the room is going to break things: we've already checked that the
