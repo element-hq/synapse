@@ -1,0 +1,1 @@
+Don't 500 when calling /context on an out-of-band membership event.
