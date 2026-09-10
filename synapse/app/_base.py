@@ -716,7 +716,10 @@ async def start(hs: "HomeServer", *, freeze: bool = True) -> None:
         m = module(config, module_api)
         logger.info("Loaded module %s", m)
 
-    if hs.config.auto_accept_invites.enabled:
+    if (
+        hs.config.auto_accept_invites.enabled
+        or hs.config.auto_accept_invites.enabled_for_accepted_knocks
+    ):
         # Start the local auto_accept_invites module.
         m = InviteAutoAccepter(hs.config.auto_accept_invites, module_api)
         logger.info("Loaded local module %s", m)
