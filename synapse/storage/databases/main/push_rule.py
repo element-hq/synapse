@@ -78,10 +78,11 @@ _MIGRATE_LEGACY_MENTION_PUSH_RULES_UPDATE_NAME = "migrate_legacy_mention_push_ru
 
 # Which intentional mention rule each legacy mention rule's customisations are
 # carried over to. The same pairing as Element Web, which keeps the two rules of
-# each pair in sync when the user changes one of them (`syncedRuleIds` in
-# `apps/web/src/notifications/VectorPushRulesDefinitions.ts`).
-# `.m.rule.contains_display_name` is deliberately absent: it has no counterpart,
-# as intentional mentions are by user ID, not by display name.
+# each pair in sync when the user changes one of them, and pairs
+# `.m.rule.contains_display_name` with nothing (`syncedRuleIds` in
+# https://github.com/element-hq/element-web/blob/c603feb6e61e31b6068e425a379c9ad96d07194c/apps/web/src/notifications/VectorPushRulesDefinitions.ts#L87-L119).
+# It is deliberately absent here too: it has no counterpart, as intentional
+# mentions are by user ID, not by display name.
 _LEGACY_MENTION_PUSH_RULE_MAPPING: dict[str, str] = {
     PushRuleIds.CONTAINS_USER_NAME: PushRuleIds.IS_USER_MENTION,
     PushRuleIds.ROOMNOTIF: PushRuleIds.IS_ROOM_MENTION,
