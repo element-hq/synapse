@@ -1449,11 +1449,7 @@ class UserDirectoryRemoteProfileTestCase(unittest.HomeserverTestCase):
 
 
 class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
-    """Tests for ingesting remote users into the user directory.
-
-    The handler is intentionally unaware of federation; it only persists
-    already-parsed `RemoteUserDirectoryEntry` objects.
-    """
+    """Tests for syncing and ingesting federated user directory entries."""
 
     servlets = [
         login.register_servlets,
@@ -1469,13 +1465,138 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         # sync while the experimental feature is enabled.
         config["experimental_features"] = {
             "bwi_federated_user_dir_enabled": True,
+            "bwi_federated_user_dir_sync_interval": "1s",
         }
         return self.setup_test_homeserver(config=config)
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.handler = hs.get_user_directory_handler()
+        self.federation_client = hs.get_federation_client()
         self.user_dir_helper = GetUserDirectoryTables(self.store)
+
+    def test_sync_uses_db_destinations_and_upserts_remote_users(self) -> None:
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "results": [
+                    {
+                        "user_id": "@bob:remote.example.com",
+                        "display_name": "Bob Remote",
+                        "avatar_url": None,
+                    }
+                ],
+            }
+        )
+
+        self.get_success(self.handler._sync_federated_user_directory())
+
+        self.federation_client.user_directory_fetch.assert_called_once_with(
+            "remote.example.com",
+            self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout,
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@bob:remote.example.com", profiles)
+        self.assertIn(
+            ("@bob:remote.example.com", "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+
+    def test_sync_skips_own_server(self) -> None:
+        self.get_success(self.store.set_destination_retry_timings("test", None, 0, 0))
+
+        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+
+        self.get_success(self.handler._sync_federated_user_directory())
+
+        self.federation_client.user_directory_fetch.assert_not_called()
+
+    def _run_sync_returning(self, results: list[dict]) -> None:
+        """Run a sync with the supplied remote results."""
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={"results": results}
+        )
+        self.get_success(self.handler._sync_federated_user_directory())
+
+    def test_sync_prunes_users_absent_from_new_result(self) -> None:
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        self._run_sync_returning(
+            [
+                {"user_id": "@bob:remote.example.com", "display_name": "Bob"},
+                {"user_id": "@carol:remote.example.com", "display_name": "Carol"},
+            ]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {
+                ("@bob:remote.example.com", "remote.example.com"),
+                ("@carol:remote.example.com", "remote.example.com"),
+            },
+        )
+
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@bob:remote.example.com", profiles)
+        self.assertNotIn("@carol:remote.example.com", profiles)
+
+    def test_sync_empty_result_does_not_prune(self) -> None:
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+
+        # An empty result is also returned for a failed request, so do not prune.
+        self._run_sync_returning([])
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+
+    def test_sync_is_scheduled_on_background_worker(self) -> None:
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "results": [
+                    {"user_id": "@scheduled:remote.example.com"},
+                ]
+            }
+        )
+
+        self.reactor.advance(1.0)
+
+        self.federation_client.user_directory_fetch.assert_called_once_with(
+            "remote.example.com",
+            self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout,
+        )
 
     def test_upsert_remote_users_persists_profiles_and_visibility(self) -> None:
         self.get_success(
@@ -1666,3 +1787,31 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.get_success(self.user_dir_helper.get_users_in_federated_search()),
             set(),
         )
+
+
+class FederatedUserDirectoryNoBackgroundTasksTestCase(unittest.HomeserverTestCase):
+    """Tests that federated directory sync only runs on the background worker."""
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        config["run_background_tasks_on"] = "other"
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+            "bwi_federated_user_dir_sync_interval": "1s",
+        }
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.handler = hs.get_user_directory_handler()
+        self.federation_client = hs.get_federation_client()
+
+    def test_sync_is_not_scheduled(self) -> None:
+        self.get_success(
+            self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)
+        )
+        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+
+        self.reactor.advance(1.0)
+
+        self.federation_client.user_directory_fetch.assert_not_called()

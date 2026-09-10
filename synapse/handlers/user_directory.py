@@ -36,10 +36,11 @@ from synapse.api.constants import (
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.metrics import SERVER_NAME_LABEL
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import RemoteUserDirectoryEntry, UserID
+from synapse.types import JsonDict, RemoteUserDirectoryEntry, UserID
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
@@ -114,7 +115,12 @@ class UserDirectoryHandler(StateDeltasHandler):
         )
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self.hs = hs  # nb must be called this for @wrap_as_background_process. #NOTE Why do we use _hs instead of hs? # Must be named `hs` for @wrap_as_background_process
         self._hs = hs
+        self._federation_client = hs.get_federation_client()
+        self._federated_user_directory_fetch_timeout = (
+            hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout
+        )
 
         # The current position in the current_state_delta stream
         self.pos: int | None = None
@@ -146,6 +152,19 @@ class UserDirectoryHandler(StateDeltasHandler):
             self._refresh_remote_profiles_call_later = self.clock.call_later(
                 Duration(seconds=10),
                 self.kick_off_remote_profile_refresh_process,
+            )
+
+        # Periodically sync remote homeservers' user directories into our own,
+        # but only on the worker that runs background tasks.
+        if (
+            hs.config.experimental.bwi_federated_user_dir_enabled
+            and hs.config.worker.run_background_tasks
+        ):
+            self.clock.looping_call(
+                self._sync_federated_user_directory,
+                Duration(
+                    milliseconds=hs.config.experimental.bwi_federated_user_dir_sync_interval_ms
+                ),
             )
 
     async def search_users(
@@ -787,6 +806,103 @@ class UserDirectoryHandler(StateDeltasHandler):
                         profile.get(ProfileFields.AVATAR_URL)
                     ),
                 )
+
+    @staticmethod
+    def _parse_remote_user_directory_results(
+        response: JsonDict,
+    ) -> list[RemoteUserDirectoryEntry]:
+        """Parse a remote user directory fetch response into typed entries.
+
+        Malformed entries are skipped before the results are reconciled with
+        the local user directory.
+        """
+        entries: list[RemoteUserDirectoryEntry] = []
+        for user in response.get("results", []):
+            if not isinstance(user, dict):
+                logger.debug(
+                    "Skipping remote user directory entry that is not an object: %r",
+                    user,
+                )
+                continue
+
+            user_id = user.get("user_id")
+            if not isinstance(user_id, str):
+                logger.debug(
+                    "Skipping remote user directory entry with missing or "
+                    "non-string user_id: %r",
+                    user,
+                )
+                continue
+
+            display_name = user.get("display_name")
+            if not isinstance(display_name, str):
+                if display_name is not None:
+                    logger.debug(
+                        "Ignoring non-string display_name for remote user %s: %r",
+                        user_id,
+                        display_name,
+                    )
+                display_name = None
+
+            avatar_url = user.get("avatar_url")
+            if not isinstance(avatar_url, str):
+                if avatar_url is not None:
+                    logger.debug(
+                        "Ignoring non-string avatar_url for remote user %s: %r",
+                        user_id,
+                        avatar_url,
+                    )
+                avatar_url = None
+
+            entries.append(
+                RemoteUserDirectoryEntry(
+                    user_id=user_id,
+                    display_name=display_name,
+                    avatar_url=avatar_url,
+                )
+            )
+
+        return entries
+
+    @wrap_as_background_process("federated_user_directory_sync")
+    async def _sync_federated_user_directory(self) -> None:
+        """Fetch and reconcile known homeservers' user directories."""
+        destinations = await self.store.get_known_destinations()
+        if not destinations:
+            logger.debug("ending federated user directory sync: no known destinations")
+            return
+
+        total_reconciled = 0
+
+        for destination in destinations:
+            if destination == self.server_name:
+                continue
+
+            response = await self._federation_client.user_directory_fetch(
+                destination,
+                self._federated_user_directory_fetch_timeout,
+            )
+
+            # De-duplicate by user ID within a single destination's results.
+            entries_by_user: dict[str, RemoteUserDirectoryEntry] = {}
+            for entry in self._parse_remote_user_directory_results(response):
+                entries_by_user[entry.user_id] = entry
+
+            # `user_directory_fetch` returns an empty result on failure, which is
+            # indistinguishable from a genuinely empty directory. Avoid pruning
+            # still-valid users when the remote homeserver is unavailable.
+            if not entries_by_user:
+                continue
+
+            await self.reconcile_remote_users(
+                destination, list(entries_by_user.values())
+            )
+            total_reconciled += len(entries_by_user)
+
+        logger.debug(
+            "Federated user directory sync reconciled %d remote users",
+            total_reconciled,
+        )
 
     async def upsert_remote_users(
         self, users: Sequence[RemoteUserDirectoryEntry]
