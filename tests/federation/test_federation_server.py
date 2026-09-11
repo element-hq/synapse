@@ -1317,7 +1317,6 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             self.hs.get_datastores().main.get_state_dag_extremities(room_id)
         )
         self.assertGreater(len(extremities), 0)
-        self.assertCountEqual(event["prev_state_events"], extremities)
         # When creating events, prev_state_events should be set to the state DAG fwd extremities
         self.assertIncludes(
             set(event["prev_state_events"]), set(extremities), exact=True
