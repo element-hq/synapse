@@ -31,10 +31,8 @@ jobs:
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           install-project: "false"
+          groups: "docs"
           poetry-version: "2.4.1"
-
-      - name: "Install docs python dependencies"
-        run: "poetry install --only docs --no-root"
 
       - name: Build the documentation
         # mdbook will only create an index.html if we're including docs/README.md in SUMMARY.md.
@@ -69,10 +67,8 @@ jobs:
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           install-project: "false"
+          groups: "docs"
           poetry-version: "2.4.1"
-
-      - name: "Install docs python dependencies"
-        run: "poetry install --only docs --no-root"
 
       - name: Setup htmltest
         run: |
