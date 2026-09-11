@@ -1249,7 +1249,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     def test_send_join_state_dag_ignores_partial_state(self) -> None:
         room_version = RoomVersions.MSC4242v12.identifier
         creator_user_id = self.register_user("user1_msc4242", "test")
-        tok = self.login("user1_msc4242", "test")
+        tok = self.login(creator_user_id, "test")
         room_id = self.helper.create_room_as(
             room_creator=creator_user_id, tok=tok, room_version=room_version
         )
