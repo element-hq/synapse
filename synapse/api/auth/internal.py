@@ -277,6 +277,7 @@ class InternalAuth(BaseAuth):
             )
         except (
             pymacaroons.exceptions.MacaroonException,
+            IndexError,
             TypeError,
             ValueError,
         ) as e:
