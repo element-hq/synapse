@@ -43,6 +43,7 @@ from synapse.api.errors import Codes, HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.events import EventBase
 from synapse.http.client import ByteWriteable
+from synapse.http.site import SynapseRequest
 from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
@@ -1374,6 +1375,12 @@ class MediaHashesTestCase(unittest.HomeserverTestCase):
         )
 
 
+class _NoContentLengthRequest(SynapseRequest):
+    def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
+        self.requestHeaders.removeHeader(b"Content-Length")
+        super().requestReceived(command, path, version)
+
+
 class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
     servlets = [
         login.register_servlets,
@@ -1384,6 +1391,7 @@ class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
         self.user = self.register_user("user", "pass")
         self.tok = self.login("user", "pass")
         self.mock_result = True  # Allow all uploads by default
+        self.store = hs.get_datastores().main
 
         hs.get_module_api().register_media_repository_callbacks(
             is_user_allowed_to_upload_media_of_size=self.is_user_allowed_to_upload_media_of_size,
@@ -1411,6 +1419,55 @@ class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
         self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=413)
         assert self.last_user_id == self.user
         assert self.last_size == len(SMALL_PNG)
+
+    @override_config({"max_upload_size": len(SMALL_PNG)})
+    def test_chunked_upload(self) -> None:
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload",
+            SMALL_PNG,
+            access_token=self.tok,
+            request=_NoContentLengthRequest,
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(
+            channel.json_body["error"], "Request must specify a Content-Length"
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload",
+            SMALL_PNG,
+            access_token=self.tok,
+            request=_NoContentLengthRequest,
+            shorthand=False,
+            custom_headers=[(b"Transfer-Encoding", b"Chunked")],
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(self.last_user_id, self.user)
+        self.assertEqual(self.last_size, len(SMALL_PNG))
+
+        media_id = channel.json_body["content_uri"].rsplit("/", 1)[1]
+        stored_media = self.get_success(self.store.get_local_media(media_id))
+        assert stored_media is not None
+        self.assertEqual(stored_media.media_length, len(SMALL_PNG))
+        self.assertEqual(stored_media.sha256, SMALL_PNG_SHA256)
+
+    @override_config({"max_upload_size": len(SMALL_PNG) - 1})
+    def test_chunked_upload_too_large(self) -> None:
+        channel = self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload",
+            SMALL_PNG,
+            access_token=self.tok,
+            request=_NoContentLengthRequest,
+            shorthand=False,
+            custom_headers=[(b"Transfer-Encoding", b"Chunked")],
+        )
+        self.assertEqual(channel.code, 413)
+        self.assertEqual(channel.json_body["errcode"], Codes.TOO_LARGE)
+        self.assertFalse(hasattr(self, "last_size"))
 
 
 def _make_animated_gif() -> bytes:
