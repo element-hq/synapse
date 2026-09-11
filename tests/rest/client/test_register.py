@@ -183,7 +183,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, channel.json_body)
         self.assertEqual(
             channel.json_body.get("errcode"),
-            Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            "M_APPSERVICE_LOGIN_UNSUPPORTED",
             channel.json_body,
         )
 
