@@ -1192,7 +1192,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             returned_state_dag = [
                 (ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]
             ]
-            self.assertCountEqual(returned_state_dag, expected_state)
+            self.assertIncludes(returned_state_dag, expected_state, exact=True)
             self.assertNotIn("state", channel.json_body)
             self.assertNotIn("auth_chain", channel.json_body)
         else:
@@ -1247,6 +1247,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     @skip_test("requires MSC4242 inbound event auth")
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag_ignores_partial_state(self) -> None:
+        # FIXME: when we support partial joins this test can be deleted
         room_version = RoomVersions.MSC4242v12.identifier
         creator_user_id = self.register_user("user1_msc4242", "test")
         tok = self.login(creator_user_id, "test")
