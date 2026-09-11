@@ -79,7 +79,7 @@ jobs:
         # However, we're using docs/README.md for other purposes and need to pick a new page
         # as the default. Let's opt for the welcome page instead.
         run: |
-          mdbook build
+          poetry run mdbook build
           cp book/welcome_and_overview.html book/index.html
 
       - name: Prepare and publish schema files

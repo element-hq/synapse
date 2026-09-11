@@ -56,7 +56,7 @@ Then, [install mdbook](https://github.com/rust-lang/mdBook#installation), which 
 Finally, **from the root of the repository**, build the documentation with:
 
 ```sh
-mdbook build
+poetry run mdbook build
 ```
 
 The rendered contents will be outputted to a new `book/` directory at the root of the repository. Please note that
