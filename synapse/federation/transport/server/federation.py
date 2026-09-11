@@ -28,7 +28,7 @@ from typing import (
     Sequence,
 )
 
-from synapse.api.constants import Direction, EduTypes
+from synapse.api.constants import Direction, EduTypes, StateDag
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersions
 from synapse.api.urls import FEDERATION_UNSTABLE_PREFIX, FEDERATION_V2_PREFIX
@@ -639,6 +639,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
         limit = int(content.get("limit", 10))
         earliest_events = content.get("earliest_events", [])
         latest_events = content.get("latest_events", [])
+        walk_state_dag = bool(content.get(StateDag.GET_MISSING_EVENTS_FIELD, False))
 
         result = await self.handler.on_get_missing_events(
             origin,
@@ -646,6 +647,7 @@ class FederationGetMissingEventsServlet(BaseFederationServerServlet):
             earliest_events=earliest_events,
             latest_events=latest_events,
             limit=limit,
+            walk_state_dag=walk_state_dag,
         )
 
         return 200, result
