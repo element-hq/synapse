@@ -155,6 +155,12 @@ class ProfileFieldRestServlet(RestServlet):
             if avatar_url is not None:
                 ret[field_name] = avatar_url
         else:
+            # Custom fields deliberately behave differently from `displayname` and
+            # `avatar_url`: an unset custom field raises a 404 rather than returning
+            # `200 {}`. The spec allows both, see MSC4537:
+            # https://github.com/matrix-org/matrix-spec-proposals/pull/4537
+            # This is likely to change once the spec settles on either 404 or
+            # `200 {}` only, which would be a breaking change.
             ret[field_name] = await self.profile_handler.get_profile_field(
                 user, field_name
             )
