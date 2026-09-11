@@ -563,7 +563,10 @@ class FederationEventHandler:
         ):
             # We should have been given a connected state DAG. If there is a gap in it we
             # cannot calculate the state, so the response is invalid and we refuse the join.
-            raise SynapseError(502, "Unable to join because the remote server passed back a state DAG that is not connected (invalid)")
+            raise SynapseError(
+                502,
+                "Unable to join because the remote server passed back a state DAG that is not connected (invalid)",
+            )
 
         # persist the auth chain and state events.
         #
@@ -583,7 +586,10 @@ class FederationEventHandler:
         )
         if room_version.msc4242_state_dags and has_rejected_events:
             # The state DAG must not include rejected events
-            raise SynapseError(502, "Unable to join because the remote server passed back a state  DAG that includes rejected events (invalid)")
+            raise SynapseError(
+                502,
+                "Unable to join because the remote server passed back a state  DAG that includes rejected events (invalid)",
+            )
 
         # and now persist the join event itself.
         logger.info(
@@ -2023,7 +2029,9 @@ class FederationEventHandler:
                         event, calculated_auth_events.values()
                     )
                 except AuthError as e:
-                    logger.warning("Rejecting %r while persisting state DAG because %s", event, e)
+                    logger.warning(
+                        "Rejecting %r while persisting state DAG because %s", event, e
+                    )
                     context.rejected = RejectedReason.AUTH_ERROR
                 except EventSizeError as e:
                     if e.unpersistable:
