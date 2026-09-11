@@ -57,6 +57,15 @@ jobs:
         with:
           mdbook-version: '0.5.2'
 
+      # Building the book requires running the `scripts-dev/schema_versions.py`
+      # script first, which has these dependencies.
+      - name: Setup python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.x"
+
+      - run: "pip install 'packaging>=20.0' 'GitPython>=3.1.20'"
+
       - name: Setup htmltest
         run: |
           wget https://github.com/wjdp/htmltest/releases/download/v0.17.0/htmltest_0.17.0_linux_amd64.tar.gz
