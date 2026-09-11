@@ -1921,6 +1921,7 @@ class FederationEventHandler:
         events_and_contexts_to_persist: list[EventPersistencePair] = []
         event_id_to_state_group: dict[str, int] = {}
         state_group_to_state_map: dict[int, StateMap[str]] = {}
+        # Tracks which events have been processed in causal order (prev_state_events first)
         processed_event_map: dict[str, EventBase] = {}
 
         async def process(event: EventBase) -> EventPersistencePair:
@@ -1958,6 +1959,8 @@ class FederationEventHandler:
 
                 batched_auth_events = None
                 if from_send_join:
+                    # event_map is the complete state DAG
+
                     # The events in this batch aren't persisted yet, so pull the auth
                     # events out of the batch, falling back to the database for events we
                     # had already seen and hence filtered out of the batch.
@@ -1966,6 +1969,8 @@ class FederationEventHandler:
                         for event_id in calculated_auth_event_ids
                         if event_id in event_map
                     }
+                    # In theory we should not be missing any auth events because event_map contains
+                    # the entire state DAG, but if we do we can ask the database if it knows about them.
                     missing_auth_event_ids = set(calculated_auth_event_ids).difference(
                         calculated_auth_events
                     )
@@ -1980,6 +1985,9 @@ class FederationEventHandler:
                                 redact_behaviour=EventRedactBehaviour.as_is,
                             )
                         )
+                    # In order to run auth rule checks we need the events referenced in the event
+                    # (prev_state_events) and the events we calculated (auth_events) so load them now.
+                    # If we are missing any, auth rule checks will produce a coherent error message.
                     batched_auth_events = {
                         event_id: event_map[event_id]
                         for event_id in itertools.chain(
@@ -1987,6 +1995,10 @@ class FederationEventHandler:
                         )
                         if event_id in event_map
                     }
+                    # If we have calculated state before this event, remember it so we don't need
+                    # to keep asking the database. The state we are remembering is StateMap[event_id]
+                    # along with the state group integer, which is exactly the data needed by
+                    # _calculate_state_dag_context
                     if context.state_group is not None:
                         event_id_to_state_group[event.event_id] = context.state_group
                         state_group_to_state_map[
@@ -2115,6 +2127,9 @@ class FederationEventHandler:
                 event.prev_state_events,
                 # There is no filter to apply here
                 state_filter=None,
+                # we need to have finished processing the entire state DAG before we can
+                # compute the state for new events, but this function is called WHEN we are processing
+                # the entire state DAG. To wait here would be circular, we'd deadlock.
                 await_full_state=False,
             )
 
