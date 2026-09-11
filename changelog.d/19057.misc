@@ -1,0 +1,1 @@
+Move `start_doing_background_updates()` to `HomeServer.start_background_tasks()`.
