@@ -253,7 +253,10 @@ class ExperimentalConfig(Config):
         # MSC4169: Backwards-compatible redaction sending using `/send`
         self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
 
-        # MSC4210: Remove legacy mentions
+        # MSC4210: Remove legacy mentions. Merged into Matrix v1.17; enabled by
+        # default since Synapse 1.161.0 and kept only as a temporary opt-out.
+        # Tracked in: https://github.com/element-hq/synapse/issues/19415
+        # TODO: Remove the flag and the legacy rules after 2026-12-01.
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", True)
 
         # MSC4222: Adding `state_after` to sync v2
