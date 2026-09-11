@@ -1235,9 +1235,13 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     @skip_test("requires MSC4242 inbound event auth")
     @override_config({"experimental_features": {"msc4242_enabled": True}})
     def test_send_join_state_dag(self) -> None:
-        # KNOWN_ROOM_VERSIONS lacks MSC4242v12 rooms because it is behind an experimental features flag
-        # so set the flag and do the same test as above. When MSC4242 rooms are not gated behind a
-        # config flag this test can be deleted.
+        """
+        KNOWN_ROOM_VERSIONS lacks MSC4242v12 rooms because it is behind an experimental features flag
+        so set the flag and do the same test as above.
+       
+        FIXME: When MSC4242 rooms are not gated behind a
+        config flag this test can be deleted.
+        """
         self._test_send_join_common(RoomVersions.MSC4242v12.identifier)
 
     @skip_test("requires MSC4242 inbound event auth")
