@@ -796,7 +796,6 @@ class RoomSummaryHandler:
             "canonical_alias": stats.canonical_alias,
             "num_joined_members": stats.joined_members,
             "avatar_url": stats.avatar,
-            "join_rule": stats.join_rules,
             "world_readable": (
                 stats.history_visibility == HistoryVisibility.WORLD_READABLE
             ),
@@ -815,6 +814,12 @@ class RoomSummaryHandler:
                 state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
             )
         )
+        if join_event_id := join_rules_state_ids.get((EventTypes.JoinRules, ""), None):
+            # To get the freshest data available, pull the state for the join_rules
+            # directly. In the unlikely case it is None, it will still be filtered out
+            # below.
+            join_event = await self._store.get_event(join_event_id)
+            entry["join_rule"] = join_event.content.get("join_rule")
 
         try:
             room_version = await self._store.get_room_version(room_id)
