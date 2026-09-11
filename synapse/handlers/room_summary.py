@@ -368,7 +368,7 @@ class RoomSummaryHandler:
             # inaccessible to the requesting user.
             if room_entry:
                 # Add the room (including the stripped m.space.child events).
-                rooms_result.append(room_entry.as_json(for_client=True))
+                rooms_result.append(room_entry.as_json())
 
                 # If this room is not at the max-depth, check if there are any
                 # children to process.
@@ -872,7 +872,8 @@ class RoomSummaryHandler:
         remote_room_hosts: list[str] | None = None,
     ) -> JsonDict:
         """
-        Implementation of the room summary C-S API from MSC3266
+        Implementation of the room summary C-S API, see
+        https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1room_summaryroomidoralias
 
         Args:
             requester:  user id of the user making this request, will be None
@@ -980,25 +981,14 @@ class _RoomEntry:
     # This may not include all children.
     children_state_events: Sequence[JsonDict] = ()
 
-    def as_json(self, for_client: bool = False) -> JsonDict:
+    def as_json(self) -> JsonDict:
         """
         Returns a JSON dictionary suitable for the room hierarchy endpoint.
 
         It returns the room summary including the stripped m.space.child events
         as a sub-key.
-
-        Args:
-            for_client: If true, any server-server only fields are stripped from
-                the result.
-
         """
         result = dict(self.room)
-
-        # Before returning to the client, remove the allowed_room_ids key, if it
-        # exists.
-        if for_client:
-            result.pop("allowed_room_ids", False)
-
         result["children_state"] = self.children_state_events
         return result
 
