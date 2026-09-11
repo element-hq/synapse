@@ -1,0 +1,1 @@
+Drop incoming federation device list updates from non-compliant (grandfathered historical) user IDs, so that such user IDs are not forwarded to clients outside the context of an event, as per [the spec](https://spec.matrix.org/v1.14/appendices/#historical-user-ids).
