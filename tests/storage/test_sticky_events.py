@@ -11,6 +11,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import sqlite3
+from http import HTTPStatus
 
 from twisted.internet.testing import MemoryReactor
 
@@ -23,7 +24,7 @@ from synapse.api.constants import (
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
-from synapse.rest.client import login, register, room
+from synapse.rest.client import login, register, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
 from synapse.util.clock import Clock
@@ -45,6 +46,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
 
     servlets = [
         room.register_servlets,
+        sync.register_servlets,
         login.register_servlets,
         register.register_servlets,
         admin.register_servlets,
@@ -52,7 +54,10 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = {"msc4354_enabled": True}
+        config["experimental_features"] = {
+            "msc3575_enabled": True,
+            "msc4354_enabled": True,
+        }
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -428,3 +433,136 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, valid_sticky_event.event_id)
+
+    def _get_visible_sticky_event_ids(self) -> set[str]:
+        """
+        Returns the IDs of the sticky events visible to clients in sync.
+        """
+        sync_body: JsonDict = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    # We don't want any timeline events, just sticky events
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "org.matrix.msc4354.sticky_events": {
+                    "enabled": True,
+                }
+            },
+        }
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync",
+            sync_body,
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        sticky_events = channel.json_body["extensions"].get(
+            "org.matrix.msc4354.sticky_events"
+        )
+        if sticky_events is None:
+            return set()
+        events_in_room = (
+            sticky_events.get("rooms", {}).get(self.room_id, {}).get("events", [])
+        )
+        return {event["event_id"] for event in events_in_room}
+
+    def test_soft_failure_cleared_when_state_changes(self) -> None:
+        """
+        Tests that a soft-failed sticky event stops being soft-failed once a change to
+        the room's current state means that it passes auth after all.
+        """
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        self.helper.join(self.room_id, user2_id, tok=user2_tok)
+
+        # Devoice user2, so that their sticky event will (realistically) fail auth
+        # against the room's current state.
+        self.helper.send_state(
+            self.room_id,
+            EventTypes.PowerLevels,
+            body={"users": {self.user_id: 100, user2_id: -1}, "events_default": 0},
+            tok=self.token,
+        )
+
+        # Inject a soft-failed sticky event. This is cheating a bit for brevity.
+        # In the real world, we'd need to craft a soft-failed sticky event to arrive over federation.
+        # The Complement test will do this: https://github.com/matrix-org/complement/pull/806/files#diff-6c9d6d169485d0848c6b20dd9b43f6fe669a8a710e42f953d08fa25a99cc8f4cR509
+        event_id = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                sender=user2_id,
+                type=EventTypes.Message,
+                content={"body": "sticky", "msgtype": "m.text"},
+                internal_metadata={"soft_failed": True},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        ).event_id
+
+        # Whilst it is soft-failed, the event isn't shown to clients.
+        self.assertEqual(self._get_visible_sticky_event_ids(), set())
+
+        # Change the room's power levels to voice user2 back.
+        # This triggers the soft-fail re-evaluation and also allows the soft-failed sticky
+        # event to pass state-dependent auth checks against the current state, becoming
+        # un-soft-failed
+        self.helper.send_state(
+            self.room_id,
+            EventTypes.PowerLevels,
+            body={"users": {self.user_id: 100, user2_id: 0}, "events_default": 0},
+            tok=self.token,
+        )
+
+        # The event has been re-evaluated and is now shown to clients...
+        self.assertEqual(self._get_visible_sticky_event_ids(), {event_id})
+        # ...and the soft-failure flag has been cleared.
+        event = self.get_success(self.store.get_event(event_id))
+        self.assertFalse(event.internal_metadata.is_soft_failed())
+
+    def test_soft_failure_cleared_when_sender_membership_changes(self) -> None:
+        """
+        Tests that soft-failure status of a sticky event is reconsidered when
+        the sender's membership changes.
+        """
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Inject a soft-failed sticky event from user2
+        event_id = self.get_success(
+            inject_event(
+                self.hs,
+                room_id=self.room_id,
+                sender=user2_id,
+                type=EventTypes.Message,
+                content={"body": "sticky", "msgtype": "m.text"},
+                internal_metadata={"soft_failed": True},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        ).event_id
+
+        # Whilst it is soft-failed, the event isn't shown to clients.
+        self.assertEqual(self._get_visible_sticky_event_ids(), set())
+
+        # Check that an irrelevant user's membership changing doesn't affect the event
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        self.helper.join(self.room_id, user3_id, tok=user3_tok)
+        self.assertEqual(self._get_visible_sticky_event_ids(), set())
+
+        # The sender joins, so the event now passes auth and is un-soft-failed.
+        self.helper.join(self.room_id, user2_id, tok=user2_tok)
+        self.assertEqual(self._get_visible_sticky_event_ids(), {event_id})
+        # ...and the soft-failure has been cleared from the event itself.
+        event = self.get_success(self.store.get_event(event_id))
+        self.assertFalse(event.internal_metadata.is_soft_failed())

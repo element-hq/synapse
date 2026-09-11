@@ -68,7 +68,12 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
-from synapse.replication.tcp.streams import BackfillStream, UnPartialStatedEventStream
+from synapse.replication.tcp.streams import (
+    BackfillStream,
+    StickyEventsStream,
+    UnPartialStatedEventStream,
+)
+from synapse.replication.tcp.streams._base import StickyEventsStreamRow
 from synapse.replication.tcp.streams.events import EventsStream
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedEventStreamRow
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -470,6 +475,15 @@ class EventsWorkerStore(SQLBaseStore):
                     # If the partial-stated event became rejected or unrejected
                     # when it wasn't before, we need to invalidate this cache.
                     self._invalidate_local_get_event_cache(row.event_id)
+        elif stream_name == StickyEventsStream.NAME:
+            for row in rows:
+                assert isinstance(row, StickyEventsStreamRow)
+
+                # A sticky event only gets a new row on this stream when it is first
+                # persisted (in which case there's nothing cached to invalidate) or when
+                # its soft-failure status changed, which is stored in the event's
+                # internal metadata, so invalidate the cached event.
+                self._invalidate_local_get_event_cache(row.event_id)
 
         super().process_replication_rows(stream_name, instance_name, token, rows)
 
