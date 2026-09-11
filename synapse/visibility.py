@@ -196,21 +196,17 @@ async def filter_and_transform_events_for_client(
         # Filter out call invites in public rooms, as this would potentially
         # ring a lot of users.
         if event.type == EventTypes.CallInvite and not event.is_state():
-            # `state_after_event` should only be None if the event is an outlier,
-            # and earlier code should filter out outliers entirely.
-            #
-            # In addition, we only create outliers locally for out-of-band
-            # invite rejections, invites received over federation, or state
-            # events needed to authorise other events. None of this applies to
-            # call invites.
-            assert state_after_event is not None
-
-            room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
-            if (
-                room_join_rules is not None
-                and room_join_rules.content.get("join_rule") == JoinRules.PUBLIC
-            ):
-                return None
+            # `state_after_event` should only be None if the event is an outlier
+            # (or our copy of the event is stale and still flagged as one, see
+            # below); in either case we can't check the join rules, so let the
+            # event through.
+            if state_after_event is not None:
+                room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
+                if (
+                    room_join_rules is not None
+                    and room_join_rules.content.get("join_rule") == JoinRules.PUBLIC
+                ):
+                    return None
 
         # Annotate the event with the user's membership after the event.
         #
@@ -224,8 +220,23 @@ async def filter_and_transform_events_for_client(
         elif state_after_event is not None:
             user_membership_event = state_after_event.get((EventTypes.Member, user_id))
         else:
-            # unreachable!
-            raise Exception("Missing state for event that is not user's own membership")
+            # We have no state for this event: it was flagged as an outlier
+            # when we fetched the state above, but `always_include_ids` let it
+            # through anyway. This can happen when an out-of-band membership
+            # event (e.g. an invite, or a rejection of one, received while not
+            # in the room) is later de-outliered — because we are also in the
+            # room and received it over federation — and enters the current
+            # state, while the copy of the event we are working with (e.g. from
+            # a worker's not-yet-invalidated cache) still carries the outlier
+            # flag. We don't know the user's membership at this point in the
+            # DAG, which MSC4115 permits — return the event unannotated rather
+            # than failing the whole request.
+            logger.info(
+                "filter_and_transform_events_for_client: no state for always-included"
+                " outlier %s; returning it without a membership annotation",
+                event.event_id,
+            )
+            return FilteredEvent(event=filtered, membership=None)
 
         user_membership = (
             user_membership_event.membership
