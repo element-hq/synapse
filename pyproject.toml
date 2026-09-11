@@ -290,7 +290,6 @@ dev = [
 
     # The following are used by the release script
     "click>=8.1.3",
-    # GitPython was == 3.1.14; bumped to 3.1.20, the first release with type hints.
     "GitPython>=3.1.47",
     "markdown-it-py>=3.0.0",
     "pygithub>=1.59",
@@ -304,6 +303,11 @@ dev = [
 
     # Used for checking the schema delta files
     "sqlglot>=28.0.0",
+]
+# Dependencies for building Synapse's documentation.
+docs = [
+    "packaging>=20.0",
+    "GitPython>=3.1.20",
 ]
 
 [tool.towncrier]

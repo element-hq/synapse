@@ -1,0 +1,1 @@
+Move documentation building python dependencies into `pyproject.toml` under a new `docs` dependency group.
