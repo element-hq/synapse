@@ -61,6 +61,7 @@ from synapse.event_auth import (
     validate_event_for_room_version,
 )
 from synapse.events import EventBase
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import (
     EventContext,
     EventPersistencePair,
@@ -522,8 +523,10 @@ class FederationEventHandler:
         Args:
             origin: Where the events came from
             room_id:
-            auth_events
-            state
+            auth_events: The auth chain from the send_join response. Empty for MSC4242
+                State DAG rooms, which do not have one.
+            state: The current state of the room. For MSC4242 State DAG rooms this is the
+                state DAG, which includes the auth chains for the state.
             event
             room_version: The room version we expect this room to have, and
                 will raise if it doesn't match the version in the create event.
@@ -555,6 +558,16 @@ class FederationEventHandler:
         if room_version.identifier != room_version_id:
             raise SynapseError(400, "Room version mismatch")
 
+        if room_version.msc4242_state_dags and not is_state_dag_connected(
+            [ev for ev in state if supports_msc4242_state_dag(ev)]
+        ):
+            # We should have been given a connected state DAG. If there is a gap in it we
+            # cannot calculate the state, so the response is invalid and we refuse the join.
+            raise SynapseError(
+                502,
+                "Unable to join because the remote server passed back a state DAG that is not connected (invalid)",
+            )
+
         # persist the auth chain and state events.
         #
         # any invalid events here will be marked as rejected, and we'll carry on.
@@ -566,9 +579,17 @@ class FederationEventHandler:
         # signatures right now doesn't mean that we will *never* be able to, so it
         # is premature to reject them.
         #
-        await self._auth_and_persist_outliers(
-            room_id, itertools.chain(auth_events, state)
+        has_rejected_events = await self._auth_and_persist_outliers(
+            room_id,
+            itertools.chain(auth_events, state),
+            from_send_join=True,
         )
+        if room_version.msc4242_state_dags and has_rejected_events:
+            # The state DAG must not include rejected events
+            raise SynapseError(
+                502,
+                "Unable to join because the remote server passed back a state  DAG that includes rejected events (invalid)",
+            )
 
         # and now persist the join event itself.
         logger.info(
@@ -619,6 +640,18 @@ class FederationEventHandler:
                             self._store, self._state_deletion_store
                         ),
                     )
+                )
+            elif supports_msc4242_state_dag(event):
+                # We don't blindly trust the state the remote server claims is current,
+                # and instead calculate the state before the join ourselves, which we can
+                # do now that the whole state DAG has been persisted.
+                state_before_event = (
+                    await self._state_handler.resolve_state_groups_for_events(
+                        event.room_id, event.prev_state_events
+                    )
+                )
+                state_ids_before_event = await state_before_event.get_state(
+                    self._state_storage_controller
                 )
             else:
                 state_ids_before_event = {
@@ -1686,12 +1719,16 @@ class FederationEventHandler:
 
     @trace
     async def _auth_and_persist_outliers(
-        self, room_id: str, events: Iterable[EventBase]
-    ) -> None:
+        self,
+        room_id: str,
+        events: Iterable[EventBase],
+        from_send_join: bool = False,
+    ) -> bool:
         """Persist a batch of outlier events fetched from remote servers.
 
         We first sort the events to make sure that we process each event's auth_events
-        before the event itself.
+        before the event itself. For MSC4242 State DAG events this means sorting by
+        `prev_state_events`, which is also where auth events are calculated from.
 
         We then mark the events as outliers, persist them to the database, and, where
         appropriate (eg, an invite), awake the notifier.
@@ -1700,8 +1737,20 @@ class FederationEventHandler:
             room_id: the room that the events are meant to be in (though this has
                not yet been checked)
             events: the events that have been fetched
+            from_send_join: If True, `events` is the complete state DAG from a /send_join
+               response, which allows the events to be processed as a batch rather than
+               one at a time. Only used for MSC4242 State DAG rooms.
+        Returns:
+            True if any of the events were rejected.
         """
         event_map = {event.event_id: event for event in events}
+        if not event_map:
+            return False
+
+        # There must be an event in events else we would have returned by now
+        is_state_dag_room = next(
+            iter(event_map.values())
+        ).room_version.msc4242_state_dags
 
         event_ids = event_map.keys()
         set_tag(
@@ -1728,26 +1777,39 @@ class FederationEventHandler:
 
         # We need to persist an event's auth events before the event.
         auth_graph = {
-            ev.event_id: [e_id for e_id in ev.auth_event_ids() if e_id in event_map]
+            ev.event_id: [
+                e_id
+                for e_id in (
+                    ev.prev_state_events
+                    if supports_msc4242_state_dag(ev)
+                    else ev.auth_event_ids()
+                )
+                if e_id in event_map
+            ]
             for ev in event_map.values()
         }
-        sorted_auth_event_ids = sorted_topologically(event_map.keys(), auth_graph)
-        sorted_auth_events = [event_map[e_id] for e_id in sorted_auth_event_ids]
+        sorted_event_ids = sorted_topologically(event_map.keys(), auth_graph)
+        sorted_events = [event_map[e_id] for e_id in sorted_event_ids]
         logger.info(
             "Persisting %i remaining outliers: %s",
-            len(sorted_auth_events),
-            shortstr(e.event_id for e in sorted_auth_events),
+            len(sorted_events),
+            shortstr(e.event_id for e in sorted_events),
         )
+
+        if is_state_dag_room:
+            return await self._auth_and_persist_state_dag_outliers(
+                room_id, event_map, sorted_events, from_send_join
+            )
+
+        events_and_contexts_to_persist: list[EventPersistencePair] = []
 
         # get all the auth events for all the events in this batch. By now, they should
         # have been persisted.
         auth_event_ids = {
-            aid for event in sorted_auth_events for aid in event.auth_event_ids()
+            aid for event in sorted_events for aid in event.auth_event_ids()
         }
         auth_map = {
-            ev.event_id: ev
-            for ev in sorted_auth_events
-            if ev.event_id in auth_event_ids
+            ev.event_id: ev for ev in sorted_events if ev.event_id in auth_event_ids
         }
 
         missing_events = auth_event_ids.difference(auth_map)
@@ -1758,8 +1820,6 @@ class FederationEventHandler:
                 redact_behaviour=EventRedactBehaviour.as_is,
             )
             auth_map.update(persisted_events)
-
-        events_and_contexts_to_persist: list[EventPersistencePair] = []
 
         async def prep(event: EventBase) -> None:
             with nested_logging_context(suffix=event.event_id):
@@ -1806,7 +1866,7 @@ class FederationEventHandler:
 
             events_and_contexts_to_persist.append((event, context))
 
-        for i, event in enumerate(sorted_auth_events):
+        for i, event in enumerate(sorted_events):
             await prep(event)
 
             # The above function is typically not async, and so won't yield to
@@ -1814,6 +1874,11 @@ class FederationEventHandler:
             # occasionally to ensure we don't block other work.
             if (i + 1) % 1000 == 0:
                 await self._clock.sleep(Duration(seconds=0))
+
+        has_rejected_events = any(
+            context.rejected is not None
+            for _, context in events_and_contexts_to_persist
+        )
 
         # Also persist the new event in batches for similar reasons as above.
         for batch in batch_iter(events_and_contexts_to_persist, 1000):
@@ -1825,6 +1890,277 @@ class FederationEventHandler:
                 # during backfill should be marked as backfilled as well.
                 backfilled=True,
             )
+
+        return has_rejected_events
+
+    async def _auth_and_persist_state_dag_outliers(
+        self,
+        room_id: str,
+        event_map: dict[str, EventBase],
+        sorted_events: list[EventBase],
+        from_send_join: bool,
+    ) -> bool:
+        """Persist a batch of MSC4242 State DAG outlier events.
+
+        Other room versions check that an event is allowed according to the auth events
+        the event itself lists. MSC4242 rooms instead calculate the auth state before the
+        event and then determine if the event is allowed.
+
+        This means we normally cannot prep the whole batch and then persist the whole
+        batch, as the state at an event's `prev_state_events` has to have been persisted
+        before we can work out that event's auth events. The exception is a /send_join
+        response, where the entire state DAG is in `event_map` and so the state at each
+        event can be remembered as we go.
+
+        Params:
+            room_id: the room that the events are meant to be in (though this has
+               not yet been checked)
+            event_map: all of the events being persisted, by event ID
+            sorted_events: the events being persisted, sorted so that an event's
+               `prev_state_events` come before it
+            from_send_join: True if `event_map` is the complete state DAG from a
+               /send_join response
+        Returns:
+            True if any of the events were rejected.
+        """
+        has_rejected_events = False
+        events_and_contexts_to_persist: list[EventPersistencePair] = []
+        event_id_to_state_group: dict[str, int] = {}
+        state_group_to_state_map: dict[int, StateMap[str]] = {}
+        # Tracks which events have been processed in causal order (prev_state_events first)
+        processed_event_map: dict[str, EventBase] = {}
+
+        async def process(event: EventBase) -> EventPersistencePair:
+            assert supports_msc4242_state_dag(event)
+            with nested_logging_context(suffix=event.event_id):
+                # We can only use the state we have remembered if we have remembered it
+                # for every one of the event's `prev_state_events`. If we haven't, the
+                # missing ones were already persisted, so use the database instead.
+                known_prev_state_maps = None
+                if from_send_join and all(
+                    prev_state_event_id in event_id_to_state_group
+                    for prev_state_event_id in event.prev_state_events
+                ):
+                    known_prev_state_maps = {
+                        event_id_to_state_group[prev_state_event_id]: (
+                            state_group_to_state_map[
+                                event_id_to_state_group[prev_state_event_id]
+                            ]
+                        )
+                        for prev_state_event_id in event.prev_state_events
+                    }
+
+                (
+                    context,
+                    calculated_auth_event_ids,
+                ) = await self._calculate_state_dag_context(
+                    event,
+                    known_prev_state_maps=known_prev_state_maps,
+                    event_map=processed_event_map,
+                )
+                event.internal_metadata.calculated_auth_event_ids = (
+                    calculated_auth_event_ids
+                )
+                event.internal_metadata.outlier = True
+
+                batched_auth_events = None
+                if from_send_join:
+                    # event_map is the complete state DAG
+
+                    # The events in this batch aren't persisted yet, so pull the auth
+                    # events out of the batch, falling back to the database for events we
+                    # had already seen and hence filtered out of the batch.
+                    calculated_auth_events = {
+                        event_id: event_map[event_id]
+                        for event_id in calculated_auth_event_ids
+                        if event_id in event_map
+                    }
+                    # In theory we should not be missing any auth events because event_map contains
+                    # the entire state DAG, but if we do we can ask the database if it knows about them.
+                    missing_auth_event_ids = set(calculated_auth_event_ids).difference(
+                        calculated_auth_events
+                    )
+                    if missing_auth_event_ids:
+                        calculated_auth_events.update(
+                            await self._store.get_events(
+                                missing_auth_event_ids,
+                                # Allow rejected events so events which depend on them fail with coherent
+                                # error messages. If we filtered them out here, we'd instead fail with
+                                # a missing events error which is misleading.
+                                allow_rejected=True,
+                                redact_behaviour=EventRedactBehaviour.as_is,
+                            )
+                        )
+                    # In order to run auth rule checks we need the events referenced in the event
+                    # (prev_state_events) and the events we calculated (auth_events) so load them now.
+                    # If we are missing any, auth rule checks will produce a coherent error message.
+                    batched_auth_events = {
+                        event_id: event_map[event_id]
+                        for event_id in itertools.chain(
+                            calculated_auth_event_ids, event.prev_state_events
+                        )
+                        if event_id in event_map
+                    }
+                    # If we have calculated state before this event, remember it so we don't need
+                    # to keep asking the database. The state we are remembering is StateMap[event_id]
+                    # along with the state group integer, which is exactly the data needed by
+                    # _calculate_state_dag_context
+                    if context.state_group is not None:
+                        event_id_to_state_group[event.event_id] = context.state_group
+                        state_group_to_state_map[
+                            context.state_group
+                        ] = await context.get_current_state_ids()
+                else:
+                    calculated_auth_events = await self._store.get_events(
+                        calculated_auth_event_ids,
+                        # Allow rejected events so events which depend on them fail with coherent
+                        # error messages. If we filtered them out here, we'd instead fail with
+                        # a missing events error which is misleading.
+                        allow_rejected=True,
+                        redact_behaviour=EventRedactBehaviour.as_is,
+                    )
+
+                try:
+                    validate_event_for_room_version(event)
+                    await check_state_independent_auth_rules(
+                        self._store, event, batched_auth_events
+                    )
+                    check_state_dependent_auth_rules(
+                        event, calculated_auth_events.values()
+                    )
+                except AuthError as e:
+                    logger.warning(
+                        "Rejecting %r while persisting state DAG because %s", event, e
+                    )
+                    context.rejected = RejectedReason.AUTH_ERROR
+                except EventSizeError as e:
+                    if e.unpersistable:
+                        # This event is completely unpersistable.
+                        raise e
+                    # Otherwise, we are somewhat lenient and just persist the event
+                    # as rejected, for moderate compatibility with older Synapse
+                    # versions.
+                    logger.warning("While validating received event %r: %s", event, e)
+                    context.rejected = RejectedReason.OVERSIZED_EVENT
+
+            processed_event_map[event.event_id] = event
+            return event, context
+
+        if from_send_join:
+            for i, event in enumerate(sorted_events):
+                event_and_context = await process(event)
+                if event_and_context[1].rejected is not None:
+                    has_rejected_events = True
+                events_and_contexts_to_persist.append(event_and_context)
+
+                # The above function is typically not async, and so won't yield to
+                # the reactor. For large rooms let's yield to the reactor
+                # occasionally to ensure we don't block other work.
+                if (i + 1) % 1000 == 0:
+                    await self._clock.sleep(Duration(seconds=0))
+
+            for batch in batch_iter(events_and_contexts_to_persist, 1000):
+                await self.persist_events_and_notify(
+                    room_id,
+                    batch,
+                    # Mark these events as backfilled as they're historic events that
+                    # will eventually be backfilled. For example, missing events we
+                    # fetch during backfill should be marked as backfilled as well.
+                    backfilled=True,
+                )
+        else:
+            for event in sorted_events:
+                event_and_context = await process(event)
+                if event_and_context[1].rejected is not None:
+                    has_rejected_events = True
+                await self.persist_events_and_notify(
+                    room_id,
+                    [event_and_context],
+                    # Mark these events as backfilled as they're historic events that
+                    # will eventually be backfilled. For example, missing events we
+                    # fetch during backfill should be marked as backfilled as well.
+                    backfilled=True,
+                )
+
+        return has_rejected_events
+
+    async def _calculate_state_dag_context(
+        self,
+        event: MSC4242Event,
+        known_prev_state_maps: dict[int, StateMap[str]] | None = None,
+        event_map: dict[str, EventBase] | None = None,
+    ) -> tuple[EventContext, list[str]]:
+        """Calculate the context and auth events for an MSC4242 State DAG event.
+
+        The state before the event is resolved from the event's `prev_state_events`, and
+        the auth events are then calculated from that state, in the same way
+        `EventBuilder.build` does when creating events locally. This is the expensive
+        bit, but it's a one-time cost as the calculated auth events are remembered on
+        the event.
+
+        Args:
+            event: The event to calculate the context for.
+            known_prev_state_maps: The state maps at all of the event's
+               `prev_state_events`, keyed by state group, if known. This allows events
+               which have not been persisted yet to be processed.
+            event_map: Events which may be needed to resolve the state but which have not
+               been persisted yet.
+        Returns:
+            The persisted EventContext and the calculated auth event IDs.
+
+        Raises:
+            SynapseError if the event has no `prev_state_events` and is not a create
+            event.
+        """
+        if len(event.prev_state_events) == 0 and event.type != EventTypes.Create:
+            raise SynapseError(502, f"event {event.event_id} has no prev_state_events")
+
+        if known_prev_state_maps:
+            if len(known_prev_state_maps) == 1:
+                state_ids = list(known_prev_state_maps.values())[0]
+            else:
+                res = await self._state_resolution_handler.resolve_state_groups(
+                    event.room_id,
+                    event.room_version.identifier,
+                    known_prev_state_maps,
+                    event_map=event_map,
+                    state_res_store=StateResolutionStore(
+                        self._store, self._state_deletion_store
+                    ),
+                )
+                state_ids = await res.get_state(self._state_storage_controller)
+        else:
+            state_ids = await self._state_handler.compute_state_after_events(
+                event.room_id,
+                event.prev_state_events,
+                # There is no filter to apply here
+                state_filter=None,
+                # we need to have finished processing the entire state DAG before we can
+                # compute the state for new events, but this function is called WHEN we are processing
+                # the entire state DAG. To wait here would be circular, we'd deadlock.
+                await_full_state=False,
+            )
+
+        # We should always have some resolved state after the prev_state_events, except
+        # for the create event which is the start of the state DAG.
+        is_create_event = (
+            len(event.prev_state_events) == 0
+            and event.type == EventTypes.Create
+            and event.get_state_key() == ""
+        )
+        if not is_create_event:
+            # We must have calculated room state for every event by now.
+            # Only the create event can have no room state (since it's the first event in the room)
+            assert len(state_ids) > 0
+
+        context = await self._state_handler.compute_event_context(
+            event,
+            state_ids,
+            # `compute_event_context` asserts this is None if there is no state, which
+            # is the case for the create event.
+            partial_state=None if is_create_event else False,
+        )
+        return context, self._event_auth_handler.compute_auth_events(event, state_ids)
 
     @trace
     async def _check_event_auth(
@@ -1873,7 +2209,7 @@ class FederationEventHandler:
         # caller rather than swallow with `context.rejected` (since we cannot be
         # certain that there is a permanent problem with the event).
         claimed_auth_events = await self._load_or_fetch_auth_events_for_event(
-            origin, event
+            origin, event, context
         )
         set_tag(
             SynapseTags.RESULT_PREFIX + "claimed_auth_events",
@@ -1896,6 +2232,13 @@ class FederationEventHandler:
                 "While checking auth of %r against auth_events: %s", event, e
             )
             context.rejected = RejectedReason.AUTH_ERROR
+            return
+
+        if supports_msc4242_state_dag(event):
+            # For MSC4242 State DAG rooms, the auth events are calculated from the state before
+            # the event rather than taken from the event, so checking the event against its auth
+            # events (step 4) is the same as checking it against the state before it (step 5),
+            # and only step 4 is performed.
             return
 
         # now check the auth rules pass against the room state before the event
@@ -2111,7 +2454,7 @@ class FederationEventHandler:
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
-        self, destination: str | None, event: EventBase
+        self, destination: str | None, event: EventBase, context: EventContext
     ) -> Collection[EventBase]:
         """Fetch this event's auth_events, from database or remote
 
@@ -2124,6 +2467,10 @@ class FederationEventHandler:
         to `destination`, or we couldn't validate the signature on the event (which
         in turn has multiple potential causes).
 
+        MSC4242 State DAG events do not list their auth events, so instead we make sure we
+        have all of the event's `prev_state_events` and then calculate the auth events from
+        the state before the event.
+
         Args:
             destination: where to send the /event_auth request. Typically the server
                that sent us `event` in the first place.
@@ -2133,8 +2480,11 @@ class FederationEventHandler:
 
             event: the event whose auth_events we want
 
+            context: the state before the event.
+
         Returns:
-            all of the events listed in `event.auth_events_ids`, after deduplication
+            all of the events listed in `event.auth_events_ids`, after deduplication. For
+            MSC4242 State DAG events, the calculated auth events.
 
         Raises:
             AssertionError if some auth events were missing and no `destination` was
@@ -2142,7 +2492,11 @@ class FederationEventHandler:
 
             AuthError if we were unable to fetch the auth_events for any reason.
         """
-        event_auth_event_ids = set(event.auth_event_ids())
+        event_auth_event_ids = set(
+            event.prev_state_events
+            if supports_msc4242_state_dag(event)
+            else event.auth_event_ids()
+        )
         event_auth_events = await self._store.get_events(
             event_auth_event_ids, allow_rejected=True
         )
@@ -2150,6 +2504,8 @@ class FederationEventHandler:
             event_auth_events.keys()
         )
         if not missing_auth_event_ids:
+            if supports_msc4242_state_dag(event):
+                return await self._load_calculated_auth_events(event, context)
             return event_auth_events.values()
         if destination is None:
             # this shouldn't happen: destination must be set unless we know we have already
@@ -2180,6 +2536,8 @@ class FederationEventHandler:
         missing_auth_event_ids.difference_update(extra_auth_events.keys())
         event_auth_events.update(extra_auth_events)
         if not missing_auth_event_ids:
+            if supports_msc4242_state_dag(event):
+                return await self._load_calculated_auth_events(event, context)
             return event_auth_events.values()
 
         # we still don't have all the auth events.
@@ -2192,6 +2550,36 @@ class FederationEventHandler:
         # exist, which means it is premature to store `event` as rejected.
         # instead we raise an AuthError, which will make the caller ignore it.
         raise AuthError(code=HTTPStatus.FORBIDDEN, msg="Auth events could not be found")
+
+    async def _load_calculated_auth_events(
+        self, event: MSC4242Event, context: EventContext
+    ) -> Collection[EventBase]:
+        """Calculate the auth events for an MSC4242 State DAG event and load them.
+
+        MSC4242 events do not list their auth events, so they are calculated from the
+        state before the event, in the same way `EventBuilder.build` does when creating
+        events locally. The calculated auth event IDs are remembered on the event so we
+        don't need to calculate them again when the event is persisted.
+
+        Rejected events never form part of the room state, so the calculated auth events
+        cannot be rejected and are loaded without allowing rejected events.
+
+        Args:
+            event: the event whose auth events we want.
+            context: the state before the event.
+
+        Returns:
+            The calculated auth events.
+        """
+        state_ids = await context.get_prev_state_ids()
+        calculated_auth_event_ids = self._event_auth_handler.compute_auth_events(
+            event, state_ids
+        )
+        event.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
+        calculated_auth_events = await self._store.get_events(
+            calculated_auth_event_ids, allow_rejected=False
+        )
+        return calculated_auth_events.values()
 
     @trace
     @tag_args
@@ -2428,3 +2816,18 @@ class FederationEventHandler:
                 len(ev.auth_event_ids()),
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many auth_events")
+
+
+def is_state_dag_connected(state_dag: Collection[MSC4242Event]) -> bool:
+    """Returns True if the given events form a connected state DAG (MSC4242).
+
+    The DAG is connected if every event referenced in a `prev_state_events` field is
+    itself present in `state_dag`, i.e. there are no gaps in the DAG.
+    """
+    have_event_ids = {ev.event_id for ev in state_dag}
+    all_prev_state_events = {
+        prev_state_event_id
+        for ev in state_dag
+        for prev_state_event_id in ev.prev_state_events
+    }
+    return all_prev_state_events.issubset(have_event_ids)
