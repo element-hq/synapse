@@ -1973,6 +1973,9 @@ class FederationEventHandler:
                         calculated_auth_events.update(
                             await self._store.get_events(
                                 missing_auth_event_ids,
+                                # Allow rejected events so events which depend on them fail with coherent
+                                # error messages. If we filtered them out here, we'd instead fail with
+                                # a missing events error which is misleading.
                                 allow_rejected=True,
                                 redact_behaviour=EventRedactBehaviour.as_is,
                             )
@@ -1992,6 +1995,9 @@ class FederationEventHandler:
                 else:
                     calculated_auth_events = await self._store.get_events(
                         calculated_auth_event_ids,
+                        # Allow rejected events so events which depend on them fail with coherent
+                        # error messages. If we filtered them out here, we'd instead fail with
+                        # a missing events error which is misleading.
                         allow_rejected=True,
                         redact_behaviour=EventRedactBehaviour.as_is,
                     )
@@ -2107,7 +2113,7 @@ class FederationEventHandler:
             state_ids = await self._state_handler.compute_state_after_events(
                 event.room_id,
                 event.prev_state_events,
-                # We cannot filter the state as we need to persist the state group.
+                # There is no filter to apply here
                 state_filter=None,
                 await_full_state=False,
             )
@@ -2115,9 +2121,13 @@ class FederationEventHandler:
         # We should always have some resolved state after the prev_state_events, except
         # for the create event which is the start of the state DAG.
         is_create_event = (
-            len(event.prev_state_events) == 0 and event.type == EventTypes.Create
+            len(event.prev_state_events) == 0
+            and event.type == EventTypes.Create
+            and event.get_state_key() == ""
         )
         if not is_create_event:
+            # We must have calculated room state for every event by now.
+            # Only the create event can have no room state (since it's the first event in the room)
             assert len(state_ids) > 0
 
         context = await self._state_handler.compute_event_context(
@@ -2135,11 +2145,6 @@ class FederationEventHandler:
     ) -> None:
         """
         Checks whether an event should be rejected (for failing auth checks).
-
-        For MSC4242 State DAG rooms, the auth events are calculated from the state before
-        the event rather than taken from the event, so checking the event against its auth
-        events (step 4) is the same as checking it against the state before it (step 5),
-        and only step 4 is performed.
 
         Args:
             origin: The host the event originates from. This is used to fetch
@@ -2207,6 +2212,10 @@ class FederationEventHandler:
             return
 
         if supports_msc4242_state_dag(event):
+            # For MSC4242 State DAG rooms, the auth events are calculated from the state before
+            # the event rather than taken from the event, so checking the event against its auth
+            # events (step 4) is the same as checking it against the state before it (step 5),
+            # and only step 4 is performed.
             return
 
         # now check the auth rules pass against the room state before the event
@@ -2544,7 +2553,9 @@ class FederationEventHandler:
             event, state_ids
         )
         event.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
-        calculated_auth_events = await self._store.get_events(calculated_auth_event_ids)
+        calculated_auth_events = await self._store.get_events(
+            calculated_auth_event_ids, allow_rejected=False
+        )
         return calculated_auth_events.values()
 
     @trace
