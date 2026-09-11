@@ -1,0 +1,1 @@
+Remove the legacy mention push rules (`.m.rule.contains_display_name`, `.m.rule.contains_user_name` and `.m.rule.roomnotif`) from the base push rule set by default, as per Matrix v1.17 ([MSC4210](https://github.com/matrix-org/matrix-spec-proposals/pull/4210)). Set `experimental_features.msc4210_enabled: false` to restore them.
