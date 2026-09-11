@@ -587,6 +587,34 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
             "POST", "/_matrix/client/v3/register/msisdn/requestToken"
         )
 
+    def test_appservice_registration_without_inhibit_login(self) -> None:
+        """Test that appservice registration without `inhibit_login` is rejected
+        with the `M_APPSERVICE_LOGIN_UNSUPPORTED` errcode."""
+        appservice = ApplicationService(
+            token="i_am_an_app_service",
+            id="1234",
+            namespaces={"users": [{"regex": r"@alice:.+", "exclusive": True}]},
+            sender=UserID.from_string("@as_main:test"),
+        )
+
+        self.hs.get_datastores().main.services_cache = [appservice]
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/register",
+            {
+                "username": "alice",
+                "type": "m.login.application_service",
+            },
+            shorthand=False,
+            access_token="i_am_an_app_service",
+        )
+        self.assertEqual(channel.code, 400, channel.json_body)
+        self.assertEqual(
+            channel.json_body.get("errcode"),
+            "M_APPSERVICE_LOGIN_UNSUPPORTED",
+            channel.json_body,
+        )
+
     def test_session_management_endpoints_removed(self) -> None:
         """Test that session management endpoints that were removed in MSC2964 are no longer available."""
         self.expect_unrecognized("GET", "/_matrix/client/v3/login")

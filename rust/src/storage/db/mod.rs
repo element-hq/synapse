@@ -32,7 +32,7 @@ pub mod python_db_pool;
 /// It may be invoked multiple times under certain failure modes (serialization
 /// and deadlock errors), so it is `Fn` rather than `FnOnce`.
 pub type ErasedInteraction =
-    Box<dyn for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, ErasedResult> + Send>;
+    Box<dyn for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, ErasedResult> + Send + Sync>;
 
 /// The type-erased *result* of an [`ErasedInteraction`]
 /// [`DatabasePool::run_interaction_erased`].
@@ -114,6 +114,7 @@ pub trait DatabasePoolExt: DatabasePool {
         R: Send + 'static,
         F: for<'txn> Fn(&'txn mut dyn Transaction) -> BoxFuture<'txn, anyhow::Result<R>>
             + Send
+            + Sync
             + 'static,
     {
         // Erase the concrete return type `R` into `Box<dyn Any>` so we can call

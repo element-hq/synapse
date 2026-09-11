@@ -146,7 +146,9 @@ class RemoteJoinHelper:
                     "type": EventTypes.Member,
                     "state_key": remote_creator_user_id,
                     "content": {"membership": Membership.JOIN},
-                    "auth_events": [room_create_event.event_id],
+                    "auth_events": [room_create_event.event_id]
+                    if not room_version.msc4291_room_ids_as_hashes
+                    else [],
                     "prev_events": [room_create_event.event_id],
                 },
                 room_version=room_version,
@@ -173,7 +175,9 @@ class RemoteJoinHelper:
                         "auth_events": [
                             room_create_event.event_id,
                             creator_membership_event.event_id,
-                        ],
+                        ]
+                        if not room_version.msc4291_room_ids_as_hashes
+                        else [creator_membership_event.event_id],
                         "prev_events": [prev_event.event_id],
                     },
                     room_version=room_version,
@@ -215,7 +219,9 @@ class RemoteJoinHelper:
                     "auth_events": [
                         room_create_event.event_id,
                         creator_membership_event.event_id,
-                    ],
+                    ]
+                    if not room_version.msc4291_room_ids_as_hashes
+                    else [creator_membership_event.event_id],
                     "prev_events": [
                         extra_events[-1].event_id
                         if extra_events
@@ -254,7 +260,9 @@ class RemoteJoinHelper:
                 "auth_events": [
                     room_create_event.event_id,
                     invite_membership_event.event_id,
-                ],
+                ]
+                if not room_version.msc4291_room_ids_as_hashes
+                else [invite_membership_event.event_id],
                 "prev_events": [invite_membership_event.event_id],
             },
             room_version=room_version,

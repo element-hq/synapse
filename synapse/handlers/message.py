@@ -704,6 +704,9 @@ class EventCreationHandler:
                         Codes.USER_ACCOUNT_SUSPENDED,
                     )
 
+            if event_dict["type"] == EventTypes.Redaction:
+                await self._check_redaction_allowed_period(event_dict)
+
         is_create_event = (
             event_dict["type"] == EventTypes.Create and event_dict["state_key"] == ""
         )
@@ -2235,6 +2238,48 @@ class EventCreationHandler:
         )
 
         return bool(original_event and sender != original_event.sender)
+
+    async def _check_redaction_allowed_period(self, event_dict: dict) -> None:
+        """Reject a redaction of an `m.room.message` older than the configured period.
+
+        Only applies to `m.room.message` targets. Enforced for local users only
+        (federated redactions bypass `create_event`). When the target is an edit
+        (`m.replace`), the age and type of the original event are used, not the
+        edit.
+        """
+        period = self.config.server.redaction_allowed_period
+        if period is None:
+            return
+
+        redacts = event_dict["content"].get("redacts") or event_dict.get("redacts")
+        room_id = event_dict["room_id"]
+
+        if redacts is None:
+            return
+
+        target = await self.store.get_event(
+            redacts, check_room_id=room_id, allow_none=True
+        )
+        if target is None:
+            return
+
+        relation = relation_from_event(target)
+        if relation is not None and relation.rel_type == RelationTypes.REPLACE:
+            original = await self.store.get_event(
+                relation.parent_id, check_room_id=room_id, allow_none=True
+            )
+            if original is not None:
+                target = original
+
+        if target.type != EventTypes.Message:
+            return
+
+        if target.origin_server_ts < self.clock.time_msec() - period:
+            raise SynapseError(
+                403,
+                f"Events older than {period}ms cannot be redacted.",
+                Codes.FORBIDDEN,
+            )
 
     async def _maybe_kick_guest_users(
         self, event: EventBase, context: EventContext
