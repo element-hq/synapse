@@ -149,7 +149,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                     "content": {
                         "msgtype": "m.text",
                         "body": "helo @room",
-                        "m.mentions": {"room": True},
+                        EventContentFields.MENTIONS: {"room": True},
                     },
                     "sender": self.alice,
                 },
@@ -259,7 +259,10 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         self.assertTrue(
             self._create_and_process(
                 bulk_evaluator,
-                {"body": "hello alice", "m.mentions": {"user_ids": [self.alice]}},
+                {
+                    "body": "hello alice",
+                    EventContentFields.MENTIONS: {"user_ids": [self.alice]},
+                },
             ),
             "alice should be notified (intentional mention)",
         )
@@ -629,7 +632,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                 {
                     "msgtype": "m.text",
                     "body": "this is a message that mentions alice",
-                    "m.mentions": {"user_ids": [self.alice]},
+                    EventContentFields.MENTIONS: {"user_ids": [self.alice]},
                 },
                 type="m.room.message",
             ),

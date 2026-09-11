@@ -25,6 +25,7 @@ from parameterized import parameterized
 from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EventContentFields
 from synapse.logging.context import make_deferred_yieldable
 from synapse.push import PusherConfig, PusherConfigException
 from synapse.rest import admin
@@ -477,7 +478,7 @@ class HTTPPusherTests(HomeserverTestCase):
             {
                 "msgtype": "m.text",
                 "body": "Oh, user, hello!",
-                "m.mentions": {"user_ids": [user_id]},
+                EventContentFields.MENTIONS: {"user_ids": [user_id]},
             },
             tok=other_access_token,
         )
@@ -564,7 +565,7 @@ class HTTPPusherTests(HomeserverTestCase):
             {
                 "msgtype": "m.text",
                 "body": "@room eeek! There's a spider on the table!",
-                "m.mentions": {"room": True},
+                EventContentFields.MENTIONS: {"room": True},
             },
             tok=other_access_token,
         )
@@ -590,7 +591,7 @@ class HTTPPusherTests(HomeserverTestCase):
             {
                 "msgtype": "m.text",
                 "body": "@room the spider is gone",
-                "m.mentions": {"room": True},
+                EventContentFields.MENTIONS: {"room": True},
             },
             tok=yet_another_access_token,
         )

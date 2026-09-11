@@ -22,7 +22,7 @@
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import MAIN_TIMELINE, RelationTypes
+from synapse.api.constants import MAIN_TIMELINE, EventContentFields, RelationTypes
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -84,7 +84,7 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             content={
                 "msgtype": "m.text",
                 "body": user_id,
-                "m.mentions": {"user_ids": [user_id]},
+                EventContentFields.MENTIONS: {"user_ids": [user_id]},
                 "m.relates_to": {
                     "rel_type": RelationTypes.THREAD,
                     "event_id": first_event_id,
@@ -198,7 +198,9 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
                 content={
                     "msgtype": "m.text",
                     "body": "msg",
-                    "m.mentions": {"user_ids": [user_id]} if highlight else {},
+                    EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                    if highlight
+                    else {},
                 },
                 tok=other_token,
             )
@@ -396,7 +398,9 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
                 content={
                     "msgtype": "m.text",
                     "body": "msg",
-                    "m.mentions": {"user_ids": [user_id]} if highlight else {},
+                    EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                    if highlight
+                    else {},
                 },
                 tok=other_token,
             )["event_id"]
@@ -445,7 +449,9 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             content: JsonDict = {
                 "msgtype": "m.text",
                 "body": "msg",
-                "m.mentions": {"user_ids": [user_id]} if highlight else {},
+                EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                if highlight
+                else {},
             }
             if thread_root is not None:
                 content["m.relates_to"] = {
@@ -544,7 +550,9 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             content: JsonDict = {
                 "msgtype": "m.text",
                 "body": "msg",
-                "m.mentions": {"user_ids": [user_id]} if highlight else {},
+                EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                if highlight
+                else {},
             }
             if thread_id:
                 content["m.relates_to"] = {
@@ -725,7 +733,9 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
             content: JsonDict = {
                 "msgtype": "m.text",
                 "body": "msg",
-                "m.mentions": {"user_ids": [user_id]} if highlight else {},
+                EventContentFields.MENTIONS: {"user_ids": [user_id]}
+                if highlight
+                else {},
             }
             if thread_id:
                 content["m.relates_to"] = {
