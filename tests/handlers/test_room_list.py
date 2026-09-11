@@ -1,8 +1,15 @@
 from http import HTTPStatus
+from unittest.mock import AsyncMock
 
+from twisted.internet.testing import MemoryReactor
+
+from synapse.api.constants import PublicRoomsFilterFields
+from synapse.api.errors import Codes, SynapseError
 from synapse.rest import admin
 from synapse.rest.client import directory, login, room
+from synapse.server import HomeServer
 from synapse.types import JsonDict
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.utils import default_config
@@ -15,6 +22,26 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
         room.register_servlets,
         directory.register_servlets,
     ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.mock_policy_handler = AsyncMock()
+
+        # Other tests ideally ensure that the handler respects the configuration correctly.
+        # We're interested in testing that the handler is called, not that it's configured.
+        async def assert_neutral_search_query(query: str) -> None:
+            if query == "test_intentional_failure":
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST, "mocked policy fail", Codes.FORBIDDEN
+                )
+            self.assertEqual(query, "test_search_term")
+
+        self.mock_policy_handler.assert_neutral_search_query = (
+            assert_neutral_search_query
+        )
+        hs = self.setup_test_homeserver(
+            server_policy_handler=self.mock_policy_handler,
+        )
+        return hs
 
     def _create_published_room(
         self, tok: str, extra_content: JsonDict | None = None
@@ -91,3 +118,48 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
             {room1, room3},
             "test3 should be able to see only 2 rooms",
         )
+
+    def test_policyserv_can_intercept_searches(self) -> None:
+        """
+        Tests that if a "safety policy" is configured, then that policy
+        server is consulted when requests for a search term are made.
+
+        This functionality doesn't apply when there's no search term.
+
+        No rooms are required to test this - the expected output is an
+        error to force zero results being returned.
+
+        Typically, this functionality is used to intercept unsafe searches
+        for rooms and instead "redirect" the caller to elsewhere. The redirect
+        is done socially, not technically - the user is provided links to
+        support resources they can access.
+        """
+        # Per docstring, quickly assert that no search means no policyserv call.
+        # This works because our mock handler will assert that the search query
+        # is a specific value - `None`/an empty string is not that value.
+        self.get_success(
+            self.hs.get_room_list_handler().get_local_public_room_list(
+                search_filter=None,
+            )
+        )
+
+        # Now test that "safe" search queries are passed through normally
+        self.get_success(
+            self.hs.get_room_list_handler().get_local_public_room_list(
+                search_filter={
+                    PublicRoomsFilterFields.GENERIC_SEARCH_TERM: "test_search_term",
+                },
+            )
+        )
+
+        # Finally, test that an "unsafe" search query is intercepted by policyserv
+        err = self.get_failure(
+            self.hs.get_room_list_handler().get_local_public_room_list(
+                search_filter={
+                    PublicRoomsFilterFields.GENERIC_SEARCH_TERM: "test_intentional_failure",
+                },
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(err.code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(err.errcode, Codes.FORBIDDEN)
