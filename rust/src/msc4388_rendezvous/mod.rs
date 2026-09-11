@@ -31,7 +31,7 @@ use crate::{
     duration::SynapseDuration,
     errors::{NotFoundError, SynapseError},
     http::http_request_from_twisted,
-    msc4388_rendezvous::session::{GetResponse, PostResponse, PutResponse},
+    msc4388_rendezvous::session::{GetResponse, PostResponse, PutOutcome, PutResponse},
     UnwrapInfallible,
 };
 
@@ -298,8 +298,27 @@ impl MSC4388RendezvousHandler {
         &mut self,
         py: Python<'_>,
         id: &str,
+        txn_id: &str,
         twisted_request: &Bound<'_, PyAny>,
     ) -> PyResult<(u8, PutResponse)> {
+        // The transaction ID is used as a map key, so we enforce the opaque
+        // identifier grammar (including its 255 byte limit) that MSC4388
+        // requires of it, to keep the memory used by a session bounded.
+        if txn_id.is_empty()
+            || txn_id.len() > 255
+            || !txn_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'='))
+        {
+            return Err(SynapseError::new(
+                StatusCode::BAD_REQUEST,
+                "Invalid transaction ID".to_owned(),
+                "M_INVALID_PARAM",
+                None,
+                None,
+            ));
+        }
+
         let request = http_request_from_twisted(twisted_request)?;
         // parse JSON body
         let put_request: PutRequest =
@@ -330,27 +349,18 @@ impl MSC4388RendezvousHandler {
             .filter(|s| !s.expired(now))
             .ok_or_else(NotFoundError::new)?;
 
-        if !session.sequence_token().eq(&sequence_token) {
-            // Allow clients to safely retry a PUT (e.g. after a network error)
-            // by accepting the previous sequence_token as long as the data
-            // being submitted matches what is currently stored. This makes
-            // PUTs idempotent without weakening the concurrent-write check.
-            if session.is_idempotent_retry(&sequence_token, &data) {
-                return Ok((200, session.put_response()));
-            }
-
-            return Err(SynapseError::new(
+        // The session performs the compare-and-swap, and remembers the outcome
+        // against the transaction ID so that retries are idempotent.
+        match session.send(txn_id, &sequence_token, data, now) {
+            PutOutcome::Accepted(sequence_token) => Ok((200, PutResponse::new(sequence_token))),
+            PutOutcome::ConcurrentWrite => Err(SynapseError::new(
                 StatusCode::CONFLICT,
                 "sequence_token does not match".to_owned(),
                 "IO_ELEMENT_MSC4388_CONCURRENT_WRITE",
                 None,
                 None,
-            ));
+            )),
         }
-
-        session.update(data, now);
-
-        Ok((200, session.put_response()))
     }
 
     fn handle_delete(&mut self, id: &str) -> PyResult<(u8, ())> {
