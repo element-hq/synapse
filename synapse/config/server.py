@@ -293,7 +293,26 @@ class UnixListenerConfig:
         return False
 
 
-ListenerConfig = TCPListenerConfig | UnixListenerConfig
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class SystemdListenerConfig:
+    """Object describing the configuration of a single systemd socket-activated listener."""
+
+    # Matched against $LISTEN_FDNAMES, i.e. `FileDescriptorName=` in the .socket unit.
+    fd_name: str = attr.ib(validator=attr.validators.instance_of(str))
+    type: str = attr.ib(validator=attr.validators.in_(KNOWN_LISTENER_TYPES))
+    tls: bool = False
+
+    # only populated if type=http
+    http_options: HttpListenerConfig | None = None
+
+    def get_site_tag(self) -> str:
+        return self.fd_name
+
+    def is_tls(self) -> bool:
+        return self.tls
+
+
+ListenerConfig = TCPListenerConfig | UnixListenerConfig | SystemdListenerConfig
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -758,6 +777,7 @@ class ServerConfig(Config):
             raise ConfigError("Expected a list", ("listeners",))
 
         self.listeners = [parse_listener_def(i, x) for i, x in enumerate(listeners)]
+        check_for_duplicate_systemd_sockets(self.listeners)
 
         # no_tls is not really supported anymore, but let's grandfather it in here.
         if config.get("no_tls", False):
@@ -1183,6 +1203,16 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
         )
 
     if socket_path:
+        if socket_path.startswith("systemd:"):
+            fd_name = socket_path[len("systemd:") :]
+            if not fd_name:
+                raise ConfigError(
+                    "A name must be given after 'systemd:' in the 'path' option, "
+                    "matching the name of a socket inherited from systemd "
+                    "(LISTEN_FDNAMES)."
+                )
+            return SystemdListenerConfig(fd_name, listener_type, tls, http_config)
+
         # TODO: Add in path validation, like if the directory exists and is writable?
         # Set a default for the permission, in case it's left out
         socket_mode = listener.get("mode", 0o666)
@@ -1206,6 +1236,21 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
                 bind_addresses.extend(DEFAULT_BIND_ADDRESSES)
 
         return TCPListenerConfig(port, bind_addresses, listener_type, tls, http_config)
+
+
+def check_for_duplicate_systemd_sockets(listeners: Iterable[ListenerConfig]) -> None:
+    """Check that no two listeners in the given list adopt the same systemd socket"""
+    seen: set[str] = set()
+    for listener in listeners:
+        if not isinstance(listener, SystemdListenerConfig):
+            continue
+
+        if listener.fd_name in seen:
+            raise ConfigError(
+                f"The systemd socket named {listener.fd_name} is used by more "
+                "than one listener."
+            )
+        seen.add(listener.fd_name)
 
 
 _MANHOLE_SETTINGS_SCHEMA = {
