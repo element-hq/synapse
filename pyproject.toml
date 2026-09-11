@@ -153,7 +153,9 @@ opentracing = [
 jwt = ["authlib"]
 # hiredis is not a *strict* dependency, but it makes things much faster.
 # (if it is not installed, we fall back to slow code.)
-redis = ["txredisapi>=1.4.7", "hiredis>=0.3"]
+# txredisapi 1.4.12 is the first release to accept a `username` kwarg for
+# Redis ACL auth: https://github.com/IlyaSkriblovsky/txredisapi/releases/tag/1.4.12
+redis = ["txredisapi>=1.4.12", "hiredis>=0.3"]
 # Required to use experimental `caches.track_memory_usage` config option.
 cache-memory = ["pympler>=1.0"]
 # If this is updated, don't forget to update the equivalent lines in
@@ -186,7 +188,7 @@ all = [
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis
-    "txredisapi>=1.4.7", "hiredis>=0.3",
+    "txredisapi>=1.4.12", "hiredis>=0.3",
     # cache-memory
     # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",
