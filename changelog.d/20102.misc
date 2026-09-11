@@ -1,0 +1,1 @@
+Add CI that checks that old schemas are upgradable and give the same final schema.

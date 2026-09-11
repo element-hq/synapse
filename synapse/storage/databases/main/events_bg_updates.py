@@ -90,6 +90,28 @@ _REPLACE_STREAM_ORDERING_SQL_COMMANDS = (
     "ALTER INDEX events_ts2 RENAME TO events_ts",
 )
 
+# Postgres refuses to drop a column that a foreign key depends on, so any foreign key
+# referencing `events.stream_ordering` has to be dropped before the swap above and
+# recreated afterwards (by which point `stream_ordering2` has been renamed into place,
+# so the saved definitions still name the right column).
+#
+# We look these up rather than hardcoding them, because the set has grown over time:
+# delta 74/03 added three on the membership tables, and the sliding sync tables later
+# added two more.
+#
+# Foreign keys which already reference `stream_ordering2` — because delta
+# 79/04 repointed them — are deliberately not matched here: the rename carries
+# those over on its own.
+_SELECT_STREAM_ORDERING_FOREIGN_KEYS_SQL = """
+    SELECT c.conrelid::regclass::text, quote_ident(c.conname), pg_get_constraintdef(c.oid)
+    FROM pg_constraint c
+    JOIN pg_attribute a
+        ON a.attrelid = c.confrelid AND a.attnum = ANY (c.confkey)
+    WHERE c.contype = 'f'
+        AND c.confrelid = 'events'::regclass
+        AND a.attname = 'stream_ordering'
+"""
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _CalculateChainCover:
@@ -1476,9 +1498,30 @@ class EventsBackgroundUpdatesStore(
         """Drop the old 'stream_ordering' column and rename 'stream_ordering2' into its place."""
 
         def process(txn: Cursor) -> None:
+            txn.execute(_SELECT_STREAM_ORDERING_FOREIGN_KEYS_SQL)
+            foreign_keys = txn.fetchall()
+
+            for table, constraint, _definition in foreign_keys:
+                logger.info(
+                    "dropping %s on %s so that stream_ordering can be replaced",
+                    constraint,
+                    table,
+                )
+                txn.execute(f"ALTER TABLE {table} DROP CONSTRAINT {constraint}")
+
             for sql in _REPLACE_STREAM_ORDERING_SQL_COMMANDS:
                 logger.info("completing stream_ordering migration: %s", sql)
                 txn.execute(sql)
+
+            for table, constraint, definition in foreign_keys:
+                logger.info("restoring %s on %s", constraint, table)
+                # Constraints which were not `NOT VALID` are validated as they are
+                # added, which scans the table. That is acceptable here: a database
+                # still running this migration predates every table that holds such a
+                # constraint, so those tables are empty at this point.
+                txn.execute(
+                    f"ALTER TABLE {table} ADD CONSTRAINT {constraint} {definition}"
+                )
 
         # ANALYZE the new column to build stats on it, to encourage PostgreSQL to use the
         # indexes on it.
