@@ -1,0 +1,1 @@
+Stabilise [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222): support the stable `use_state_after` query parameter and `state_after` response field on `/sync`, as per Matrix v1.16, and remove the `msc4222_enabled` experimental config flag.
