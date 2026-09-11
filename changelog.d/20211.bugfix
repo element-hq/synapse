@@ -1,0 +1,1 @@
+Do not include `og:image` in responses to `/preview_url` when the media was automatically quarantined by hash matching.
