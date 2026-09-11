@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-9e3badfd.js";
+            window.path_to_searchindex_js = "searchindex-e1b1a2b1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -9126,18 +9126,15 @@ has more information on setting up SiWA.</p>
 <h3 id="auth0"><a class="header" href="#auth0">Auth0</a></h3>
 <p><a href="https://auth0.com/">Auth0</a> is a hosted SaaS IdP solution.</p>
 <ol>
-<li>
-<p>Create a regular web application for Synapse</p>
-</li>
-<li>
-<p>Set the Allowed Callback URLs to <code>[synapse public baseurl]/_synapse/client/oidc/callback</code></p>
-</li>
-<li>
-<p>Add a rule with any name to add the <code>preferred_username</code> claim.
-(See https://auth0.com/docs/customize/rules/create-rules for more information on how to create rules.)</p>
-<details>
- <summary>Code sample</summary>
-<pre><code class="language-js">function addPersistenceAttribute(user, context, callback) {
+<li>Create a regular web application for Synapse</li>
+<li>Set the Allowed Callback URLs to <code>[synapse public baseurl]/_synapse/client/oidc/callback</code></li>
+<li>Add a rule with any name to add the <code>preferred_username</code> claim.
+(See https://auth0.com/docs/customize/rules/create-rules for more information on how to create rules.)</li>
+</ol>
+  <details>
+    <summary>Code sample</summary>
+<pre><code>```js
+function addPersistenceAttribute(user, context, callback) {
   user.user_metadata = user.user_metadata || {};
   user.user_metadata.preferred_username = user.user_metadata.preferred_username || user.user_id;
   context.idToken.preferred_username = user.user_metadata.preferred_username;
@@ -9150,10 +9147,9 @@ has more information on setting up SiWA.</p>
         callback(err);
     });
 }
+```
 </code></pre>
-</details></li>
-</ol>
-  
+  </details>
 <p>Synapse config:</p>
 <pre><code class="language-yaml">oidc_providers:
   - idp_id: auth0
@@ -19879,6 +19875,9 @@ await wait_for_room("!aAAaaAaaaAAAaAaAA:matrix.org")
 await wait_for_room("!aAAaaAaaaAAAaAaAA:matrix.org")
 </code></pre>
 </td>
+</tr>
+
+</table>
 
 <h3 id="uncancelled-processing"><a class="header" href="#uncancelled-processing">Uncancelled processing</a></h3>
 <p>Some <code>async</code> functions may kick off some <code>async</code> processing which is
@@ -19980,8 +19979,6 @@ with LoggingContext("request-1"):
 
 </table>
 
-</tr>
-</table>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="log-contexts"><a class="header" href="#log-contexts">Log Contexts</a></h1>
 <p>To help track the processing of individual requests, synapse uses a
