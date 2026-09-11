@@ -4078,7 +4078,7 @@ Parts of this section are required if enabling the `consent` resource under [`li
 
 This setting has the following sub-options:
 
-* `template_dir` (string): Gives the location of the templates for the HTML forms. This directory should contain one subdirectory per language (eg, `en`, `fr`), and each language directory should contain the policy document (named as `<version>.html`) and a success page (success.html).
+* `template_dir` (string): Gives the location of the templates for the HTML forms. This directory should contain one subdirectory per language (eg, `en`, `fr`), and each language directory should contain the policy document (named as <version>.html) and a success page (success.html).
 
 * `version` (number): Specifies the "current" version of the policy document. It defines the version to be served by the consent resource if there is no `v` parameter.
 
