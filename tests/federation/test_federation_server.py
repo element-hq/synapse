@@ -1192,7 +1192,9 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             returned_state_dag = [
                 (ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]
             ]
-            self.assertIncludes(set(returned_state_dag), set(expected_state), exact=True)
+            self.assertIncludes(
+                set(returned_state_dag), set(expected_state), exact=True
+            )
             self.assertNotIn("state", channel.json_body)
             self.assertNotIn("auth_chain", channel.json_body)
         else:
