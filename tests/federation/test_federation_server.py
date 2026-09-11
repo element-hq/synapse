@@ -1192,7 +1192,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
             returned_state_dag = [
                 (ev["type"], ev["state_key"]) for ev in channel.json_body["state_dag"]
             ]
-            self.assertIncludes(returned_state_dag, expected_state, exact=True)
+            self.assertIncludes(set(returned_state_dag), set(expected_state), exact=True)
             self.assertNotIn("state", channel.json_body)
             self.assertNotIn("auth_chain", channel.json_body)
         else:
@@ -1238,7 +1238,7 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
         """
         KNOWN_ROOM_VERSIONS lacks MSC4242v12 rooms because it is behind an experimental features flag
         so set the flag and do the same test as above.
-       
+
         FIXME: When MSC4242 rooms are not gated behind a
         config flag this test can be deleted.
         """
