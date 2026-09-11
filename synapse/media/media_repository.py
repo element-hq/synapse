@@ -328,6 +328,10 @@ class MediaRepository:
     ) -> MXCUri:
         """Create or update the content of the given media ID.
 
+        Note: this does not check the media upload limits that apply to the
+        uploader. Callers acting on behalf of a user are responsible for calling
+        `check_media_upload_limits` first, before any of the content is stored.
+
         Args:
             media_type: The content type of the file.
             upload_name: The name of the file, if provided.
@@ -359,64 +363,6 @@ class MediaRepository:
                 "Media has been automatically quarantined as it matched existing quarantined media"
             )
 
-        # Check that the user has not exceeded any of the media upload limits.
-
-        # Use limits from module API if provided
-        media_upload_limits = (
-            await self.media_repository_callbacks.get_media_upload_limits_for_user(
-                auth_user.to_string()
-            )
-        )
-
-        # Otherwise use the default limits from config
-        if media_upload_limits is None:
-            # Note: the media upload limits are sorted so larger time periods are
-            # first.
-            media_upload_limits = self.default_media_upload_limits
-
-        # This is the total size of media uploaded by the user in the last
-        # `time_period_ms` milliseconds, or None if we haven't checked yet.
-        uploaded_media_size: int | None = None
-
-        for limit in media_upload_limits:
-            # We only need to check the amount of media uploaded by the user in
-            # this latest (smaller) time period if the amount of media uploaded
-            # in a previous (larger) time period is below the limit.
-            #
-            # This optimization means that in the common case where the user
-            # hasn't uploaded much media, we only need to query the database
-            # once.
-            if (
-                uploaded_media_size is None
-                or uploaded_media_size + content_length > limit.max_bytes
-            ):
-                uploaded_media_size = await self.store.get_media_uploaded_size_for_user(
-                    user_id=auth_user.to_string(), time_period_ms=limit.time_period_ms
-                )
-
-            if uploaded_media_size + content_length > limit.max_bytes:
-                await self.media_repository_callbacks.on_media_upload_limit_exceeded(
-                    user_id=auth_user.to_string(),
-                    limit=limit,
-                    sent_bytes=uploaded_media_size,
-                    attempted_bytes=content_length,
-                )
-
-                # Fall back to the static page served by Synapse when the limit
-                # doesn't specify its own `info_uri` (e.g. limits returned by a
-                # module callback without one).
-                info_uri = (
-                    limit.info_uri
-                    or self.hs.config.media.media_upload_limit_fallback_info_uri
-                )
-
-                raise UserLimitExceededError(
-                    403,
-                    "Media upload limit exceeded",
-                    info_uri=info_uri,
-                    can_upgrade=limit.can_upgrade,
-                )
-
         if is_new_media:
             await self.store.store_local_media(
                 media_id=media_id,
@@ -445,6 +391,80 @@ class MediaRepository:
             logger.info("Failed to generate thumbnails: %s", e)
 
         return MXCUri(self.server_name, media_id)
+
+    @trace
+    async def check_media_upload_limits(
+        self, user_id: str, content_length: int
+    ) -> None:
+        """Check that uploading the given amount of content would not take the
+        user over any of the media upload limits.
+
+        This should be called *before* the content is written to storage, so
+        that a rejected upload does not leave an orphaned file behind.
+
+        Args:
+            user_id: The user that is uploading the media.
+            content_length: The size in bytes of the media being uploaded.
+
+        Raises:
+            UserLimitExceededError: if the upload would exceed one of the limits
+                that apply to the user.
+        """
+        # Use limits from module API if provided
+        media_upload_limits = (
+            await self.media_repository_callbacks.get_media_upload_limits_for_user(
+                user_id
+            )
+        )
+
+        # Otherwise use the default limits from config
+        if media_upload_limits is None:
+            # Note: the media upload limits are sorted so larger time periods are
+            # first.
+            media_upload_limits = self.default_media_upload_limits
+
+        # This is the total size of media uploaded by the user in the last
+        # `time_period_ms` milliseconds, or None if we haven't checked yet.
+        uploaded_media_size: int | None = None
+
+        for limit in media_upload_limits:
+            # We only need to check the amount of media uploaded by the user in
+            # this latest (smaller) time period if the amount of media uploaded
+            # in a previous (larger) time period is below the limit.
+            #
+            # This optimization means that in the common case where the user
+            # hasn't uploaded much media, we only need to query the database
+            # once.
+            if (
+                uploaded_media_size is None
+                or uploaded_media_size + content_length > limit.max_bytes
+            ):
+                uploaded_media_size = await self.store.get_media_uploaded_size_for_user(
+                    user_id=user_id, time_period_ms=limit.time_period_ms
+                )
+
+            if uploaded_media_size + content_length > limit.max_bytes:
+                await self.media_repository_callbacks.on_media_upload_limit_exceeded(
+                    user_id=user_id,
+                    limit=limit,
+                    sent_bytes=uploaded_media_size,
+                    attempted_bytes=content_length,
+                )
+
+                # Fall back to the static page served by Synapse when the limit
+                # doesn't specify its own `info_uri` (e.g. limits returned by a
+                # module callback without one).
+                info_uri = (
+                    limit.info_uri
+                    or self.hs.config.media.media_upload_limit_fallback_info_uri
+                )
+
+                raise UserLimitExceededError(
+                    403,
+                    "Media upload limit exceeded",
+                    info_uri=info_uri,
+                    can_upgrade=limit.can_upgrade,
+                )
 
     def respond_not_yet_uploaded(self, request: SynapseRequest) -> None:
         respond_with_json(
