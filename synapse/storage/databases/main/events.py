@@ -1799,6 +1799,11 @@ class PersistEventsStore:
             stream_id: This is expected to be the minimum `stream_ordering` for the
                 batch of events that we are persisting; which means we do not end up in a
                 situation where workers see events before the `current_state_delta` updates.
+                Note that this stamps a row *before* its own event; readers that pair
+                deltas with the events in the same window bound each delta on its
+                event's position instead, see
+                `get_current_state_deltas_for_room_by_event_position(...)`, which stays
+                correct if this stamp is ever changed.
                 FIXME: However, this function also gets called with next upcoming
                 `stream_ordering` when we re-sync the state of a partial stated room (see
                 `update_current_state(...)`) which may be "correct" but it would be good to

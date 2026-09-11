@@ -528,6 +528,11 @@ class SlidingSyncHandler:
         their LEAVE/BAN event (inclusive).
 
         (> `from_token` and <= `to_token`)
+
+        Each delta is bounded on its state event's position rather than on the
+        delta row's batch-minimum stamp, so that a `pos` inside a persist batch
+        selects a state event for the timeline and its delta for `required_state`
+        together (see `get_current_state_deltas_for_room_by_event_position`).
         """
         membership = room_membership_for_user_at_to_token.membership
         # We don't know how to handle `membership` values other than these. The
@@ -566,7 +571,7 @@ class SlidingSyncHandler:
                 f"Unexpected membership {membership} that we don't know how to handle yet"
             )
 
-        return await self.store.get_current_state_deltas_for_room(
+        return await self.store.get_current_state_deltas_for_room_by_event_position(
             room_id=room_id,
             from_token=from_token,
             to_token=to_bound,
