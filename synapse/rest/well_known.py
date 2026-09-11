@@ -53,6 +53,16 @@ class WellKnownBuilder:
                 "base_url": self._config.registration.default_identity_server
             }
 
+        if self._config.matrix_rtc.transports:
+            result["org.matrix.msc4143.rtc_foci"] = []
+
+            for transport in self._config.matrix_rtc.transports:
+                transport_json = {
+                    "type": transport.type,
+                    "livekit_service_url": transport.livekit_service_url,
+                }
+                result["org.matrix.msc4143.rtc_foci"].append(transport_json)
+
         if self._config.mas.enabled:
             assert isinstance(self._auth, MasDelegatedAuth)
 
