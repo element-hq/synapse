@@ -1,0 +1,1 @@
+Fix state events being omitted from the [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222) `state_after` sync response when the client's `since` token falls inside an event persistence batch, as could happen on worker deployments.
