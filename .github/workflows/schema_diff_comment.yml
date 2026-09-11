@@ -30,7 +30,7 @@ jobs:
     name: Post schema diff comment
     runs-on: ubuntu-latest
     # Only run when triggered by a pull request and only on a PR from a fork
-    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.full_name != github.repository
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.full_name != github.repository && github.event.workflow_run.conclusion != 'cancelled'
     steps:
       - name: Download schema diff artifact
         id: download
