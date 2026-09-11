@@ -35,11 +35,6 @@ class AuthMetadataServlet(RestServlet):
             "/auth_metadata$",
             releases=("v1",),
         ),
-        *client_patterns(
-            "/org.matrix.msc2965/auth_metadata$",
-            unstable=True,
-            releases=(),
-        ),
     ]
 
     def __init__(self, hs: "HomeServer"):
