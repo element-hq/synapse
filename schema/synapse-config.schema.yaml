@@ -2387,6 +2387,20 @@ properties:
     default:
       per_second: 0.016
       burst_count: 200.0
+  rc_profile:
+    $ref: "#/$defs/rc"
+    description: >-
+      This option allows admins to ratelimit profile lookups by clients.
+
+
+      Requests are limited per user when the request is authenticated,
+      otherwise per client IP address.
+
+
+      _Added in Synapse 1.159.0._
+    default:
+      per_second: 1.0
+      burst_count: 500.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
