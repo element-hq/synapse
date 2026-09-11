@@ -686,18 +686,24 @@ class SyncHandler:
         with Measure(
             self.clock, name="sticky_events_by_room", server_name=self.server_name
         ):
-            from_id = since_token.sticky_events_key if since_token else 0
+            from_token = (
+                since_token.sticky_events_key
+                if since_token
+                else MultiWriterStreamToken(stream=0)
+            )
 
             room_ids = sync_result_builder.joined_room_ids
 
-            to_id, sticky_by_room = await self.store.get_sticky_events_in_rooms(
+            to_token, sticky_by_room = await self.store.get_sticky_events_in_rooms(
                 room_ids,
-                from_id=from_id,
-                to_id=now_token.sticky_events_key,
+                from_token=from_token,
+                to_token=now_token.sticky_events_key,
                 now=now,
                 limit=StickyEvent.MAX_EVENTS_IN_SYNC,
             )
-            now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
+            now_token = now_token.copy_and_replace(
+                StreamKeyType.STICKY_EVENTS, to_token
+            )
 
         return now_token, sticky_by_room
 

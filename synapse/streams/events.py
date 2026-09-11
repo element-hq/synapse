@@ -84,7 +84,7 @@ class EventSources:
             self._instance_name
         )
         thread_subscriptions_key = self.store.get_max_thread_subscriptions_stream_id()
-        sticky_events_key = self.store.get_max_sticky_events_stream_id()
+        sticky_events_key = self.store.get_sticky_events_stream_token()
         quarantined_media_key = self.store.get_quarantined_media_stream_token()
         profile_updates_key = self.store.get_max_profile_updates_stream_id()
 

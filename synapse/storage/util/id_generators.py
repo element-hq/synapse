@@ -36,6 +36,7 @@ from typing import (
 )
 
 import attr
+from immutabledict import immutabledict
 from sortedcontainers import SortedList, SortedSet
 
 from synapse.logging import issue9533_logger
@@ -49,6 +50,7 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
+from synapse.types import MultiWriterStreamToken
 
 if TYPE_CHECKING:
     from synapse.notifier import ReplicationNotifier
@@ -982,3 +984,180 @@ class _MultiWriterCtxManager:
             )
 
         return False
+
+
+def make_multiwriter_sharded_token_bounds_sql(
+    *,
+    stream_id_column: str,
+    instance_name_column: str,
+    from_token_exclusive: MultiWriterStreamToken,
+    to_token_inclusive: MultiWriterStreamToken,
+) -> tuple[str, Sequence[str | int]]:
+    """
+    Build an SQL clause that, in a multi-writer stream table,
+    matches the rows within the bounds of the `MultiWriterStreamToken` tokens provided.
+
+    Bounds: from_token_exclusive < ... <= to_token_inclusive
+
+    Arguments:
+        stream_id_column: the name of the `stream_id` column
+            Should be prefixed with the table name or alias
+            when used in a multi-table SELECT statement.
+        instance_name_column: the name of the `instance_name` column.
+            Should be prefixed with the table name or alias
+            when used in a multi-table SELECT statement.
+        from_token_exclusive:
+            MultiWriterStreamToken representing the highest position that has 'already been seen'.
+            Exclusive lower bound
+        to_token_inclusive:
+            MultiWriterStreamToken representing the highest position that has visible data.
+            Inclusive upper bound
+
+    Example:
+
+        make_multiwriter_sharded_token_bounds_sql(
+            stream_id_column="se.stream_id",
+            instance_name_column="se.instance_name",
+            # m5~1.8
+            from_token_exclusive=MultiWriterStreamToken(
+                stream=5, instance_map=immutabledict({"worker1": 8})
+            ),
+            # m10~2.14
+            to_token_inclusive=MultiWriterStreamToken(
+                stream=10, instance_map=immutabledict({"worker2": 14})
+            ),
+        )
+
+    gives:
+
+        (
+            5 < se.stream_id AND se.stream_id <= 14
+            AND NOT (se.instance_name = 'worker1' AND se.stream_id <= 8)
+            AND (
+                se.stream_id <= 10
+                OR (se.instance_name = 'worker2' AND se.stream_id <= 14)
+            )
+        )
+
+    which matches, for example:
+        - a `worker1` row at position 9 (past the 8 we had already read from
+            `worker1`, and within the 10 that is visible for every writer);
+        - a `worker2` row at position 12 (past 5, and `worker2` is
+            explicitly visible up to 14);
+    but not:
+        - a `worker1` row at position 7, which the `from` token says we have
+            already read;
+        - a `worker3` row at position 12, which is beyond the position that
+            is visible for writers other than `worker2`.
+
+    See also:
+        - `advance_multiwriter_sharded_token_after_partial_read` to create the next
+          `from_token_exclusive` after the result of reading a limited set of rows.
+    """
+
+    # The SQL we build will fundamentally consist of many clauses ANDed together.
+    #
+    # We start with an envelope delimited by the two outermost, writer-independent, bounds.
+    # We know everything before the lowest position of `from` and everything after the highest
+    # position of `to` must be out-of-bounds.
+    # This pair of bounds is the most likely to be index-friendly.
+    clauses = [f"? < {stream_id_column}", f"{stream_id_column} <= ?"]
+    values: list[int | str] = [
+        from_token_exclusive.stream,
+        to_token_inclusive.get_max_stream_pos(),
+    ]
+
+    # Now for every writer where we had already read further ahead than the baseline (lowest) position of `from`,
+    # we whittle away what we have already seen from the lower end of the envelope.
+    for instance_name, pos in from_token_exclusive.instance_map.items():
+        clauses.append(f"NOT ({instance_name_column} = ? AND {stream_id_column} <= ?)")
+        values.extend((instance_name, pos))
+
+    # Now we need to restrict the upper end of the envelope to only include those rows where either:
+    # - the row is in a region where all writers' rows are visible; or
+    upper_or_clauses = [f"{stream_id_column} <= ?"]
+    upper_or_values: list[int | str] = [to_token_inclusive.stream]
+    # - the row's writer is explicitly visible ahead of the baseline (minimum) position
+    for instance_name, pos in to_token_inclusive.instance_map.items():
+        upper_or_clauses.append(
+            f"({instance_name_column} = ? AND {stream_id_column} <= ?)"
+        )
+        upper_or_values.extend((instance_name, pos))
+
+    clauses.append("(\n\t\t" + "\n\t\tOR ".join(upper_or_clauses) + "\n\t)")
+    values.extend(upper_or_values)
+
+    return "(\n\t" + "\n\tAND ".join(clauses) + "\n)", values
+
+
+def advance_multiwriter_sharded_token_after_partial_read(
+    *,
+    from_token_exclusive: MultiWriterStreamToken,
+    to_token_inclusive: MultiWriterStreamToken,
+    last_read_stream_id: int,
+) -> MultiWriterStreamToken:
+    """
+    Calculates the 'read up to' token after reading a limited number of rows
+    between two `MultiWriterStreamToken` bounds.
+    Pairs with `make_multiwriter_sharded_token_bounds_sql`.
+
+    The read operation MUST have been ordered by the stream ID, e.g.
+    using `ORDER BY stream_id`.
+
+    Arguments:
+        from_token_exclusive: the exclusive lower bound the rows were read with.
+        to_token_inclusive: the inclusive upper bound the rows were read with.
+        last_read_stream_id: the `stream_id` of the last row that was read.
+
+    Returns:
+        A token that could be used as the `from_token_exclusive` for a subsequent
+        read, in order to continue reading rows in range.
+
+        The token represents the maximum 'read up to' position.
+        Rows with positions strictly above the token have not yet been read.
+    """
+    assert from_token_exclusive.stream < last_read_stream_id, "read was out of bounds"
+
+    # Calculate the new baseline position that we have read up to,
+    # which applies across all workers.
+    new_baseline = max(
+        # Must be at least as far as it was before (doesn't go backwards)
+        from_token_exclusive.stream,
+        min(
+            # Simple case: this is just `last_read_stream_id`,
+            # the `stream_id` of the last row we read.
+            last_read_stream_id,
+            # Complicated case: some writers may not have advanced to `last_read_stream_id` yet,
+            # so we have to cap off at the baseline 'to' position (`to_token_inclusive.stream`)
+            to_token_inclusive.stream,
+        ),
+    )
+
+    # Now consider whether any workers are ahead of the baseline.
+    # We do this by calculating the position of each relevant worker.
+    # (Relevant by virtue of being in either the `from` or `to` token.)
+    advanced_instance_map = {}
+    for instance_name in (
+        from_token_exclusive.instance_map.keys()
+        | to_token_inclusive.instance_map.keys()
+    ):
+        # Calculate the worker's position
+        worker_pos = max(
+            # Must be at least as far as it was before (doesn't go backwards)
+            from_token_exclusive.get_stream_pos_for_instance(instance_name),
+            # Then:
+            # - up to `last_read_stream_id`
+            # - unless its rows aren't visible yet, so cap off at the `to` position
+            # Either one of these cases will be at least as high as `new_baseline`.
+            min(
+                last_read_stream_id,
+                to_token_inclusive.get_stream_pos_for_instance(instance_name),
+            ),
+        )
+
+        if worker_pos > new_baseline:
+            advanced_instance_map[instance_name] = worker_pos
+
+    return MultiWriterStreamToken(
+        stream=new_baseline, instance_map=immutabledict(advanced_instance_map)
+    )
