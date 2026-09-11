@@ -43,8 +43,17 @@ line linking to the new documentation file:
 The documentation is built with [mdbook](https://rust-lang.github.io/mdBook/), and the outline of the
 documentation is determined by the structure of [SUMMARY.md](SUMMARY.md).
 
-First, [get mdbook](https://github.com/rust-lang/mdBook#installation). Then, **from the root of the repository**,
-build the documentation with:
+Building the documentation requires running some python. Ensure you have set up `poetry`, then run:
+
+```
+poetry install --only docs --no-root
+```
+
+to install just the python dependencies needed to build the documentation.
+
+Then, [install mdbook](https://github.com/rust-lang/mdBook#installation), which will convert the source markdown to HTML pages.
+
+Finally, **from the root of the repository**, build the documentation with:
 
 ```sh
 mdbook build
