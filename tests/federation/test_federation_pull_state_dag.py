@@ -50,12 +50,11 @@ T = TypeVar("T")
 class FederationPullStateDagTestCase(unittest.FederatingHomeserverTestCase):
     """Tests for receiving pulled events in a remote MSC4242 State DAG room.
 
-    A room is first joined over federation (the same way as the join tests), which leaves
-    a real, fully-persisted state DAG on the local homeserver. Events are then fed through
+    A room is first joined over federation. Events are then fed through
     the real inbound pull path (`_process_pulled_event`), with the remote server's
     /get_missing_events responses supplied by the test (by mocking the federation HTTP
     client). This exercises the state DAG walk, outlier persistence, state/auth
-    calculation and the soft-fail check for real.
+    calculation and the soft-fail check.
     """
 
     servlets = [
@@ -155,6 +154,31 @@ class FederationPullStateDagTestCase(unittest.FederatingHomeserverTestCase):
             event_type=EventTypes.JoinRules,
             state_key="",
             content={"join_rule": JoinRules.PUBLIC},
+        )
+        append(
+            event_type=EventTypes.PowerLevels,
+            state_key="",
+            content={
+                "users": {},
+                "users_default": 0,
+                "events": {
+                    EventTypes.Name: 50,
+                    EventTypes.PowerLevels: 100,
+                    EventTypes.RoomHistoryVisibility: 100,
+                    EventTypes.CanonicalAlias: 50,
+                    EventTypes.RoomAvatar: 50,
+                    EventTypes.Tombstone: 150,
+                    EventTypes.ServerACL: 100,
+                    EventTypes.RoomEncryption: 100,
+                },
+                "events_default": 0,
+                "state_default": 50,
+                "ban": 50,
+                "kick": 50,
+                "redact": 50,
+                "invite": 50,
+                "historical": 100,
+            },
         )
         for kwargs in extra_state_events or []:
             append(**kwargs)
