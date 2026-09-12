@@ -159,8 +159,15 @@ class SynapseRequest(Request):
         self.responseHeaders.setRawHeaders(
             b"Content-Length", [f"{len(error_response_bytes)}"]
         )
+        self.responseHeaders.setRawHeaders(b"Connection", [b"close"])
         self.write(error_response_bytes)
         self.loseConnection()
+
+    def _set_request_line(self, command: bytes, path: bytes, version: bytes) -> None:
+        """Set request-line fields before writing an early response."""
+        self.method = command
+        self.uri = path
+        self.clientproto = version
 
     def _get_content_length_from_headers(self) -> int | None:
         """Attempts to obtain the `Content-Length` value from the request's headers.
@@ -196,20 +203,20 @@ class SynapseRequest(Request):
                 Codes.UNKNOWN,
             )
 
-    def _validate_content_length(self) -> None:
-        """Validate Content-Length header and actual content size.
+    def _validate_content_length_header(self) -> int | None:
+        """Validate the declared Content-Length against the global size limit.
 
         Raises:
-            ContentLengthError: If validation fails.
+            ContentLengthError: If the Content-Length header is invalid or exceeds
+                the global request body size limit.
+
+        Returns:
+            The declared content length, or `None` if the header is absent.
         """
-        # we should have a `content` by now.
-        assert self.content, "_validate_content_length() called before gotLength()"
         content_length = self._get_content_length_from_headers()
 
         if content_length is None:
-            return
-
-        actual_content_length = self.content.tell()
+            return None
 
         if content_length > self._max_request_body_size:
             logger.info(
@@ -225,6 +232,23 @@ class SynapseRequest(Request):
                 f"Request content is too large (>{self._max_request_body_size})",
                 Codes.TOO_LARGE,
             )
+
+        return content_length
+
+    def _validate_content_length(self) -> None:
+        """Validate Content-Length header and actual content size.
+
+        Raises:
+            ContentLengthError: If validation fails.
+        """
+        # we should have a `content` by now.
+        assert self.content, "_validate_content_length() called before gotLength()"
+        content_length = self._validate_content_length_header()
+
+        if content_length is None:
+            return
+
+        actual_content_length = self.content.tell()
 
         if content_length != actual_content_length:
             comparison = (
@@ -249,16 +273,10 @@ class SynapseRequest(Request):
     # Twisted machinery: this method is called by the Channel once the full request has
     # been received, to dispatch the request to a resource.
     def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
-        # In the case of a Content-Length header being present, and it's value being too
-        # large, throw a proper error to make debugging issues due to overly large requests much
-        # easier. Currently we handle such cases in `handleContentChunk` and abort the
-        # connection without providing a proper HTTP response.
-        #
-        # Attempting to write an HTTP response from within `handleContentChunk` does not
-        # work, so the code here has been added to at least provide a response in the
-        # case of the Content-Length header being present.
-        self.method, self.uri = command, path
-        self.clientproto = version
+        # SynapseProtocol validates the declared Content-Length before accepting the
+        # body. Validate it again here, and compare it with the amount Twisted actually
+        # received, before dispatching the request to a resource.
+        self._set_request_line(command, path, version)
 
         try:
             self._validate_content_length()
@@ -787,8 +805,9 @@ class SynapseProtocol(HTTPChannel):
     """
     Synapse-specific twisted http Protocol.
 
-    This is a small wrapper around the twisted HTTPChannel so we can track active
-    connections in order to close any outstanding connections on shutdown.
+    This wrapper rejects requests with a declared oversized body before Twisted sends
+    ``100 Continue``. It also tracks active connections so that outstanding connections
+    can be closed on shutdown.
     """
 
     def __init__(
@@ -806,6 +825,7 @@ class SynapseProtocol(HTTPChannel):
         self.max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
         self.request_class = request_class
+        self._request_body_rejected = False
 
     def connectionMade(self) -> None:
         """
@@ -846,6 +866,32 @@ class SynapseProtocol(HTTPChannel):
             request_id_header=self.request_id_header,
         )
 
+    def allHeadersReceived(self) -> None:
+        """Validate Content-Length before Twisted sends ``100 Continue``."""
+        request = self.requests[-1]
+        assert isinstance(request, SynapseRequest)
+
+        request._set_request_line(self._command, self._path, self._version)
+        try:
+            request._validate_content_length_header()
+        except ContentLengthError as e:
+            # ``HTTPChannel.lineReceived`` enters raw mode after this method
+            # returns. Remember the rejection so that any request body bytes which
+            # were sent eagerly alongside the headers are discarded while the
+            # error response is flushed and the connection closes.
+            self._request_body_rejected = True
+            request._respond_with_error(e)
+            return
+
+        super().allHeadersReceived()
+
+    def rawDataReceived(self, data: bytes) -> None:
+        """Discard request body bytes after rejecting its Content-Length."""
+        if self._request_body_rejected:
+            return
+
+        super().rawDataReceived(data)
+
 
 class SynapseSite(ProxySite):
     """
@@ -882,8 +928,7 @@ class SynapseSite(ProxySite):
             resource:  The base of the resource tree to be used for serving requests on
                 this site
             server_version_string: A string to present for the Server header
-            max_request_body_size: Maximum request body length to allow before
-                dropping the connection
+            max_request_body_size: Maximum request body length to accept
             reactor: reactor to be used to manage connection timeouts
         """
         super().__init__(
