@@ -33,6 +33,7 @@ See doc/log_contexts.rst for details on how this works.
 import logging
 import threading
 import typing
+from collections import deque
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
@@ -55,6 +56,8 @@ from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.util.stringutils import random_string_insecure_fast
 
 if TYPE_CHECKING:
+    from sentry_sdk.types import Breadcrumb
+
     from synapse.logging.scopecontextmanager import _LogContextScope
     from synapse.types import ISynapseReactor
 
@@ -102,6 +105,22 @@ except Exception:
 # a hook which can be set during testing to assert that we aren't abusing logcontexts.
 def logcontext_error(msg: str) -> None:
     logger.warning(msg)
+
+
+_sentry_breadcrumb_ring_size: int | None = None
+"""
+Size of the Sentry breadcrumb ring each logcontext keeps, or `None` while Sentry is
+disabled.
+
+Set by `synapse.logging.sentry`: `sentry_sdk` is an optional dependency, so this module
+cannot import it.
+"""
+
+
+def set_sentry_breadcrumb_ring_size(size: int) -> None:
+    """Start keeping a Sentry breadcrumb ring of the given size on each logcontext."""
+    global _sentry_breadcrumb_ring_size
+    _sentry_breadcrumb_ring_size = size
 
 
 # get an id for the current thread.
@@ -235,6 +254,10 @@ class ContextRequest:
     url: str
     protocol: str
     user_agent: str
+    # Unset until the request is routed; narrowed from the resource class name to
+    # the servlet class name as dispatch progresses (see
+    # `SynapseRequest.set_servlet_name`).
+    servlet_name: str | None = None
 
 
 LoggingContextOrSentinel = Union["LoggingContext", "_Sentinel"]
@@ -259,6 +282,7 @@ class _Sentinel:
         "server_name",
         "request",
         "tag",
+        "sentry_breadcrumbs",
     ]
 
     def __init__(self) -> None:
@@ -269,6 +293,7 @@ class _Sentinel:
         self.request = None
         self.scope = None
         self.tag = None
+        self.sentry_breadcrumbs: "deque[Breadcrumb] | None" = None
 
     def __str__(self) -> str:
         return "sentinel"
@@ -326,6 +351,7 @@ class LoggingContext:
         "request",
         "tag",
         "scope",
+        "sentry_breadcrumbs",
     ]
 
     def __init__(
@@ -358,6 +384,21 @@ class LoggingContext:
         self.finished = False
 
         self.parent_context = parent_context
+
+        # Sentry breadcrumbs recorded under this context, or `None` while Sentry is
+        # disabled. Children (including database threads) share their parent's ring so
+        # that a request's breadcrumbs stay together and separate from other requests'.
+        # `synapse.logging.sentry._snapshot_breadcrumbs` covers what makes reading a
+        # ring that other threads are appending to safe.
+        self.sentry_breadcrumbs: "deque[Breadcrumb] | None" = None
+        if _sentry_breadcrumb_ring_size is not None:
+            if (
+                parent_context is not None
+                and parent_context.sentry_breadcrumbs is not None
+            ):
+                self.sentry_breadcrumbs = parent_context.sentry_breadcrumbs
+            else:
+                self.sentry_breadcrumbs = deque(maxlen=_sentry_breadcrumb_ring_size)
 
         # Inherit some fields from the parent context
         if self.parent_context is not None:
