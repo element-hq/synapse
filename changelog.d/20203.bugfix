@@ -1,0 +1,2 @@
+Ensure when a user leaves a room, the profile update stream is correctly updated for users they no longer
+share rooms with.

@@ -526,7 +526,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
     ) -> None:
         """
         Test that profile extension response returns a null for the user in
-        incremental sync.
+        incremental sync, if the user left the last shared room.
         """
         # Make an initial Sliding Sync request with the profiles extension enabled
         profiles_config: dict = {
@@ -543,6 +543,46 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=self.tok)
 
         self.helper.leave(self.joined_room, self.other_user, tok=self.other_tok)
+
+        # Make an incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
+        # We should see a null profile
+        self.assertIsNone(
+            response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
+                "@other_user:test"
+            ],
+        )
+
+    @parameterized.expand(
+        [
+            True,
+            False,
+        ]
+    )
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_null_profile_returned_we_left_all_rooms(
+        self,
+        request_fields: bool,
+    ) -> None:
+        """
+        Test that profile extension response returns a null for the user in
+        incremental sync, if we left the last shared room with a user.
+        """
+        # Make an initial Sliding Sync request with the profiles extension enabled
+        profiles_config: dict = {
+            "enabled": True,
+        }
+        if request_fields:
+            profiles_config["fields"] = ["field"]
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "org.matrix.msc4262.profiles": profiles_config,
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=self.tok)
+
+        self.helper.leave(self.joined_room, self.user, tok=self.tok)
 
         # Make an incremental Sliding Sync request
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=self.tok)
