@@ -26,7 +26,8 @@
 # More info here: https://docs.python.org/3/reference/compound_stmts.html#annotations
 from __future__ import annotations
 
-from typing import NoReturn, Protocol
+import logging
+from typing import NoReturn, Protocol, Sequence
 
 from prometheus_client.core import Sample
 
@@ -35,13 +36,16 @@ from synapse.metrics import (
     SERVER_NAME_LABEL,
     InFlightGauge,
     LaterGauge,
+    RegistryProxy,
     all_later_gauges_to_clean_up_on_shutdown,
     generate_latest,
 )
+from synapse.metrics._types import Collector
 from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
 from tests.metrics import get_latest_metrics
+from tests.metrics._collectors import BrokenCollector, HealthyCollector
 
 
 def get_sample_labels_value(sample: Sample) -> tuple[dict[str, str], float]:
@@ -391,3 +395,74 @@ class LaterGaugeTests(unittest.HomeserverTestCase):
             f"Missing metric {hs2_metric} in cache metrics {metrics_map}",
         )
         self.assertEqual(hs2_metric_value, "2.0")
+
+
+class RegistryProxyTests(unittest.TestCase):
+    """Tests for `RegistryProxy.collect`, the per-collector error boundary Synapse
+    installs in front of the real `REGISTRY`."""
+
+    def _register(self, collector: Collector) -> None:
+        REGISTRY.register(collector)
+        self.addCleanup(REGISTRY.unregister, collector)
+
+    def _records_naming(
+        self, records: Sequence[logging.LogRecord], name: str
+    ) -> Sequence[logging.LogRecord]:
+        """`RegistryProxy.collect` runs over the process-global `REGISTRY`, so any
+        other collector failing during the same scrape would otherwise be counted."""
+        return [record for record in records if name in record.getMessage()]
+
+    def test_broken_collector_does_not_prevent_other_metrics(self) -> None:
+        """A collector whose `collect()` raises is skipped, but other collectors'
+        metrics are still yielded, with one ERROR record logged naming it."""
+        broken_collector = BrokenCollector("test_registry_proxy_broken_collector")
+        self._register(broken_collector)
+        self._register(HealthyCollector("test_registry_proxy_healthy_collector"))
+
+        with self.assertLogs("synapse.metrics", level="ERROR") as cm:
+            names = {metric.name for metric in RegistryProxy.collect()}
+
+        self.assertIn("test_registry_proxy_healthy_collector", names)
+        self.assertNotIn("test_registry_proxy_broken_collector", names)
+
+        records = self._records_naming(
+            cm.records, "test_registry_proxy_broken_collector"
+        )
+        self.assertEqual(len(records), 1)
+        self.assertIsNotNone(records[0].exc_info)
+        self.assertIn(repr(broken_collector), records[0].getMessage())
+
+    def test_dunder_prefixed_families_are_filtered(self) -> None:
+        """Metric families whose name starts with `__` are filtered out."""
+        self._register(HealthyCollector("__test_registry_proxy_hidden_collector"))
+
+        names = {metric.name for metric in RegistryProxy.collect()}
+        self.assertNotIn("__test_registry_proxy_hidden_collector", names)
+
+    def test_restricted_registry_keeps_the_boundary_and_the_filter(self) -> None:
+        """A `?name[]=` scrape, which `prometheus_client.exposition._bake_output`
+        serves from `restricted_registry`, gets the requested families through the
+        same error boundary and `__`-prefix filter as a full scrape."""
+        broken_collector = BrokenCollector("test_registry_proxy_restricted_broken")
+        self._register(broken_collector)
+        self._register(HealthyCollector("test_registry_proxy_restricted_healthy"))
+        self._register(HealthyCollector("__test_registry_proxy_restricted_hidden"))
+        self._register(HealthyCollector("test_registry_proxy_restricted_unasked"))
+
+        restricted = RegistryProxy.restricted_registry(
+            [
+                "test_registry_proxy_restricted_broken",
+                "test_registry_proxy_restricted_healthy",
+                "__test_registry_proxy_restricted_hidden",
+            ]
+        )
+        with self.assertLogs("synapse.metrics", level="ERROR") as cm:
+            names = {metric.name for metric in restricted.collect()}
+
+        self.assertEqual(names, {"test_registry_proxy_restricted_healthy"})
+
+        records = self._records_naming(
+            cm.records, "test_registry_proxy_restricted_broken"
+        )
+        self.assertEqual(len(records), 1)
+        self.assertIsNotNone(records[0].exc_info)
