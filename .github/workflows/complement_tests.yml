@@ -160,7 +160,7 @@ jobs:
         run: cat /tmp/gotest-complement.log | gotestfmt -hide "successful-downloads,successful-tests,empty-packages"
 
       - name: Run in-repo Complement Tests
-        # Always run as long as we attempted to run the original Complement tests
+        # Always run as long as we attempted to run the original Complement tests.
         # This lets us get a status report on the in-repo tests, even if the
         # standard Complement test suite fails.
         if: always() && steps.run_complement_tests.outcome != 'skipped'
