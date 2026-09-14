@@ -940,13 +940,13 @@ class ProfileWorkerStore(SQLBaseStore):
         else:
             assert not field_names
 
-        if not target_users:
+        if target_users is None:
             # This function must be called with one user only if it needs to
             # compute the target users. This restriction mainly exists as a
             # fail safe to ensure we don't abuse the loop of membership fetches here
             # and ensure calling code makes the necessary optimizations.
             assert len(users) == 1
-            if not user_rooms:
+            if user_rooms is None:
                 rows = self.db_pool.simple_select_onecol_txn(
                     txn=txn,
                     table="current_state_events",
