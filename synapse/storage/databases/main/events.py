@@ -2185,7 +2185,13 @@ class PersistEventsStore:
         """
         Record updates into the profile updates stream for when a user leaves a room.
 
-        If this was the last shared room with a set of users, clear all old rows from
+        This handles two distinct cases when a user leaves a room:
+          1) we find users in the the room who no longer share rooms with the user that
+            left the room, and record a `LEFT_ROOM` action for them.
+          2) we check for the user who left the room if they no longer share rooms with
+            some users of the room that was left, and do the same in reverse.
+
+        In both cases, when recording a `LEFT_ROOM` action, we clear all old rows from
         the `profile_updates_per_user` table relating to those users, to avoid exposing
         any profile field changes past the point of not being in any common rooms with
         the user.
