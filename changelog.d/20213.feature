@@ -1,0 +1,1 @@
+Stop attaching Matrix IDs and client IP addresses to Sentry events: events now identify the user by a pseudonymous hash, carry only the current request's breadcrumbs (configurable with `sentry.max_breadcrumbs`), and record the servlet, method and listener as tags.

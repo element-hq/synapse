@@ -574,6 +574,21 @@ class SynapseRequest(Request):
             else:
                 self._finished_processing()
 
+    def set_servlet_name(self, servlet_name: str) -> None:
+        """Record which servlet is handling this request.
+
+        Callers narrow the name down as dispatch progresses, from the resource class
+        to the servlet class that ends up handling the request.
+        """
+        # A logging context should exist by now (and have a ContextRequest): `render`
+        # builds it before `_started_processing`, and the `server.py` callers run
+        # inside `Request.render`.
+        assert self.logcontext is not None
+        assert self.logcontext.request is not None
+
+        self.request_metrics.name = servlet_name
+        self.logcontext.request.servlet_name = servlet_name
+
     def _started_processing(self, servlet_name: str) -> None:
         """Record the fact that we are processing this request.
 
@@ -584,14 +599,15 @@ class SynapseRequest(Request):
             servlet_name: the name of the servlet which will be
                 processing this request. This is used in the metrics.
 
-                It is possible to update this afterwards by updating
-                self.request_metrics.name.
+                It is possible to update this afterwards by calling
+                `set_servlet_name`.
         """
         self.start_time = time.time()
         self.request_metrics = RequestMetrics(our_server_name=self.our_server_name)
         self.request_metrics.start(
             self.start_time, name=servlet_name, method=self.get_method()
         )
+        self.set_servlet_name(servlet_name)
 
         self.synapse_site.access_logger.debug(
             "%s - %s - Received request: %s %s",

@@ -138,7 +138,7 @@ saml2 = [
 ]
 oidc = ["authlib>=0.15.1"]
 url-preview = ["lxml>=4.6.3"]
-sentry = ["sentry-sdk>=0.7.2"]
+sentry = ["sentry-sdk>=2.0.0"]
 opentracing = [
     "jaeger-client>=4.2.0",
     "opentracing>=2.2.0",
@@ -182,7 +182,7 @@ all = [
     # url-preview
     "lxml>=4.6.3",
     # sentry
-    "sentry-sdk>=0.7.2",
+    "sentry-sdk>=2.0.0",
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis

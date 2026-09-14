@@ -329,7 +329,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
         exceptions, return values, metrics, etc.
         """
         try:
-            request.request_metrics.name = self.__class__.__name__
+            request.set_servlet_name(self.__class__.__name__)
 
             with trace_servlet(request, self._extract_context):
                 try:
@@ -558,7 +558,7 @@ class JsonResource(DirectServeJsonResource):
 
         # Make sure we have an appropriate name for this handler in prometheus
         # (rather than the default of JsonResource).
-        request.request_metrics.name = servlet_classname
+        request.set_servlet_name(servlet_classname)
 
         # Now trigger the callback. If it returns a response, we send it
         # here. If it throws an exception, that is handled by the wrapper

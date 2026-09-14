@@ -84,7 +84,6 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
 from synapse.types import ISynapseReactor, StrCollection
-from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
 from synapse.util.daemonize import daemonize_process
 from synapse.util.gai_resolver import GAIResolver
@@ -831,26 +830,11 @@ def setup_sentry(hs: "HomeServer") -> None:
     if not hs.config.metrics.sentry_enabled:
         return
 
-    import sentry_sdk
+    # `sentry_sdk` is an optional dependency, so the module that imports it is only
+    # pulled in once we know Sentry is enabled.
+    from synapse.logging.sentry import setup_sentry as setup
 
-    sentry_sdk.init(
-        dsn=hs.config.metrics.sentry_dsn,
-        release=SYNAPSE_VERSION,
-        environment=hs.config.metrics.sentry_environment,
-    )
-
-    # We set some default tags that give some context to this instance
-    global_scope = sentry_sdk.Scope.get_global_scope()
-    global_scope.set_tag("matrix_server_name", hs.config.server.server_name)
-
-    app = (
-        hs.config.worker.worker_app
-        if hs.config.worker.worker_app
-        else "synapse.app.homeserver"
-    )
-    name = hs.get_instance_name()
-    global_scope.set_tag("worker_app", app)
-    global_scope.set_tag("worker_name", name)
+    setup(hs)
 
 
 def setup_sdnotify(hs: "HomeServer") -> None:

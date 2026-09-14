@@ -3175,11 +3175,17 @@ An optional `environment` field can be used to specify an environment. This allo
 
 NOTE: While attempts are made to ensure that the logs don't contain any sensitive information, this cannot be guaranteed. By enabling this option the sentry server may therefore receive sensitive information, and it in turn may then disseminate sensitive information through insecure notification channels if so configured.
 
+What Synapse sends to Sentry: the exception or log message that triggered the event; its stack trace, including each frame's local variables; the servlet, HTTP method and listener (`site_tag`) handling the request, as tags; a pseudonymous user id; the request path with its query string removed and the `User-Agent` header; and the last `max_breadcrumbs` log lines of that request. Synapse never attaches the client's IP address itself, but `sentry_sdk` sends local variables as it finds them, so an IP held in one can still reach Sentry.
+
+The pseudonymous user id is an unsalted, truncated SHA-256 of the Matrix ID. It is stable, so one user's events can be correlated with each other, and anyone holding a candidate Matrix ID can confirm whether it matches.
+
 This setting has the following sub-options:
 
 * `dsn` (string|null): The DSN assigned by sentry. If unset or null, sentry integration is disabled. Defaults to `null`.
 
 * `environment` (string|null): Sentry environment. Defaults to `null`.
+
+* `max_breadcrumbs` (integer): The number of recent log lines to attach to each sentry event as breadcrumbs. Synapse collects breadcrumbs per request, so a larger value costs memory for every request in flight. Defaults to `50`.
 
 Example configuration:
 ```yaml

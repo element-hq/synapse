@@ -92,6 +92,34 @@ class JsonResourceTests(unittest.TestCase):
 
         self.assertEqual(got_kwargs, {"room_id": "\N{SNOWMAN}"})
 
+    def test_servlet_name_recorded_on_logcontext(self) -> None:
+        """
+        The name of the servlet that handled a request ends up on the request's
+        logcontext, so that out-of-band reporting can name it.
+        """
+
+        def _callback(
+            request: SynapseRequest, **kwargs: object
+        ) -> tuple[int, JsonDict]:
+            return 200, {}
+
+        res = JsonResource(self.homeserver)
+        res.register_paths(
+            "GET", [re.compile("^/_matrix/foo$")], _callback, "test_servlet"
+        )
+
+        channel = make_request(
+            self.reactor, FakeSite(res, self.reactor), b"GET", b"/_matrix/foo"
+        )
+
+        self.assertEqual(channel.code, 200)
+
+        request = channel.request
+        assert isinstance(request, SynapseRequest)
+        assert request.logcontext is not None
+        assert request.logcontext.request is not None
+        self.assertEqual(request.logcontext.request.servlet_name, "test_servlet")
+
     def test_callback_direct_exception(self) -> None:
         """
         If the web callback raises an uncaught exception, it will be translated
