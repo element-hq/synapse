@@ -1999,7 +1999,6 @@ class FederationEventHandler:
                         for event_id in itertools.chain(
                             calculated_auth_event_ids, event.prev_state_events
                         )
-                        if event_id in event_map
                     }
                     # If we have calculated state before this event, remember it so we don't need
                     # to keep asking the database. The state we are remembering is StateMap[event_id]
@@ -2117,6 +2116,7 @@ class FederationEventHandler:
 
         if known_prev_state_maps:
             if len(known_prev_state_maps) == 1:
+                # There's only 1 state map so we don't need to do state resolution at all.
                 state_ids = list(known_prev_state_maps.values())[0]
             else:
                 res = await self._state_resolution_handler.resolve_state_groups(
@@ -2133,25 +2133,26 @@ class FederationEventHandler:
             state_ids = await self._state_handler.compute_state_after_events(
                 event.room_id,
                 event.prev_state_events,
-                # There is no filter to apply here
+                # There is no filter to apply here and we want all the events anyway since we need
+                # to persist the entire calculate state.
                 state_filter=None,
-                # we need to have finished processing the entire state DAG before we can
-                # compute the state for new events, but this function is called WHEN we are processing
-                # the entire state DAG. To wait here would be circular, we'd deadlock.
+                # we need to have finished processing the events causally prior to `event` in the
+                # state DAG before we can compute the state for this `event`, but this function is
+                # called unilaterally WHEN we are processing events in the state DAG.
+                # To wait here would be circular, we'd deadlock.
                 await_full_state=False,
             )
 
         # We should always have some resolved state after the prev_state_events, except
         # for the create event which is the start of the state DAG.
-        is_create_event = (
-            len(event.prev_state_events) == 0
-            and event.type == EventTypes.Create
-            and event.get_state_key() == ""
-        )
+        is_create_event = len(event.prev_state_events) == 0 and (
+            event.type,
+            event.get_state_key(),
+        ) == (EventTypes.Create, "")
         if not is_create_event:
             # We must have calculated room state for every event by now.
             # Only the create event can have no room state (since it's the first event in the room)
-            assert len(state_ids) > 0
+            assert len(state_ids) > 0, "State at prev_state_events was not calculated"
 
         context = await self._state_handler.compute_event_context(
             event,
@@ -2561,9 +2562,6 @@ class FederationEventHandler:
         events locally. The calculated auth event IDs are remembered on the event so we
         don't need to calculate them again when the event is persisted.
 
-        Rejected events never form part of the room state, so the calculated auth events
-        cannot be rejected and are loaded without allowing rejected events.
-
         Args:
             event: the event whose auth events we want.
             context: the state before the event.
@@ -2577,7 +2575,10 @@ class FederationEventHandler:
         )
         event.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
         calculated_auth_events = await self._store.get_events(
-            calculated_auth_event_ids, allow_rejected=False
+            calculated_auth_event_ids,
+            # Rejected events never form part of the room state, so the calculated auth events
+            # cannot be rejected and are loaded without allowing rejected events.
+            allow_rejected=False,
         )
         return calculated_auth_events.values()
 
