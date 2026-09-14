@@ -20,6 +20,7 @@
 #
 #
 
+import copy
 import itertools
 import logging
 import os
@@ -139,11 +140,68 @@ def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
 _set_prometheus_client_use_created_metrics(False)
 
 
+def _check_registry_collect_internals_are_present() -> None:
+    """
+    `_RegistryProxy.collect` reaches into `CollectorRegistry`'s private
+    `_collector_to_names` and `_lock` attributes (see there) to give each collector
+    its own error boundary. If a `prometheus_client` upgrade renames or removes them,
+    fail at import rather than on every scrape.
+    """
+    if not (hasattr(REGISTRY, "_collector_to_names") and hasattr(REGISTRY, "_lock")):
+        raise Exception(
+            "Can't iterate prometheus_client's collectors one at a time (brittle hack broken?)"
+        )
+
+
+_check_registry_collect_internals_are_present()
+
+
 class _RegistryProxy:
     @staticmethod
     def collect() -> Iterable[Metric]:
-        for metric in REGISTRY.collect():
-            if not metric.name.startswith("__"):
+        # `_collector_to_names` and `_lock` are private `CollectorRegistry` attributes
+        # (see `_check_registry_collect_internals_are_present` above). Snapshotting the
+        # collector set under the lock mirrors `CollectorRegistry.collect`
+        # (prometheus_client/registry.py); unlike that method, we don't need to also
+        # yield a target_info metric here because Synapse's `REGISTRY` never calls
+        # `set_target_info`.
+        with REGISTRY._lock:
+            collectors = copy.copy(REGISTRY._collector_to_names)
+
+        for collector in collectors:
+            try:
+                for metric in collector.collect():
+                    if not metric.name.startswith("__"):
+                        yield metric
+            except Exception:
+                # Collection can run concurrently with the reactor (on the
+                # prometheus_client HTTP server's own thread), so a collector reading
+                # reactor-owned state can raise. Skip it rather than failing the whole
+                # scrape.
+                logger.exception(
+                    "Error collecting metrics from %r (%s); skipping the rest of its "
+                    "metrics for this scrape",
+                    collector,
+                    collectors[collector],
+                )
+
+    @staticmethod
+    def restricted_registry(names: Iterable[str]) -> "_RestrictedRegistryProxy":
+        # `prometheus_client.exposition._bake_output` calls this for `?name[]=` scrapes,
+        # and its own `RestrictedRegistry` collects from the real `REGISTRY`, which
+        # would bypass the error boundary and the `__`-prefix filter in `collect` above.
+        return _RestrictedRegistryProxy(names)
+
+
+class _RestrictedRegistryProxy:
+    """The families of `_RegistryProxy.collect` that a `?name[]=` scrape asked for."""
+
+    def __init__(self, names: Iterable[str]) -> None:
+        self._names = set(names)
+
+    def collect(self) -> Iterable[Metric]:
+        for metric in _RegistryProxy.collect():
+            if metric.name in self._names:
                 yield metric
 
 

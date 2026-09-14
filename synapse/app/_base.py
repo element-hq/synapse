@@ -315,6 +315,33 @@ def register_start(
     clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
 
 
+def _handle_metrics_request_error(request: object, client_address: object) -> None:
+    """`socketserver.BaseServer.handle_error` replacement for the metrics listener.
+
+    `ThreadingMixIn.process_request_thread` calls this as a plain function
+    (`self.handle_error(request, client_address)` looks it up on the instance, so no
+    bound `self` is passed) from inside its `except Exception:` block, so
+    `sys.exc_info()` still refers to the exception that was raised while handling the
+    request.
+
+    Without this, `socketserver.BaseServer.handle_error`'s default implementation
+    prints the traceback to `sys.stderr` with one line per `write()` call, and Synapse
+    turns each of those lines into its own ERROR log record.
+    """
+    exc = sys.exc_info()[1]
+    if isinstance(exc, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+        # The scraper closed the connection while we were reading its request. A
+        # disconnect while the response is being written never gets here:
+        # `wsgiref.handlers.BaseHandler.run` catches these three types itself.
+        logger.debug(
+            "Connection error handling metrics request from %s: %r",
+            client_address,
+            exc,
+        )
+    else:
+        logger.exception("Error handling metrics request from %s", client_address)
+
+
 def listen_metrics(
     bind_addresses: StrCollection, port: int
 ) -> list[tuple[WSGIServer, Thread]]:
@@ -344,6 +371,14 @@ def listen_metrics(
         server, thread = start_http_server_prometheus(
             port, addr=host, registry=RegistryProxy
         )
+        # A scraper disconnecting while its request is being read is the only error
+        # path left that reaches socketserver: collector errors are handled in
+        # `RegistryProxy.collect`, and anything the WSGI app raises is caught by
+        # `wsgiref.handlers.BaseHandler`, which writes the traceback to `wsgi.errors`
+        # instead. The stdlib default here would print the traceback to `sys.stderr`,
+        # which Synapse's stdio-to-logs redirection turns into one ERROR record per
+        # line.
+        server.handle_error = _handle_metrics_request_error  # type: ignore[method-assign]
         servers.append((server, thread))
     return servers
 
