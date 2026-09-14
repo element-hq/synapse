@@ -2484,13 +2484,18 @@ class EventCreationHandler:
         for k, v in original_event.internal_metadata.get_dict().items():
             setattr(builder.internal_metadata, k, v)
 
-        # Creation events using msc4291 rooms will not have a room_id, and will
-        # also not have prev_events nor prev_state_events(below). This makes mypy happy.
+        # Creation events using msc4242 and msc4291 rooms will not have a room_id, and
+        # will also not have prev_events nor prev_state_events(below).
         prev_event_ids = []
-        if builder.room_id is not None:
+        if builder.room_id is not None and not (
+            builder.type == EventTypes.Create
+            and original_event.room_version.msc4291_room_ids_as_hashes
+        ):
             prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
 
-        prev_state_events = None
+        prev_state_events: list[str] | None = (
+            [] if original_event.room_version.msc4242_state_dags else None
+        )
         if (
             original_event.room_version.msc4242_state_dags
             and builder.type != EventTypes.Create
