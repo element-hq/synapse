@@ -2241,7 +2241,7 @@ class PersistEventsStore:
         # in the room that no longer shares a room with the user who left the room.
         self.store.record_profile_updates_txn(
             txn=txn,
-            user_id=user_id,
+            users={user_id.to_string()},
             action=ProfileUpdateAction.LEFT_ROOM,
             field_names=[],
             target_users=users_no_longer_sharing_rooms,
@@ -2262,14 +2262,13 @@ class PersistEventsStore:
             (user_id.to_string(), *user_args),
         )
         # Then add the left room action rows in the stream.
-        for user in users_no_longer_sharing_rooms:
-            self.store.record_profile_updates_txn(
-                txn=txn,
-                user_id=UserID.from_string(user),
-                action=ProfileUpdateAction.LEFT_ROOM,
-                field_names=[],
-                target_users={user_id.to_string()},
-            )
+        self.store.record_profile_updates_txn(
+            txn=txn,
+            users=users_no_longer_sharing_rooms,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users={user_id.to_string()},
+        )
 
     @classmethod
     def _get_relevant_sliding_sync_current_state_event_ids_txn(
