@@ -2065,6 +2065,10 @@ class FederationEventHandler:
         # This is just an optimisation, so it doesn't need to be watertight - the event
         # persister does another round of deduplication.
         seen_remotes = await self._store.have_seen_events(room_id, event_map.keys())
+        if is_state_dag_room:
+            # Out-of-band memberships were persisted without state; now that we have
+            # their `prev_state_events` process them again so they gain some.
+            seen_remotes = await self._store.get_events_with_state_groups(seen_remotes)
         for s in seen_remotes:
             event_map.pop(s, None)
 

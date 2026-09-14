@@ -632,6 +632,20 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 raise RuntimeError("No state group for unknown or outlier event %s" % e)
         return res
 
+    async def get_events_with_state_groups(
+        self, event_ids: Collection[str]
+    ) -> set[str]:
+        """Returns the subset of the given events which have a state group."""
+        rows = await self.db_pool.simple_select_many_batch(
+            table="event_to_state_groups",
+            column="event_id",
+            iterable=event_ids,
+            keyvalues={},
+            retcols=("event_id",),
+            desc="get_events_with_state_groups",
+        )
+        return {row[0] for row in rows}
+
     async def get_referenced_state_groups(
         self, state_groups: Iterable[int]
     ) -> set[int]:

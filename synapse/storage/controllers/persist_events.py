@@ -53,6 +53,7 @@ from synapse.events import (
 from synapse.events.py_protocol import (
     MSC4242Event,
     all_supports_msc4242_state_dag,
+    is_out_of_band_state_dag_event,
 )
 from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
@@ -695,7 +696,8 @@ class EventsPersistenceStorageController:
                 #
                 # See: docs/auth_chain_difference_algorithm.md
                 new_event_links = await self.persist_events_store.calculate_chain_cover_index_for_events(
-                    room_id, [e for e, _ in chunk]
+                    room_id,
+                    [e for e, _ in chunk if not is_out_of_band_state_dag_event(e)],
                 )
 
             # Stop the state groups from being deleted while we're persisting
@@ -853,6 +855,15 @@ class EventsPersistenceStorageController:
         NB: this does not write them because if it did, new events may see them _before_ the events
         get persisted, causing failures in retrieving state groups.
         """
+        # Out-of-band memberships aren't in our copy of the state DAG.
+        event_contexts = [
+            (e, ctx)
+            for e, ctx in event_contexts
+            if not is_out_of_band_state_dag_event(e)
+        ]
+        if not event_contexts:
+            return None, None, None
+
         # Update forward extremities
         # ...for the state DAG
         existing_state_dag_fwd_extrems = (
