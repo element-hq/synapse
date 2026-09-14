@@ -1,2 +1,1 @@
-Ensure when a user leaves a room, the profile update stream is correctly updated for users they no longer
-share rooms with.
+Tell clients to remove local profile information for users after leaving the last room shared with them.
