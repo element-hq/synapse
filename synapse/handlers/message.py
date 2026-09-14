@@ -2451,8 +2451,12 @@ class EventCreationHandler:
             self.validator.validate_builder(builder)
 
         except SynapseError as e:
-            # Prepend the error message with some context.
+            # Prepend the error message with some context. This will be raised as a
+            # `400` since assumption of the validator is that it came directly from a
+            # client. Change this to a `500`, as the module will have changed something
+            # and that is a fault of the server
             e.msg = "Third party rules module created an invalid event: " + e.msg
+            e.code = HTTPStatus.INTERNAL_SERVER_ERROR
             raise
 
         immutable_fields = [
