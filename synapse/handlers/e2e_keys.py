@@ -71,7 +71,7 @@ ONE_TIME_KEY_UPLOAD = "one_time_key_upload_lock"
 # clients built on the matrix-rust-sdk aim to keep on the server, and well below
 # vodozemac's private key bound, so we never reject an upload from a well-behaved
 # client nor hold a key the client has already discarded.
-MAX_ONE_TIME_KEYS_PER_DEVICE = 500
+MAX_ONE_TIME_KEYS_PER_ALGORITHM_PER_DEVICE = 500
 
 
 class E2eKeysHandler:
@@ -1009,7 +1009,7 @@ class E2eKeysHandler:
                 algorithm for algorithm, _, _ in new_keys
             ).items():
                 total = counts.get(algorithm, 0) + new_count
-                if total > MAX_ONE_TIME_KEYS_PER_DEVICE:
+                if total > MAX_ONE_TIME_KEYS_PER_ALGORITHM_PER_DEVICE:
                     raise SynapseError(
                         400,
                         "Uploading %i more %s one-time keys would leave the device "
@@ -1018,7 +1018,7 @@ class E2eKeysHandler:
                             new_count,
                             algorithm,
                             total,
-                            MAX_ONE_TIME_KEYS_PER_DEVICE,
+                            MAX_ONE_TIME_KEYS_PER_ALGORITHM_PER_DEVICE,
                         ),
                         Codes.TOO_LARGE,
                     )
