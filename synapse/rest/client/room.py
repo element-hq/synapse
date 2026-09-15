@@ -602,10 +602,19 @@ def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration 
         The value of the requested delay, or None if it was absent.
 
     Raises:
-        SynapseError: if the delay parameter is present and invalid.
+        SynapseError: if the delay parameter is present and not a positive integer.
     """
-    delay_ms = parse_integer(request, "org.matrix.msc4140.delay")
-    return Duration(milliseconds=delay_ms) if delay_ms is not None else None
+    param_name = "org.matrix.msc4140.delay"
+    delay_ms = parse_integer(request, param_name)
+    if delay_ms is None:
+        return None
+    if delay_ms <= 0:
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            f"Query parameter {param_name} must be an integer greater than zero.",
+            Codes.INVALID_PARAM,
+        )
+    return Duration(milliseconds=delay_ms)
 
 
 # TODO: Needs unit testing for room ID + alias joins
