@@ -44,7 +44,6 @@ from synapse.synapse_rust.events import (  # noqa: F401
     BundledAggregations,
     ThreadAggregation,
 )
-from synapse.synapse_rust.room_versions import RoomVersion
 from synapse.types import JsonDict, Requester, UserID
 from synapse.util.async_helpers import gather_results
 from synapse.visibility import filter_and_transform_events_for_client
@@ -194,7 +193,6 @@ class RelationsHandler:
         event_id: str,
         initial_redaction_event: EventBase,
         relation_types: list[str],
-        room_version: RoomVersion,
     ) -> None:
         """Redacts all events related to the given event ID with one of the given
         relation types.
@@ -212,8 +210,6 @@ class RelationsHandler:
                 event_id.
             relation_types: The types of relations to look for. If "*" is in the list,
                 all related events will be redacted regardless of the type.
-            room_version: The RoomVersion of the room, for deciding where the 'redacts'
-                key should go in the event dict
 
         Raises:
             ShadowBanError if the requester is shadow-banned
@@ -230,24 +226,16 @@ class RelationsHandler:
             )
 
         for related_event_id in related_event_ids:
-            # Depending on the room version involved, the "redacts" key can go in one of
-            # two places. If we only use what was provided in the initial event, it will
-            # only target an event that was already redacted and nothing will happen.
-            new_redaction_content = dict(initial_redaction_event.content)
-            event_dict: JsonDict = {
-                "type": EventTypes.Redaction,
-                "content": new_redaction_content,
-                "room_id": initial_redaction_event.room_id,
-                "sender": requester.user.to_string(),
-            }
-            if room_version.updated_redaction_rules:
-                event_dict["content"].update({"redacts": related_event_id})
-            else:
-                event_dict["redacts"] = related_event_id
             try:
                 await self._event_creation_handler.create_and_send_nonmember_event(
                     requester,
-                    event_dict,
+                    {
+                        "type": EventTypes.Redaction,
+                        "content": initial_redaction_event.content,
+                        "room_id": initial_redaction_event.room_id,
+                        "sender": requester.user.to_string(),
+                        "redacts": related_event_id,
+                    },
                     ratelimit=False,
                 )
             except SynapseError as e:
