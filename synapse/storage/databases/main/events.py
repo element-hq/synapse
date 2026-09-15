@@ -2215,7 +2215,13 @@ class PersistEventsStore:
         """
         Record updates into the profile updates stream for when a user leaves a room.
 
-        If this was the last shared room with a set of users, clear all old rows from
+        This handles two distinct cases when a user leaves a room:
+          1) we find users in the the room who no longer share rooms with the user that
+            left the room, and record a `LEFT_ROOM` action for them.
+          2) we check for the user who left the room if they no longer share rooms with
+            some users of the room that was left, and do the same in reverse.
+
+        In both cases, when recording a `LEFT_ROOM` action, we clear all old rows from
         the `profile_updates_per_user` table relating to those users, to avoid exposing
         any profile field changes past the point of not being in any common rooms with
         the user.
@@ -2267,13 +2273,37 @@ class PersistEventsStore:
             (*user_args, user_id.to_string()),
         )
 
-        # Now record the "left room" action in the stream
+        # Now record the "left room" action in the stream for each user
+        # in the room that no longer shares a room with the user who left the room.
         self.store.record_profile_updates_txn(
             txn=txn,
-            user_id=user_id,
+            users={user_id.to_string()},
             action=ProfileUpdateAction.LEFT_ROOM,
             field_names=[],
             target_users=users_no_longer_sharing_rooms,
+        )
+
+        # We also need to record things in reverse. The user, who left the
+        # room, needs to get profile update rows for every user they no longer
+        # share a room with.
+        # First clear old rows between these users.
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE user_id = ?
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE {user_clause}
+                    )
+            """,
+            (user_id.to_string(), *user_args),
+        )
+        # Then add the left room action rows in the stream.
+        self.store.record_profile_updates_txn(
+            txn=txn,
+            users=users_no_longer_sharing_rooms,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users={user_id.to_string()},
         )
 
     @classmethod
