@@ -23,10 +23,9 @@
 
 import logging
 import re
-from abc import ABC, abstractmethod
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Awaitable, NoReturn
+from typing import TYPE_CHECKING, Awaitable
 from urllib import parse as urlparse
 
 import attr
@@ -518,7 +517,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
+class RoomDelayedEventRestServlet(TransactionRestServlet):
     CATEGORY = "Delayed event management requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -532,14 +531,10 @@ class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
         PATTERNS = "/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)"
         register_txn_path(self, PATTERNS, http_server, "org.matrix.msc4140")
 
-    @abstractmethod
-    async def _do(
-        self,
-        request: SynapseRequest,
-        requester: Requester,
-        room_id: str,
-        event_type: str,
-    ) -> tuple[int, JsonDict]: ...
+    class DelayedEventBodyModel(RequestBodyModel):
+        delay: PositiveInt
+        content: JsonDict
+        state_key: StrictStr | None = None
 
     async def on_POST(
         self,
@@ -565,18 +560,6 @@ class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
             room_id,
             event_type,
         )
-
-
-class RoomDelayedEventRestServletUnsupported(RoomDelayedEventRestServletBase):
-    async def _do(self, *_: Any) -> NoReturn:
-        _raise_delayed_events_unsupported()
-
-
-class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
-    class DelayedEventBodyModel(RequestBodyModel):
-        delay: PositiveInt
-        content: JsonDict
-        state_key: StrictStr | None = None
 
     async def _do(
         self,
@@ -633,14 +616,6 @@ def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration 
             Codes.INVALID_PARAM,
         )
     return Duration(milliseconds=delay_ms)
-
-
-def _raise_delayed_events_unsupported() -> NoReturn:
-    raise SynapseError(
-        HTTPStatus.FORBIDDEN,
-        "Sending delayed events has been disallowed",
-        Codes.FORBIDDEN,
-    )
 
 
 # TODO: Needs unit testing for room ID + alias joins
@@ -1884,11 +1859,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomCreateRestServlet(hs).register(http_server)
     TimestampLookupRestServlet(hs).register(http_server)
 
-    (
-        RoomDelayedEventRestServlet(hs)
-        if hs.config.server.msc4140_enabled
-        else RoomDelayedEventRestServletUnsupported(hs)
-    ).register(http_server)
+    RoomDelayedEventRestServlet(hs).register(http_server)
 
     # Some servlets only get registered for the main process.
     if hs.config.worker.worker_app is None:

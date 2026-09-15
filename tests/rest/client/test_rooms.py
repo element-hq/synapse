@@ -2930,7 +2930,7 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         self,
         invalid_delay: int,
     ) -> None:
-        """Test that errors for delayed events being unsupported have precedence over errors for invalid delays."""
+        """Test that an invalid delay is rejected as such even when delayed events are unsupported."""
         path, body = self.get_delayed_event_path_and_body(
             self.room_id,
             invalid_delay,
@@ -2943,10 +2943,10 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
             path.encode("ascii"),
             body,
         )
-        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            Codes.FORBIDDEN,
-            channel.json_body.get("errcode"),
+            self.invalid_delay_error_type,
+            channel.json_body["errcode"],
             channel.json_body,
         )
 
