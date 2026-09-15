@@ -714,6 +714,94 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self._update_delayed_event(delay_ids.pop(0), "send", action_in_path)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
+    def test_repeated_action_on_cancelled_delayed_event(self) -> None:
+        delay_ids = []
+        for delay_ms in (900, 100000):
+            channel = self.make_request(
+                "POST",
+                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay_ms),
+                {},
+                self.user1_access_token,
+            )
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            delay_id = channel.json_body.get("delay_id")
+            assert delay_id is not None
+            delay_ids.append(delay_id)
+        delay_id = delay_ids[1]
+
+        channel = self._update_delayed_event(delay_id, "cancel", True)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        # Repeating the action that matches the outcome must succeed
+        channel = self._update_delayed_event(delay_id, "cancel", True)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertDictEqual({}, channel.json_body)
+
+        # Actions that conflict with the outcome must fail
+        for action in ("send", "restart"):
+            channel = self._update_delayed_event(delay_id, action, True)
+            self.assertEqual(HTTPStatus.CONFLICT, channel.code, channel.result)
+            self.assertEqual(
+                Codes.UNKNOWN, channel.json_body["errcode"], channel.result
+            )
+
+        self._assert_finalised(delay_id)
+
+        # None of this may have disturbed the other scheduled delayed event
+        self.reactor.advance(1)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_ids[0], True
+        )
+        self._assert_finalised(delay_ids[0], event_id=event_id)
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
+
+    def test_repeated_action_on_sent_delayed_event(self) -> None:
+        delay_ids = []
+        for delay_ms in (900, 100000):
+            channel = self.make_request(
+                "POST",
+                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay_ms),
+                {},
+                self.user1_access_token,
+            )
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            delay_id = channel.json_body.get("delay_id")
+            assert delay_id is not None
+            delay_ids.append(delay_id)
+        delay_id = delay_ids[1]
+
+        channel = self._update_delayed_event(delay_id, "send", True)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_id, True
+        )
+
+        # Repeating the action that matches the outcome must succeed, without resending
+        channel = self._update_delayed_event(delay_id, "send", True)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertDictEqual({}, channel.json_body)
+        self.assertEqual(
+            event_id,
+            self._find_sent_delayed_event(self.user1_access_token, delay_id, True),
+        )
+
+        # Actions that conflict with the outcome must fail
+        for action in ("cancel", "restart"):
+            channel = self._update_delayed_event(delay_id, action, True)
+            self.assertEqual(HTTPStatus.CONFLICT, channel.code, channel.result)
+            self.assertEqual(
+                Codes.UNKNOWN, channel.json_body["errcode"], channel.result
+            )
+
+        self._assert_finalised(delay_id, event_id=event_id)
+
+        # None of this may have disturbed the other scheduled delayed event
+        self.reactor.advance(1)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_ids[0], True
+        )
+        self._assert_finalised(delay_ids[0], event_id=event_id)
+
     @parameterized.expand((True, False))
     def test_restart_delayed_state_event(self, action_in_path: bool) -> None:
         state_key = "to_send_on_restarted_timeout"

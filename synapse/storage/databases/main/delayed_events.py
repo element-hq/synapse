@@ -620,6 +620,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         Returns: The details of the matching delayed event,
             and the send time of the next delayed event to be sent, if any.
+            The details are None if the delayed event has already been sent.
 
         Raises:
             NotFoundError: if there is no matching delayed event.
@@ -669,7 +670,7 @@ class DelayedEventsStore(SQLBaseStore):
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been cancelled",
                     )
-                return None, None
+                return None, self._get_next_delayed_event_send_ts_txn(txn)
 
             event = DelayedEventDetails(
                 RoomID.from_string(row[0]),
@@ -736,7 +737,6 @@ class DelayedEventsStore(SQLBaseStore):
                         HTTPStatus.CONFLICT,
                         "Delayed event has already been sent",
                     )
-                return None
             return self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(

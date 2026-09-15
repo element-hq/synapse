@@ -484,20 +484,25 @@ class DelayedEventsHandler:
         """
         Immediately sends the matching delayed event, instead of waiting for its scheduled delivery.
 
+        If the delayed event has already been sent, this does nothing.
+
         Raises:
             NotFoundError: if no matching delayed event could be found.
+            SynapseError: if the delayed event has already been cancelled,
+                or if sending it failed.
         """
         assert self._is_master
         await self._mgmt_ratelimit(request)
         await make_deferred_yieldable(self._initialized_from_db)
 
         event, next_send_ts = await self._store.process_target_delayed_event(delay_id)
+        if event is None:
+            return
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
-        if event:
-            await self._send_event(event, False)
+        await self._send_event(event, False)
 
     async def _mgmt_ratelimit(self, request: SynapseRequest) -> None:
         """
