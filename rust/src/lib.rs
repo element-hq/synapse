@@ -16,6 +16,7 @@ pub mod http;
 pub mod http_client;
 pub mod identifier;
 pub mod json;
+pub mod logging;
 pub mod matrix_const;
 pub mod msc4388_rendezvous;
 pub mod push;
@@ -70,6 +71,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(reset_logging_config, m)?)?;
 
     acl::register_module(py, m)?;
+    logging::context::register_module(py, m)?;
     deferred::register_module(py, m)?;
     push::register_module(py, m)?;
     events::register_module(py, m)?;
