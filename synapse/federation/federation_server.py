@@ -64,6 +64,7 @@ from synapse.federation.federation_base import (
 )
 from synapse.federation.persistence import TransactionActions
 from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
+from synapse.federation.user_directory import UserDirectoryResponseModel
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import (
@@ -1497,37 +1498,24 @@ class FederationServer(FederationBase):
         Returns:
             A tuple of (response code, response json)
         """
-        return 200, await self._fetch_all_users()
+        return 200, await self._fetch_all_local_users()
 
-    async def _fetch_all_users(self) -> JsonDict:
+    async def _fetch_all_local_users(self) -> JsonDict:
         """Return all of this server's own users from the user directory.
 
-        Reads the directory straight from the database and filters to locally
-        owned users, since the federation endpoint must only expose this
-        homeserver's own users (the table may also hold cached remote users).
+        The database query returns only registered local directory entries,
+        excluding cached remote users.
 
         Returns:
             A dict of the form ``{"results": [...]}``.
         """
-        results = await self.store.get_users_in_user_dir()
+        results = await self.store.get_local_users_in_user_dir()
 
-        # Federation endpoint: only return users local to this homeserver.
-        # is_mine_id is infallible and returns False for malformed user IDs.
-        filtered_results: list[JsonDict] = []
-        for user in results["results"]:
-            if not self.hs.is_mine_id(user["user_id"]):
-                continue
-
-            # Omit optional fields entirely when unset rather than sending
-            # null over the wire.
-            entry: JsonDict = {"user_id": user["user_id"]}
-            if user["display_name"] is not None:
-                entry["display_name"] = user["display_name"]
-            if user["avatar_url"] is not None:
-                entry["avatar_url"] = user["avatar_url"]
-            filtered_results.append(entry)
-
-        return {"results": filtered_results}
+        response = UserDirectoryResponseModel.model_validate(
+            {"results": results["results"]}
+        )
+        # Keep full-directory responses compact by omitting unset profile fields.
+        return response.model_dump(mode="json", exclude_none=True)
 
 
 class FederationHandlerRegistry:

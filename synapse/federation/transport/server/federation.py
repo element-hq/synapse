@@ -910,6 +910,10 @@ class FederationUserDirectoryFetchServlet(BaseFederationServerServlet):
     The endpoint takes no parameters and always returns the responding server's
     full local directory, so it is a plain GET without a request body.
 
+    The user_id field is required. Unset display_name and avatar_url fields are
+    omitted to keep the response compact. This is a full snapshot, missing
+    or explicit null profile fields mean no current value and clear cached values.
+
     GET /_matrix/federation/unstable/de.bwi.federated_user_dir/user_directory/fetch
     Response:
     {

@@ -1284,13 +1284,14 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             ],
         }
 
-    async def get_users_in_user_dir(self) -> SearchResult:
-        """Get every user stored in the user directory.
+    async def get_local_users_in_user_dir(self) -> SearchResult:
+        """Get every registered local user stored in the user directory.
 
         Unlike `search_user_dir`, this does not match a search term: it
-        returns all profiles in the `user_directory` table. It is used by the
-        federation responder to hand a server's full local directory to a
-        remote homeserver.
+        returns all local profiles in the `user_directory` table. Joining
+        with `users`, which only contains local accounts, excludes cached
+        remote profiles. It is used by the federation responder to hand a
+        server's full local directory to a remote homeserver.
 
         Returns:
             A `SearchResult` of the form:
@@ -1306,14 +1307,14 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                     ]
                 }
         """
+        sql = """
+            SELECT d.user_id, d.display_name, d.avatar_url
+            FROM user_directory AS d
+            INNER JOIN users AS u ON u.name = d.user_id
+        """
         rows = cast(
             list[tuple[str, str | None, str | None]],
-            await self.db_pool.simple_select_list(
-                table="user_directory",
-                keyvalues=None,
-                retcols=("user_id", "display_name", "avatar_url"),
-                desc="get_users_in_user_dir",
-            ),
+            await self.db_pool.execute("get_local_users_in_user_dir", sql),
         )
 
         results: list[UserProfile] = [

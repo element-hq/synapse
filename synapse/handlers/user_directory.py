@@ -23,7 +23,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Sequence
 
-from pydantic import StrictStr, ValidationError, ValidationInfo, model_validator
+from pydantic import ValidationError, ValidationInfo, model_validator
 from typing_extensions import Self
 
 from twisted.internet.interfaces import IDelayedCall
@@ -42,6 +42,7 @@ from synapse.api.errors import (
     RequestSendFailed,
     SynapseError,
 )
+from synapse.federation.user_directory import UserDirectoryResponseModel
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.http.client import is_unknown_endpoint
 from synapse.metrics import SERVER_NAME_LABEL
@@ -52,7 +53,6 @@ from synapse.storage.roommember import ProfileInfo
 from synapse.types import JsonDict, RemoteUserDirectoryEntry, UserID
 from synapse.util.duration import Duration
 from synapse.util.metrics import Measure
-from synapse.util.pydantic_models import ParseModel
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import non_null_str_or_none
 
@@ -75,18 +75,8 @@ MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO = 5
 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES = Duration(seconds=15)
 
 
-class _RemoteUserDirectoryEntryModel(ParseModel):
-    """An entry returned by the federated user directory endpoint."""
-
-    user_id: StrictStr
-    display_name: StrictStr | None = None
-    avatar_url: StrictStr | None = None
-
-
-class _RemoteUserDirectoryResponseModel(ParseModel):
-    """A complete response from the federated user directory endpoint."""
-
-    results: list[_RemoteUserDirectoryEntryModel]
+class _RemoteUserDirectoryResponseModel(UserDirectoryResponseModel):
+    """A directory snapshot whose user IDs are validated against the destination."""
 
     @model_validator(mode="after")
     def validate_user_ids(self, info: ValidationInfo) -> Self:
@@ -973,6 +963,7 @@ class UserDirectoryHandler(StateDeltasHandler):
             return
 
         await self.store.upsert_federated_remote_users(profiles)
+
     async def reconcile_remote_users(
         self, homeserver: str, users: Sequence[RemoteUserDirectoryEntry]
     ) -> None:
