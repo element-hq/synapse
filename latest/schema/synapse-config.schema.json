@@ -1,6 +1,6 @@
 {
   "$schema": "https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json",
-  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.159/synapse-config.schema.json",
+  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.161/synapse-config.schema.json",
   "type": "object",
   "properties": {
     "modules": {
@@ -221,7 +221,7 @@
     },
     "include_profile_updates_in_sync": {
       "type": "boolean",
-      "description": "Use this option to include updates of other users' profiles in sync responses, for users who share rooms.\nRequires an [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatible client, and is currently limited to legacy sync and local users only.\nThis feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms.",
+      "description": "Use this option to include updates of other users' profiles in sync responses, for users who share rooms.\nFor legacy sync clients, requires [MSC4429](https://github.com/matrix-org/matrix-spec-proposals/pull/4429) compatibility. For sliding sync clients, requires [MSC4262](https://github.com/matrix-org/matrix-spec-proposals/pull/4262) compatibility. Note, profile updates via sync are currently limited to local users only.\nThis feature is under development and should be used with caution on busy servers or servers which depend on `limit_profile_requests_to_users_who_share_rooms` for ensuring profile information doesn't leak across rooms.",
       "default": false,
       "examples": [
         true
@@ -1125,6 +1125,21 @@
         "28d"
       ]
     },
+    "redaction_allowed_period": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/duration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How long after an `m.room.message` was sent a local user is still allowed to redact it. If a local user tries to redact a `m.room.message` older than this period Synapse responds with `403 M_FORBIDDEN` and does not redact the event.\n\nOnly applies to `m.room.message` events redacted by local users.  Redactions of other event types and redactions received over federation are unaffected. When the target of the redaction is an edit (`m.replace`), the age and type are taken from the original event and not the edit.\n\nSet to `null` (the default) to disable, allowing events to be redacted at any time.",
+      "default": null,
+      "examples": [
+        "7d"
+      ]
+    },
     "forgotten_room_retention_period": {
       "oneOf": [
         {
@@ -1387,12 +1402,15 @@
       ]
     },
     "federation_domain_whitelist": {
-      "type": "array",
-      "description": "Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.\n\nNote: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a \"private federation\", where a group of servers all whitelist each other and have the same whitelist.",
+      "type": [
+        "null",
+        "array"
+      ],
+      "description": "Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction.\n\nIf specified as an empty list (`[]`), federation will be denied with all servers. Specifying an empty list (`[]`) here is the recommended way of disabling federation.\n\nIf unset or null, allows federation with all servers.\n\nNote: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a \"private federation\", where a group of servers all whitelist each other and have the same whitelist.",
       "items": {
         "type": "string"
       },
-      "default": [],
+      "default": null,
       "examples": [
         [
           "lon.example.com",
@@ -2605,9 +2623,14 @@
                 "description": "The type of transport to use to connect to the selective forwarding unit (SFU).",
                 "example": "livekit"
               },
+              "url": {
+                "type": "string",
+                "description": "The WebSocket URL of the LiveKit SFU. If type is \"livekit\", either this or `livekit_service_url` is required.\n\nClients that support `url` will use the Client-Server API to (indirectly) interact with the LiveKit authorization service. The service needs to be set up as an application service in order to support these endpoints. See https://github.com/element-hq/lk-jwt-service for further details.",
+                "example": "wss://livekit.example.com"
+              },
               "livekit_service_url": {
                 "type": "string",
-                "description": "The base URL of the LiveKit service. Should only be used with LiveKit-based transports.",
+                "description": "Deprecated. The HTTP URL of the LiveKit authorization service. If type is \"livekit\", either this or `url` is required.\n\nClients that don't support `url` will use `livekit_service_url` to directly interact with the LiveKit authorization service. This mode of operation is deprecated and should only be used for backwards compatibility.",
                 "example": "https://matrix-rtc.example.com/livekit/jwt"
               }
             }
@@ -2622,6 +2645,7 @@
           "transports": [
             {
               "type": "livekit",
+              "url": "wss://livekit.example.com",
               "livekit_service_url": "https://matrix-rtc.example.com/livekit/jwt"
             }
           ]
@@ -4084,7 +4108,7 @@
     },
     "encryption_enabled_by_default_for_room_type": {
       "type": "string",
-      "description": "Controls whether locally-created rooms should be end-to-end encrypted by default.\n\nPossible options are \"all\", \"invite\", and \"off\". They are defined as:\n\n* \"all\": any locally-created room\n* \"invite\": any room created with the `private_chat` or `trusted_private_chat` room creation presets\n* \"off\": this option will take no effect\n\nNote that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.",
+      "description": "Controls whether locally-created rooms should be end-to-end encrypted by default.\n\nPossible options are \"all\", \"invite\", and \"off\". They are defined as:\n\n* \"all\": any locally-created room\n* \"invite\": any room created with the `private_chat` or `trusted_private_chat` room creation presets\n* \"off\": this option will take no effect\n\nNote that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.\n\nA client may supply its own `m.room.encryption` event in the `initial_state` of its `/createRoom` request. If that event is valid (it specifies an `algorithm` as a string), it takes precedence and this option will not overwrite it, allowing the client to, for example, choose a different encryption algorithm. An empty or otherwise invalid `m.room.encryption` event does not disable forced encryption: the default will still be applied on top of it.",
       "enum": [
         "all",
         "invite",
