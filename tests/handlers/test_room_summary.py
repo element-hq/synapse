@@ -487,7 +487,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         self._assert_hierarchy(result, expected)
 
-    def test_summary_fields(self) -> None:
+    def test_summary_fields_restricted(self) -> None:
         """
         The room entries returned to clients include the `room_version`,
         `encryption` and `allowed_room_ids` fields, added to the client
@@ -518,12 +518,48 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         room_entries = {entry["room_id"]: entry for entry in result["rooms"]}
         entry = room_entries[restricted_room]
+        self.assertEqual(entry["join_rule"], JoinRules.RESTRICTED)
         self.assertEqual(entry["room_version"], RoomVersions.V8.identifier)
         self.assertEqual(entry["encryption"], RoomEncryptionAlgorithms.DEFAULT)
         self.assertEqual(entry["allowed_room_ids"], [self.space])
 
         # Rooms without restricted join rules should not have the field at all.
         self.assertNotIn("allowed_room_ids", room_entries[self.room])
+
+    def test_summary_fields_knock_restricted(self) -> None:
+        """
+        Same as `test_summary_fields_restricted`, for a `knock_restricted` room.
+
+        Joining such a room without an invite applies the restricted join rule, so
+        it also returns `allowed_room_ids`.
+        """
+        knock_restricted_room = self._create_room_with_join_rule(
+            JoinRules.KNOCK_RESTRICTED,
+            room_version=RoomVersions.V10.identifier,
+            allow=[
+                {
+                    "type": RestrictedJoinRuleTypes.ROOM_MEMBERSHIP,
+                    "room_id": self.space,
+                    "via": [self.hs.hostname],
+                }
+            ],
+        )
+        self.helper.send_state(
+            knock_restricted_room,
+            event_type=EventTypes.RoomEncryption,
+            body={"algorithm": RoomEncryptionAlgorithms.DEFAULT},
+            tok=self.token,
+        )
+
+        result = self.get_success(
+            self.handler.get_room_hierarchy(create_requester(self.user), self.space)
+        )
+        room_entries = {entry["room_id"]: entry for entry in result["rooms"]}
+        entry = room_entries[knock_restricted_room]
+        self.assertEqual(entry["join_rule"], JoinRules.KNOCK_RESTRICTED)
+        self.assertEqual(entry["room_version"], RoomVersions.V10.identifier)
+        self.assertEqual(entry["encryption"], RoomEncryptionAlgorithms.DEFAULT)
+        self.assertEqual(entry["allowed_room_ids"], [self.space])
 
     def test_complex_space(self) -> None:
         """
