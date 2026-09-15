@@ -36,7 +36,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, Requester, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
@@ -57,6 +57,40 @@ def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
     return propagate
 
 
+async def _get_optional_requester(
+    hs: "HomeServer", request: SynapseRequest
+) -> Requester | None:
+    """Authenticate a profile lookup request, where authentication is optional
+    unless `require_auth_for_profile_requests` is set.
+
+    Returns:
+        The requester if credentials were supplied, else None.
+    """
+    auth = hs.get_auth()
+    if hs.config.server.require_auth_for_profile_requests:
+        return await auth.get_user_by_req(request)
+    if not auth.has_access_token(request):
+        return None
+    return await auth.get_user_by_req(request, allow_guest=True)
+
+
+async def _auth_and_ratelimit_profile_lookup(
+    hs: "HomeServer", request: SynapseRequest
+) -> Requester | None:
+    """Authenticate a profile lookup request and apply the `rc_profile` rate
+    limit to it: per user if credentials were supplied, else per client IP
+    address.
+
+    Returns:
+        The requester if the request was authenticated, else None.
+    """
+    requester = await _get_optional_requester(hs, request)
+    await hs.get_profile_lookup_ratelimiter().ratelimit(
+        requester, key=None if requester else request.getClientAddress().host
+    )
+    return requester
+
+
 class ProfileRestServlet(RestServlet):
     PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
     CATEGORY = "Event sending requests"
@@ -70,10 +104,11 @@ class ProfileRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
 
+        requester_user = None
         if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
+            assert requester is not None
             requester_user = requester.user
 
         if not UserID.is_valid(user_id):
@@ -119,10 +154,11 @@ class ProfileFieldRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
 
+        requester_user = None
         if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
+            assert requester is not None
             requester_user = requester.user
 
         if not UserID.is_valid(user_id):
