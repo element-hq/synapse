@@ -1,3 +1,10 @@
+# Synapse 1.161.0 (2026-09-15)
+
+No significant changes since 1.161.0rc1.
+
+
+
+
 # Synapse 1.161.0rc1 (2026-09-08)
 
 Please check the [relevant section in the upgrade
