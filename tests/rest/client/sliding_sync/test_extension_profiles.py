@@ -480,7 +480,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
                 ],
                 {
                     "updated": {
-                        "avatar_url": None,
                         "displayname": "other_user",
                         "field": "value",
                     }
@@ -622,8 +621,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             {
                 "updated": {
                     "displayname": "other_user",
-                    # FIXME: This shouldn't be returned, but currently is
-                    "avatar_url": None,
                 }
             },
         )
@@ -692,7 +689,6 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
 
         expectation = {
             "updated": {
-                "avatar_url": None,
                 "displayname": "third_user",
             }
         }
