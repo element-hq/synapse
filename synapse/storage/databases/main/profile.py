@@ -20,7 +20,7 @@
 #
 import json
 from collections.abc import Set
-from typing import TYPE_CHECKING, Collection, cast
+from typing import TYPE_CHECKING, Collection, Iterable, cast
 
 import attr
 from canonicaljson import encode_canonical_json
@@ -644,12 +644,19 @@ class ProfileWorkerStore(SQLBaseStore):
             user_ids: List of user IDs to filter against.
 
         Returns:
-            Dictionary of displayname/avatar_url/custom fields for a list of users.
+            Dictionary from user_id -> field name -> field value
+            for the requested users.
+
+            This includes `displayname`, `avatar_url` and all custom fields.
+            For `displayname` and `avatar_url`, when they are stored as NULL
+            in the database column, the dictionary entry will be omitted.
         """
         if not user_ids:
             return {}
 
-        rows = await self.db_pool.simple_select_many_batch(
+        rows: Iterable[
+            tuple[str, str | None, str | None, str | JsonDict | None]
+        ] = await self.db_pool.simple_select_many_batch(
             table="profiles",
             column="full_user_id",
             iterable=user_ids,
@@ -659,15 +666,16 @@ class ProfileWorkerStore(SQLBaseStore):
 
         results: dict[str, dict[str, JsonValue | dict[str, JsonValue]]] = {}
         for full_user_id, displayname, avatar_url, fields in rows:
-            user_fields = fields or {}
-            # The SQLite driver doesn't have a JSON datatype.
-            if isinstance(self.database_engine, Sqlite3Engine) and fields:
-                user_fields = json.loads(fields)
-            base_fields = {
-                ProfileFields.DISPLAYNAME: displayname,
-                ProfileFields.AVATAR_URL: avatar_url,
-            }
-            user_fields.update(base_fields)
+            user_fields = db_to_json(fields or {})
+
+            # When the displayname and avatar URL aren't set,
+            # they are stored as NULL in the database.
+            # To make them behave the same as custom fields,
+            # when they are NULL, we treat them as not being set at all.
+            if displayname is not None:
+                user_fields[ProfileFields.DISPLAYNAME] = displayname
+            if avatar_url is not None:
+                user_fields[ProfileFields.AVATAR_URL] = avatar_url
 
             results[full_user_id] = user_fields
 
