@@ -446,6 +446,103 @@ class DelayedEventsTestCase(HomeserverTestCase):
         assert retry_after_headers
         self.assertEqual(5, int(retry_after_headers[0]))
 
+    @unittest.override_config(
+        {"experimental_features": {"msc4140_finalised_retention_period": "1h"}}
+    )
+    def test_finalised_delayed_events_are_pruned_after_retention_period(
+        self,
+    ) -> None:
+        # Disable rate-limits for this user, as this test makes many lookups
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(
+                self.user1_user_id, 0, 0
+            )
+        )
+
+        channel = self.make_request(
+            "POST",
+            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 900),
+            {},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
+
+        self.reactor.advance(1)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_id, True
+        )
+        self._assert_finalised(delay_id, event_id=event_id)
+
+        # The finalised delayed event must survive prune runs within its retention period
+        self.reactor.advance(Duration(minutes=30).as_secs())
+        self._assert_finalised(delay_id, event_id=event_id)
+
+        # ...but not the first prune run after it
+        self.reactor.advance(Duration(minutes=30).as_secs())
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+        self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"], channel.result)
+
+    @unittest.override_config(
+        {"experimental_features": {"msc4140_finalised_retention_limit_per_user": 2}}
+    )
+    def test_finalised_delayed_events_are_pruned_beyond_retention_limit(
+        self,
+    ) -> None:
+        # Disable rate-limits for these users, as this test makes many lookups
+        for user_id in (self.user1_user_id, self.user2_user_id):
+            self.get_success(
+                self.hs.get_datastores().main.set_ratelimit_for_user(user_id, 0, 0)
+            )
+
+        def schedule_and_cancel(access_token: str) -> str:
+            channel = self.make_request(
+                "POST",
+                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
+                {},
+                access_token,
+            )
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            delay_id = channel.json_body.get("delay_id")
+            assert delay_id is not None
+            channel = self._update_delayed_event(delay_id, "cancel", True)
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            # Space out the finalisation times, so that their order is unambiguous
+            self.reactor.advance(1)
+            return delay_id
+
+        # Finalise one more delayed event than the limit for user1,
+        # and one for user2 to check that the limit applies per user
+        user2_delay_id = schedule_and_cancel(self.user2_access_token)
+        user1_delay_ids = [
+            schedule_and_cancel(self.user1_access_token) for _ in range(3)
+        ]
+
+        # Nothing is pruned until the next prune run
+        for delay_id in user1_delay_ids:
+            self._assert_finalised(delay_id)
+        self._assert_finalised(user2_delay_id, access_token=self.user2_access_token)
+
+        self.reactor.advance(Duration(minutes=5).as_secs())
+
+        # Only the oldest finalised delayed event of user1 is pruned
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{user1_delay_ids[0]}",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+        self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"], channel.result)
+        for delay_id in user1_delay_ids[1:]:
+            self._assert_finalised(delay_id)
+        self._assert_finalised(user2_delay_id, access_token=self.user2_access_token)
+
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", PATH_PREFIX)
         self.assertEqual(HTTPStatus.UNAUTHORIZED, channel.code, channel.result)

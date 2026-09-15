@@ -360,75 +360,51 @@ class DelayedEventsStore(SQLBaseStore):
         retention_period: int,
         retention_limit: int,
     ) -> None:
-        def prune_finalised_delayed_events(txn: LoggingTransaction) -> None:
-            self._prune_expired_finalised_delayed_events(
-                txn, current_ts, retention_period
-            )
-
-            txn.execute(
-                """
-                SELECT DISTINCT(user_localpart)
-                FROM delayed_events
-                WHERE finalised_ts IS NOT NULL
-                """
-            )
-            for [user_localpart] in txn.fetchall():
-                self._prune_excess_finalised_delayed_events_for_user(
-                    txn, user_localpart, retention_limit
-                )
-
-        await self.db_pool.runInteraction(
-            "prune_finalised_delayed_events", prune_finalised_delayed_events
-        )
-
-    def _prune_expired_finalised_delayed_events(
-        self, txn: LoggingTransaction, current_ts: Timestamp, retention_period: int
-    ) -> None:
         """
-        Delete all finalised delayed events that had finalised
-        before the end of the given retention period.
-        """
-        txn.execute(
-            """
-            DELETE FROM delayed_events
-            WHERE ? - finalised_ts > ?
-            """,
-            (
-                current_ts,
-                retention_period,
-            ),
-        )
+        Deletes finalised delayed events that are past their retention.
 
-    def _prune_excess_finalised_delayed_events_for_user(
-        self, txn: LoggingTransaction, user_localpart: str, retention_limit: int
-    ) -> None:
+        Args:
+            current_ts: The current timestamp.
+            retention_period: How long (in milliseconds) after finalisation
+                a finalised delayed event is retained.
+            retention_limit: How many finalised delayed events are retained
+                per user. The most recently finalised ones are kept.
         """
-        Delete the oldest finalised delayed events for the given user,
-        such that no more of them remain than the given retention limit.
-        """
-        txn.execute(
-            """
-            SELECT COUNT(*) FROM delayed_events
-            WHERE user_localpart = ?
-                AND finalised_ts IS NOT NULL
-            """,
-            (user_localpart,),
-        )
-        num_existing: int = txn.fetchall()[0][0]
-        if num_existing > retention_limit:
+
+        def prune_finalised_delayed_events_txn(txn: LoggingTransaction) -> None:
             txn.execute(
                 """
                 DELETE FROM delayed_events
-                WHERE user_localpart = ?
-                    AND finalised_ts IS NOT NULL
-                ORDER BY finalised_ts
-                LIMIT ?
+                WHERE finalised_ts IS NOT NULL
+                    AND finalised_ts < ?
                 """,
-                (
-                    user_localpart,
-                    num_existing - retention_limit,
-                ),
+                (current_ts - retention_period,),
             )
+
+            # FIXME: Remove "AS subquery" after dropping support for PostgreSQL <16
+            txn.execute(
+                """
+                DELETE FROM delayed_events
+                WHERE delay_id IN (
+                    SELECT delay_id FROM (
+                        SELECT
+                            delay_id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY user_localpart
+                                ORDER BY finalised_ts DESC
+                            ) AS finalised_rank
+                        FROM delayed_events
+                        WHERE finalised_ts IS NOT NULL
+                    ) AS subquery
+                    WHERE finalised_rank > ?
+                )
+                """,
+                (retention_limit,),
+            )
+
+        await self.db_pool.runInteraction(
+            "prune_finalised_delayed_events", prune_finalised_delayed_events_txn
+        )
 
     async def get_delayed_event_for_user(
         self,
