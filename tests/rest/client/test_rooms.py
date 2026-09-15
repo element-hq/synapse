@@ -2502,7 +2502,7 @@ class RoomDelayedEventTestCase(RoomBase):
     def get_delayed_event_path_and_body(
         cls,
         room_id: str,
-        delay: int,
+        delay_ms: int,
         event_type: str,
         state_key: str | None,
         content: JsonDict,
@@ -2515,7 +2515,7 @@ class RoomDelayedEventTestCase(RoomBase):
             path += f"/{state_key}"
         elif txn_id is not None:
             path += f"/{txn_id}"
-        path += f"?org.matrix.msc4140.delay={delay}"
+        path += f"?org.matrix.msc4140.delay={delay_ms}"
         return path, content
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -2907,14 +2907,14 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
     def get_delayed_event_path_and_body(
         cls,
         room_id: str,
-        delay: int,
+        delay_ms: int,
         event_type: str,
         state_key: str | None,
         content: JsonDict,
         txn_id: str | None = "mid1",
     ) -> tuple[str, JsonDict]:
         body = {
-            "delay": delay,
+            "delay_ms": delay_ms,
             "content": content,
         }
         path = f"/_matrix/client/unstable/org.matrix.msc4140/rooms/{room_id}/delayed_event/{event_type}"
@@ -2973,7 +2973,7 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
             channel.json_body,
         )
 
-    @parameterized.expand(("delay", "content"))
+    @parameterized.expand(("delay_ms", "content"))
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_delayed_event_with_missing_key(self, missing_key: str) -> None:
         """Test that the dedicated endpoint fails with a body missing a required key."""
