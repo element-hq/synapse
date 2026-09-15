@@ -78,6 +78,7 @@ class BaseUploadServlet(RestServlet):
                 code=413,
                 errcode=Codes.TOO_LARGE,
             )
+
         args: dict[bytes, list[bytes]] = request.args  # type: ignore
         upload_name_bytes = parse_bytes_from_args(args, "filename")
         if upload_name_bytes:
@@ -105,6 +106,10 @@ class BaseUploadServlet(RestServlet):
         # if headers.hasHeader(b"Content-Disposition"):
         #     disposition = headers.getRawHeaders(b"Content-Disposition")[0]
         # TODO(markjh): parse content-disposition
+
+        # Check the upload limits last which matches previous behaviour.
+        # It might make more sense to put this alongside the initial file size check.
+        await self.media_repo.check_media_upload_limits(user_id, content_length)
 
         return content_length, upload_name, media_type
 
