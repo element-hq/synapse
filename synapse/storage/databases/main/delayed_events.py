@@ -81,6 +81,9 @@ class DelayedEventResponse:
     delay_ms: int
     delayed_since_ts: int
     content: JsonDict = attr.ib(converter=db_to_json)
+    # Present only for finalised delayed events (MSC4140): `finalised_ts`, plus
+    # `event_id` if the event was sent, or `error` if sending it failed.
+    finalised: JsonDict | None = None
 
     def asdict(self) -> JsonDict:
         return attr.asdict(self, filter=lambda _attr, v: v is not None)
@@ -433,7 +436,8 @@ class DelayedEventsStore(SQLBaseStore):
         user_localpart: str,
     ) -> DelayedEventResponse:
         """
-        Returns the specified pending delayed event owned by the given user.
+        Returns the specified delayed event owned by the given user,
+        whether it is still scheduled or has been finalised.
 
         Raises:
             NotFoundError: if there is no matching delayed event.
@@ -447,18 +451,29 @@ class DelayedEventsStore(SQLBaseStore):
                 state_key,
                 delay,
                 send_ts - delay,
-                content
+                content,
+                finalised_ts,
+                finalised_event_id,
+                finalised_error
             FROM delayed_events
             WHERE delay_id = ? AND user_localpart = ?
-                AND NOT is_processed
-                AND finalised_ts IS NULL
             """,
             delay_id,
             user_localpart,
         )
         if not rows:
             raise NotFoundError("Delayed event not found")
-        return DelayedEventResponse(delay_id, *rows[0])
+        row = rows[0]
+        return DelayedEventResponse(
+            delay_id,
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            _make_finalised_dict(row[6], row[7], row[8]),
+        )
 
     async def get_all_delayed_events_for_user(
         self,
@@ -918,6 +933,25 @@ def _generate_delay_id() -> DelayID:
     # is expected to be sufficiently random to be globally unique.
 
     return DelayID(f"syd_{stringutils.random_string(20)}")
+
+
+def _make_finalised_dict(
+    finalised_ts: int | None,
+    finalised_event_id: str | None,
+    finalised_error: str | None,
+) -> JsonDict | None:
+    """
+    Builds the `finalised` object of a delayed event's API representation
+    from its stored finalisation columns, or returns None if it is not finalised.
+    """
+    if finalised_ts is None:
+        return None
+    finalised: JsonDict = {"finalised_ts": finalised_ts}
+    if finalised_event_id is not None:
+        finalised["event_id"] = finalised_event_id
+    elif finalised_error is not None:
+        finalised["error"] = db_to_json(finalised_error)
+    return finalised
 
 
 def _generate_cancelled_by_state_update_json() -> str:

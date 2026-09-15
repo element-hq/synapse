@@ -575,7 +575,8 @@ class DelayedEventsHandler:
         self, requester: Requester, delay_id: str
     ) -> DelayedEventResponse:
         """
-        Return the specified pending delayed event requested by the given user.
+        Return the specified delayed event requested by the given user,
+        whether it is still scheduled or has been finalised.
 
         Raises:
             NotFoundError: if no matching delayed event could be found.

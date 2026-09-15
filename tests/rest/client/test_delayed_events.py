@@ -280,8 +280,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_id, True
+        )
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+        self._assert_finalised(delay_id, event_id=event_id)
 
     def test_delayed_member_events_are_sent_on_timeout(self) -> None:
         channel = self.make_request(
@@ -327,8 +331,68 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual("leave", content.get("membership"), content)
         self.assertEqual("Delayed kick", content.get("reason"), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_id, True
+        )
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+        self._assert_finalised(delay_id, event_id=event_id)
+
+    def test_delayed_event_is_finalised_with_error_if_timeout_send_fails(
+        self,
+    ) -> None:
+        channel = self.make_request(
+            "POST",
+            _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 900),
+            {},
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
+
+        # Leave the room so that the delayed event can no longer be sent
+        self.helper.leave(self.room_id, self.user1_user_id, tok=self.user1_access_token)
+
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+        self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
+        self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+        self._assert_finalised(delay_id, errcode=Codes.FORBIDDEN)
+
+    @unittest.override_config({"rc_message": {"per_second": 0.1, "burst_count": 3}})
+    def test_delayed_event_is_finalised_with_error_if_timeout_send_is_ratelimited(
+        self,
+    ) -> None:
+        delay_ids = []
+        for delay_ms in (800, 900):
+            channel = self.make_request(
+                "POST",
+                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay_ms),
+                {},
+                self.user1_access_token,
+            )
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            delay_id = channel.json_body.get("delay_id")
+            assert delay_id is not None
+            delay_ids.append(delay_id)
+
+        # Both delayed events are due, but only the first fits in the ratelimit.
+        # The second must not be retried, and its failure must be recorded.
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_ids[0], True
+        )
+        self._find_sent_delayed_event(self.user1_access_token, delay_ids[1], False)
+
+        self._assert_finalised(delay_ids[0], event_id=event_id)
+        self._assert_finalised(delay_ids[1], errcode=Codes.LIMIT_EXCEEDED)
+
+        self.reactor.advance(100)
+        self._find_sent_delayed_event(self.user1_access_token, delay_ids[1], False)
 
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", PATH_PREFIX)
@@ -446,6 +510,15 @@ class DelayedEventsTestCase(HomeserverTestCase):
         channel = self._update_delayed_event(delay_id, "cancel", action_in_path)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertListEqual([], self._get_delayed_events())
+        self._assert_finalised(delay_id)
+
+        # Other users must not be able to look up the finalised delayed event either
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}",
+            access_token=self.user2_access_token,
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
 
         self.reactor.advance(1)
         content = self.helper.get_state(
@@ -458,6 +531,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+        self._assert_finalised(delay_id)
 
     @parameterized.expand((True, False))
     @unittest.override_config(
@@ -559,8 +633,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(content_value, content.get(content_property_name), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_id, True
+        )
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+        self._assert_finalised(delay_id, event_id=event_id)
 
     @parameterized.expand((True, False))
     @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
@@ -641,8 +719,12 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-        self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        event_id = self._find_sent_delayed_event(
+            self.user1_access_token, delay_id, True
+        )
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+        self._assert_finalised(delay_id, event_id=event_id)
 
     @parameterized.expand((True, False))
     @unittest.override_config(
@@ -772,6 +854,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertListEqual([], self._get_delayed_events())
 
+        finalised = self._assert_finalised(delay_id, errcode=Codes.UNKNOWN)
+        self.assertEqual(
+            "M_CANCELLED_BY_STATE_UPDATE",
+            finalised["error"].get("org.matrix.msc4140.errcode"),
+            finalised,
+        )
+
         self.reactor.advance(1)
         content = self.helper.get_state(
             self.room_id,
@@ -800,6 +889,63 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         return events
 
+    def _get_delayed_event(self, delay_id: str) -> JsonDict:
+        """Look up a single delayed event of user1, which must exist."""
+        channel = self.make_request(
+            "GET",
+            f"{PATH_PREFIX}/{delay_id}",
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        return channel.json_body
+
+    def _assert_scheduled(self, delay_id: str) -> JsonDict:
+        """Assert that user1's delayed event is still scheduled, and return it."""
+        delayed_event = self._get_delayed_event(delay_id)
+        self.assertNotIn("finalised", delayed_event)
+        return delayed_event
+
+    def _assert_finalised(
+        self,
+        delay_id: str,
+        *,
+        event_id: str | None = None,
+        errcode: str | None = None,
+    ) -> JsonDict:
+        """Assert that user1's delayed event has been finalised, and return
+        its `finalised` object.
+
+        Args:
+            delay_id: The ID of the delayed event to look up.
+            event_id: The ID of the event that the delayed event was sent as, if it was sent.
+            errcode: The error code that prevented the delayed event from being sent, if any.
+                If neither this nor `event_id` is set, the delayed event must have been
+                cancelled by the user.
+        """
+        delayed_event = self._get_delayed_event(delay_id)
+        finalised = delayed_event.get("finalised")
+        self.assertIsInstance(finalised, dict, delayed_event)
+        assert finalised is not None
+
+        finalised_ts = finalised.get("finalised_ts")
+        self.assertIsInstance(finalised_ts, int, finalised)
+        self.assertLessEqual(finalised_ts, self.clock.time_msec())
+        self.assertGreaterEqual(finalised_ts, delayed_event["delayed_since_ts"])
+
+        if event_id is not None:
+            self.assertDictEqual(
+                {"finalised_ts": finalised_ts, "event_id": event_id}, finalised
+            )
+        elif errcode is not None:
+            self.assertNotIn("event_id", finalised)
+            self.assertEqual(
+                errcode, finalised.get("error", {}).get("errcode"), finalised
+            )
+        else:
+            self.assertDictEqual({"finalised_ts": finalised_ts}, finalised)
+
+        return finalised
+
     def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
         key = "content"
         self.assertIn(key, event)
@@ -826,7 +972,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
     def _find_sent_delayed_event(
         self, access_token: str, delay_id: str, should_find: bool
-    ) -> None:
+    ) -> str | None:
         """Call /sync and look for a synced event with a specified delay_id.
         At most one event will ever have a matching delay_id.
 
@@ -834,28 +980,32 @@ class DelayedEventsTestCase(HomeserverTestCase):
             access_token: The access token of the user to call /sync for.
             delay_id: The delay_id to search for in synced events.
             should_find: Whether /sync should include an event with a matching delay_id.
+
+        Returns: The ID of the event with the matching delay_id, if one was found.
         """
         channel = self.make_request("GET", "/sync", access_token=access_token)
         self.assertEqual(HTTPStatus.OK, channel.code)
 
-        rooms = channel.json_body["rooms"]
+        rooms = channel.json_body.get("rooms", {})
         events = []
         for membership in "join", "leave":
-            if membership in rooms:
-                events += rooms[membership][self.room_id]["timeline"]["events"]
+            room = rooms.get(membership, {}).get(self.room_id)
+            if room is not None:
+                events += room["timeline"]["events"]
 
-        found = False
+        found: str | None = None
         for event in events:
             if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
                 if not should_find:
                     self.fail(
                         "Found event with matching delay_id, but expected to not find one"
                     )
-                if found:
+                if found is not None:
                     self.fail("Found multiple events with matching delay_id")
-                found = True
-        if should_find and not found:
+                found = event["event_id"]
+        if should_find and found is None:
             self.fail("Did not find event with matching delay_id")
+        return found
 
 
 def _get_path_for_delayed_state(
