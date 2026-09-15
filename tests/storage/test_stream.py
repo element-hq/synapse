@@ -1452,6 +1452,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
                 auth_chain=[creation_event, creator_join_event],
                 partial_state=False,
                 servers_in_room=frozenset(),
+                state_dag=None,
             )
         )
 

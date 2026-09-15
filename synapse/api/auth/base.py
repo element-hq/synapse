@@ -317,9 +317,6 @@ class BaseAuth:
         - The returned device ID, if present, has been checked to be a valid device ID
           for the returned user ID.
         """
-        # TODO: We can drop unstable support after 2026-01-01 (couple months after stable support)
-        UNSTABLE_DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
-
         app_service = self.store.get_app_service_by_token(access_token)
         if app_service is None:
             return None
@@ -340,9 +337,7 @@ class BaseAuth:
         else:
             effective_user_id = app_service.sender
 
-        effective_device_id_args = request.args.get(
-            b"device_id", request.args.get(UNSTABLE_DEVICE_ID_ARG_NAME)
-        )
+        effective_device_id_args = request.args.get(b"device_id")
         if effective_device_id_args:
             effective_device_id = effective_device_id_args[0].decode("utf8")
             # We only just set this so it can't be None!

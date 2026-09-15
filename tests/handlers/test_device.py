@@ -840,6 +840,7 @@ class DeviceUnPartialStateTestCase(unittest.HomeserverTestCase):
                 partial_state=True,
                 # Only REMOTE1_SERVER_NAME is known at join time.
                 servers_in_room={self.REMOTE1_SERVER_NAME},
+                state_dag=None,
             )
         )
 
