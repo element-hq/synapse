@@ -394,6 +394,58 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.reactor.advance(100)
         self._find_sent_delayed_event(self.user1_access_token, delay_ids[1], False)
 
+    @unittest.override_config(
+        {"experimental_features": {"msc4140_max_delayed_events_per_user": 2}}
+    )
+    def test_finalised_delayed_events_do_not_count_towards_user_limit(self) -> None:
+        # Disable rate-limits for this user, to test only the limit on scheduled events
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(
+                self.user1_user_id, 0, 0
+            )
+        )
+
+        def schedule(delay_ms: int) -> FakeChannel:
+            return self.make_request(
+                "POST",
+                _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, delay_ms),
+                {},
+                self.user1_access_token,
+            )
+
+        # Finalise more delayed events than the limit allows to be scheduled at once:
+        # one cancelled, one sent manually, one sent on timeout
+        finalised_delay_ids = []
+        for delay_ms, action in ((1000, "cancel"), (1000, "send"), (900, None)):
+            channel = schedule(delay_ms)
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+            delay_id = channel.json_body["delay_id"]
+            finalised_delay_ids.append(delay_id)
+            if action is not None:
+                channel = self._update_delayed_event(delay_id, action, True)
+                self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.reactor.advance(1)
+        for delay_id in finalised_delay_ids:
+            self.assertIn("finalised", self._get_delayed_event(delay_id))
+        self.assertListEqual([], self._get_delayed_events())
+
+        # The finalised delayed events must not count towards the limit
+        for delay_ms in (5000, 6000):
+            channel = schedule(delay_ms)
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertEqual(2, len(self._get_delayed_events()))
+
+        # ...nor towards the time to wait until the limit is no longer reached,
+        # which must be computed from the scheduled delayed events only
+        channel = schedule(7000)
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertEqual(
+            Codes.LIMIT_EXCEEDED, channel.json_body["errcode"], channel.json_body
+        )
+        retry_after_headers = channel.headers.getRawHeaders("Retry-After")
+        assert retry_after_headers
+        self.assertEqual(5, int(retry_after_headers[0]))
+
     def test_get_delayed_events_auth(self) -> None:
         channel = self.make_request("GET", PATH_PREFIX)
         self.assertEqual(HTTPStatus.UNAUTHORIZED, channel.code, channel.result)
