@@ -111,8 +111,6 @@ ALLOWED_ATTRS = {
     # would make sense if we did
     "img": ["src"],
 }
-# When bleach release a version with this option, we can specify schemes
-# ALLOWED_SCHEMES = ["http", "https", "ftp", "mailto"]
 
 
 class Mailer:
@@ -543,8 +541,10 @@ class Mailer:
             results.events_before + [notif_event],
         )
 
-        for event in the_events:
-            messagevars = await self._get_message_vars(notif, event, room_state_ids)
+        for filtered_event in the_events:
+            messagevars = await self._get_message_vars(
+                notif, filtered_event.event, room_state_ids
+            )
             if messagevars is not None:
                 ret["messages"].append(messagevars)
 
@@ -969,8 +969,6 @@ def safe_markup(raw_html: str) -> Markup:
                 raw_html,
                 tags=ALLOWED_TAGS,
                 attributes=ALLOWED_ATTRS,
-                # bleach master has this, but it isn't released yet
-                # protocols=ALLOWED_SCHEMES,
                 strip=True,
             )
         )

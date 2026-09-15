@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 class GetFilterRestServlet(RestServlet):
-    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter/(?P<filter_id>[^/]*)")
+    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter/(?P<filter_id>[^/]*)$")
     CATEGORY = "Encryption requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -76,7 +76,7 @@ class GetFilterRestServlet(RestServlet):
 
 
 class CreateFilterRestServlet(RestServlet):
-    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter")
+    PATTERNS = client_patterns("/user/(?P<user_id>[^/]*)/filter$")
     CATEGORY = "Encryption requests"
 
     def __init__(self, hs: "HomeServer"):

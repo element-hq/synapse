@@ -278,17 +278,15 @@ def parse_html_to_open_graph(tree: "etree._Element") -> dict[str, str | None]:
     # "og:video:height" : "720",
     # "og:video:secure_url": "https://www.youtube.com/v/LXDBoHyjmtw?version=3",
 
-    og = _get_meta_tags(tree, "property", "og")
+    ogRoot = _get_meta_tags(tree, "property", "og")
 
-    # TODO: Search for properties specific to the different Open Graph types,
-    # such as article: meta tags, e.g.:
-    #
-    # "article:publisher" : "https://www.facebook.com/thethudonline" />
-    # "article:author" content="https://www.facebook.com/thethudonline" />
-    # "article:tag" content="baby" />
-    # "article:section" content="Breaking News" />
-    # "article:published_time" content="2016-03-31T19:58:24+00:00" />
-    # "article:modified_time" content="2016-04-01T18:31:53+00:00" />
+    # https://ogp.me/#type_article
+    ogArticle = _get_meta_tags(tree, "property", "article")
+    # https://ogp.me/#type_profile
+    ogProfile = _get_meta_tags(tree, "property", "profile")
+
+    # Merge as-is
+    og = ogRoot | ogArticle | ogProfile
 
     # Search for Twitter Card (twitter:) meta tags, e.g.:
     #

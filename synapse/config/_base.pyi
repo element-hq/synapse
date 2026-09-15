@@ -38,6 +38,7 @@ from synapse.config import (  # noqa: F401
     oidc,
     password_auth_providers,
     push,
+    push_rules,
     ratelimiting,
     redis,
     registration,
@@ -103,6 +104,7 @@ class RootConfig:
     worker: workers.WorkerConfig
     authproviders: password_auth_providers.PasswordAuthProviderConfig
     push: push.PushConfig
+    push_rules: push_rules.PushRulesConfig
     spamchecker: spam_checker.SpamCheckerConfig
     room: room.RoomConfig
     userdirectory: user_directory.UserDirectoryConfig

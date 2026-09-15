@@ -388,9 +388,7 @@ class DevicesRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(0, channel.json_body["total"])
         self.assertEqual(0, len(channel.json_body["devices"]))
 
-    @unittest.override_config(
-        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
-    )
+    @unittest.override_config({"experimental_features": {"msc3814_enabled": True}})
     def test_get_devices(self) -> None:
         """
         Tests that a normal lookup for devices is successfully

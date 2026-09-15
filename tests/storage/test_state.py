@@ -637,9 +637,7 @@ class StateStoreTestCase(HomeserverTestCase):
                     self.get_success(
                         self.store.db_pool.simple_select_list(
                             table="state_group_edges",
-                            keyvalues={
-                                "state_group": str(context.state_group_after_event)
-                            },
+                            keyvalues={"state_group": context.state_group_after_event},
                             retcols=("prev_state_group",),
                         )
                     ),

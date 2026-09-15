@@ -120,7 +120,7 @@ class ObservableDeferredTest(TestCase):
         assert results[1] is not None
         self.assertEqual(str(results[1].value), "gah!", "observer 2 errback result")
 
-    def test_cancellation(self) -> None:
+    def test_cancellation_observer(self) -> None:
         """Test that cancelling an observer does not affect other observers."""
         origin_d: "Deferred[int]" = Deferred()
         observable = ObservableDeferred(origin_d, consumeErrors=True)
@@ -138,6 +138,10 @@ class ObservableDeferredTest(TestCase):
         self.assertFalse(observer1.called)
         self.failureResultOf(observer2, CancelledError)
         self.assertFalse(observer3.called)
+        # check that we remove the cancelled observer from the list of observers
+        # as a clean up.
+        self.assertEqual(len(observable.observers()), 2)
+        self.assertNotIn(observer2, observable.observers())
 
         # other observers resolve as normal
         origin_d.callback(123)
@@ -147,6 +151,22 @@ class ObservableDeferredTest(TestCase):
         # additional observers resolve as normal
         observer4 = observable.observe()
         self.assertEqual(observer4.result, 123, "observer 4 callback result")
+
+    def test_cancellation_observee(self) -> None:
+        """Test that cancelling the original deferred cancels all observers."""
+        origin_d: "Deferred[int]" = Deferred()
+        observable = ObservableDeferred(origin_d, consumeErrors=True)
+
+        observer1 = observable.observe()
+        observer2 = observable.observe()
+
+        self.assertFalse(observer1.called)
+        self.assertFalse(observer2.called)
+
+        # cancel the original deferred
+        origin_d.cancel()
+        self.failureResultOf(observer1, CancelledError)
+        self.failureResultOf(observer2, CancelledError)
 
 
 class TimeoutDeferredTest(TestCase):

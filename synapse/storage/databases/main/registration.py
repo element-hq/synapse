@@ -1133,6 +1133,33 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction("count_real_users", _count_users)
 
+    async def get_user_count_by_service(self) -> list[tuple[str, int]]:
+        """Counts users grouped by their appservice.
+
+        Returns:
+            A list of tuples (appservice_id, count). "native" is emitted as the
+            appservice for users that don't come from appservices (i.e. native Matrix
+            users).
+
+        """
+
+        def _get_user_count_by_service(
+            txn: LoggingTransaction,
+        ) -> list[tuple[str, int]]:
+            sql = """
+                SELECT COALESCE(NULLIF(appservice_id, ''), 'native') AS app_service, COUNT(*) AS count
+                FROM users
+                WHERE deactivated = 0
+                GROUP BY COALESCE(NULLIF(appservice_id, ''), 'native')
+            """
+
+            txn.execute(sql)
+            return cast(list[tuple[str, int]], txn.fetchall())
+
+        return await self.db_pool.runInteraction(
+            "get_user_count_by_service", _get_user_count_by_service
+        )
+
     async def generate_user_id(self) -> str:
         """Generate a suitable localpart for a guest user
 
@@ -2092,58 +2119,6 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             "replace_refresh_token", _replace_refresh_token_txn
         )
 
-    async def set_device_for_refresh_token(
-        self, user_id: str, old_device_id: str, device_id: str
-    ) -> None:
-        """Moves refresh tokens from old device to current device
-
-        Args:
-            user_id: The user of the devices.
-            old_device_id: The old device.
-            device_id: The new device ID.
-        Returns:
-            None
-        """
-
-        await self.db_pool.simple_update(
-            "refresh_tokens",
-            keyvalues={"user_id": user_id, "device_id": old_device_id},
-            updatevalues={"device_id": device_id},
-            desc="set_device_for_refresh_token",
-        )
-
-    def _set_device_for_access_token_txn(
-        self, txn: LoggingTransaction, token: str, device_id: str
-    ) -> str:
-        old_device_id = self.db_pool.simple_select_one_onecol_txn(
-            txn, "access_tokens", {"token": token}, "device_id"
-        )
-
-        self.db_pool.simple_update_txn(
-            txn, "access_tokens", {"token": token}, {"device_id": device_id}
-        )
-
-        self._invalidate_cache_and_stream(txn, self.get_user_by_access_token, (token,))
-
-        return old_device_id
-
-    async def set_device_for_access_token(self, token: str, device_id: str) -> str:
-        """Sets the device ID associated with an access token.
-
-        Args:
-            token: The access token to modify.
-            device_id: The new device ID.
-        Returns:
-            The old device ID associated with the access token.
-        """
-
-        return await self.db_pool.runInteraction(
-            "set_device_for_access_token",
-            self._set_device_for_access_token_txn,
-            token,
-            device_id,
-        )
-
     async def add_login_token_to_user(
         self,
         user_id: str,
@@ -2526,14 +2501,6 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         def user_delete_access_tokens_for_devices_txn(
             txn: LoggingTransaction, batch_device_ids: StrCollection
         ) -> list[tuple[str, int, str | None]]:
-            self.db_pool.simple_delete_many_txn(
-                txn,
-                table="refresh_tokens",
-                keyvalues={"user_id": user_id},
-                column="device_id",
-                values=batch_device_ids,
-            )
-
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "device_id", batch_device_ids
             )
@@ -2552,6 +2519,17 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 self.get_user_by_access_token,
                 [(t[0],) for t in tokens_and_devices],
             )
+            # Delete access tokens first, before refresh tokens.
+            # This ensures we can capture the deleted access tokens for cache invalidation
+            # before any CASCADE deletes occur.
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="refresh_tokens",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=batch_device_ids,
+            )
+
             return tokens_and_devices
 
         results = []

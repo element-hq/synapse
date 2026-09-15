@@ -29,9 +29,11 @@ import synapse.rest.admin
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
+    JoinRules,
     ReceiptTypes,
     RelationTypes,
 )
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -41,6 +43,7 @@ from tests import unittest
 from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
+from tests.rest.client.test_rooms import make_request_with_cancellation_test
 from tests.server import TimedOutException
 
 logger = logging.getLogger(__name__)
@@ -391,6 +394,69 @@ class SyncKnockTestCase(KnockingStrippedStateEventHelperMixin):
         self.check_knock_room_state_against_room_state(
             room_state_events, self.expected_room_state
         )
+
+
+class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
+    """MSC4311: Tests that m.room.create is present in invite_state and knock_state"""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        knock.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        return config
+
+    def test_create_event_present_in_invite_state(self) -> None:
+        """m.room.create must appear in invite_state."""
+        inviter = self.register_user("inviter", "pass")
+        inviter_tok = self.login("inviter", "pass")
+        invitee = self.register_user("invitee", "pass")
+        invitee_tok = self.login("invitee", "pass")
+
+        room_id = self.helper.create_room_as(inviter, tok=inviter_tok)
+        self.helper.invite(room=room_id, src=inviter, targ=invitee, tok=inviter_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=invitee_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        invite_state_events = channel.json_body["rooms"]["invite"][room_id][
+            "invite_state"
+        ]["events"]
+        event_types = {stripped_event["type"] for stripped_event in invite_state_events}
+        self.assertIn(EventTypes.Create, event_types)
+
+    def test_create_event_present_in_knock_state(self) -> None:
+        """m.room.create must appear in knock_state."""
+        host = self.register_user("host", "pass")
+        host_tok = self.login("host", "pass")
+        knocker = self.register_user("knocker", "pass")
+        knocker_tok = self.login("knocker", "pass")
+
+        room_id = self.helper.create_room_as(
+            host, is_public=False, room_version="7", tok=host_tok
+        )
+        self.helper.send_state(
+            room_id,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=host_tok,
+        )
+
+        self.helper.knock(room_id, knocker, tok=knocker_tok)
+
+        channel = self.make_request("GET", "/sync", access_token=knocker_tok)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        knock_state_events = channel.json_body["rooms"]["knock"][room_id][
+            "knock_state"
+        ]["events"]
+        event_types = {stripped_event["type"] for stripped_event in knock_state_events}
+        self.assertIn(EventTypes.Create, event_types)
 
 
 class UnreadMessagesTestCase(unittest.HomeserverTestCase):
@@ -1145,3 +1211,179 @@ class ExcludeRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertNotIn(self.excluded_room_id, channel.json_body["rooms"]["join"])
         self.assertIn(self.included_room_id, channel.json_body["rooms"]["join"])
+
+
+class SyncCancellationTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        room.register_servlets,
+    ]
+
+    def test_initial_sync(self) -> None:
+        """Tests that an initial sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_initial_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            "/_matrix/client/v3/sync",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+    def test_incremental_sync(self) -> None:
+        """Tests that an incremental sync request can be cancelled."""
+        user_id = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Populate the account with a few rooms
+        room_ids = []
+        for _ in range(5):
+            room_id = self.helper.create_room_as(user_id, tok=tok)
+            self.helper.send(room_id, tok=tok)
+            room_ids.append(room_id)
+
+        # Do an initial sync to get a since token.
+        channel = self.make_request("GET", "/sync", access_token=tok)
+        self.assertEqual(200, channel.code, msg=channel.result)
+        since = channel.json_body["next_batch"]
+
+        # Send some more messages to generate activity in the rooms.
+        for room_id in room_ids:
+            self.helper.send(room_id, tok=tok)
+
+        channel = make_request_with_cancellation_test(
+            "test_incremental_sync",
+            self.reactor,
+            self.site,
+            "GET",
+            f"/_matrix/client/v3/sync?since={since}&timeout=10000",
+            token=tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
+
+class SyncStateAfterArchivedRoomTestCase(unittest.HomeserverTestCase):
+    """Tests MSC4222 `state_after` behaviour for rooms the syncing user has
+    left (i.e. rooms in the `leave` section of the sync response)."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+    def test_archived_room_state_after_not_newer_than_leave(self) -> None:
+        """`state_after` for a left room must be the state at the end of that
+        room's timeline, i.e. at the user's leave point — never state from
+        after the leave.
+
+        Scenario: with lazy-loading of members and `use_state_after` enabled,
+        Alice does an incremental sync covering the window in which Bob sent a
+        message and Alice then left. Bob changed his per-room displayname
+        *after* Alice's leave; that post-leave membership event must NOT
+        appear in Alice's `state_after` for the left room.
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login("alice", "password")
+        bob = self.register_user("bob", "password")
+        bob_tok = self.login("bob", "password")
+
+        # Opt Alice in to MSC4222.
+        self.get_success(
+            self.store.set_features_for_user(alice, {ExperimentalFeature.MSC4222: True})
+        )
+
+        # Name the room to avoid heroes: those come from the *current*
+        # summary — a separate leak path from the one under test.
+        room_id = self.helper.create_room_as(
+            alice, tok=alice_tok, extra_content={"name": "Some room name"}
+        )
+        self.helper.join(room_id, bob, tok=bob_tok)
+
+        # Bob's membership as it will stand at Alice's leave point.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/rooms/{room_id}/state/m.room.member/{bob}?format=event",
+            access_token=alice_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        bob_member_event_id_at_leave = channel.json_body["event_id"]
+
+        # Lazy-load members; `include_redundant_members` bypasses the members
+        # cache so Bob's membership appears in the incremental sync below.
+        sync_filter = json.dumps(
+            {
+                "room": {
+                    "state": {
+                        "lazy_load_members": True,
+                        "include_redundant_members": True,
+                    },
+                }
+            }
+        )
+        sync_url = f"/sync?filter={sync_filter}&org.matrix.msc4222.use_state_after=true"
+
+        # Initial sync.
+        channel = self.make_request("GET", sync_url, access_token=alice_tok)
+        self.assertEqual(channel.code, 200, channel.result)
+        since = channel.json_body["next_batch"]
+
+        # Bob becomes a timeline sender in the next sync window.
+        self.helper.send(room_id, body="hello", tok=bob_tok)
+
+        # Alice leaves the room.
+        self.helper.leave(room_id, alice, tok=alice_tok)
+
+        # Bob's membership changes AFTER Alice's leave.
+        post_leave_member_event = self.helper.send_state(
+            room_id,
+            EventTypes.Member,
+            {"membership": "join", "displayname": "bob-post-leave"},
+            tok=bob_tok,
+            state_key=bob,
+        )
+        post_leave_member_event_id = post_leave_member_event["event_id"]
+
+        # Incremental sync: the room is in the `leave` section.
+        channel = self.make_request(
+            "GET", f"{sync_url}&since={since}", access_token=alice_tok
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        left_room = channel.json_body["rooms"]["leave"][room_id]
+        state_after_events = left_room["org.matrix.msc4222.state_after"]["events"]
+
+        # Post-leave state must not appear in `state_after`.
+        self.assertNotIn(
+            post_leave_member_event_id,
+            [e["event_id"] for e in state_after_events],
+            f"state_after contains state from after the user's leave: "
+            f"{state_after_events}",
+        )
+
+        # Bob's membership must be the one at the leave point.
+        self.assertEqual(
+            [
+                e["event_id"]
+                for e in state_after_events
+                if e["type"] == EventTypes.Member and e["state_key"] == bob
+            ],
+            [bob_member_event_id_at_leave],
+        )

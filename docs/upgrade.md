@@ -117,6 +117,111 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+
+# Upgrading to v1.161.0
+
+## Deprecation of `matrix_rtc.livekit_service_url`
+
+When configuring the MatrixRTC LiveKit transport, the `livekit_service_url` is now
+deprecated but should continue to be listed to ensure backwards compatibility with
+older clients. A new sibling `url` config property is added that should be set to
+your SFU's WebSocket URL. Clients that support `url` will use the Client-Server API
+to (indirectly) interact with the LiveKit authorization service. The service needs
+to be set up as an application service in order to support these endpoints. See
+https://github.com/element-hq/lk-jwt-service and
+https://element-hq.github.io/synapse/v1.161/usage/configuration/config_documentation.html#matrix_rtc
+for further details.
+
+# Upgrading to v1.159.0
+
+## Change of signing key expiry date for the Debian/Ubuntu package repository (2026)
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`,
+please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+but this change must be imported into your keyring.
+
+If you have the `matrix-org-archive-keyring` package installed and it updates before the current key expires, this should
+happen automatically.
+
+Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
+will need to get a fresh copy of the keys. You can do so with:
+
+```sh
+sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+```
+
+The old version of the key will expire on `2027-03-15`.
+
+# Upgrading to v1.158.0
+
+## Drop support for Ubuntu 25.10 'Questing Quokka', add support for Ubuntu 26.04 'Resolute Raccoon'
+
+Ubuntu 25.10 'Questing Quokka' [is end-of-life as of
+2026-07-01](https://endoflife.date/ubuntu). This release drops support for Ubuntu 25.10,
+and in its place adds support for Ubuntu 26.04 'Resolute Raccoon'.
+
+# Upgrading to v1.157.0
+
+## MSC3861 Auth Delegation must be migrated to stable Matrix Authentication Service integration
+
+Support for the deprecated MSC3861 Auth Delegation (`experimental_features.msc3861`)
+has been dropped in this version, in favour of the stable Matrix Authentication Service
+integration.
+
+See [the previous upgrade notes](#stable-integration-with-matrix-authentication-service)
+and the [`matrix_authentication_service` section in the Configuration Manual](usage/configuration/config_documentation.md#matrix_authentication_service)
+for more information.
+
+# Upgrading to v1.152.0
+
+## Workers which quarantine media must be stream writers
+
+A new [`quarantined_media_changes` stream writer](./workers.md#the-quarantined_media_changes-stream) is
+introduced. Existing deployments which route the `/quarantine_media` endpoints to a
+worker (instead of the main process) *must* also add those workers to the
+`quarantined_media_changes` stream writer list. Quarantining media will not work without
+this.
+
+If your deployment does not use workers, or instead uses the main process for
+quarantining media, you do not need to make any changes to your configuration.
+
+# Upgrading to v1.150.0
+
+## Removal of the `systemd` pip extra
+
+The `matrix-synapse[systemd]` pip extra has been removed.
+If you use `systemd.journal.JournalHandler` in your logging configuration
+(e.g. `contrib/systemd/log_config.yaml`), you must now install
+`systemd-python` manually in Synapse's runtime environment:
+
+```bash
+pip install systemd-python
+```
+
+No action is needed if you do not use journal logging, or if you installed
+Synapse from the Debian packages (which handle this automatically).
+
+## Module API: Deprecation of the `deactivation` parameter in the `set_displayname` method
+
+If you have Synapse modules installed that use the `set_displayname` method to change
+the display name of your users, please ensure that it doesn't pass the optional
+`deactivation` parameter.
+
+This parameter is now deprecated and it is intended to be removed in 2027.
+No immediate change is necessary, however once the parameter is removed, modules passing it will produce errors.
+[Issue #19546](https://github.com/element-hq/synapse/issues/19546) tracks this removal.
+
+From this version, when the parameter is passed, an error such as
+``Deprecated `deactivation` parameter passed to `set_displayname` Module API (value: False). This will break in 2027.`` will be logged. The method will otherwise continue to work.
+
+## Updated request log format (`Processed request: ...`)
+
+The [request log format](usage/administration/request_log.md) has slightly changed to
+include `ru=(...)` and `db=(...)` labels to better disambiguate the number groupings.
+Previously, these values appeared without labels.
+
+This only matters if you have third-party tooling that parses the Synapse logs.
+
 # Upgrading to v1.146.0
 
 ## Drop support for Ubuntu 25.04 Plucky Puffin, and add support for 25.10 Questing Quokka
@@ -124,6 +229,14 @@ stacking them up. You can monitor the currently running background updates with
 Ubuntu 25.04 Plucky Puffin [is end-of-life as of 17 Jan
 2026](https://endoflife.date/ubuntu). This release drops support for Ubuntu
 25.04, and in its place adds support for Ubuntu 25.10 Questing Quokka.
+
+## Removal of MSC2697 (Legacy) Dehydrated devices
+
+The endpoints for
+[MSC2697](https://github.com/matrix-org/matrix-spec-proposals/pull/2697) have now
+been removed, since the MSC is closed. Developers who rely on this feature should
+migrate to [MSC3814](https://github.com/matrix-org/matrix-spec-proposals/pull/3814)
+which introduces support for a newer version of dehydrated devices.
 
 # Upgrading to v1.144.0
 
@@ -269,7 +382,8 @@ using these metrics.
 Support for [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service) is now stable, with a simplified configuration.
 This stable integration requires MAS 0.20.0 or later.
 
-The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.137.0.
+The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.157.0.
+(*Note*: this previously read v1.137.0 but the removal date was missed.)
 
 Synapse deployments already using MAS should now use the new configuration options:
 
@@ -836,7 +950,7 @@ the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify `enable_legacy_metrics: false` in your homeserver configuration.
 
-A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12).
+A list of affected metrics is available on the [Metrics How-to page](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12).
 
 
 ## Deprecation of the `generate_short_term_login_token` module API method
@@ -2431,7 +2545,7 @@ back to v1.3.1, subject to the following:
 
 Some counter metrics have been renamed, with the old names deprecated.
 See [the metrics
-documentation](metrics-howto.md#renaming-of-metrics--deprecation-of-old-names-in-12)
+documentation](https://element-hq.github.io/synapse/v1.69/metrics-howto.html#renaming-of-metrics--deprecation-of-old-names-in-12)
 for details.
 
 # Upgrading to v1.1.0

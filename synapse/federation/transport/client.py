@@ -47,6 +47,7 @@ from synapse.api.urls import (
 )
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.units import Transaction
+from synapse.http.client import is_unknown_endpoint
 from synapse.http.matrixfederationclient import ByteParser, LegacyJsonSendParser
 from synapse.http.types import QueryParams
 from synapse.types import JsonDict, UserID
@@ -141,33 +142,6 @@ class TransportLayerClient:
             destination, path=path, timeout=timeout, try_trailing_slash_on_400=True
         )
 
-    async def get_policy_recommendation_for_pdu(
-        self, destination: str, event: EventBase, timeout: int | None = None
-    ) -> JsonDict:
-        """Requests the policy recommendation for the given pdu from the given policy server.
-
-        Args:
-            destination: The host name of the remote homeserver checking the event.
-            event: The event to check.
-            timeout: How long to try (in ms) the destination for before giving up.
-                None indicates no timeout.
-
-        Returns:
-            The full recommendation object from the remote server.
-        """
-        logger.debug(
-            "get_policy_recommendation_for_pdu dest=%s, event_id=%s",
-            destination,
-            event.event_id,
-        )
-        return await self.client.post_json(
-            destination=destination,
-            path=f"/_matrix/policy/unstable/org.matrix.msc4284/event/{event.event_id}/check",
-            data=event.get_pdu_json(),
-            ignore_backoff=True,
-            timeout=timeout,
-        )
-
     async def ask_policy_server_to_sign_event(
         self, destination: str, event: EventBase, timeout: int | None = None
     ) -> JsonDict:
@@ -186,13 +160,28 @@ class TransportLayerClient:
             The signature from the policy server, structured in the same was as the 'signatures'
             JSON in the event e.g { "$policy_server_via_domain" : { "ed25519:policy_server": "signature_base64" }}
         """
-        return await self.client.post_json(
-            destination=destination,
-            path="/_matrix/policy/unstable/org.matrix.msc4284/sign",
-            data=event.get_pdu_json(),
-            ignore_backoff=True,
-            timeout=timeout,
-        )
+        # Try stable first, then fall back to unstable if unsupported. All other errors
+        # are just errors.
+        try:
+            return await self.client.post_json(
+                destination=destination,
+                path="/_matrix/policy/v1/sign",
+                data=event.get_pdu_json(),
+                ignore_backoff=True,
+                timeout=timeout,
+            )
+        except HttpResponseException as ex:
+            if is_unknown_endpoint(ex):
+                # TODO: Remove unstable MSC4284 support
+                # https://github.com/element-hq/synapse/issues/19502
+                return await self.client.post_json(
+                    destination=destination,
+                    path="/_matrix/policy/unstable/org.matrix.msc4284/sign",
+                    data=event.get_pdu_json(),
+                    ignore_backoff=True,
+                    timeout=timeout,
+                )
+            raise
 
     async def backfill(
         self, destination: str, room_id: str, event_tuples: Collection[str], limit: int
@@ -787,18 +776,21 @@ class TransportLayerClient:
         limit: int,
         min_depth: int,
         timeout: int,
+        state_dag: bool,
     ) -> JsonDict:
         path = _create_v1_path("/get_missing_events/%s", room_id)
-
+        request_body = {
+            "limit": int(limit),
+            "min_depth": int(min_depth),
+            "earliest_events": earliest_events,
+            "latest_events": latest_events,
+        }
+        if state_dag:
+            request_body["org.matrix.msc4242.state_dag"] = True
         return await self.client.post_json(
             destination=destination,
             path=path,
-            data={
-                "limit": int(limit),
-                "min_depth": int(min_depth),
-                "earliest_events": earliest_events,
-                "latest_events": latest_events,
-            },
+            data=request_body,
             timeout=timeout,
         )
 
@@ -997,6 +989,10 @@ class SendJoinResponse:
     # "event" is not included in the response.
     event: EventBase | None = None
 
+    # MSC4242: State DAGs. Always included for state dag rooms, else None.
+    # Replaces auth_events.
+    state_dag: list[EventBase] | None = None
+
     # The room state is incomplete
     members_omitted: bool = False
 
@@ -1079,7 +1075,7 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
     MAX_RESPONSE_SIZE = 500 * 1024 * 1024
 
     def __init__(self, room_version: RoomVersion, v1_api: bool):
-        self._response = SendJoinResponse([], [], event_dict={})
+        self._response = SendJoinResponse([], [], event_dict={}, state_dag=[])
         self._room_version = room_version
         self._coros: list[Generator[None, bytes, None]] = []
 
@@ -1122,6 +1118,15 @@ class SendJoinParser(ByteParser[SendJoinResponse]):
                     use_float="True",
                 )
             )
+
+            if room_version.msc4242_state_dags:
+                self._coros.append(
+                    ijson.items_coro(
+                        _event_list_parser(room_version, self._response.state_dag),
+                        prefix + "state_dag.item",
+                        use_float=True,
+                    )
+                )
 
     def write(self, data: bytes) -> int:
         for c in self._coros:

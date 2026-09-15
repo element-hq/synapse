@@ -21,6 +21,7 @@
 import platform
 import sqlite3
 import struct
+import sys
 import threading
 from typing import TYPE_CHECKING, Any, Mapping
 
@@ -89,6 +90,20 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
     def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None:
         # We need to import here to avoid an import loop.
         from synapse.storage.prepare_database import prepare_database
+
+        if sys.version_info >= (3, 12):
+            # Opportunistically disable the SQLITE_DBCONFIG_DEFENSIVE
+            # flag on the database, as some of our database migrations
+            # alter the schema and this is forbidden in defensive mode.
+            #
+            # This is only known to be necessary on macOS, though SQLite can
+            # in theory be configured to be defensive by default on any
+            # platform.
+            #
+            # The constant for this is only exposed in the sqlite3 module
+            # on Python >= 3.12.
+            assert isinstance(db_conn.conn, sqlite3.Connection)
+            db_conn.conn.setconfig(sqlite3.SQLITE_DBCONFIG_DEFENSIVE, False)
 
         if self._is_in_memory:
             # In memory databases need to be rebuilt each time. Ideally we'd

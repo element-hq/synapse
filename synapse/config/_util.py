@@ -18,12 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, TypeVar
+from typing import Annotated, Any, TypeVar
 
 import jsonschema
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, BeforeValidator, StrictInt, TypeAdapter, ValidationError
+from pydantic_core.core_schema import int_schema
 
-from synapse.config._base import ConfigError
+from synapse.config._base import Config, ConfigError
 from synapse.types import JsonDict, StrSequence
 
 
@@ -97,3 +98,11 @@ def parse_and_validate_mapping(
     except ValidationError as e:
         raise ConfigError(str(e)) from e
     return instances
+
+
+ConfigByteSize = Annotated[
+    StrictInt, BeforeValidator(Config.parse_size), int_schema(ge=0)
+]
+"""
+A size in bytes. Pydantic-compatible wrapper for `Config.parse_size`
+"""

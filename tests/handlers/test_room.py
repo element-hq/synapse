@@ -1,6 +1,9 @@
+from unittest.mock import patch
+
 import synapse
 from synapse.api.constants import EventTypes, RoomEncryptionAlgorithms
 from synapse.rest.client import login, room
+from synapse.types import create_requester
 
 from tests import unittest
 from tests.unittest import override_config
@@ -106,3 +109,150 @@ class EncryptedByDefaultTestCase(unittest.HomeserverTestCase):
             tok=user_token,
             expect_code=404,
         )
+
+    @override_config({"encryption_enabled_by_default_for_room_type": "all"})
+    def test_user_supplied_encryption_event_is_not_overwritten(self) -> None:
+        """Tests that an m.room.encryption event supplied by the user in the
+        initial state takes precedence over the one that would otherwise be forced
+        by encryption_enabled_by_default_for_room_type, rather than a duplicate
+        default event being sent.
+        """
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room, supplying our own encryption event with a non-default
+        # algorithm in the initial state.
+        custom_content = {"algorithm": "some.custom.invalid.algorithm"}
+        room_id = self.helper.create_room_as(
+            user,
+            is_public=False,
+            tok=user_token,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomEncryption,
+                        "state_key": "",
+                        "content": custom_content,
+                    }
+                ]
+            },
+        )
+
+        # Check that the room's encryption event is the one we supplied, not the
+        # default that the config option would otherwise force.
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomEncryption,
+            tok=user_token,
+        )
+        self.assertEqual(event_content, custom_content)
+
+    @override_config({"encryption_enabled_by_default_for_room_type": "all"})
+    def test_empty_encryption_event_does_not_bypass_forced_encryption(self) -> None:
+        """Tests that a user cannot bypass encryption_enabled_by_default_for_room_type
+        by supplying an empty m.room.encryption event in the initial state. Since
+        such an event is not valid (it lacks the required `algorithm` key), the
+        forced default must still be applied.
+        """
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room, supplying an empty encryption event in the initial state.
+        room_id = self.helper.create_room_as(
+            user,
+            is_public=False,
+            tok=user_token,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomEncryption,
+                        "state_key": "",
+                        "content": {},
+                    }
+                ]
+            },
+        )
+
+        # Check that the forced default encryption was still applied on top of the
+        # empty event, rather than the bypass succeeding.
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomEncryption,
+            tok=user_token,
+        )
+        self.assertEqual(event_content, {"algorithm": RoomEncryptionAlgorithms.DEFAULT})
+
+    @override_config({"encryption_enabled_by_default_for_room_type": "all"})
+    def test_non_string_algorithm_does_not_bypass_forced_encryption(self) -> None:
+        """Tests that a user cannot bypass encryption_enabled_by_default_for_room_type
+        by supplying an m.room.encryption event whose `algorithm` is not a string.
+        The forced default must still be applied.
+        """
+        # Create a user
+        user = self.register_user("user", "pass")
+        user_token = self.login(user, "pass")
+
+        # Create a room, supplying an encryption event with a malformed
+        # (non-string) algorithm in the initial state.
+        room_id = self.helper.create_room_as(
+            user,
+            is_public=False,
+            tok=user_token,
+            extra_content={
+                "initial_state": [
+                    {
+                        "type": EventTypes.RoomEncryption,
+                        "state_key": "",
+                        "content": {"algorithm": 42},
+                    }
+                ]
+            },
+        )
+
+        # Check that the forced default encryption was still applied.
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.RoomEncryption,
+            tok=user_token,
+        )
+        self.assertEqual(event_content, {"algorithm": RoomEncryptionAlgorithms.DEFAULT})
+
+
+class RoomIDCollisionTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+    ]
+
+    def test_colliding_v12_room_ids_are_retried(self) -> None:
+        """In v12+ rooms the room ID is the reference hash of the
+        create event, so two rooms whose create events have identical content
+        collide on the same room ID. This happens when the same user creates
+        several rooms at once (e.g. concurrent /createRoom requests with the
+        same config within the same millisecond).
+
+        Regression test: the collision must be retried transparently and both
+        rooms created with distinct IDs.
+        """
+        handler = self.hs.get_room_creation_handler()
+        user_id = self.register_user("alice", "pass")
+        requester = create_requester(user_id)
+
+        # Freeze the clock so both create events carry the same
+        # `origin_server_ts`; with identical config this forces the two room
+        # IDs to hash to the same value, reproducing the collision.
+        with patch.object(self.hs.get_clock(), "time_msec", return_value=1234567890000):
+            room_id1, _, _ = self.get_success(
+                handler.create_room(requester, {"room_version": "12"}, ratelimit=False)
+            )
+            room_id2, _, _ = self.get_success(
+                handler.create_room(requester, {"room_version": "12"}, ratelimit=False)
+            )
+
+        self.assertNotEqual(room_id1, room_id2)
+        # v12 room IDs are content hashes with no domain component.
+        self.assertNotIn(":", room_id1)
+        self.assertNotIn(":", room_id2)

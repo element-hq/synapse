@@ -44,7 +44,7 @@ class ServerNoticesTests(unittest.HomeserverTestCase):
     ]
 
     def default_config(self) -> JsonDict:
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         config.update({"server_notices": DEFAULT_SERVER_NOTICES_CONFIG})
 

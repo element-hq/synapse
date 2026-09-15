@@ -45,6 +45,7 @@ from mypy.types import (
     AnyType,
     CallableType,
     Instance,
+    LiteralType,
     NoneType,
     Options,
     TupleType,
@@ -133,6 +134,7 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, ArgLocation | None] = 
     "prometheus_client.metrics.Info": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Enum": ArgLocation("labelnames", 2),
     "synapse.metrics.LaterGauge": ArgLocation("labelnames", 2),
+    "synapse.metrics._InFlightGaugeRuntime": ArgLocation("labels", 2),
     "synapse.metrics.InFlightGauge": ArgLocation("labels", 2),
     "synapse.metrics.GaugeBucketCollector": ArgLocation("labelnames", 2),
     "prometheus_client.registry.Collector": None,
@@ -811,6 +813,10 @@ def is_cacheable(
     # This should probably be done via a TypeVisitor. Apologies to the reader!
     if isinstance(rt, AnyType):
         return True, ("may be mutable" if verbose else None)
+
+    elif isinstance(rt, LiteralType):
+        # Literal[True] etc
+        return True, None
 
     elif isinstance(rt, Instance):
         if (

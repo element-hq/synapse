@@ -81,7 +81,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 2)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)
@@ -119,7 +120,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 1)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)
@@ -151,7 +153,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 2)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)
@@ -192,7 +195,8 @@ class ExfiltrateData(unittest.HomeserverTestCase):
 
         # Check that the right number of events were written
         counter = Counter(
-            (event.type, getattr(event, "state_key", None)) for event in written_events
+            (event.event.type, getattr(event.event, "state_key", None))
+            for event in written_events
         )
         self.assertEqual(counter[(EventTypes.Message, None)], 2)
         self.assertEqual(counter[(EventTypes.Member, self.user1)], 1)
