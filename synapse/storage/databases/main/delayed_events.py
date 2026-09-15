@@ -881,6 +881,37 @@ class DelayedEventsStore(SQLBaseStore):
             finalise_processed_delayed_state_events,
         )
 
+    async def unprocess_delayed_event(self, delay_id: DelayID) -> Timestamp | None:
+        """
+        Unmark the matching delayed event for processing, so that it is scheduled again.
+        Used when a delayed event that was marked for processing could not be sent.
+
+        Returns: The send time of the next delayed event to be sent, if any.
+
+        Raises:
+            StoreError: if there is no matching delayed event, or if it has not
+                been marked as processed, or if it has already been finalised.
+        """
+
+        def unprocess_delayed_event_txn(txn: LoggingTransaction) -> Timestamp | None:
+            txn.execute(
+                """
+                UPDATE delayed_events SET is_processed = FALSE
+                WHERE delay_id = ?
+                    AND is_processed
+                    AND finalised_ts IS NULL
+                """,
+                (delay_id,),
+            )
+            if txn.rowcount == 0:
+                raise StoreError(404, "No row found (delayed_events)")
+            return self._get_next_delayed_event_send_ts_txn(txn)
+
+        return await self.db_pool.runInteraction(
+            "unprocess_delayed_event",
+            unprocess_delayed_event_txn,
+        )
+
     async def unprocess_delayed_events(self) -> None:
         """
         Unmark all delayed events for processing.
