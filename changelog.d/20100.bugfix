@@ -1,0 +1,1 @@
+Improve server concurrency by reading local media thumbnails asynchronously, and increase test coverage for state event parsing. Contributed by @guillemo12.
