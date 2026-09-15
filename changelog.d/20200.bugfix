@@ -1,0 +1,1 @@
+Fix a bug introduced in Synapse 1.135.0 where fetching an unset `displayname` or `avatar_url` via `GET /_matrix/client/v3/profile/{userId}/{field}` returned the field with a `null` value instead of an empty object.
