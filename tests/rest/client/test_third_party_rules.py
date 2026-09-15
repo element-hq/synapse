@@ -385,8 +385,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
             "third_party_event_rules": {
                 "module": __name__ + ".LegacyChangeEvents",
                 "config": {},
-            },
-            "default_room_version": "12",
+            }
         }
     )
     def test_legacy_check_event_allowed(self) -> None:
