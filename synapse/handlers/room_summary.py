@@ -819,6 +819,7 @@ class RoomSummaryHandler:
             # To get the freshest data available, pull the state for the join_rules
             # directly. In the unlikely case it is None, it will still be filtered out
             # below.
+            #
             # XXX: The current `/room_summary` spec (as of 2026-09-15) says that the
             #  room is assumed to be `public` when `join_rule` isn't present but this
             #  directly contradicts the scenarios where `join_rule` doesn't exist. For
