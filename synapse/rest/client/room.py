@@ -525,6 +525,7 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/delayed_event/$event_type[/$txn_id]
@@ -576,6 +577,10 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
+        sticky_duration_ms: int | None = None
+        if self._msc4354_enabled:
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+
         delay_id = await self.delayed_events_handler.add(
             requester,
             room_id=room_id,
@@ -584,7 +589,7 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
             origin_server_ts=origin_server_ts,
             content=request_body.content,
             delay=Duration(milliseconds=request_body.delay_ms),
-            sticky_duration_ms=None,
+            sticky_duration_ms=sticky_duration_ms,
         )
 
         set_tag("delay_id", delay_id)
