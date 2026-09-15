@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-862788cc.js";
+            window.path_to_searchindex_js = "searchindex-ea381424.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -8271,7 +8271,6 @@ It’s recommended to leave this option as it is. We expect to remove this optio
 <p><em>Changed in Synapse 1.84.0: Added use_tls, certificate_file, private_key_file, ca_file and ca_path attributes</em></p>
 <p><em>Changed in Synapse 1.85.0: Added path option to use a local Unix socket</em></p>
 <p><em>Changed in Synapse 1.116.0: Added password_path</em></p>
-<p><em>Changed in Synapse 1.162.0: Added username</em></p>
 <p>This setting has the following sub-options:</p>
 <ul>
 <li>
@@ -8285,9 +8284,6 @@ It’s recommended to leave this option as it is. We expect to remove this optio
 </li>
 <li>
 <p><code>path</code> (string): The full path to a local Unix socket file. <strong>If this is used, <code>host</code> and <code>port</code> are ignored.</strong> Defaults to <code>"/tmp/redis.sock"</code>.</p>
-</li>
-<li>
-<p><code>username</code> (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires <code>password</code> (or <code>password_path</code>) to also be set. Defaults to <code>null</code>.</p>
 </li>
 <li>
 <p><code>password</code> (string|null): Optional password if configured on the Redis instance. Defaults to <code>null</code>.</p>
@@ -8319,7 +8315,6 @@ It’s recommended to leave this option as it is. We expect to remove this optio
   enabled: true
   host: localhost
   port: 6379
-  username: &lt;username&gt;
   password_path: &lt;path_to_the_password_file&gt;
   dbid: &lt;dbid&gt;
 </code></pre>
