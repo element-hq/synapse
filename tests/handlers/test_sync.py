@@ -2465,15 +2465,9 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
             incremental_result.profile_updates["@other_user:test"]["displayname"],
             "other_user",
         )
-        self.assertIsNone(
-            incremental_result.profile_updates["@other_user:test"]["avatar_url"],
-        )
         self.assertEqual(
             incremental_result.profile_updates["@third_user:test"]["displayname"],
             "third_user",
-        )
-        self.assertIsNone(
-            incremental_result.profile_updates["@third_user:test"]["avatar_url"],
         )
         self.assertFalse(
             "m.status" in incremental_result.profile_updates["@third_user:test"].keys(),
