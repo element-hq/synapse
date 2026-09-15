@@ -893,6 +893,32 @@ class ProfileWorkerStore(SQLBaseStore):
         )
         target_users = {row[0] for row in rows}
 
+        # First ensure we clear any previous "left room" actions,
+        # as these users are now sharing a room again.
+        target_user_clause, target_user_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "user_id",
+            target_users,
+        )
+        users_clause, users_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "user_id",
+            users,
+        )
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {target_user_clause}
+                    AND stream_id IN (
+                        SELECT stream_id
+                        FROM profile_updates
+                        WHERE
+                            {users_clause} AND
+                            action = ?
+                    )
+            """,
+            (*target_user_args, *users_args, ProfileUpdateAction.LEFT_ROOM.value),
+        )
         # Record the profile updates for each user
         self.record_profile_updates_txn(
             txn=txn,
@@ -905,6 +931,22 @@ class ProfileWorkerStore(SQLBaseStore):
         # We also need to do this in reverse, to ensure the joined users receive
         # the profiles of the members in the room, should they not know them from
         # before.
+        # First clear any old "left room" actions, as we're now sharing a room again.
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {users_clause}
+                    AND stream_id IN (
+                        SELECT stream_id
+                        FROM profile_updates
+                        WHERE
+                            {target_user_clause} AND
+                            action = ?
+                    )
+            """,
+            (*users_args, *target_user_args, ProfileUpdateAction.LEFT_ROOM.value),
+        )
+        # Then record the joined actions.
         self.record_profile_updates_txn(
             txn=txn,
             users=target_users,
