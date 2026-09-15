@@ -819,7 +819,9 @@ class RoomSummaryHandler:
             # directly. In the unlikely case it is None, it will still be filtered out
             # below.
             join_event = await self._store.get_event(join_event_id)
-            entry["join_rule"] = join_event.content.get("join_rule")
+            join_rule_content = join_event.content.get("join_rule")
+            if isinstance(join_rule_content, str):
+                entry["join_rule"] = join_rule_content
 
         try:
             room_version = await self._store.get_room_version(room_id)
