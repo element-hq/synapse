@@ -485,7 +485,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         self.helper.send_state(
             self.room_id,
             EventTypes.PowerLevels,
-            body={"users": {self.user_id: 100, user2_id: -1}, "events_default": 0},
+            body={"users": {user2_id: -1}, "events_default": 0},
             tok=self.token,
         )
 
@@ -517,7 +517,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         self.helper.send_state(
             self.room_id,
             EventTypes.PowerLevels,
-            body={"users": {self.user_id: 100, user2_id: 0}, "events_default": 0},
+            body={"users": {user2_id: 0}, "events_default": 0},
             tok=self.token,
         )
 

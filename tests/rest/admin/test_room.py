@@ -3318,14 +3318,24 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
             self.creator, tok=self.creator_tok, is_public=True
         )
 
-        # The creator drops admin rights in the room.
+        # In the case that this is a msc4291 compliant room, we can not use the room
+        # creator as the "puppeted" user. Join another user to use as a sentinel
+        # instead. The room's creator will leave the room before the command runs.
+        self.helper.join(room_id, self.second_user_id, tok=self.second_tok)
+
+        # The creator gives a placeholder of rights in the room. The power level can be
+        # 0, as long as it is present it will be considered. Having it be missing will
+        # produce a different error: "No local admin user in room" which is not what
+        # this test is supposed to check
         pl = self.helper.get_state(
             room_id, EventTypes.PowerLevels, tok=self.creator_tok
         )
-        pl["users"][self.creator] = 0
+        pl["users"][self.second_user_id] = 0
         self.helper.send_state(
             room_id, EventTypes.PowerLevels, body=pl, tok=self.creator_tok
         )
+
+        self.helper.leave(room_id, self.creator, tok=self.creator_tok)
 
         channel = self.make_request(
             "POST",

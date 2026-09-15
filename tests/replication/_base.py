@@ -39,6 +39,7 @@ from synapse.replication.tcp.protocol import (
 from synapse.replication.tcp.resource import ReplicationStreamProtocolFactory
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.server import FakeTransport
@@ -482,6 +483,71 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
                 client_protocol, self.reactor, server_protocol
             )
             server_protocol.makeConnection(server_to_client_transport)
+
+    def _generate_rooms_on_worker(
+        self,
+        user_id: str,
+        user_tok: str,
+        list_of_worker_names: list[str] | None = None,
+        try_at_most_count: int | None = None,
+    ) -> dict[str, str]:
+        """
+        Given a list of worker names, generate rooms until there is at least one on each
+        of the named workers.
+
+        Args:
+            user_id: The user_id of the user making the room.
+            user_tok: The token of the user making the room.
+            list_of_worker_names: A list of worker names that need to have rooms. By
+                default, each `events` worker provided in the homeserver config will be used.
+            try_at_most_count: A given number of iterations to try and produce rooms. If
+                not provided, use the number of workers multiplied by 3 for the count.
+        Returns:
+            A mapping of `worker_name`->`room_id`
+        """
+        # Save a shorter reference to the `RoutableShardedWorkerHandlingConfig` that
+        # contains the information needed to not only identify the full list of workers
+        # (in case the default for `list_of_workernames` is used) and provides the
+        # routing hash function that decides which worker a given room id should go to.
+        events_writers_config = self.hs.config.worker.events_shard_config
+
+        if list_of_worker_names is None:
+            _set_of_worker_names = set(events_writers_config.instances)
+        else:
+            _set_of_worker_names = set(list_of_worker_names)
+
+        assert len(_set_of_worker_names) > 0
+        # Save a copy of this to use now, we can use the original to assert expectations
+        # before returning.
+        set_of_workernames = set(_set_of_worker_names)
+
+        results_mapping = {}
+
+        # Maintain a count, in case of a runaway process.
+        count = try_at_most_count or len(set_of_workernames) * 3
+
+        while set_of_workernames:
+            self.reactor.advance(Duration(milliseconds=1).as_secs())
+            count -= 1
+            _room_id = self.helper.create_room_as(user_id, tok=user_tok)
+
+            _worker_responsible = events_writers_config.get_instance(_room_id)
+
+            if _worker_responsible in set_of_workernames:
+                results_mapping[_worker_responsible] = _room_id
+                # Remember to remove the worker now that it is found
+                set_of_workernames.remove(_worker_responsible)
+
+            if count == 0:
+                raise AssertionError(
+                    "Count exhausted attempting to generate rooms. Aborting and failing test"
+                )
+
+        # Since this *IS* part of a test, lets make sure all worker names requested are
+        # accounted for
+        assert results_mapping.keys() == _set_of_worker_names
+
+        return results_mapping
 
 
 class TestReplicationDataHandler(ReplicationDataHandler):
