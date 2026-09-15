@@ -452,6 +452,64 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.update_profile_in_user_dir(BELA, "Bela", None))
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
 
+    def test_get_local_users_in_user_dir(self) -> None:
+        """Only registered local directory entries and their profiles are returned."""
+        local_user = "@local:test"
+        no_profile_user = "@no_profile:test"
+        self.get_success(
+            self.store.register_user(
+                local_user, create_profile_with_displayname="Account profile"
+            )
+        )
+        self.get_success(self.store.register_user(no_profile_user))
+        self.get_success(
+            self.store.update_profile_in_user_dir(
+                local_user, "Directory profile", "mxc://test/avatar"
+            )
+        )
+        self.get_success(
+            self.store.update_profile_in_user_dir(no_profile_user, None, None)
+        )
+        # A local-looking ID without a registered account must also be excluded.
+        self.get_success(
+            self.store.update_profile_in_user_dir("@unregistered:test", None, None)
+        )
+
+        result = self.get_success(self.store.get_local_users_in_user_dir())
+
+        self.assertFalse(result["limited"])
+        self.assertCountEqual(
+            result["results"],
+            [
+                {
+                    "user_id": local_user,
+                    "display_name": "Directory profile",
+                    "avatar_url": "mxc://test/avatar",
+                },
+                {
+                    "user_id": no_profile_user,
+                    "display_name": None,
+                    "avatar_url": None,
+                },
+            ],
+        )
+
+    def test_get_local_users_in_user_dir_remote_only(self) -> None:
+        """A directory containing only remote users has no local results."""
+        self.assertEqual(
+            self.get_success(self.store.get_local_users_in_user_dir()),
+            {"limited": False, "results": []},
+        )
+
+    def test_get_local_users_in_user_dir_unlisted_account(self) -> None:
+        """Local accounts without a directory entry are not returned."""
+        self.get_success(self.store.register_user("@unlisted:test"))
+
+        self.assertEqual(
+            self.get_success(self.store.get_local_users_in_user_dir()),
+            {"limited": False, "results": []},
+        )
+
     def test_search_user_dir(self) -> None:
         # normally when alice searches the directory she should just find
         # bob because bobby doesn't share a room with her.

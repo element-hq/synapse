@@ -1529,6 +1529,53 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         )
         self.get_success(self.handler._sync_federated_user_directory())
 
+    def test_sync_clears_unset_profile_fields(self) -> None:
+        """Missing or null fields in a full snapshot clear cached profile values."""
+        destination = "remote.example.com"
+        user_id = "@bob:remote.example.com"
+        self.get_success(
+            self.store.set_destination_retry_timings(destination, None, 0, 0)
+        )
+
+        for description, profile in (
+            ("omitted", {}),
+            ("explicit null", {"display_name": None, "avatar_url": None}),
+        ):
+            with self.subTest(description):
+                self._run_sync_returning(
+                    [
+                        {
+                            "user_id": user_id,
+                            "display_name": "Bob",
+                            "avatar_url": "mxc://remote.example.com/avatar",
+                        }
+                    ]
+                )
+                profiles = self.get_success(
+                    self.user_dir_helper.get_profiles_in_user_directory()
+                )
+                self.assertEqual(
+                    profiles[user_id],
+                    ProfileInfo(
+                        display_name="Bob", avatar_url="mxc://remote.example.com/avatar"
+                    ),
+                )
+
+                self._run_sync_returning([{"user_id": user_id, **profile}])
+
+                profiles = self.get_success(
+                    self.user_dir_helper.get_profiles_in_user_directory()
+                )
+                self.assertEqual(
+                    profiles[user_id], ProfileInfo(display_name=None, avatar_url=None)
+                )
+                self.assertIn(
+                    (user_id, destination),
+                    self.get_success(
+                        self.user_dir_helper.get_users_in_federated_search()
+                    ),
+                )
+
     def test_sync_prunes_users_absent_from_new_result(self) -> None:
         self.get_success(
             self.store.set_destination_retry_timings("remote.example.com", None, 0, 0)

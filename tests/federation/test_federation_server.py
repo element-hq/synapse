@@ -106,9 +106,27 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(500, channel.code, channel.result)
 
-    def test_federation_user_directory_fetch_servlet(self) -> None:
-        """Test that the federation user directory fetch servlet works correctly."""
-        self.register_user("userlambda", "password")
+    @parameterized.expand(
+        [
+            ({},),
+            ({"display_name": "Local user"},),
+            ({"avatar_url": "mxc://test/avatar"},),
+            ({"display_name": "Local user", "avatar_url": "mxc://test/avatar"},),
+            ({"display_name": "", "avatar_url": ""},),
+        ]
+    )
+    def test_federation_user_directory_fetch_servlet(self, profile: JsonDict) -> None:
+        """Only local entries are exposed, with unset profile fields omitted."""
+        user_id = self.register_user("userlambda", "password")
+        store = self.hs.get_datastores().main
+        self.get_success(
+            store.update_profile_in_user_dir(
+                user_id, profile.get("display_name"), profile.get("avatar_url")
+            )
+        )
+        self.get_success(
+            store.update_profile_in_user_dir("@remote:elsewhere", "Remote user", None)
+        )
 
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
@@ -118,14 +136,21 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
 
         # Check that the response is correct
         self.assertEqual(channel.code, 200)
-        self.assertNotIn("limited", channel.json_body)
-        results = channel.json_body.get("results", [])
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].get("user_id"), "@userlambda:test")
+        self.assertEqual(
+            channel.json_body, {"results": [{"user_id": user_id, **profile}]}
+        )
 
-    def test_federation_user_directory_fetch_servlet_no_results(self) -> None:
+    @parameterized.expand([(False,), (True,)])
+    def test_federation_user_directory_fetch_servlet_no_results(
+        self, include_remote: bool
+    ) -> None:
         """An empty local directory yields no results."""
-        # No local users are registered, so the directory is empty.
+        if include_remote:
+            self.get_success(
+                self.hs.get_datastores().main.update_profile_in_user_dir(
+                    "@remote:elsewhere", "Remote user", None
+                )
+            )
 
         # Make a request to the servlet
         channel = self.make_signed_federation_request(
@@ -143,7 +168,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         """A server failure is returned as an error, not an empty directory."""
         with patch.object(
             self.hs.get_datastores().main,
-            "get_users_in_user_dir",
+            "get_local_users_in_user_dir",
             new=AsyncMock(side_effect=RuntimeError("database unavailable")),
         ):
             channel = self.make_signed_federation_request(
