@@ -21,5 +21,10 @@ for BRANCH_NAME in "$GITHUB_HEAD_REF" "$GITHUB_BASE_REF" "${GITHUB_REF#refs/head
     continue
   fi
 
-  (wget -O - "https://github.com/matrix-org/complement/archive/$BRANCH_NAME.tar.gz" | tar -xz --strip-components=1 -C complement) && break
+  # TEMPORARY, DO NOT MERGE: try the barodeur/complement fork first so this PR
+  # can be tested against the matching Complement branch before it is merged
+  # into matrix-org/complement. Revert this commit once that has happened.
+  for REPO in barodeur/complement matrix-org/complement; do
+    (wget -O - "https://github.com/$REPO/archive/$BRANCH_NAME.tar.gz" | tar -xz --strip-components=1 -C complement) && break 2
+  done
 done
