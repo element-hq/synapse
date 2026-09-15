@@ -4670,7 +4670,7 @@ _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
 _Changed in Synapse 1.116.0: Added password\_path_
 
-_Changed in Synapse 1.161.0: Added username_
+_Changed in Synapse 1.162.0: Added username_
 
 This setting has the following sub-options:
 
