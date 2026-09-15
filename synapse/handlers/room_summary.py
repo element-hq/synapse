@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 import attr
 
 from synapse.api.constants import (
+    EventContentFields,
     EventTypes,
     HistoryVisibility,
     JoinRules,
@@ -819,7 +820,7 @@ class RoomSummaryHandler:
             # directly. In the unlikely case it is None, it will still be filtered out
             # below.
             join_event = await self._store.get_event(join_event_id)
-            join_rule_content = join_event.content.get("join_rule")
+            join_rule_content = join_event.content.get(EventContentFields.JOIN_RULE)
             if isinstance(join_rule_content, str):
                 entry["join_rule"] = join_rule_content
 
