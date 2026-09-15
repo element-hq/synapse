@@ -906,14 +906,14 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
 def _get_delayed_event_request_args(
     room_id: str,
-    delay: int,
+    delay_ms: int,
     event_type: str,
     state_key: str | None,
     content: JsonDict,
     txn_id: str | None = "mid1",
 ) -> tuple[str, bytes, JsonDict]:
     body = {
-        "delay": delay,
+        "delay_ms": delay_ms,
         "content": content,
     }
     path = f"{_UNSTABLE_PATH_PREFIX}/rooms/{room_id}/delayed_event/{event_type}"

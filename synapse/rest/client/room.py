@@ -532,7 +532,7 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         register_txn_path(self, PATTERNS, http_server, "org.matrix.msc4140")
 
     class DelayedEventBodyModel(RequestBodyModel):
-        delay: PositiveInt
+        delay_ms: PositiveInt
         content: JsonDict
         state_key: StrictStr | None = None
 
@@ -583,7 +583,7 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
             state_key=request_body.state_key,
             origin_server_ts=origin_server_ts,
             content=request_body.content,
-            delay=Duration(milliseconds=request_body.delay),
+            delay=Duration(milliseconds=request_body.delay_ms),
             sticky_duration_ms=None,
         )
 
