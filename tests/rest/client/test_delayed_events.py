@@ -14,12 +14,14 @@
 
 """Tests REST events for /delayed_events paths."""
 
+import sqlite3
 from http import HTTPStatus
 
 from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EventUnsignedContentFields, StickyEvent
 from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import delayed_events, login, room, sync, versions
@@ -32,6 +34,7 @@ from synapse.util.duration import Duration
 from tests import unittest
 from tests.server import FakeChannel
 from tests.unittest import HomeserverTestCase
+from tests.utils import USE_POSTGRES_FOR_TESTS
 
 _UNSTABLE_PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4140"
 _MANAGEMENT_PATH_PREFIX = _UNSTABLE_PATH_PREFIX + "/delayed_events"
@@ -294,6 +297,48 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
+
+    @unittest.override_config({"experimental_features": {"msc4354_enabled": True}})
+    def test_delayed_sticky_event_is_sent_with_sticky_duration(self) -> None:
+        """Test that the sticky duration given when scheduling a delayed event
+        is applied to the event once it is sent (MSC4354)."""
+        if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
+            # We need the JSON functionality in SQLite
+            self.skipTest(
+                f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
+            )
+
+        sticky_duration = Duration(minutes=1)
+        method, path, body = _get_delayed_event_request_args(
+            self.room_id,
+            900,
+            _EVENT_TYPE,
+            None,
+            {"body": "sticky"},
+        )
+        channel = self.make_request(
+            method,
+            path
+            + f"?{StickyEvent.QUERY_PARAM_NAME}={sticky_duration.as_millis()}".encode(
+                "ascii"
+            ),
+            body,
+            self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
+
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+
+        event = self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        assert event is not None
+        self.assertGreater(
+            event["unsigned"].get(EventUnsignedContentFields.STICKY_TTL, 0),
+            0,
+            event,
+        )
 
     def test_delayed_member_events_are_sent_on_timeout(self) -> None:
         channel = self.make_request(
@@ -872,7 +917,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
     def _find_sent_delayed_event(
         self, access_token: str, delay_id: str, should_find: bool
-    ) -> None:
+    ) -> JsonDict | None:
         """Call /sync and look for a synced event with a specified delay_id.
         At most one event will ever have a matching delay_id.
 
@@ -880,6 +925,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
             access_token: The access token of the user to call /sync for.
             delay_id: The delay_id to search for in synced events.
             should_find: Whether /sync should include an event with a matching delay_id.
+
+        Returns:
+            The synced event with the matching delay_id, if any.
         """
         channel = self.make_request("GET", "/sync", access_token=access_token)
         self.assertEqual(HTTPStatus.OK, channel.code)
@@ -890,18 +938,19 @@ class DelayedEventsTestCase(HomeserverTestCase):
             if membership in rooms:
                 events += rooms[membership][self.room_id]["timeline"]["events"]
 
-        found = False
+        found: JsonDict | None = None
         for event in events:
             if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
                 if not should_find:
                     self.fail(
                         "Found event with matching delay_id, but expected to not find one"
                     )
-                if found:
+                if found is not None:
                     self.fail("Found multiple events with matching delay_id")
-                found = True
-        if should_find and not found:
+                found = event
+        if should_find and found is None:
             self.fail("Did not find event with matching delay_id")
+        return found
 
 
 def _get_delayed_event_request_args(
