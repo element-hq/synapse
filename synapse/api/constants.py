@@ -441,6 +441,7 @@ class ProfileUpdateAction(str, enum.Enum):
     normally includes. This update action currently has no meaning for sync responses
     that are not incremental and non-lazy.
     """
+
     LEFT_ROOM = "left_room"
     """
     This profile update row action represents a user leaving a room.
@@ -450,9 +451,12 @@ class ProfileUpdateAction(str, enum.Enum):
     profiles, so clients can clear their cache containing the users profile data
     they are no longer interested in.
     """
+
     UPDATE = "update"
     """
-    This profile update row action represents a user updating a profile field.
+    This profile update row action represents a user updating one or more
+    profile fields.
+    'Updating' could mean creating, changing the value of, or deleting a field.
 
     Depending on the type of sync (initial/incremental, lazy/non-lazy), either the
     diff of profile field updates or all the current profile fields are included
@@ -495,4 +499,14 @@ class StickyEvent:
     Maximum number of sticky events to include in /sync.
 
     This is the default specified in the MSC. Chosen arbitrarily.
+    """
+
+
+class StateDag:
+    GET_MISSING_EVENTS_FIELD: Final = "org.matrix.msc4242.state_dag"
+    MAX_MISSING_EVENTS: Final = 1000
+    """
+    Max number of events to return in a single /get_missing_events response.
+    Arbitrary, servers usually never get this high so it's mostly to bound the max size of
+    a single /get_missing_events response.
     """

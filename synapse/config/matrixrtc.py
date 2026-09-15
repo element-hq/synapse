@@ -17,7 +17,7 @@
 
 from typing import Any
 
-from pydantic import Field, StrictStr, ValidationError, model_validator
+from pydantic import Field, StrictStr, ValidationError, field_validator, model_validator
 from typing_extensions import Self
 
 from synapse.types import JsonDict
@@ -29,20 +29,34 @@ from ._base import Config, ConfigError
 class TransportConfigModel(ParseModel):
     type: StrictStr
 
+    url: StrictStr | None = Field(default=None)
+    """An optional WebSocket URL pointing to the LiveKit SFU. If type is "livekit", either this or livekit_service_url is required."""
+
     livekit_service_url: StrictStr | None = Field(default=None)
-    """An optional livekit service URL. Only required if type is "livekit"."""
+    """Deprecated. An optional HTTP URL pointing to the LiveKit authorization service. If type is "livekit", either this or url is required."""
 
     @model_validator(mode="after")
-    def validate_livekit_service_url(self) -> Self:
-        if self.type == "livekit" and not self.livekit_service_url:
+    def validate_livekit_transport(self) -> Self:
+        if self.type == "livekit" and not self.url and not self.livekit_service_url:
             raise ValueError(
-                "You must set a `livekit_service_url` when using the 'livekit' transport."
+                "You must set either `url` or `livekit_service_url` when using the 'livekit' transport."
             )
         return self
 
 
 class MatrixRtcConfigModel(ParseModel):
-    transports: list = []
+    transports: list[dict[str, Any]] = []
+
+    @field_validator("transports")
+    @classmethod
+    def validate_transports(
+        cls, transports: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Validate each transport by attempting to construct a `TransportConfigModel`
+        from it, raising a `ValidationError` if construction fails."""
+        for transport in transports:
+            TransportConfigModel(**transport)
+        return transports
 
 
 class MatrixRtcConfig(Config):

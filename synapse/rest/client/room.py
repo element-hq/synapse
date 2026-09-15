@@ -1412,6 +1412,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                         event_id=event_id,
                         initial_redaction_event=event,
                         relation_types=with_relations,
+                        room_version=room_version,
                     )
 
             event_id = event.event_id
