@@ -641,6 +641,15 @@ class DeviceHandler:
         memberships_to_fetch: set[str] = set()
 
         # TODO: Only pull out membership events?
+        #
+        # This bounds the deltas on their rows' batch-minimum stamp rather than
+        # on each membership event's own position (contrast
+        # `get_current_state_deltas_for_room_by_event_position`). That is fine
+        # here: a delta stamped before its event is reported one sync *early*,
+        # in the window that ends at the stamp, and never dropped, since a
+        # client's sync windows are contiguous. Reporting early only makes the
+        # client refetch that user's device list a little sooner, and nothing
+        # below pairs the deltas with a timeline.
         state_changes = await self.store.get_current_state_deltas_for_rooms(
             joined_room_ids, from_token=from_token.room_key, to_token=now_token.room_key
         )
