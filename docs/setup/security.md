@@ -39,3 +39,19 @@ mentioned in MXIDs hosted on that server.
 
 Following this advice ensures that even if an XSS is found in Synapse, the
 impact to other applications will be minimal.
+
+## Firewall configuration
+
+If your Matrix server is secured by a firewall, firewall rules for two different purposes are required.
+
+Client access to a Synapse server runs via the client port which is TCP port 443 by default. The client port has to be allowed inbound.
+
+Federation to exchange messages with other Matrix servers runs via TCP port 8448 by default or alternatively via regular HTTPS TCP port 443 (usually if run with [delegation](delegate.md) and/or behind a [reverse proxy](reverse_proxy.md)). So to allow federation in a firewall, make sure to allow the federation port of your Synapse server inbound.
+
+If you have outbound access limited by a firewall allowlist, make sure both TCP ports 443 **and** 8448 are allowed outbound.
+
+Direction | Port             | Protocol | Description
+--------- | ---------------- | -------- | -----------
+Inbound   | 443              | TCP      | Client access
+Inbound   | 8448 and/or 443  | TCP      | Federation inbound, depending on the federation port used
+Outbound  | 8448 **and** 443 | TCP      | Federation outbound, both ports are usually used
