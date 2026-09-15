@@ -60,7 +60,6 @@ from synapse.api.errors import (
     PartialStateConflictError,
     RequestSendFailed,
     SynapseError,
-    UnsupportedRoomVersionError,
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
@@ -678,12 +677,6 @@ class FederationHandler:
                     room_id
                 )
 
-                # See related restriction in /createRoom requests in handlers/room.py
-                if room_version_obj.msc4242_state_dags:
-                    raise UnsupportedRoomVersionError(
-                        "Homeserver does not support this room version over federation"
-                    )
-
                 ret = await self.federation_client.send_join(
                     host_list,
                     event,
@@ -706,6 +699,11 @@ class FederationHandler:
                 state = ret.state
                 auth_chain = ret.auth_chain
                 auth_chain.sort(key=lambda e: e.depth)
+
+                if ret.state_dag is not None:
+                    # MSC4242 State DAG rooms have no separate state and auth chain: the
+                    # state DAG is both, and everything is derived from it.
+                    state = ret.state_dag
 
                 logger.debug("do_invite_join auth_chain: %s", auth_chain)
                 logger.debug("do_invite_join state: %s", state)
