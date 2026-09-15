@@ -26,7 +26,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from synapse.api.constants import ProfileFields
-from synapse.api.errors import Codes, MissingClientTokenError, SynapseError
+from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -57,35 +57,37 @@ def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
     return propagate
 
 
-async def _ratelimit_profile_lookup(
+async def _get_optional_requester(
     hs: "HomeServer", request: SynapseRequest
 ) -> Requester | None:
-    """Apply the `rc_profile` rate limit to a profile lookup request.
+    """Authenticate a profile lookup request, where authentication is optional
+    unless `require_auth_for_profile_requests` is set.
 
-    Authentication is optional on profile lookups (unless
-    `require_auth_for_profile_requests` is set): if credentials are supplied
-    the limit is applied per user, otherwise per client IP address.
+    Returns:
+        The requester if credentials were supplied, else None.
+    """
+    auth = hs.get_auth()
+    if hs.config.server.require_auth_for_profile_requests:
+        return await auth.get_user_by_req(request)
+    if not auth.has_access_token(request):
+        return None
+    return await auth.get_user_by_req(request, allow_guest=True)
+
+
+async def _auth_and_ratelimit_profile_lookup(
+    hs: "HomeServer", request: SynapseRequest
+) -> Requester | None:
+    """Authenticate a profile lookup request and apply the `rc_profile` rate
+    limit to it: per user if credentials were supplied, else per client IP
+    address.
 
     Returns:
         The requester if the request was authenticated, else None.
     """
-    auth = hs.get_auth()
-    ratelimiter = hs.get_profile_lookup_ratelimiter()
-
-    requester: Requester | None = None
-    if hs.config.server.require_auth_for_profile_requests:
-        requester = await auth.get_user_by_req(request)
-    else:
-        try:
-            requester = await auth.get_user_by_req(request, allow_guest=True)
-        except MissingClientTokenError:
-            pass
-
-    if requester is not None:
-        await ratelimiter.ratelimit(requester)
-    else:
-        await ratelimiter.ratelimit(None, key=request.getClientAddress().host)
-
+    requester = await _get_optional_requester(hs, request)
+    await hs.get_profile_lookup_ratelimiter().ratelimit(
+        requester, key=None if requester else request.getClientAddress().host
+    )
     return requester
 
 
@@ -102,7 +104,7 @@ class ProfileRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> tuple[int, JsonDict]:
-        requester = await _ratelimit_profile_lookup(self.hs, request)
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
 
         requester_user = None
         if self.hs.config.server.require_auth_for_profile_requests:
@@ -152,7 +154,7 @@ class ProfileFieldRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
-        requester = await _ratelimit_profile_lookup(self.hs, request)
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
 
         requester_user = None
         if self.hs.config.server.require_auth_for_profile_requests:
