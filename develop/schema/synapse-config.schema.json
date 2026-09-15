@@ -4788,7 +4788,7 @@
     },
     "redis": {
       "type": "object",
-      "description": "Configuration for Redis when using workers. This *must* be enabled when using workers.\n\n_Added in Synapse 1.78.0._\n\n_Changed in Synapse 1.84.0: Added use\\_tls, certificate\\_file, private\\_key\\_file, ca\\_file and ca\\_path attributes_\n\n_Changed in Synapse 1.85.0: Added path option to use a local Unix socket_\n\n_Changed in Synapse 1.116.0: Added password\\_path_",
+      "description": "Configuration for Redis when using workers. This *must* be enabled when using workers.\n\n_Added in Synapse 1.78.0._\n\n_Changed in Synapse 1.84.0: Added use\\_tls, certificate\\_file, private\\_key\\_file, ca\\_file and ca\\_path attributes_\n\n_Changed in Synapse 1.85.0: Added path option to use a local Unix socket_\n\n_Changed in Synapse 1.116.0: Added password\\_path_\n\n_Changed in Synapse 1.162.0: Added username_",
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -4809,6 +4809,14 @@
           "type": "string",
           "description": "The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.**",
           "default": "/tmp/redis.sock"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set.",
+          "default": null
         },
         "password": {
           "type": [
@@ -4877,6 +4885,7 @@
           "enabled": true,
           "host": "localhost",
           "port": 6379,
+          "username": "<username>",
           "password_path": "<path_to_the_password_file>",
           "dbid": "<dbid>"
         }
