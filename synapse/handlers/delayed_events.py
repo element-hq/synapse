@@ -33,6 +33,7 @@ from synapse.replication.http.delayed_events import (
 from synapse.storage.databases.main.delayed_events import (
     DelayedEventDetails,
     DelayedEventResponse,
+    DelayedEventResponseLegacyCompat,
     EventType,
     StateKey,
     Timestamp,
@@ -585,40 +586,19 @@ class DelayedEventsHandler:
             requester.user.localpart,
         )
 
-    async def get_delayed_events_for_user(
-        self,
-        requester: Requester,
-        get_scheduled: bool,
-        get_finalised: bool,
-    ) -> dict[str, list[JsonDict]]:
+    async def get_all_for_user(
+        self, requester: Requester
+    ) -> list[DelayedEventResponseLegacyCompat]:
         """
-        Return the delayed events owned by the given user.
-        Scheduled delayed events include fields from earlier revisions of MSC4140
-        for compatibility with clients that still expect them.
-
-        Args:
-            requester: The user whose delayed events to get.
-            get_scheduled: Whether to look up scheduled delayed events.
-            get_finalised: Whether to look up finalised delayed events.
+        Return all scheduled delayed events owned by the given user.
+        Includes fields from earlier revisions of MSC4140 for
+        compatibility with clients that still expect them.
         """
         # TODO: Remove legacy fields once stable
         await self._delayed_event_mgmt_ratelimiter.ratelimit(requester)
-
-        # TODO: Support Pagination stream API
-        ret: dict[str, list[JsonDict]] = {}
-        if get_scheduled:
-            scheduled = await self._store.get_all_delayed_events_for_user(
-                requester.user.localpart
-            )
-            ret["scheduled"] = [delayed_event.asdict() for delayed_event in scheduled]
-        if get_finalised:
-            ret["finalised"] = await self._store.get_finalised_delayed_events_for_user(
-                requester.user.localpart,
-                self._get_current_ts(),
-                self.hs.config.experimental.msc4140_finalised_retention_period,
-                self.hs.config.experimental.msc4140_finalised_per_user_retention_limit,
-            )
-        return ret
+        return await self._store.get_all_delayed_events_for_user(
+            requester.user.localpart
+        )
 
     async def _send_event(
         self,
