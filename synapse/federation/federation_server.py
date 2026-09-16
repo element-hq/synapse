@@ -1490,7 +1490,9 @@ class FederationServer(FederationBase):
         """Handle a user directory request from a remote server.
 
         Returns every searchable local user, since the federation endpoint
-        always syncs the full local directory rather than matching a term.
+        always syncs the full local directory rather than matching a term. The
+        database query returns only registered local directory entries,
+        excluding cached remote users.
 
         Args:
             origin: The server that sent the request.
@@ -1498,24 +1500,13 @@ class FederationServer(FederationBase):
         Returns:
             A tuple of (response code, response json)
         """
-        return 200, await self._fetch_all_local_users()
-
-    async def _fetch_all_local_users(self) -> JsonDict:
-        """Return all of this server's own users from the user directory.
-
-        The database query returns only registered local directory entries,
-        excluding cached remote users.
-
-        Returns:
-            A dict of the form ``{"results": [...]}``.
-        """
         results = await self.store.get_local_users_in_user_dir()
 
         response = UserDirectoryResponseModel.model_validate(
             {"results": results["results"]}
         )
         # Keep full-directory responses compact by omitting unset profile fields.
-        return response.model_dump(mode="json", exclude_none=True)
+        return 200, response.model_dump(mode="json", exclude_none=True)
 
 
 class FederationHandlerRegistry:
