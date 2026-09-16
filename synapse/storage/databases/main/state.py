@@ -633,11 +633,8 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         Returns:
             Map from type/state_key to event ID.
         """
-        if state_filter is None:
-            state_filter = StateFilter.all()
-
         # First we check if we can delegate to one of the cached functions.
-        if state_filter.is_full():
+        if state_filter is None or state_filter.is_full():
             return await self.get_partial_current_state_ids(room_id)
 
         if not state_filter.has_wildcards():
