@@ -27,7 +27,6 @@ import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.appservice import ApplicationService
-from synapse.events import FrozenEvent, make_event_from_dict
 from synapse.push.bulk_push_rule_evaluator import _flatten_dict
 from synapse.push.httppusher import tweaks_for_actions
 from synapse.rest import admin
@@ -40,6 +39,7 @@ from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 from tests.test_utils.event_injection import create_event, inject_member_event
 
 
@@ -81,7 +81,7 @@ class FlattenDictTestCase(unittest.TestCase):
 
     def test_event(self) -> None:
         """Events can also be flattened."""
-        event = make_event_from_dict(
+        event = make_test_event(
             {
                 "room_id": "!test:test",
                 "type": "m.room.message",
@@ -103,6 +103,10 @@ class FlattenDictTestCase(unittest.TestCase):
             "room_id": "!test:test",
             "sender": "@alice:test",
             "type": "m.room.message",
+            "depth": 1,
+            "origin_server_ts": 1,
+            "auth_events": [],
+            "prev_events": [],
         }
         self.assertEqual(expected, _flatten_dict(event))
 
@@ -121,24 +125,32 @@ class FlattenDictTestCase(unittest.TestCase):
         }
 
         # For a current room version, there's no special behavior.
-        event = make_event_from_dict(event_dict, room_version=RoomVersions.V8)
+        event = make_test_event(event_dict, room_version=RoomVersions.V8)
         expected = {
             "room_id": "!test:test",
             "sender": "@alice:test",
             "type": "m.room.message",
             "content.org\\.matrix\\.msc1767\\.markup": [],
+            "depth": 1,
+            "origin_server_ts": 1,
+            "auth_events": [],
+            "prev_events": [],
         }
         self.assertEqual(expected, _flatten_dict(event))
 
         # For a room version with extensible events, they parse out the text/plain
         # to a content.body property.
-        event = make_event_from_dict(event_dict, room_version=RoomVersions.MSC1767v10)
+        event = make_test_event(event_dict, room_version=RoomVersions.MSC1767v10)
         expected = {
             "content.body": "hello world!",
             "room_id": "!test:test",
             "sender": "@alice:test",
             "type": "m.room.message",
             "content.org\\.matrix\\.msc1767\\.markup": [],
+            "depth": 1,
+            "origin_server_ts": 1,
+            "auth_events": [],
+            "prev_events": [],
         }
         self.assertEqual(expected, _flatten_dict(event))
 
@@ -152,7 +164,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         msc4210: bool = False,
         msc4306: bool = False,
     ) -> PushRuleEvaluator:
-        event = FrozenEvent(
+        event = make_test_event(
             {
                 "event_id": "$event_id",
                 "type": "m.room.history_visibility",

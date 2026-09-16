@@ -127,7 +127,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
 
             sql = f"""
                 CREATE TABLE IF NOT EXISTS {TEMP_TABLE}_position (
-                    position TEXT NOT NULL
+                    position BIGINT NOT NULL
                 )
             """
             txn.execute(sql)

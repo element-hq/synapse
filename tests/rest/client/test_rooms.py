@@ -26,12 +26,14 @@
 import json
 from http import HTTPStatus
 from typing import Any, Iterable, Literal
-from unittest.mock import AsyncMock, Mock, call, patch
+from unittest.mock import AsyncMock, Mock, call, create_autospec, patch
 from urllib import parse as urlparse
 
 from parameterized import param, parameterized
 
+from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
+from twisted.web.client import Agent
 
 import synapse.rest.admin
 from synapse.api.constants import (
@@ -59,14 +61,20 @@ from synapse.rest.client import (
     sync,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomAlias, UserID, create_requester
+from synapse.types import JsonDict, JsonMapping, RoomAlias, UserID, create_requester
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.http.server._base import make_request_with_cancellation_test
+from tests.server import FakeChannel
 from tests.storage.test_stream import PaginationTestCase
-from tests.test_utils.event_injection import create_event
+from tests.test_utils import FakeResponse
+from tests.test_utils.event_injection import (
+    create_event,
+    inject_event,
+)
 from tests.unittest import override_config
 from tests.utils import default_config
 
@@ -500,7 +508,8 @@ class RoomPermissionsTestCase(RoomBase):
             )
         )
         assert pl_event is not None
-        self.assertEqual(50, pl_event.content.get("m.call.invite"))
+        self.assertEqual(50, pl_event.content.get("events", {}).get("m.call.invite"))
+        self.assertEqual(50, pl_event.content.get("events", {}).get("m.room.name"))
 
         private_pl_event = self.get_success(
             self.store_controllers.state.get_current_state_event(
@@ -508,7 +517,9 @@ class RoomPermissionsTestCase(RoomBase):
             )
         )
         assert private_pl_event is not None
-        self.assertEqual(None, private_pl_event.content.get("m.call.invite"))
+        self.assertEqual(
+            None, private_pl_event.content.get("events", {}).get("m.call.invite")
+        )
 
 
 class RoomStateTestCase(RoomBase):
@@ -1856,7 +1867,7 @@ class RoomMessagesTestCase(RoomBase):
             mock_return_value: str | bool | Codes | tuple[Codes, JsonDict] | bool = (
                 "NOT_SPAM"
             )
-            mock_content: JsonDict | None = None
+            mock_content: JsonMapping | None = None
 
             async def check_event_for_spam(
                 self,
@@ -1923,7 +1934,8 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
     def test_default_power_levels_with_room_override(self) -> None:
         """
         Create a room, providing power level overrides.
-        Confirm that the room's power levels reflect the overrides.
+        When the `power_level_content_override` was provided, it should replace the
+        default power levels.
 
         See https://github.com/matrix-org/matrix-spec/issues/492
         - currently we overwrite each key of power_level_content_override
@@ -1952,9 +1964,9 @@ class RoomPowerLevelOverridesTestCase(RoomBase):
     )
     def test_power_levels_with_server_override(self) -> None:
         """
-        With a server configured to modify the room-level defaults,
-        Create a room, without providing any extra power level overrides.
-        Confirm that the room's power levels reflect the server-level overrides.
+        With a server configured `default_power_level_content_override`, creating a room
+        without `power_level_content_override` should result in the server-level overrides
+        being applied.
 
         Similar to https://github.com/matrix-org/matrix-spec/issues/492,
         we overwrite each key of power_level_content_override completely.
@@ -2245,7 +2257,7 @@ class RoomMessageListTestCase(RoomBase):
         self.room_id = self.helper.create_room_as(self.user_id)
 
     def test_topo_token_is_accepted(self) -> None:
-        token = "t1-0_0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
@@ -2256,7 +2268,7 @@ class RoomMessageListTestCase(RoomBase):
         self.assertTrue("end" in channel.json_body)
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
-        token = "s0_0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET", "/rooms/%s/messages?access_token=x&from=%s" % (self.room_id, token)
         )
@@ -2371,6 +2383,87 @@ class RoomMessageListTestCase(RoomBase):
             channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
         )
 
+    def test_room_messages_paginate_through_rejected_events(
+        self,
+    ) -> None:
+        """Test that pagination continues past a batch of rejected events.
+
+        Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-6qf2-7x63-mm6v
+
+        Synapse before 1.152.1 had a bug meaning that a batch full of only
+        rejected events would cause `/messages` to not return any more
+        pagination tokens, falsely signalling the end of backpagination.
+        """
+        # Send an early message that should not be filtered.
+        early_event_id = self.helper.send(self.room_id, "early message")["event_id"]
+
+        # Inject a batch of events and mark them as rejected in the database.
+        # We create more events than a single pagination request would fetch,
+        # so that one page of backward pagination request would only see rejected events.
+        for _ in range(3):
+            event = self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=self.room_id,
+                    sender=self.user_id,
+                    type=EventTypes.Message,
+                    content={"body": "filtered event", "msgtype": "m.text"},
+                )
+            )
+            self.get_success(
+                self.hs.get_datastores().main.db_pool.runInteraction(
+                    "mark_rejected",
+                    self.hs.get_datastores().main.mark_event_rejected_txn,
+                    event.event_id,
+                    "testing",
+                )
+            )
+
+        # Send a message after all the rejected events.
+        latest_event_id = self.helper.send(self.room_id, "latest message")["event_id"]
+
+        # Start backpaginating.
+        channel = self.make_request(
+            "GET", f"/rooms/{self.room_id}/messages?dir=b&limit=2"
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        events_in_page = [e["event_id"] for e in channel.json_body["chunk"]]
+        end_token: str | None = channel.json_body["end"]
+
+        self.assertEqual(
+            events_in_page,
+            [latest_event_id],
+            "The latest event should be included in the first page we see whilst backpaginating",
+        )
+
+        event_ids_in_pages: list[list[str]] = [events_in_page]
+
+        # Bound the number of backpagination attempts to 2
+        for _ in range(2):
+            channel = self.make_request(
+                "GET", f"/rooms/{self.room_id}/messages?from={end_token}&dir=b&limit=2"
+            )
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+            events_in_page = [e["event_id"] for e in channel.json_body["chunk"]]
+            event_ids_in_pages.append(events_in_page)
+
+            if early_event_id in events_in_page:
+                # We have found the event we were looking for
+                return
+
+            self.assertIn(
+                "end",
+                channel.json_body,
+                f"No `end` token received. Did not find {early_event_id} whilst backpaginating ({latest_event_id = }, {event_ids_in_pages = })",
+            )
+            # Use the end_token in the next iteration
+            end_token = channel.json_body["end"]
+
+        self.fail(
+            f"Exhausted backpagination attempts. Did not find {early_event_id} whilst backpaginating ({latest_event_id = }, {event_ids_in_pages = })"
+        )
+
 
 class RoomMessageFilterTestCase(RoomBase):
     """Tests /rooms/$room_id/messages REST events."""
@@ -2444,7 +2537,12 @@ class RoomDelayedEventTestCase(RoomBase):
             body,
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertNotIn("org.matrix.msc4140.errcode", channel.json_body)
+        # Assert that the standard error response uses a valid errcode.
+        # The specific errcode is irrelevant for the purpose of this test.
+        self.assertIsInstance(
+            channel.json_body.get("errcode"),
+            str,
+        )
 
     def test_delayed_event_unsupported_by_default(self) -> None:
         """Test that sending a delayed event is unsupported with the default config."""
@@ -2460,10 +2558,39 @@ class RoomDelayedEventTestCase(RoomBase):
             path.encode("ascii"),
             body,
         )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_UNSUPPORTED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            Codes.FORBIDDEN,
+            channel.json_body.get("errcode"),
+            channel.json_body,
+        )
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 0,
+            },
+        }
+    )
+    def test_delayed_event_disabled_by_limit(self) -> None:
+        """Test that delayed events are disabled by configuring the per-user limit to 0."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            2000,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(
+            "PUT",
+            path.encode("ascii"),
+            body,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN,
+            channel.json_body.get("errcode"),
             channel.json_body,
         )
 
@@ -2484,10 +2611,191 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(
-            "M_MAX_DELAY_EXCEEDED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
+            "ORG.MATRIX.MSC4140_DELAY_TOO_LARGE",
+            channel.json_body.get("errcode"),
             channel.json_body,
         )
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 1,
+            },
+        }
+    )
+    def test_delayed_event_user_limit_reached(self) -> None:
+        """Test that users cannot have more delayed events scheduled at once than allowed."""
+        # Disable rate-limits for this user. We want to specifically test the storage-based limit, not the request limits
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
+        )
+
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            15000,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+            None,
+        )
+        make_delayed_event_request = lambda: self.make_request(
+            "POST",
+            path.encode("ascii"),
+            body,
+        )
+        # Send a delayed event to eat up the limit
+        channel = make_delayed_event_request()
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        # Try to send another delayed event (we expect to hit the limit on the max number of delayed events that can be scheduled at once)
+        channel = make_delayed_event_request()
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertEqual(
+            Codes.LIMIT_EXCEEDED,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+        # Confirm that the response includes the time remaining until the next of the user's
+        # delayed events to be sent, at which point another delayed event may be scheduled
+        # without exceeding the limit
+        retry_after_headers = channel.headers.getRawHeaders("Retry-After")
+        assert retry_after_headers
+        retry_after_sec = int(retry_after_headers[0])
+        self.assertGreater(retry_after_sec, 0)
+        # Confirm that there is only a single value to the Retry-After header, as per RFC9110
+        self.assertEqual(1, len(retry_after_headers))
+
+        # Wait until we're able to retry again (the retry time from the error response)
+        self.reactor.advance(retry_after_sec)
+
+        # We should be able to send another delayed event again
+        channel = make_delayed_event_request()
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 1,
+            },
+        }
+    )
+    def test_delayed_event_processed_user_limit_reached(self) -> None:
+        """
+        Test that delayed events in the midst of being sent still count towards the limit of
+        how many delayed events a user may have scheduled at once.
+        """
+        send_after = Duration(seconds=1)
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            send_after.as_millis(),
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+            None,
+        )
+        make_delayed_event_request = lambda: self.make_request(
+            "POST",
+            path.encode("ascii"),
+            body,
+        )
+        channel = make_delayed_event_request()
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        # Simulate the server taking a long time to persist delayed events
+        simulated_send_lag = Duration(seconds=5)
+        event_creation_handler = self.hs.get_event_creation_handler()
+        orig_send_fn = event_creation_handler.create_and_send_nonmember_event
+
+        async def slow_send_fn(*args: Any, **kwargs: Any) -> Any:
+            await self.clock.sleep(simulated_send_lag)
+            return await orig_send_fn(*args, **kwargs)
+
+        with patch.object(event_creation_handler, orig_send_fn.__name__, slow_send_fn):
+            self.reactor.advance(send_after.as_secs())
+            channel = make_delayed_event_request()
+            self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+            self.assertEqual(
+                Codes.LIMIT_EXCEEDED,
+                channel.json_body["errcode"],
+                channel.json_body,
+            )
+            # Confirm that the response lacks a Retry-After header, because the reason for this limit
+            # is the server taking an indeterminitely long time to process a delayed event, and the
+            # server doesn't know how much longer the client should wait before sending more requests
+            retry_after_headers = channel.headers.getRawHeaders("Retry-After")
+            assert not retry_after_headers
+
+            # Wait until the delayed event gets persisted
+            self.reactor.advance(simulated_send_lag.as_secs())
+
+            # We should be able to send another delayed event again
+            channel = make_delayed_event_request()
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 5,
+            },
+        }
+    )
+    def test_delayed_event_user_limit_exceeded(self) -> None:
+        """
+        Test that delayed event limits work properly when
+        the number of already scheduled events exceeds the configured limit.
+
+        This can be invoked by the server admin lowering the configured limit & restarting the server
+        while a user has fewer scheduled delayed events than the old limit, but more than the new limit.
+        """
+        send_after: Duration
+
+        def make_delayed_event_request() -> FakeChannel:
+            path, body = self.get_delayed_event_path_and_body(
+                self.room_id,
+                send_after.as_millis(),
+                "m.room.message",
+                None,
+                {
+                    "body": f"test (send after {send_after.as_secs()}s)",
+                    "msgtype": "m.text",
+                },
+                None,
+            )
+            return self.make_request("POST", path.encode("ascii"), body)
+
+        for i in range(1, 5):
+            send_after = Duration(seconds=i)
+            channel = make_delayed_event_request()
+            self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        # Simulate restarting the server after having reconfigured the limit
+        # to be lower than the number of delayed events we just scheduled.
+        #
+        # Set the limit > 1 to test not having to wait for _all_ delayed events
+        # to be sent before being able to schedule a new one.
+        self.hs.config.server.max_delayed_events_per_user = 2
+
+        channel = make_delayed_event_request()
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+        self.assertEqual(
+            Codes.LIMIT_EXCEEDED,
+            channel.json_body["errcode"],
+            channel.json_body,
+        )
+        retry_after_header = channel.headers.getRawHeaders("Retry-After")
+        assert retry_after_header
+        retry_after_sec = int(retry_after_header[0])
+        assert retry_after_sec > 0
+
+        # Wait until we're able to retry again (the retry time from the error response)
+        self.reactor.advance(retry_after_sec)
+
+        # We should be able to send another delayed event again
+        channel = make_delayed_event_request()
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     @parameterized.expand((-2000, 0))
     @unittest.override_config({"max_event_delay_duration": "24h"})
@@ -2512,32 +2820,6 @@ class RoomDelayedEventTestCase(RoomBase):
         self.assertEqual(
             self.invalid_delay_error_type,
             channel.json_body["errcode"],
-            channel.json_body,
-        )
-
-    @parameterized.expand((-2000, 0))
-    @unittest.override_config({"max_event_delay_duration": None})
-    def test_delayed_event_unsupported_with_invalid_delay(
-        self,
-        invalid_delay: int,
-    ) -> None:
-        """Test that errors for delayed events being unsupported have precedence over errors for invalid delays."""
-        path, body = self.get_delayed_event_path_and_body(
-            self.room_id,
-            invalid_delay,
-            "m.room.message",
-            None,
-            {"body": "test", "msgtype": "m.text"},
-        )
-        channel = self.make_request(
-            "PUT",
-            path.encode("ascii"),
-            body,
-        )
-        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
-        self.assertEqual(
-            "M_MAX_DELAY_UNSUPPORTED",
-            channel.json_body.get("org.matrix.msc4140.errcode"),
             channel.json_body,
         )
 
@@ -2596,14 +2878,14 @@ class RoomDelayedEventTestCase(RoomBase):
             None,
         )
         # Test that new delayed events are correctly ratelimited.
-        args = (
+        make_delayed_event_request = lambda: self.make_request(
             "POST",
             path.encode("ascii"),
             body,
         )
-        channel = self.make_request(*args)
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        channel = self.make_request(*args)
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
@@ -2612,7 +2894,7 @@ class RoomDelayedEventTestCase(RoomBase):
         )
 
         # Test that the new delayed events aren't ratelimited anymore.
-        channel = self.make_request(*args)
+        channel = make_delayed_event_request()
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
 
@@ -2641,6 +2923,32 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         if txn_id is not None:
             path += f"/{txn_id}"
         return path, body
+
+    @parameterized.expand((-2000, 0))
+    @unittest.override_config({"max_event_delay_duration": None})
+    def test_delayed_event_unsupported_with_invalid_delay(
+        self,
+        invalid_delay: int,
+    ) -> None:
+        """Test that errors for delayed events being unsupported have precedence over errors for invalid delays."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            invalid_delay,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(
+            "PUT",
+            path.encode("ascii"),
+            body,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN,
+            channel.json_body.get("errcode"),
+            channel.json_body,
+        )
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_delayed_event_with_content_at_top(self) -> None:
@@ -2879,7 +3187,7 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
         )
 
     def default_config(self) -> JsonDict:
-        config = default_config("test")
+        config = default_config(server_name="test")
         config["room_list_publication_rules"] = [{"action": "allow"}]
         return config
 
@@ -4814,7 +5122,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -4822,7 +5130,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -4857,7 +5165,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -4908,7 +5216,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -4924,16 +5232,16 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             original = self.get_success(self.store.get_event(message.event_id))
             if not original:
                 self.fail("Expected to find remote message in DB")
-            redacted_because = original.unsigned.get("redacted_because")
-            if not redacted_because:
-                self.fail("Did not find redacted_because field")
-            self.assertEqual(redacted_because.event_id, ban_event_id)
+            redacted_by = original.internal_metadata.redacted_by
+            if not redacted_by:
+                self.fail("Did not find redacted_by field")
+            self.assertEqual(redacted_by, ban_event_id)
 
     def test_unbanning_remote_user_stops_redaction_action(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -4941,7 +5249,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -4976,7 +5284,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5017,7 +5325,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         # user should be able to join again
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5065,7 +5373,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5179,7 +5487,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5187,7 +5495,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -5222,7 +5530,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5273,7 +5581,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5289,13 +5597,13 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             original = self.get_success(self.store.get_event(message.event_id))
             if not original:
                 self.fail("Expected to find remote message in DB")
-            self.assertEqual(original.unsigned["redacted_by"], ban_event_id)
+            self.assertEqual(original.internal_metadata.redacted_by, ban_event_id)
 
     def test_rejoining_kicked_remote_user_stops_redaction_action(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5303,7 +5611,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -5338,7 +5646,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5374,7 +5682,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         # user re-joins after kick
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=10",
+            f"/_matrix/federation/v1/make_join/{self.room_id}/{bad_user}?ver=11",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
         join_result = channel.json_body
@@ -5382,7 +5690,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         join_event_dict = join_result["event"]
         self.add_hashes_and_signatures_from_other_server(
             join_event_dict,
-            RoomVersions.V10,
+            RoomVersions.V11,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -5422,7 +5730,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
                         "prev_events": auth_ids,
                     }
                 ),
-                room_version=RoomVersions.V10,
+                room_version=RoomVersions.V11,
             )
 
             self.get_success(
@@ -5662,3 +5970,117 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             expect_redaction=True,
             reason="being disruptive",
         )
+
+
+class CreateRoomRemoteInviteTestCase(unittest.FederatingHomeserverTestCase):
+    """
+    Tests error propagation from remote invites during /createRoom.
+
+    Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq.
+    """
+
+    servlets = [
+        room.register_servlets,
+        login.register_servlets,
+        register.register_servlets,
+        admin.register_servlets,
+    ]
+
+    hijack_auth = False
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user_id = self.register_user("creator", "test")
+        self.token = self.login("creator", "test")
+
+    def _mock_remote_invite_http_error(
+        self,
+        status: int,
+        error_body: JsonDict,
+    ) -> None:
+        """
+        Make the remote homeserver reply to its `/invite` endpoint with an error.
+
+        Args:
+            status: the HTTP status to return
+            error_body: the JSON error body to return
+        """
+        federation_http_client = self.hs.get_federation_http_client()
+
+        fake_agent = create_autospec(Agent, spec_set=True)
+
+        def request(
+            method: bytes,
+            uri: bytes,
+            headers: object = None,
+            bodyProducer: object = None,
+        ) -> "defer.Deferred":
+            # For our test, we don't expect any other outbound request
+            assert b"/invite/" in uri, f"unexpected outbound request to {uri!r}"
+            return defer.succeed(
+                FakeResponse.json(
+                    code=status,
+                    payload=error_body,
+                )
+            )
+
+        fake_agent.request.side_effect = request
+        federation_http_client.agent = fake_agent
+
+    @parameterized.expand(
+        (
+            (
+                HTTPStatus.IM_A_TEAPOT,
+                {
+                    "errcode": "M_FORBIDDEN",
+                    "error": "You can't invite this user",
+                },
+                HTTPStatus.IM_A_TEAPOT,
+                {
+                    "errcode": "M_FORBIDDEN",
+                    "error": "You can't invite this user",
+                },
+            ),
+            # This case is https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq
+            # The error is rewritten for safety.
+            (
+                HTTPStatus.UNAUTHORIZED,
+                {"errcode": "M_UNKNOWN_TOKEN", "error": "unknown token"},
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "errcode": "M_UNKNOWN",
+                    "error": "unknown token",
+                },
+            ),
+        )
+    )
+    def test_remote_invite_bubbles_errors(
+        self,
+        policy_server_error_status: HTTPStatus,
+        policy_server_error_body: JsonDict,
+        expected_client_facing_error_status: HTTPStatus,
+        expected_client_facing_error_body: JsonDict,
+    ) -> None:
+        """
+        Test that, when creating a room involving a remote invite,
+        when the remote homeserver returns an error, we bubble it
+        to the client carefully.
+
+        Regression test for https://github.com/element-hq/synapse/security/advisories/GHSA-95fh-hv8c-chvq
+        """
+        # Mock the remote homeserver (at the HTTP level) to return the configured error
+        self._mock_remote_invite_http_error(
+            policy_server_error_status,
+            policy_server_error_body,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/createRoom",
+            {"invite": ["@alice:" + self.OTHER_SERVER_NAME]},
+            access_token=self.token,
+        )
+
+        self.assertEqual(
+            channel.code, expected_client_facing_error_status, channel.result
+        )
+        self.assertEqual(channel.json_body, expected_client_facing_error_body)

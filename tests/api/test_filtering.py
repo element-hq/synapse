@@ -36,7 +36,7 @@ from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 from tests import unittest
-from tests.events.test_utils import MockEvent
+from tests.test_utils.event_builders import make_test_event
 
 user_id = UserID.from_string("@test_user:test")
 user2_id = UserID.from_string("@test_user2:test")
@@ -134,18 +134,22 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
     def test_definition_types_works_with_literals(self) -> None:
         definition = {"types": ["m.room.message", "org.matrix.foo.bar"]}
-        event = MockEvent(sender="@foo:bar", type="m.room.message", room_id="!foo:bar")
+        event = make_test_event(
+            sender="@foo:bar", type="m.room.message", room_id="!foo:bar"
+        )
 
         self.assertTrue(Filter(self.hs, definition)._check(event))
 
     def test_definition_types_works_with_wildcards(self) -> None:
         definition = {"types": ["m.*", "org.matrix.foo.bar"]}
-        event = MockEvent(sender="@foo:bar", type="m.room.message", room_id="!foo:bar")
+        event = make_test_event(
+            sender="@foo:bar", type="m.room.message", room_id="!foo:bar"
+        )
         self.assertTrue(Filter(self.hs, definition)._check(event))
 
     def test_definition_types_works_with_unknowns(self) -> None:
         definition = {"types": ["m.room.message", "org.matrix.foo.bar"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="now.for.something.completely.different",
             room_id="!foo:bar",
@@ -154,19 +158,23 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
     def test_definition_not_types_works_with_literals(self) -> None:
         definition = {"not_types": ["m.room.message", "org.matrix.foo.bar"]}
-        event = MockEvent(sender="@foo:bar", type="m.room.message", room_id="!foo:bar")
+        event = make_test_event(
+            sender="@foo:bar", type="m.room.message", room_id="!foo:bar"
+        )
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
     def test_definition_not_types_works_with_wildcards(self) -> None:
         definition = {"not_types": ["m.room.message", "org.matrix.*"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar", type="org.matrix.custom.event", room_id="!foo:bar"
         )
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
     def test_definition_not_types_works_with_unknowns(self) -> None:
         definition = {"not_types": ["m.*", "org.*"]}
-        event = MockEvent(sender="@foo:bar", type="com.nom.nom.nom", room_id="!foo:bar")
+        event = make_test_event(
+            sender="@foo:bar", type="com.nom.nom.nom", room_id="!foo:bar"
+        )
         self.assertTrue(Filter(self.hs, definition)._check(event))
 
     def test_definition_not_types_takes_priority_over_types(self) -> None:
@@ -174,33 +182,35 @@ class FilteringTestCase(unittest.HomeserverTestCase):
             "not_types": ["m.*", "org.*"],
             "types": ["m.room.message", "m.room.topic"],
         }
-        event = MockEvent(sender="@foo:bar", type="m.room.topic", room_id="!foo:bar")
+        event = make_test_event(
+            sender="@foo:bar", type="m.room.topic", room_id="!foo:bar"
+        )
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
     def test_definition_senders_works_with_literals(self) -> None:
         definition = {"senders": ["@flibble:wibble"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@flibble:wibble", type="com.nom.nom.nom", room_id="!foo:bar"
         )
         self.assertTrue(Filter(self.hs, definition)._check(event))
 
     def test_definition_senders_works_with_unknowns(self) -> None:
         definition = {"senders": ["@flibble:wibble"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@challenger:appears", type="com.nom.nom.nom", room_id="!foo:bar"
         )
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
     def test_definition_not_senders_works_with_literals(self) -> None:
         definition = {"not_senders": ["@flibble:wibble"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@flibble:wibble", type="com.nom.nom.nom", room_id="!foo:bar"
         )
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
     def test_definition_not_senders_works_with_unknowns(self) -> None:
         definition = {"not_senders": ["@flibble:wibble"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@challenger:appears", type="com.nom.nom.nom", room_id="!foo:bar"
         )
         self.assertTrue(Filter(self.hs, definition)._check(event))
@@ -210,21 +220,21 @@ class FilteringTestCase(unittest.HomeserverTestCase):
             "not_senders": ["@misspiggy:muppets"],
             "senders": ["@kermit:muppets", "@misspiggy:muppets"],
         }
-        event = MockEvent(
+        event = make_test_event(
             sender="@misspiggy:muppets", type="m.room.topic", room_id="!foo:bar"
         )
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
     def test_definition_rooms_works_with_literals(self) -> None:
         definition = {"rooms": ["!secretbase:unknown"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar", type="m.room.message", room_id="!secretbase:unknown"
         )
         self.assertTrue(Filter(self.hs, definition)._check(event))
 
     def test_definition_rooms_works_with_unknowns(self) -> None:
         definition = {"rooms": ["!secretbase:unknown"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!anothersecretbase:unknown",
@@ -233,7 +243,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
     def test_definition_not_rooms_works_with_literals(self) -> None:
         definition = {"not_rooms": ["!anothersecretbase:unknown"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!anothersecretbase:unknown",
@@ -242,7 +252,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
     def test_definition_not_rooms_works_with_unknowns(self) -> None:
         definition = {"not_rooms": ["!secretbase:unknown"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!anothersecretbase:unknown",
@@ -254,7 +264,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
             "not_rooms": ["!secretbase:unknown"],
             "rooms": ["!secretbase:unknown"],
         }
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar", type="m.room.message", room_id="!secretbase:unknown"
         )
         self.assertFalse(Filter(self.hs, definition)._check(event))
@@ -268,7 +278,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
             "types": ["m.room.message", "muppets.kermit.*"],
             "not_types": ["muppets.misspiggy.*"],
         }
-        event = MockEvent(
+        event = make_test_event(
             sender="@kermit:muppets",  # yup
             type="m.room.message",  # yup
             room_id="!stage:unknown",  # yup
@@ -284,7 +294,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
             "types": ["m.room.message", "muppets.kermit.*"],
             "not_types": ["muppets.misspiggy.*"],
         }
-        event = MockEvent(
+        event = make_test_event(
             sender="@misspiggy:muppets",  # nope
             type="m.room.message",  # yup
             room_id="!stage:unknown",  # yup
@@ -300,7 +310,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
             "types": ["m.room.message", "muppets.kermit.*"],
             "not_types": ["muppets.misspiggy.*"],
         }
-        event = MockEvent(
+        event = make_test_event(
             sender="@kermit:muppets",  # yup
             type="m.room.message",  # yup
             room_id="!piggyshouse:muppets",  # nope
@@ -316,7 +326,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
             "types": ["m.room.message", "muppets.kermit.*"],
             "not_types": ["muppets.misspiggy.*"],
         }
-        event = MockEvent(
+        event = make_test_event(
             sender="@kermit:muppets",  # yup
             type="muppets.misspiggy.kisses",  # nope
             room_id="!stage:unknown",  # yup
@@ -325,7 +335,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
     def test_filter_labels(self) -> None:
         definition = {"org.matrix.labels": ["#fun"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -334,7 +344,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
         self.assertTrue(Filter(self.hs, definition)._check(event))
 
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -344,7 +354,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
         # check it works with frozen dictionaries too
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -354,7 +364,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
     def test_filter_not_labels(self) -> None:
         definition = {"org.matrix.not_labels": ["#fun"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -363,7 +373,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -375,7 +385,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
     @unittest.override_config({"experimental_features": {"msc3874_enabled": True}})
     def test_filter_rel_type(self) -> None:
         definition = {"org.matrix.msc3874.rel_types": ["m.thread"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -384,7 +394,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -393,7 +403,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -405,7 +415,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
     @unittest.override_config({"experimental_features": {"msc3874_enabled": True}})
     def test_filter_not_rel_type(self) -> None:
         definition = {"org.matrix.msc3874.not_rel_types": ["m.thread"]}
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -414,7 +424,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
         self.assertFalse(Filter(self.hs, definition)._check(event))
 
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -423,7 +433,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
 
         self.assertTrue(Filter(self.hs, definition)._check(event))
 
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar",
             type="m.room.message",
             room_id="!secretbase:unknown",
@@ -494,7 +504,9 @@ class FilteringTestCase(unittest.HomeserverTestCase):
                 user_id=user_id, user_filter=user_filter_json
             )
         )
-        event = MockEvent(sender="@foo:bar", type="m.room.topic", room_id="!foo:bar")
+        event = make_test_event(
+            sender="@foo:bar", type="m.room.topic", room_id="!foo:bar"
+        )
         events = [event]
 
         user_filter = self.get_success(
@@ -511,7 +523,7 @@ class FilteringTestCase(unittest.HomeserverTestCase):
                 user_id=user_id, user_filter=user_filter_json
             )
         )
-        event = MockEvent(
+        event = make_test_event(
             sender="@foo:bar", type="org.matrix.custom.event", room_id="!foo:bar"
         )
         events = [event]
@@ -542,14 +554,14 @@ class FilteringTestCase(unittest.HomeserverTestCase):
     def test_filter_relations(self) -> None:
         events = [
             # An event without a relation.
-            MockEvent(
+            make_test_event(
                 event_id="$no_relation",
                 sender="@foo:bar",
                 type="org.matrix.custom.event",
                 room_id="!foo:bar",
             ),
             # An event with a relation.
-            MockEvent(
+            make_test_event(
                 event_id="$with_relation",
                 sender="@foo:bar",
                 type="org.matrix.custom.event",

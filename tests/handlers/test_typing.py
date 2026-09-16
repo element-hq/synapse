@@ -248,6 +248,14 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             )
         )
 
+        # Wait for the EDU to get pushed out over federation
+        #
+        # `started_typing` is fire-and-forget and handles the remote federation part as
+        # part of a background process which isn't waited on.
+        #
+        # We're specifically waiting for the database queries in the background process
+        self.reactor.advance(0)
+
         self.mock_federation_client.put_json.assert_called_once_with(
             "farm",
             path="/_matrix/federation/v1/send/1000000",
@@ -366,6 +374,14 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         self.on_new_event.assert_has_calls(
             [call(StreamKeyType.TYPING, 1, rooms=[ROOM_ID])]
         )
+
+        # Wait for the EDU to get pushed out over federation
+        #
+        # `stopped_typing` is fire-and-forget and handles the remote federation part as
+        # part of a background process which isn't waited on.
+        #
+        # We're specifically waiting for the database queries in the background process
+        self.reactor.advance(0)
 
         self.mock_federation_client.put_json.assert_called_once_with(
             "farm",

@@ -22,10 +22,14 @@
 import logging
 
 from synapse.logging._remote import RemoteHandler
-from synapse.logging._terse_json import JsonFormatter, TerseJsonFormatter
+from synapse.logging._terse_json import (
+    GcpJsonFormatter,
+    JsonFormatter,
+    TerseJsonFormatter,
+)
 
 # These are imported to allow for nicer logging configuration files.
-__all__ = ["RemoteHandler", "JsonFormatter", "TerseJsonFormatter"]
+__all__ = ["RemoteHandler", "JsonFormatter", "TerseJsonFormatter", "GcpJsonFormatter"]
 
 # Debug logger for https://github.com/matrix-org/synapse/issues/9533 etc
 issue9533_logger = logging.getLogger("synapse.9533_debug")

@@ -89,7 +89,7 @@ class ReplicationRemoteJoinRestServlet(ReplicationEndpoint):
         remote_room_hosts = content["remote_room_hosts"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         logger.info("remote_join: %s into room: %s", user_id, room_id)
@@ -153,7 +153,7 @@ class ReplicationRemoteKnockRestServlet(ReplicationEndpoint):
         remote_room_hosts = content["remote_room_hosts"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         logger.debug("remote_knock: %s on room: %s", user_id, room_id)
@@ -219,7 +219,7 @@ class ReplicationRemoteRejectInviteRestServlet(ReplicationEndpoint):
         txn_id = content["txn_id"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         # hopefully we're now on the master, so this won't recurse!
@@ -283,7 +283,7 @@ class ReplicationRemoteRescindKnockRestServlet(ReplicationEndpoint):
         txn_id = content["txn_id"]
         event_content = content["content"]
 
-        requester = Requester.deserialize(self.store, content["requester"])
+        requester = Requester.deserialize(content["requester"])
         request.requester = requester
 
         # hopefully we're now on the master, so this won't recurse!

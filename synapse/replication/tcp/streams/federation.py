@@ -18,13 +18,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING
 
 import attr
 
 from synapse.replication.tcp.streams._base import (
     Stream,
     Token,
+    UpdateFunction,
     current_token_without_instance,
     make_http_update_function,
 )
@@ -57,9 +58,7 @@ class FederationStream(Stream):
             self.current_token_func = current_token_without_instance(
                 federation_sender.get_current_token
             )
-            update_function: Callable[
-                [str, int, int, int], Awaitable[tuple[list[tuple[int, Any]], int, bool]]
-            ] = federation_sender.get_replication_rows
+            update_function: UpdateFunction = federation_sender.get_replication_rows
 
         elif hs.should_send_federation():
             # federation sender: Query master process

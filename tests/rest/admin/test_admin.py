@@ -18,12 +18,15 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from __future__ import annotations
 
 import urllib.parse
-from typing import cast
+from typing import Any, cast
+from unittest.mock import Mock
 
 from parameterized import parameterized
 
+from twisted.internet.defer import Deferred
 from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
@@ -69,6 +72,24 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.fetches: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+        # A remote fetch of media that was not intentional.
+        # Used to check that remote media fetches do NOT happen.
+        def unexpected_remote_fetch(*args: Any, **kwargs: Any) -> Deferred[Any]:
+            self.fetches.append((args, kwargs))
+            return Deferred()
+
+        client = Mock()
+        client.federation_get_file = unexpected_remote_fetch
+        client.get_file = unexpected_remote_fetch
+
+        return self.setup_test_homeserver(
+            clock=clock,
+            federation_http_client=client,
+        )
 
     def _ensure_quarantined(
         self,
@@ -175,6 +196,28 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
                 % server_name_and_media_id
             ),
         )
+
+    def test_non_admin_bypass_does_not_fetch_remote_media(self) -> None:
+        self.register_user("nonadmin", "pass", admin=False)
+        non_admin_user_tok = self.login("nonadmin", "pass")
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/download/example.com/remote_media"
+            "?admin_unsafely_bypass_quarantine=true",
+            shorthand=False,
+            access_token=non_admin_user_tok,
+            await_result=False,
+        )
+        self.pump()
+
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            channel.json_body["error"],
+            "Must be a server admin to bypass quarantine",
+        )
+        # Check that a remote fetch attempt did not occur.
+        self.assertEqual(self.fetches, [])
 
     @parameterized.expand(
         [

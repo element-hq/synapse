@@ -20,12 +20,12 @@
 #
 
 import logging
+from collections import Counter
 from enum import Enum
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
     Any,
-    Counter,
     Iterable,
     cast,
 )
