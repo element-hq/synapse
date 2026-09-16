@@ -31,7 +31,8 @@ from typing import (
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.storage.databases.main.state_deltas import StateDelta
-from synapse.types import JsonDict
+from synapse.types import JsonMapping
+from synapse.util.duration import Duration
 from synapse.util.events import get_plain_text_topic_from_event_content
 
 if TYPE_CHECKING:
@@ -72,7 +73,7 @@ class StatsHandler:
             # We kick this off so that we don't have to wait for a change before
             # we start populating stats
             self.clock.call_later(
-                0,
+                Duration(seconds=0),
                 self.notify_new_event,
             )
 
@@ -194,7 +195,7 @@ class StatsHandler:
                 )
                 continue
 
-            event_content: JsonDict = {}
+            event_content: JsonMapping = {}
 
             if delta.event_id is not None:
                 event = await self.store.get_event(delta.event_id, allow_none=True)

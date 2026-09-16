@@ -45,6 +45,7 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.caches.descriptors import CachedFunction
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -69,13 +70,17 @@ GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME = (
     "_get_e2e_cross_signing_signatures_for_device"
 )
 
+# As above: this cache takes a single argument which is itself a tuple, which
+# requires special handling.
+GET_SERVER_KEYS_JSON_CACHE_NAME = "_get_server_keys_json"
+
 # How long between cache invalidation table cleanups, once we have caught up
 # with the backlog.
-REGULAR_CLEANUP_INTERVAL_MS = Config.parse_duration("1h")
+REGULAR_CLEANUP_INTERVAL = Duration(hours=1)
 
 # How long between cache invalidation table cleanups, before we have caught
 # up with the backlog.
-CATCH_UP_CLEANUP_INTERVAL_MS = Config.parse_duration("1m")
+CATCH_UP_CLEANUP_INTERVAL = Duration(minutes=1)
 
 # Maximum number of cache invalidation rows to delete at once.
 CLEAN_UP_MAX_BATCH_SIZE = 20_000
@@ -139,7 +144,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self.database_engine, PostgresEngine
         ):
             self.hs.get_clock().call_later(
-                CATCH_UP_CLEANUP_INTERVAL_MS / 1000,
+                CATCH_UP_CLEANUP_INTERVAL,
                 self._clean_up_cache_invalidation_wrapper,
             )
 
@@ -303,6 +308,24 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                         # to nest our tuple in another tuple.
                         self._get_e2e_cross_signing_signatures_for_device.invalidate(  # type: ignore[attr-defined]
                             ((user_id, device_id),)
+                        )
+                elif row.cache_func == GET_SERVER_KEYS_JSON_CACHE_NAME:
+                    # As above: each entry in "keys" is a JSON-encoded
+                    # (server_name, key_id) pair, since the cache takes a single
+                    # argument which is itself a tuple and we cannot send nested
+                    # information over replication.
+                    for json_str in row.keys:
+                        try:
+                            server_name, key_id = json.loads(json_str)
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            logger.error(
+                                "Failed to deserialise cache key as valid JSON: %s",
+                                json_str,
+                            )
+                            continue
+
+                        self._get_server_keys_json.invalidate(  # type: ignore[attr-defined]
+                            ((server_name, key_id),)
                         )
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
@@ -825,12 +848,12 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         # Vary how long we wait before calling again depending on whether we
         # are still sifting through backlog or we have caught up.
         if in_backlog:
-            next_interval = CATCH_UP_CLEANUP_INTERVAL_MS
+            next_interval = CATCH_UP_CLEANUP_INTERVAL
         else:
-            next_interval = REGULAR_CLEANUP_INTERVAL_MS
+            next_interval = REGULAR_CLEANUP_INTERVAL
 
         self.hs.get_clock().call_later(
-            next_interval / 1000,
+            next_interval,
             self._clean_up_cache_invalidation_wrapper,
         )
 

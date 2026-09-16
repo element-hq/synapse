@@ -61,14 +61,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "disable_registration": True,
             "experimental_features": {
                 "msc4108_delegation_endpoint": "https://asd",
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "client_id": "client_id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "client_secret",
-                    "admin_token": "admin_token_value",
-                },
+            },
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "http://localhost:8080/",
+                "secret": "secret",
             },
         }
     )
@@ -83,14 +80,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "disable_registration": True,
             "experimental_features": {
                 "msc4108_enabled": True,
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "client_id": "client_id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "client_secret",
-                    "admin_token": "admin_token_value",
-                },
+            },
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "http://localhost:8080/",
+                "secret": "secret",
             },
         }
     )
@@ -227,14 +221,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "disable_registration": True,
             "experimental_features": {
                 "msc4108_enabled": True,
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "client_id": "client_id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "client_secret",
-                    "admin_token": "admin_token_value",
-                },
+            },
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "http://localhost:8080/",
+                "secret": "secret",
             },
         }
     )
@@ -279,14 +270,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "disable_registration": True,
             "experimental_features": {
                 "msc4108_enabled": True,
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "client_id": "client_id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "client_secret",
-                    "admin_token": "admin_token_value",
-                },
+            },
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "http://localhost:8080/",
+                "secret": "secret",
             },
         }
     )
@@ -351,14 +339,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "disable_registration": True,
             "experimental_features": {
                 "msc4108_enabled": True,
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "client_id": "client_id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "client_secret",
-                    "admin_token": "admin_token_value",
-                },
+            },
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "http://localhost:8080/",
+                "secret": "secret",
             },
         }
     )
@@ -415,14 +400,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "disable_registration": True,
             "experimental_features": {
                 "msc4108_enabled": True,
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "client_id": "client_id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "client_secret",
-                    "admin_token": "admin_token_value",
-                },
+            },
+            "matrix_authentication_service": {
+                "enabled": True,
+                "endpoint": "http://localhost:8080/",
+                "secret": "secret",
             },
         }
     )

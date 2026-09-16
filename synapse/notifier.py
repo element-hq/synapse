@@ -41,6 +41,7 @@ from twisted.internet.defer import Deferred
 from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Membership
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
@@ -61,8 +62,9 @@ from synapse.types import (
 from synapse.util.async_helpers import (
     timeout_deferred,
 )
+from synapse.util.duration import Duration
 from synapse.util.stringutils import shortstr
-from synapse.visibility import filter_events_for_client
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -209,7 +211,7 @@ class _NotifierUserStream:
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventStreamResult:
-    events: list[JsonDict | EventBase]
+    events: list[JsonDict | FilteredEvent]
     start_token: StreamToken
     end_token: StreamToken
 
@@ -235,7 +237,7 @@ class Notifier:
     Primarily used from the /events stream.
     """
 
-    UNUSED_STREAM_EXPIRY_MS = 10 * 60 * 1000
+    UNUSED_STREAM_EXPIRY = Duration(minutes=10)
 
     def __init__(self, hs: "HomeServer"):
         self.user_to_user_stream: dict[str, _NotifierUserStream] = {}
@@ -269,9 +271,7 @@ class Notifier:
 
         self.state_handler = hs.get_state_handler()
 
-        self.clock.looping_call(
-            self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY_MS
-        )
+        self.clock.looping_call(self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY)
 
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
@@ -527,6 +527,8 @@ class Notifier:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
+            StreamKeyType.STICKY_EVENTS,
+            StreamKeyType.PROFILE_UPDATES,
         ],
         new_token: int,
         users: Collection[str | UserID] | None = None,
@@ -765,7 +767,7 @@ class Notifier:
             # The events fetched from each source are a JsonDict, EventBase, or
             # UserPresenceState, but see below for UserPresenceState being
             # converted to JsonDict.
-            events: list[JsonDict | EventBase] = []
+            events: list[JsonDict | FilteredEvent] = []
             end_token = from_token
 
             for keyname, source in self.event_sources.sources.get_sources():
@@ -784,7 +786,7 @@ class Notifier:
                 )
 
                 if keyname == StreamKeyType.ROOM:
-                    new_events = await filter_events_for_client(
+                    new_events = await filter_and_transform_events_for_client(
                         self._storage_controllers,
                         user.to_string(),
                         new_events,
@@ -831,15 +833,49 @@ class Notifier:
         return result
 
     async def wait_for_stream_token(self, stream_token: StreamToken) -> bool:
-        """Wait for this worker to catch up with the given stream token."""
+        """
+        Wait for this worker to catch up with the given stream token.
+
+        This is important to ensure that the worker has a proper view of the world
+        before trying to serve a request. For example, one worker can return a response
+        with some `next_batch` token, but then the next request goes to another worker
+        which is behind; if the worker assembles a response up to the token, it could be
+        missing data in the gap between where it's behind and the requested token.
+
+        ### Inavlid future tokens
+
+        We assume the token has already been validated/sanitized before being passed to
+        this function to ensure it's not some invalid future token. We consider a token
+        invalid, if the token has positions ahead of our persisted positions in the
+        database. This is important as we we don't want to wait for the stream to
+        advance in those cases (as it may never do so) (it's a waste of time for the
+        user and server).
+
+        Previously, we would sanitize and `bound_future_token(...)` within this function
+        but that leads to bad patterns upstream where people can continue to use the
+        unbounded token.
+
+        While it was possible for older Synapse versions to erroneously give out invalid
+        future tokens, this is no longer the case and its considered a Synapse
+        programming error if this ever happens. Validation/sanitization is still
+        necessary as a user can intentionally mess with numbers in the tokens being
+        provided.
+
+        Args:
+            stream_token: The token to wait for. We assume the token has already been
+            validated/sanitized to ensure it's not some invalid future token (has a
+            stream position ahead of what is in the DB). (see details above)
+
+        Returns:
+            True when this worker has caught up
+            False when we timed out waiting
+        """
         current_token = self.event_sources.get_current_token()
+        # Return early if we are already caught up
         if stream_token.is_before_or_eq(current_token):
             return True
 
-        # Work around a bug where older Synapse versions gave out tokens "from
-        # the future", i.e. that are ahead of the tokens persisted in the DB.
-        stream_token = await self.event_sources.bound_future_token(stream_token)
-
+        # Start waiting until we've caught up to the `stream_token`
         start = self.clock.time_msec()
         logged = False
         while True:
@@ -849,6 +885,7 @@ class Notifier:
 
             now = self.clock.time_msec()
 
+            # Timed out
             if now - start > 10_000:
                 return False
 
@@ -861,7 +898,7 @@ class Notifier:
                 logged = True
 
             # TODO: be better
-            await self.clock.sleep(0.5)
+            await self.clock.sleep(Duration(milliseconds=500))
 
     async def _get_room_ids(
         self, user: UserID, explicit_room_id: str | None
@@ -889,7 +926,7 @@ class Notifier:
     def remove_expired_streams(self) -> None:
         time_now_ms = self.clock.time_msec()
         expired_streams = []
-        expire_before_ts = time_now_ms - self.UNUSED_STREAM_EXPIRY_MS
+        expire_before_ts = time_now_ms - self.UNUSED_STREAM_EXPIRY.as_millis()
         for stream in self.user_to_user_stream.values():
             if stream.count_listeners():
                 continue

@@ -21,28 +21,33 @@
 import logging
 from typing import TYPE_CHECKING, cast
 
+import attr
+
 from twisted.python.failure import Failure
 
 from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.filtering import Filter
-from synapse.events.utils import SerializeEventConfig
+from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
+from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.opentracing import trace
 from synapse.rest.admin._base import assert_user_is_admin
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
-    JsonDict,
     JsonMapping,
     Requester,
     ScheduledTask,
     StreamKeyType,
+    StreamToken,
     TaskStatus,
 )
 from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ReadWriteLock
-from synapse.visibility import filter_events_for_client
+from synapse.util.duration import Duration
+from synapse.visibility import filter_and_transform_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -67,6 +72,58 @@ PURGE_HISTORY_ACTION_NAME = "purge_history"
 PURGE_ROOM_ACTION_NAME = "purge_room"
 
 SHUTDOWN_AND_PURGE_ROOM_ACTION_NAME = "shutdown_and_purge_room"
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class GetMessagesResult:
+    """
+    Everything needed to serialize a `/messages` response.
+    """
+
+    messages_chunk: list[FilteredEvent]
+    """
+    A list of room events.
+
+     - When the request is `Direction.FORWARDS`, events will be in the range:
+       `start_token` < x <= `end_token`, (ascending topological_order)
+     - When the request is `Direction.BACKWARDS`, events will be in the range:
+       `start_token` >= x > `end_token`, (descending topological_order)
+
+    Note that an empty chunk does not necessarily imply that no more events are
+    available. Clients should continue to paginate until no `end_token` property is returned.
+    """
+
+    bundled_aggregations: dict[str, BundledAggregations]
+    """
+    A map of event ID to the bundled aggregations for the events in the chunk.
+
+    If an event doesn't have any bundled aggregations, it may not appear in the map.
+    """
+
+    state: list[EventBase] | None
+    """
+    A list of state events relevant to showing the chunk. For example, if
+    lazy_load_members is enabled in the filter then this may contain the membership
+    events for the senders of events in the chunk.
+
+    Omitted from the response when `None`.
+    """
+
+    start_token: StreamToken
+    """
+    Token corresponding to the start of chunk. This will be the same as the value given
+    in `from` query parameter of the `/messages` request.
+    """
+
+    end_token: StreamToken | None
+    """
+    A token corresponding to the end of chunk. This token can be passed back to this
+    endpoint to request further events.
+
+    If no further events are available (either because we have reached the start of the
+    timeline, or because the user does not have permission to see any more events), this
+    property is omitted from the response.
+    """
 
 
 class PaginationHandler:
@@ -116,7 +173,7 @@ class PaginationHandler:
 
                 self.clock.looping_call(
                     self.hs.run_as_background_process,
-                    job.interval,
+                    Duration(milliseconds=job.interval),
                     "purge_history_for_rooms_in_range",
                     self.purge_history_for_rooms_in_range,
                     job.shortest_max_lifetime,
@@ -417,7 +474,7 @@ class PaginationHandler:
         as_client_event: bool = True,
         event_filter: Filter | None = None,
         use_admin_priviledge: bool = False,
-    ) -> JsonDict:
+    ) -> GetMessagesResult:
         """Get messages in a room.
 
         Args:
@@ -509,7 +566,7 @@ class PaginationHandler:
         (
             events,
             next_key,
-            _,
+            limited,
         ) = await self.store.paginate_room_events_by_topological_ordering(
             room_id=room_id,
             from_key=from_token.room_key,
@@ -588,7 +645,7 @@ class PaginationHandler:
                     (
                         events,
                         next_key,
-                        _,
+                        limited,
                     ) = await self.store.paginate_room_events_by_topological_ordering(
                         room_id=room_id,
                         from_key=from_token.room_key,
@@ -611,82 +668,72 @@ class PaginationHandler:
 
         next_token = from_token.copy_and_replace(StreamKeyType.ROOM, next_key)
 
-        # if no events are returned from pagination, that implies
-        # we have reached the end of the available events.
+        # if no events are returned from pagination (this page is empty)
+        # and there aren't any more pages (not limited),
+        # that implies we have reached the end of the available events.
         # In that case we do not return end, to tell the client
         # there is no need for further queries.
-        if not events:
-            return {
-                "chunk": [],
-                "start": await from_token.to_string(self.store),
-            }
+        if not limited and not events:
+            return GetMessagesResult(
+                messages_chunk=[],
+                bundled_aggregations={},
+                state=None,
+                start_token=from_token,
+                end_token=None,
+            )
 
         if event_filter:
             events = await event_filter.filter(events)
 
         if not use_admin_priviledge:
-            events = await filter_events_for_client(
+            filtered_events = await filter_and_transform_events_for_client(
                 self._storage_controllers,
                 user_id,
                 events,
                 is_peeking=(member_event_id is None),
             )
+        else:
+            filtered_events = [FilteredEvent.admin_override(e) for e in events]
 
         # if after the filter applied there are no more events
         # return immediately - but there might be more in next_token batch
-        if not events:
-            return {
-                "chunk": [],
-                "start": await from_token.to_string(self.store),
-                "end": await next_token.to_string(self.store),
-            }
+        if not filtered_events:
+            return GetMessagesResult(
+                messages_chunk=[],
+                bundled_aggregations={},
+                state=None,
+                start_token=from_token,
+                end_token=next_token,
+            )
 
         state = None
-        if event_filter and event_filter.lazy_load_members and len(events) > 0:
+        if event_filter and event_filter.lazy_load_members and len(filtered_events) > 0:
             # TODO: remove redundant members
 
             # FIXME: we also care about invite targets etc.
             state_filter = StateFilter.from_types(
-                (EventTypes.Member, event.sender) for event in events
+                (EventTypes.Member, event.event.sender) for event in filtered_events
             )
 
             state_ids = await self._state_storage_controller.get_state_ids_for_event(
-                events[0].event_id, state_filter=state_filter
+                filtered_events[0].event.event_id, state_filter=state_filter
             )
 
             if state_ids:
                 state_dict = await self.store.get_events(list(state_ids.values()))
-                state = state_dict.values()
+                state = list(state_dict.values())
 
         aggregations = await self._relations_handler.get_bundled_aggregations(
-            events, user_id
+            filtered_events, user_id
         )
 
-        time_now = self.clock.time_msec()
-
-        serialize_options = SerializeEventConfig(
-            as_client_event=as_client_event, requester=requester
+        return GetMessagesResult(
+            messages_chunk=filtered_events,
+            bundled_aggregations=aggregations,
+            state=state,
+            start_token=from_token,
+            end_token=next_token,
         )
-
-        chunk = {
-            "chunk": (
-                await self._event_serializer.serialize_events(
-                    events,
-                    time_now,
-                    config=serialize_options,
-                    bundle_aggregations=aggregations,
-                )
-            ),
-            "start": await from_token.to_string(self.store),
-            "end": await next_token.to_string(self.store),
-        }
-
-        if state:
-            chunk["state"] = await self._event_serializer.serialize_events(
-                state, time_now, config=serialize_options
-            )
-
-        return chunk
 
     async def _shutdown_and_purge_room(
         self,

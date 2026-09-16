@@ -1,7 +1,9 @@
 import logging
+from abc import abstractmethod
 from enum import Enum
 from typing import Pattern
 
+import attr
 from matrix_common.regex import glob_to_regex
 
 from synapse.types import JsonMapping, UserID
@@ -18,9 +20,29 @@ class InviteRule(Enum):
 
 
 class InviteRulesConfig:
-    """Class to determine if a given user permits an invite from another user, and the action to take."""
+    """An object encapsulating a given user's choices about whether to accept invites."""
 
-    def __init__(self, account_data: JsonMapping | None):
+    @abstractmethod
+    def get_invite_rule(self, inviter_user_id: str) -> InviteRule:
+        """Get the invite rule that matches this user. Will return InviteRule.ALLOW if no rules match
+
+        Args:
+            inviter_user_id: The user ID of the inviting user.
+        """
+
+
+@attr.s(slots=True)
+class AllowAllInviteRulesConfig(InviteRulesConfig):
+    """An `InviteRulesConfig` implementation which will accept all invites."""
+
+    def get_invite_rule(self, inviter_user_id: str) -> InviteRule:
+        return InviteRule.ALLOW
+
+
+class MSC4155InviteRulesConfig(InviteRulesConfig):
+    """An object encapsulating [MSC4155](https://github.com/matrix-org/matrix-spec-proposals/pull/4155) invite rules."""
+
+    def __init__(self, account_data: JsonMapping):
         self.allowed_users: list[Pattern[str]] = []
         self.ignored_users: list[Pattern[str]] = []
         self.blocked_users: list[Pattern[str]] = []
@@ -110,3 +132,21 @@ class InviteRulesConfig:
                     return rule
 
         return InviteRule.ALLOW
+
+
+@attr.s(slots=True, auto_attribs=True)
+class MSC4380InviteRulesConfig(InviteRulesConfig):
+    default_invite_rule: InviteRule
+    """The invite rule to apply to all invites."""
+
+    @classmethod
+    def from_account_data(cls, data: JsonMapping) -> "MSC4380InviteRulesConfig":
+        default = data.get("default_action")
+
+        default_invite_rule = (
+            InviteRule.BLOCK if default == "block" else InviteRule.ALLOW
+        )
+        return cls(default_invite_rule=default_invite_rule)
+
+    def get_invite_rule(self, inviter_user_id: str) -> InviteRule:
+        return self.default_invite_rule

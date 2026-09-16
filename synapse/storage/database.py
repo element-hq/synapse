@@ -62,6 +62,7 @@ from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3E
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
 from synapse.types import StrCollection
 from synapse.util.async_helpers import delay_cancellation
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -75,6 +76,13 @@ logger = logging.getLogger(__name__)
 sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
+
+# The maximum length of the repr of a query's values that we log at DEBUG. Some
+# queries carry large payloads (e.g. to-device messages), and logging them in
+# full is not useful. Truncating also keeps the line well under AMP's 64KiB
+# per-value limit, which would otherwise break `trial -jN` test runs (c.f.
+# https://github.com/twisted/twisted/issues/12482).
+MAX_SQL_VALUE_LOG_LENGTH = 1000
 
 sql_scheduling_timer = Histogram(
     "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
@@ -112,6 +120,7 @@ UNIQUE_INDEX_BACKGROUND_UPDATES = {
     "event_push_summary": "event_push_summary_unique_index2",
     "receipts_linearized": "receipts_linearized_unique_index",
     "receipts_graph": "receipts_graph_unique_index",
+    "e2e_cross_signing_signatures": "e2e_cross_signing_signatures_add_key_id_to_index",
 }
 
 
@@ -501,7 +510,13 @@ class LoggingTransaction:
         sql = self.database_engine.convert_param_style(sql)
         if args:
             try:
-                sql_logger.debug("[SQL values] {%s} %r", self.name, args[0])
+                if sql_logger.isEnabledFor(logging.DEBUG):
+                    value_repr = repr(args[0])
+                    if len(value_repr) > MAX_SQL_VALUE_LOG_LENGTH:
+                        value_repr = (
+                            value_repr[:MAX_SQL_VALUE_LOG_LENGTH] + "... [truncated]"
+                        )
+                    sql_logger.debug("[SQL values] {%s} %s", self.name, value_repr)
             except Exception:
                 # Don't let logging failures stop SQL from working
                 pass
@@ -631,7 +646,7 @@ class DatabasePool:
         # Check ASAP (and then later, every 1s) to see if we have finished
         # background updates of tables that aren't safe to update.
         self._clock.call_later(
-            0.0,
+            Duration(seconds=0),
             self.hs.run_as_background_process,
             "upsert_safety_check",
             self._check_safe_to_upsert,
@@ -679,7 +694,7 @@ class DatabasePool:
         # If there's any updates still running, reschedule to run.
         if background_update_names:
             self._clock.call_later(
-                15.0,
+                Duration(seconds=15),
                 self.hs.run_as_background_process,
                 "upsert_safety_check",
                 self._check_safe_to_upsert,
@@ -706,7 +721,7 @@ class DatabasePool:
                 "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
             )
 
-        self._clock.looping_call(loop, 10000)
+        self._clock.looping_call(loop, Duration(seconds=10))
 
     def new_transaction(
         self,
@@ -799,9 +814,8 @@ class DatabasePool:
         transaction_logger.debug("[TXN START] {%s}", name)
 
         try:
-            i = 0
-            N = 5
-            while True:
+            MAX_NUMBER_OF_ATTEMPTS = 5
+            for attempt_number in range(1, MAX_NUMBER_OF_ATTEMPTS + 1):
                 cursor = conn.cursor(
                     txn_name=name,
                     after_callbacks=after_callbacks,
@@ -827,34 +841,37 @@ class DatabasePool:
                         "[TXN OPERROR] {%s} %s %d/%d",
                         name,
                         e,
-                        i,
-                        N,
+                        attempt_number,
+                        MAX_NUMBER_OF_ATTEMPTS,
                     )
-                    if i < N:
-                        i += 1
-                        try:
-                            with opentracing.start_active_span("db.rollback"):
-                                conn.rollback()
-                        except self.engine.module.Error as e1:
-                            transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
+                    try:
+                        with opentracing.start_active_span("db.rollback"):
+                            conn.rollback()
+                    except self.engine.module.Error as e1:
+                        transaction_logger.warning("[TXN EROLL] {%s} %s", name, e1)
+                    # Keep retrying if we haven't reached max attempts
+                    if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                         continue
                     raise
                 except self.engine.module.DatabaseError as e:
                     if self.engine.is_deadlock(e):
                         transaction_logger.warning(
-                            "[TXN DEADLOCK] {%s} %d/%d", name, i, N
+                            "[TXN DEADLOCK] {%s} %d/%d",
+                            name,
+                            attempt_number,
+                            MAX_NUMBER_OF_ATTEMPTS,
                         )
-                        if i < N:
-                            i += 1
-                            try:
-                                with opentracing.start_active_span("db.rollback"):
-                                    conn.rollback()
-                            except self.engine.module.Error as e1:
-                                transaction_logger.warning(
-                                    "[TXN EROLL] {%s} %s",
-                                    name,
-                                    e1,
-                                )
+                        try:
+                            with opentracing.start_active_span("db.rollback"):
+                                conn.rollback()
+                        except self.engine.module.Error as e1:
+                            transaction_logger.warning(
+                                "[TXN EROLL] {%s} %s",
+                                name,
+                                e1,
+                            )
+                        # Keep retrying if we haven't reached max attempts
+                        if attempt_number < MAX_NUMBER_OF_ATTEMPTS:
                             continue
                     raise
                 finally:
@@ -891,6 +908,21 @@ class DatabasePool:
                     # [1]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/connection.c#L465
                     # [2]: https://github.com/python/cpython/blob/v3.8.0/Modules/_sqlite/cursor.c#L236
                     cursor.close()
+            else:
+                # To appease the linter, we mark this as unreachable. Unreachable
+                # because we expect the code above to always return from the loop or
+                # raise an exception. `mypy` just doesn't understand our logic above.
+                #
+                # The Python docs
+                # (https://typing.python.org/en/latest/guides/unreachable.html#marking-code-as-unreachable)
+                # suggest `assert False` but that also gets linted to suggest raising an
+                # `AssertionError`. I'm not sure this has the same "unreachable"
+                # semantics, but it works anyway to solve the linter complaint because
+                # we're raising an exception.
+                raise AssertionError(
+                    "We expect this to be unreachable because the code above should either return or raise. "
+                    "This is a logic error in Synapse itself."
+                )
         except Exception as e:
             transaction_logger.debug("[TXN FAIL] {%s} %s", name, e)
             raise
@@ -1848,7 +1880,7 @@ class DatabasePool:
             if allow_none:
                 return None
             else:
-                raise StoreError(404, "No row found")
+                raise StoreError(404, f"No row found ({table})")
 
     @staticmethod
     def simple_select_onecol_txn(
@@ -2605,6 +2637,9 @@ def make_in_list_sql_clause(
     using the `ANY` form on postgres means that it views queries with
     different length iterables as the same, helping the query stats.
 
+    An empty `iterable` yields a constant clause: nothing can be a member of an empty
+    list, so the clause is `FALSE` (or `TRUE` when `negative`).
+
     Args:
         database_engine
         column: Name of the column
@@ -2614,6 +2649,11 @@ def make_in_list_sql_clause(
     Returns:
         A tuple of SQL query and the args
     """
+
+    if not iterable:
+        # Spell the empty case out rather than relying on each engine's handling of an
+        # empty list: sqlite permits `IN ()` but postgres does not.
+        return ("TRUE" if negative else "FALSE"), []
 
     if database_engine.supports_using_any_list:
         # This should hopefully be faster, but also makes postgres query

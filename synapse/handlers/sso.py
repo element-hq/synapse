@@ -70,6 +70,15 @@ class MappingException(Exception):
     """
 
 
+class SsoSetupError(Exception):
+    """
+    Used to catch and tag errors relating to an SSO setup's.
+
+    Used as the superclass of specific error classes,
+    as note we can't e.g. import the OIDC module unless OIDC dependencies are installed.
+    """
+
+
 class SsoIdentityProvider(Protocol):
     """Abstract base class to be implemented by SSO Identity Providers
 
@@ -521,8 +530,12 @@ class SsoHandler:
                             user_id,
                             authenticated_entity=user_id,
                         )
-                        await self._profile_handler.set_displayname(
-                            user_id_obj, requester, attributes.display_name, True
+                        await self._profile_handler.dispatch_set_profile_field(
+                            target_user=user_id_obj,
+                            requester=requester,
+                            field_name=ProfileFields.DISPLAYNAME,
+                            new_value=attributes.display_name,
+                            by_admin=True,
                         )
                 if attributes.picture:
                     await self.set_avatar(user_id, attributes.picture)
@@ -830,10 +843,11 @@ class SsoHandler:
             )
 
             # save it as user avatar
-            await self._profile_handler.set_avatar_url(
-                uid,
-                create_requester(uid),
-                str(avatar_mxc_url),
+            await self._profile_handler.dispatch_set_profile_field(
+                target_user=uid,
+                requester=create_requester(uid),
+                field_name=ProfileFields.AVATAR_URL,
+                new_value=str(avatar_mxc_url),
             )
 
             logger.info("successfully saved the user avatar")

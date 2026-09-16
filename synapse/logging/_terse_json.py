@@ -25,6 +25,7 @@ Log formatters that output terse JSON.
 
 import json
 import logging
+from datetime import datetime, timezone
 
 _encoder = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"))
 
@@ -93,3 +94,31 @@ class TerseJsonFormatter(JsonFormatter):
         }
 
         return self._format(record, event)
+
+
+class GcpJsonFormatter(logging.Formatter):
+    """JSON formatter compatible with Google Cloud Logging structured logging.
+
+    Outputs `severity` (not `level`) so GCL correctly maps each log record to
+    the right severity instead of inheriting ERROR from stderr.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = record.getMessage()
+        if record.exc_info:
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            msg = f"{msg}\n{record.exc_text}"
+
+        event = {
+            "severity": record.levelname,
+            "message": msg,
+            "logger": record.name,
+            "time": datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%S.%f"
+            )[:-3]
+            + "Z",
+        }
+
+        return _encoder.encode(event)

@@ -27,6 +27,7 @@ from synapse.config.ratelimiting import RatelimitSettings
 from synapse.storage.databases.main import DataStore
 from synapse.types import Requester
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.wheel_timer import WheelTimer
 
 if TYPE_CHECKING:
@@ -100,7 +101,7 @@ class Ratelimiter:
         # and doesn't affect correctness.
         self._timer: WheelTimer[Hashable] = WheelTimer()
 
-        self.clock.looping_call(self._prune_message_counts, 15 * 1000)
+        self.clock.looping_call(self._prune_message_counts, Duration(seconds=15))
 
     def _get_key(self, requester: Requester | None, key: Hashable | None) -> Hashable:
         """Use the requester's MXID as a fallback key if no key is provided."""
@@ -162,7 +163,12 @@ class Ratelimiter:
         if requester:
             # Disable rate limiting of users belonging to any AS that is configured
             # not to be rate limited in its registration file (rate_limited: true|false).
-            if requester.app_service and not requester.app_service.is_rate_limited():
+            app_service = (
+                self.store.get_app_service_by_id(requester.app_service_id)
+                if requester.app_service_id
+                else None
+            )
+            if app_service and not app_service.is_rate_limited():
                 return True, -1.0
 
             # Check if ratelimiting has been disabled for the user.

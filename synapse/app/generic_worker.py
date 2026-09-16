@@ -21,6 +21,7 @@
 #
 import logging
 import sys
+from typing import Optional
 
 from twisted.web.resource import Resource
 
@@ -101,6 +102,7 @@ from synapse.storage.databases.main.signatures import SignatureWorkerStore
 from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.databases.main.stats import StatsStore
+from synapse.storage.databases.main.sticky_events import StickyEventsWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.task_scheduler import TaskSchedulerWorkerStore
@@ -136,6 +138,7 @@ class GenericWorkerStore(
     RoomWorkerStore,
     DirectoryWorkerStore,
     ThreadSubscriptionsWorkerStore,
+    StickyEventsWorkerStore,
     PushRulesWorkerStore,
     ApplicationServiceTransactionWorkerStore,
     ApplicationServiceWorkerStore,
@@ -335,7 +338,7 @@ def load_config(argv_options: list[str]) -> HomeServerConfig:
 
 def create_homeserver(
     config: HomeServerConfig,
-    reactor: ISynapseReactor | None = None,
+    reactor: Optional[ISynapseReactor] = None,
 ) -> GenericWorkerServer:
     """
     Create a homeserver instance for the Synapse worker process.

@@ -42,6 +42,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.cancellation import is_function_cancellable
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -129,7 +130,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                 clock=hs.get_clock(),
                 name="repl." + self.NAME,
                 server_name=self.server_name,
-                timeout_ms=30 * 60 * 1000,
+                timeout=Duration(minutes=30),
             )
 
         # We reserve `instance_name` as a parameter to sending requests, so we
@@ -317,7 +318,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
                             # If we timed out we probably don't need to worry about backing
                             # off too much, but lets just wait a little anyway.
-                            await clock.sleep(1)
+                            await clock.sleep(Duration(seconds=1))
                         except (ConnectError, DNSLookupError) as e:
                             if not cls.RETRY_ON_CONNECT_ERROR:
                                 raise
@@ -332,7 +333,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                                 e,
                             )
 
-                            await clock.sleep(delay)
+                            await clock.sleep(Duration(seconds=delay))
                             attempts += 1
                 except HttpResponseException as e:
                     # We convert to SynapseError as we know that it was a SynapseError
@@ -343,7 +344,12 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                         code=e.code,
                         **{SERVER_NAME_LABEL: server_name},
                     ).inc()
-                    raise e.to_synapse_error()
+                    # This error is coming from another worker, so we trust it to be safe
+                    # to relay to clients directly.
+                    # In fact, we rely relaying verbatim at the very least to tell
+                    # clients when they are rate-limited,
+                    # but most likely other things too.
+                    raise e.unsafe_to_verbatim_synapse_error()
                 except Exception as e:
                     _outgoing_request_counter.labels(
                         name=cls.NAME,

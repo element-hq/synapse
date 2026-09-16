@@ -16,7 +16,14 @@ that your email address is probably `user@example.com` rather than
 `user@email.example.com`) - but doing so may require more advanced setup: see
 [Setting up Federation](../federate.md).
 
+⚠️ Before setting up Synapse please consult the [security page](security.md) for
+best practices. ⚠️
+
 ## Installing Synapse
+
+Note: Synapse uses a number of platform dependencies such as Python and PostgreSQL,
+and aims to follow supported upstream versions. See the [deprecation
+policy](../deprecation_policy.md) for more details.
 
 ### Prebuilt packages
 
@@ -221,6 +228,11 @@ pip install --upgrade pip
 pip install --upgrade setuptools
 pip install matrix-synapse
 ```
+
+If you want to use a logging configuration that references
+`systemd.journal.JournalHandler` (for example `contrib/systemd/log_config.yaml`),
+you must install `systemd-python` separately in the same environment.
+Synapse no longer provides a `matrix-synapse[systemd]` extra.
 
 This will download Synapse from [PyPI](https://pypi.org/project/matrix-synapse)
 and install it, along with the python libraries it uses, into a virtual environment

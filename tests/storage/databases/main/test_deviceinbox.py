@@ -28,7 +28,7 @@ from synapse.rest import admin
 from synapse.rest.client import devices
 from synapse.server import HomeServer
 from synapse.storage.databases.main.deviceinbox import (
-    DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS,
+    DEVICE_FEDERATION_INBOX_CLEANUP_DELAY,
 )
 from synapse.util.clock import Clock
 
@@ -191,7 +191,7 @@ class DeviceInboxFederationInboxCleanupTestCase(HomeserverTestCase):
         self.db_pool = self.store.db_pool
 
         # Advance time to ensure we are past the cleanup delay
-        self.reactor.advance(DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS * 2 / 1000)
+        self.reactor.advance(DEVICE_FEDERATION_INBOX_CLEANUP_DELAY.as_secs() * 2)
 
     def test_delete_old_federation_inbox_rows_skips_if_no_index(self) -> None:
         """Test that we don't delete rows if the index hasn't been created yet."""
@@ -245,7 +245,7 @@ class DeviceInboxFederationInboxCleanupTestCase(HomeserverTestCase):
                 )
             )
 
-        self.reactor.advance(2 * DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS / 1000)
+        self.reactor.advance(2 * DEVICE_FEDERATION_INBOX_CLEANUP_DELAY.as_secs())
 
         # Insert new messages
         for i in range(5):
@@ -293,7 +293,7 @@ class DeviceInboxFederationInboxCleanupTestCase(HomeserverTestCase):
             )
 
         # Advance time to ensure we are past the cleanup delay
-        self.reactor.advance(2 * DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS / 1000)
+        self.reactor.advance(2 * DEVICE_FEDERATION_INBOX_CLEANUP_DELAY.as_millis())
 
         # Run the cleanup - it should delete in batches and sleep between them
         deferred = defer.ensureDeferred(

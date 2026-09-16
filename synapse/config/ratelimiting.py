@@ -252,3 +252,9 @@ class RatelimitConfig(Config):
             "rc_reports",
             defaults={"per_second": 1, "burst_count": 5},
         )
+
+        self.rc_user_directory = RatelimitSettings.parse(
+            config,
+            "rc_user_directory",
+            defaults={"per_second": 0.016, "burst_count": 200},
+        )

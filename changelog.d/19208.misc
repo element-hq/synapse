@@ -1,1 +1,0 @@
-Export `SYNAPSE_SUPPORTED_COMPLEMENT_TEST_PACKAGES` environment variable from `scripts-dev/complement.sh`.

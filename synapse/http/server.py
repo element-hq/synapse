@@ -33,6 +33,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Final,
     Iterable,
     Iterator,
     Pattern,
@@ -76,6 +77,7 @@ from synapse.logging.opentracing import active_span, start_active_span, trace_se
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.iterutils import chunk_seq
 from synapse.util.json import json_encoder
 
@@ -334,7 +336,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
                     callback_return = await self._async_render(request)
                 except LimitExceededError as e:
                     if e.pause:
-                        await self._clock.sleep(e.pause)
+                        await self._clock.sleep(Duration(seconds=e.pause))
                     raise
 
                 if callback_return is not None:
@@ -672,8 +674,33 @@ class UnrecognizedRequestResource(resource.Resource):
         # or the response bytes as a return value.
         return NOT_DONE_YET
 
-    def getChild(self, name: str, request: Request) -> resource.Resource:
-        return self
+    def getChild(self, path: str, request: Request) -> resource.Resource:
+        # The child of a catch-all unrecognised request handler
+        # is itself another unrecognised request handler.
+        # We can return any UnrecognizedRequestResource that doesn't
+        # have children.
+        assert len(_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE.children) == 0
+        return _BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE
+
+
+class _LeafUnrecognisedRequestResource(UnrecognizedRequestResource):
+    """
+    UnrecognizedRequestResource, but with the added caveat that it can't have any children.
+    This makes it safe for it to return itself as a dynamic child.
+
+    Constructed as a singleton; use `_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE`
+    """
+
+    def putChild(self, path: bytes, child: IResource) -> None:
+        raise RuntimeError("_LeafUnrecognisedRequestResource does not accept children")
+
+
+_BLANK_LEAF_UNRECOGNISED_REQUEST_RESOURCE: Final[_LeafUnrecognisedRequestResource] = (
+    _LeafUnrecognisedRequestResource()
+)
+"""
+An UnrecognizedRequestResource that is guaranteed not to have children.
+"""
 
 
 class RootRedirect(resource.Resource):
@@ -860,7 +887,18 @@ def respond_with_json(
         encoder = _encode_json_bytes
 
     request.setHeader(b"Content-Type", b"application/json")
-    request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
+    # Insert a default Cache-Control header if the servlet hasn't already set one. The
+    # default directive tells both the client and any intermediary cache to not cache
+    # the response, which is a sensible default to have on most API endpoints.
+    # The absence `Cache-Control` header would mean that it's up to the clients and
+    # caching proxies mood to cache things if they want. This can be dangerous, which is
+    # why we explicitly set a "don't cache by default" policy.
+    # In practice, `no-store` should be enough, but having all three directives is more
+    # conservative in case we encounter weird, non-spec compliant caches.
+    # See https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#directives
+    # for more details.
+    if not request.responseHeaders.hasHeader(b"Cache-Control"):
+        request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
 
     if send_cors:
         set_cors_headers(request)
@@ -900,7 +938,18 @@ def respond_with_json_bytes(
 
     request.setHeader(b"Content-Type", b"application/json")
     request.setHeader(b"Content-Length", b"%d" % (len(json_bytes),))
-    request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
+    # Insert a default Cache-Control header if the servlet hasn't already set one. The
+    # default directive tells both the client and any intermediary cache to not cache
+    # the response, which is a sensible default to have on most API endpoints.
+    # The absence `Cache-Control` header would mean that it's up to the clients and
+    # caching proxies mood to cache things if they want. This can be dangerous, which is
+    # why we explicitly set a "don't cache by default" policy.
+    # In practice, `no-store` should be enough, but having all three directives is more
+    # conservative in case we encounter weird, non-spec compliant caches.
+    # See https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#directives
+    # for more details.
+    if not request.responseHeaders.hasHeader(b"Cache-Control"):
+        request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
 
     if send_cors:
         set_cors_headers(request)

@@ -31,7 +31,6 @@ from synapse.logging.opentracing import start_active_span, trace_with_opname
 from synapse.util.async_helpers import maybe_awaitable
 
 from ._base import FileInfo, Responder
-from .media_storage import FileResponder
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +177,9 @@ class FileStorageProviderBackend(StorageProvider):
 
         backup_fname = os.path.join(self.base_directory, path)
         if os.path.isfile(backup_fname):
+            # Import here to avoid circular import
+            from .media_storage import FileResponder
+
             return FileResponder(self.hs, open(backup_fname, "rb"))
 
         return None

@@ -34,6 +34,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.event_push_actions import (
     EventPushActionsWorkerStore,
 )
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -78,7 +79,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         # Read the extrems every 60 minutes
         if hs.config.worker.run_background_tasks:
-            self.clock.looping_call(self._read_forward_extremities, 60 * 60 * 1000)
+            self.clock.looping_call(self._read_forward_extremities, Duration(hours=1))
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()

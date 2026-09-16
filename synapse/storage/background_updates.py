@@ -40,6 +40,7 @@ from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 
 from . import engines
@@ -162,7 +163,7 @@ class _BackgroundUpdateContextManager:
 
     async def __aenter__(self) -> int:
         if self._sleep:
-            await self._clock.sleep(self._sleep_duration_ms / 1000)
+            await self._clock.sleep(Duration(milliseconds=self._sleep_duration_ms))
 
         return self._update_duration_ms
 
@@ -260,6 +261,10 @@ class BackgroundUpdater:
         # TODO: all these bool flags make me feel icky---can we combine into a status
         # enum?
         self._all_done = False
+
+        # A set of background updates that we have queried the database for and
+        # found to be completed.
+        self._completed_background_updates: set[str] = set()
 
         # Whether we're currently running updates
         self._running = False
@@ -393,9 +398,15 @@ class BackgroundUpdater:
         return perf
 
     def start_doing_background_updates(self) -> None:
+        """Start doing background updates in the background.
+
+        This gets called both on startup and when the admin API is used to
+        reschedule background updates.
+        """
         if self.enabled:
             # if we start a new background update, not all updates are done.
             self._all_done = False
+            self._completed_background_updates.clear()
             sleep = self.sleep_enabled
             self.hs.run_as_background_process(
                 "background_updates",
@@ -477,6 +488,9 @@ class BackgroundUpdater:
         if update_name == self._current_background_update:
             return False
 
+        if update_name in self._completed_background_updates:
+            return True
+
         update_exists = await self.db_pool.simple_select_one_onecol(
             "background_updates",
             keyvalues={"update_name": update_name},
@@ -484,6 +498,9 @@ class BackgroundUpdater:
             desc="has_completed_background_update",
             allow_none=True,
         )
+
+        if not update_exists:
+            self._completed_background_updates.add(update_name)
 
         return not update_exists
 

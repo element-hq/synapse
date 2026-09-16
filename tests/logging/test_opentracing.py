@@ -37,6 +37,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests.server import get_clock
 
@@ -184,7 +185,7 @@ class LogContextScopeManagerTestCase(TestCase):
             scopes.append(scope)
 
             self.assertEqual(self._tracer.active_span, scope.span)
-            await clock.sleep(4)
+            await clock.sleep(Duration(seconds=4))
             self.assertEqual(self._tracer.active_span, scope.span)
             scope.close()
 
@@ -194,7 +195,7 @@ class LogContextScopeManagerTestCase(TestCase):
                 scopes.append(root_scope)
 
                 d1 = run_in_background(task, 1)
-                await clock.sleep(2)
+                await clock.sleep(Duration(seconds=2))
                 d2 = run_in_background(task, 2)
 
                 # because we did run_in_background, the active span should still be the
@@ -351,7 +352,7 @@ class LogContextScopeManagerTestCase(TestCase):
 
         # Now wait for the background process to finish
         while not callback_finished:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
         self.assertTrue(
             callback_finished,
@@ -418,7 +419,7 @@ class LogContextScopeManagerTestCase(TestCase):
 
         # Now wait for the background process to finish
         while not callback_finished:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
         self.assertTrue(
             callback_finished,

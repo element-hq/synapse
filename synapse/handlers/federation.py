@@ -40,7 +40,13 @@ from signedjson.sign import verify_signed_json
 from unpaddedbase64 import decode_base64
 
 from synapse import event_auth
-from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
+from synapse.api.constants import (
+    MAX_DEPTH,
+    EventContentFields,
+    EventTypes,
+    Membership,
+    StateDag,
+)
 from synapse.api.errors import (
     AuthError,
     CodeMessageException,
@@ -49,15 +55,18 @@ from synapse.api.errors import (
     FederationError,
     FederationPullAttemptBackoffError,
     HttpResponseException,
+    InvalidAPICallError,
     NotFoundError,
     PartialStateConflictError,
     RequestSendFailed,
     SynapseError,
+    UnsupportedRoomVersionError,
 )
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.event_auth import validate_event_for_room_version
-from synapse.events import EventBase
+from synapse.events import EventBase, event_exists_in_state_dag
+from synapse.events.py_protocol import supports_msc4242_state_dag
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
 from synapse.events.validator import EventValidator
 from synapse.federation.federation_client import InvalidResponseError
@@ -72,6 +81,7 @@ from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.visibility import filter_events_for_server
 
@@ -102,6 +112,12 @@ backfill_processing_before_timer = Histogram(
         "+Inf",
     ),
 )
+
+
+NUMBER_OF_EVENTS_TO_BACKFILL = 100
+"""
+The number of events we try to backfill from other servers in a single request.
+"""
 
 
 # TODO: We can refactor this away now that there is only one backfill point again
@@ -241,7 +257,9 @@ class FederationHandler:
         Args:
             room_id: The room to backfill in.
             current_depth: The depth to check at for any upcoming backfill points.
-            limit: The max number of events to request from the remote federated server.
+            limit: The number of events that the pagination request will
+                return. This is used as part of the heuristic to decide if we
+                should back paginate.
             processing_start_time: The time when `maybe_backfill` started processing.
                 Only used for timing. If `None`, no timing observation will be made.
 
@@ -252,7 +270,9 @@ class FederationHandler:
             _BackfillPoint(event_id, depth, _BackfillPointType.BACKWARDS_EXTREMITY)
             for event_id, depth in await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=current_depth,
+                # Per the docstring, it's best to pad the `current_depth` by the
+                # number of messages you plan to backfill from these points.
+                nearby_depth=current_depth + NUMBER_OF_EVENTS_TO_BACKFILL,
                 # We only need to end up with 5 extremities combined with the
                 # insertion event extremities to make the `/backfill` request
                 # but fetch an order of magnitude more to make sure there is
@@ -264,11 +284,22 @@ class FederationHandler:
             )
         ]
 
-        # we now have a list of potential places to backpaginate from. We prefer to
-        # start with the most recent (ie, max depth), so let's sort the list.
+        # we now have a list of potential places to backpaginate from. Figure out which
+        # ones we should prefer, so let's sort the list.
         sorted_backfill_points: list[_BackfillPoint] = sorted(
             backwards_extremities,
-            key=lambda e: -int(e.depth),
+            key=lambda e: (
+                # Prefer backfill points that are closer to the `current_depth`
+                # (absolute distance)
+                abs(current_depth - e.depth),
+                # For the tie-break, we care about events that are actually in the past
+                # as they're more likely to reveal history that we can return (something
+                # absolutely in the past is better than something can potentially extend
+                # into the past).
+                #
+                # This sorts ascending so 0 sorts before 1
+                0 if current_depth >= e.depth else 1,
+            ),
         )
 
         logger.debug(
@@ -289,19 +320,20 @@ class FederationHandler:
             str(len(sorted_backfill_points)),
         )
 
-        # If we have no backfill points lower than the `current_depth` then either we
+        # If we have no backfill points lower than the `nearby_depth` then either we
         # can a) bail or b) still attempt to backfill. We opt to try backfilling anyway
         # just in case we do get relevant events. This is good for eventual consistency
         # sake but we don't need to block the client for something that is just as
         # likely not to return anything relevant so we backfill in the background. The
         # only way, this could return something relevant is if we discover a new branch
         # of history that extends all the way back to where we are currently paginating
-        # and it's within the 100 events that are returned from `/backfill`.
+        # and it's within the `NUMBER_OF_EVENTS_TO_BACKFILL` events that are returned
+        # from `/backfill`.
         if not sorted_backfill_points and current_depth != MAX_DEPTH:
             # Check that we actually have later backfill points, if not just return.
             have_later_backfill_points = await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=MAX_DEPTH,
+                nearby_depth=MAX_DEPTH,
                 limit=1,
             )
             if not have_later_backfill_points:
@@ -461,7 +493,10 @@ class FederationHandler:
 
                 try:
                     await self._federation_event_handler.backfill(
-                        dom, room_id, limit=100, extremities=extremities_to_request
+                        dom,
+                        room_id,
+                        limit=NUMBER_OF_EVENTS_TO_BACKFILL,
+                        extremities=extremities_to_request,
                     )
                     # If this succeeded then we probably already have the
                     # appropriate stuff.
@@ -556,8 +591,8 @@ class FederationHandler:
 
         return pdu
 
-    async def on_event_auth(self, event_id: str) -> list[EventBase]:
-        event = await self.store.get_event(event_id)
+    async def on_event_auth(self, event_id: str, room_id: str) -> list[EventBase]:
+        event = await self.store.get_event(event_id, check_room_id=room_id)
         auth = await self.store.get_auth_chain(
             event.room_id, list(event.auth_event_ids()), include_given=True
         )
@@ -642,6 +677,12 @@ class FederationHandler:
                 already_partial_state_room = await self.store.is_partial_state_room(
                     room_id
                 )
+
+                # See related restriction in /createRoom requests in handlers/room.py
+                if room_version_obj.msc4242_state_dags:
+                    raise UnsupportedRoomVersionError(
+                        "Homeserver does not support this room version over federation"
+                    )
 
                 ret = await self.federation_client.send_join(
                     host_list,
@@ -771,9 +812,54 @@ class FederationHandler:
             if not predecessor or not isinstance(predecessor.get("room_id"), str):
                 return event.event_id, max_stream_id
             old_room_id = predecessor["room_id"]
-            logger.debug(
-                "Found predecessor for %s during remote join: %s", room_id, old_room_id
+
+            # We can't take the new room's word for it.
+            # Check to see that the predecessor room consents to the
+            # room upgrade.
+            if not await self._event_auth_handler.is_host_in_room(
+                room_id=old_room_id, host=self.hs.hostname
+            ):
+                logger.info(
+                    "Ignoring unverified predecessor for %s during remote join: %s (not in old room)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            tombstone = await self._state_storage_controller.get_current_state_event(
+                old_room_id,
+                event_type=EventTypes.Tombstone,
+                state_key="",
             )
+
+            if tombstone is None:
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: %s (no tombstone in old room)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            intended_successor_room = tombstone.content.get(
+                EventContentFields.TOMBSTONE_SUCCESSOR_ROOM, None
+            )
+
+            if not isinstance(intended_successor_room, str):
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: %s (tombstone is invalid)",
+                    room_id,
+                    old_room_id,
+                )
+                return event.event_id, max_stream_id
+
+            if intended_successor_room != room_id:
+                logger.warning(
+                    "Ignoring unverified predecessor for %s during remote join: predecessor defined as %s (the old room ID) but the old room's tombstone points to %r which doesn't match",
+                    room_id,
+                    old_room_id,
+                    intended_successor_room,
+                )
+                return event.event_id, max_stream_id
 
             # We retrieve the room member handler here as to not cause a cyclic dependency
             member_handler = self.hs.get_room_member_handler()
@@ -964,6 +1050,11 @@ class FederationHandler:
         # Note that this requires the /send_join request to come back to the
         # same server.
         prev_event_ids = None
+        prev_state_events = None
+        if room_version.msc4242_state_dags:
+            prev_state_events = list(
+                await self.store.get_state_dag_extremities(room_id)
+            )
         if room_version.restricted_join_rule:
             # Note that the room's state can change out from under us and render our
             # nice join rules-conformant event non-conformant by the time we build the
@@ -1020,6 +1111,7 @@ class FederationHandler:
             ) = await self.event_creation_handler.create_new_client_event(
                 builder=builder,
                 prev_event_ids=prev_event_ids,
+                prev_state_events=prev_state_events,
             )
         except SynapseError as e:
             logger.warning("Failed to create join to %s because %s", room_id, e)
@@ -1187,9 +1279,10 @@ class FederationHandler:
         # We should assert some things.
         # FIXME: Do this in a nicer way
         assert event.type == EventTypes.Member
-        assert event.user_id == user_id
+        assert event.sender == user_id
         assert event.state_key == user_id
         assert event.room_id == room_id
+        assert event.content.get("membership") == membership
         return origin, event, room_version
 
     async def on_make_leave_request(
@@ -1438,6 +1531,80 @@ class FederationHandler:
 
         return missing_events
 
+    async def on_get_missing_events_state_dag(
+        self,
+        origin: str,
+        room_id: str,
+        earliest_events: list[str],
+        latest_events: list[str],
+        limit: int,
+    ) -> list[EventBase]:
+        """Processes a /get_missing_events request for the state DAG.
+
+        This is similar to processing the normal DAG with a few notable exceptions:
+          * The max 20 limit does not apply. As the entire state DAG needs to be filled
+            in, we cannot arbitrarily set a low limit. If the state DAG delta is 1000s of
+            events, we rely on the sender to set sensible limits depending on the
+            bandwidth/round trip tradeoff, capped at `StateDag.MAX_MISSING_EVENTS` so a
+            single request cannot ask for an unbounded response.
+          * We do not filter any events in the state DAG. History visibility does not
+            filter out delivery of auth chain events, so neither should this. All of the
+            returned events will be treated as outliers and as such will not be delivered
+            to clients.
+          * `latest_events` may name events which are not themselves in the state DAG,
+            because the caller seeds this request with whatever it received over /send.
+            Only state events have `msc4242_state_dag_edges` rows, so we walk from such an
+            event's `prev_state_events` instead, and return those as the first hop.
+        """
+        # guard against extreme cases
+        if len(earliest_events) > 100 or len(latest_events) > 100:
+            raise InvalidAPICallError(
+                "'earliest_events' and/or 'latest_events' too large, size must be less than 100"
+            )
+
+        await self._event_auth_handler.assert_host_in_room(room_id, origin, True)
+        limit = min(limit, StateDag.MAX_MISSING_EVENTS)
+        earliest_event_set = set(earliest_events)
+
+        seed_events = await self.store.get_events(latest_events)
+
+        seed_event_ids: list[str] = []
+        first_hop_event_ids: set[str] = set()
+        for event_id, event in seed_events.items():
+            if event_exists_in_state_dag(event):
+                seed_event_ids.append(event_id)
+                continue
+            # event is a message, so its prev_state_events are the first returned hop
+            assert supports_msc4242_state_dag(
+                event
+            )  # type-assert to access .prev_state_events
+            first_hop_event_ids.update(
+                prev_state_event_id
+                for prev_state_event_id in event.prev_state_events
+                if prev_state_event_id not in earliest_event_set
+            )
+        # `latest_events` can mix state and non-state events. If an event's
+        # prev_state_event is also one of the state-event seeds, it will be walked from
+        # below, so returning it as a first hop as well would just duplicate it.
+        first_hop_event_ids.difference_update(seed_event_ids)
+        first_hop_events: list[EventBase] = []
+        if first_hop_event_ids:
+            first_hop_events = await self.store.get_events_as_list(
+                sorted(first_hop_event_ids)
+            )
+            # the sort exists to make [:limit] truncation deterministic
+            first_hop_events.sort(key=lambda ev: ev.event_id)
+            first_hop_events = first_hop_events[:limit]
+            seed_event_ids.extend(ev.event_id for ev in first_hop_events)
+
+        missing_events = await self.store.get_missing_events_state_dag(
+            room_id=room_id,
+            earliest_event_ids=earliest_events,
+            latest_event_ids=seed_event_ids,
+            limit=limit - len(first_hop_events),
+        )
+        return first_hop_events + missing_events
+
     async def exchange_third_party_invite(
         self, sender_user_id: str, target_user_id: str, room_id: str, signed: JsonDict
     ) -> None:
@@ -1513,7 +1680,14 @@ class FederationHandler:
                     if i == max_retries - 1:
                         raise e
         else:
-            destinations = {x.split(":", 1)[-1] for x in (sender_user_id, room_id)}
+            # The sender always tells us a server to try. Pre-v12 room IDs also
+            # encode the resident server's domain, but v12+ room IDs are a hash
+            # with no domain component, so we must not treat them as a server
+            # name -- doing so raises an invalid-destination error which can
+            # abort the whole exchange before the valid destination is tried.
+            destinations = {get_domain_from_id(sender_user_id)}
+            if ":" in room_id:
+                destinations.add(get_domain_from_id(room_id))
 
             try:
                 await self.federation_client.forward_third_party_invite(
@@ -1787,6 +1961,10 @@ class FederationHandler:
                 room_id=room_id,
             )
 
+            # We don't start all the partial state room syncs at once, to avoid
+            # overloading the process.
+            await self.clock.sleep(Duration(milliseconds=10))
+
     def _start_partial_state_room_sync(
         self,
         initial_destination: str | None,
@@ -1972,7 +2150,9 @@ class FederationHandler:
                                 logger.warning(
                                     "%s; waiting for %d ms...", e, e.retry_after_ms
                                 )
-                                await self.clock.sleep(e.retry_after_ms / 1000)
+                                await self.clock.sleep(
+                                    Duration(milliseconds=e.retry_after_ms)
+                                )
 
                         # Success, no need to try the rest of the destinations.
                         break

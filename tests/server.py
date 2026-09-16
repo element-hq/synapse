@@ -81,6 +81,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
 
+from synapse.api.constants import MAX_REQUEST_SIZE
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
@@ -100,6 +101,8 @@ from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
+from synapse.util.json import json_encoder
 
 from tests.utils import (
     LEAVE_DB,
@@ -146,7 +149,7 @@ class FakeChannel:
     _reactor: MemoryReactorClock
     result: dict = attr.Factory(dict)
     _ip: str = "127.0.0.1"
-    _producer: IPullProducer | IPushProducer | None = None
+    _producer: Optional[Union[IPullProducer, IPushProducer]] = None
     resource_usage: ContextResourceUsage | None = None
     _request: Request | None = None
 
@@ -241,20 +244,19 @@ class FakeChannel:
 
     def loseConnection(self) -> None:
         self.unregisterProducer()
-        self.transport.loseConnection()
 
     # Type ignore: mypy doesn't like the fact that producer isn't an IProducer.
     def registerProducer(self, producer: IProducer, streaming: bool) -> None:
         # TODO This should ensure that the IProducer is an IPushProducer or
         # IPullProducer, unfortunately twisted.protocols.basic.FileSender does
         # implement those, but doesn't declare it.
-        self._producer = cast(IPushProducer | IPullProducer, producer)
+        self._producer = cast(Union[IPushProducer, IPullProducer], producer)
         self.producerStreaming = streaming
 
         def _produce() -> None:
             if self._producer:
                 self._producer.resumeProducing()
-                self._reactor.callLater(0.1, _produce)
+                self._reactor.callLater(0.0, _produce)
 
         if not streaming:
             self._reactor.callLater(0.0, _produce)
@@ -300,15 +302,102 @@ class FakeChannel:
     def await_result(self, timeout_ms: int = 1000) -> None:
         """
         Wait until the request is finished.
+
+        Advances the Twisted reactor clock by 0.1s and suspending execution of the
+        Python thread (to allow other threads to do work) in a loop until we see a
+        result. We timeout when both the Twisted reactor clock has been advanced enough
+        AND we've done at-least 100 iterations (round-trips for other threads to get
+        work done).
+
+        The loop 1) allows `clock.call_later` scheduled callbacks to run if they are
+        scheduled to run now and 2) will also allow other threads to make progress. This
+        could be things spawned on the Twisted reactor threadpool or Tokio runtime
+        (async Rust code).
+
+        Args:
+            timeout_ms: The Twisted reactor time we wait until we raise a `TimedOutException`
         """
-        end_time = self._reactor.seconds() + timeout_ms / 1000.0
+        timeout = Duration(milliseconds=timeout_ms)
+
+        # TODO: Why?
         self._reactor.run()
 
+        # First, run anything that's scheduled now before we start looping and advancing
+        # non-zero time increments.
+        #
+        # Without this, if some request handler had some database queries followed by
+        # `self.hs.get_clock().sleep(Duration(seconds=1))`, and called
+        # `channel.await_result(timeout_ms=1000)`, it wouldn't be called because the
+        # first `self._reactor.advance(0.1)` would be first spent driving the database
+        # queries, and only leaving 0.9s remaining (0.1s shy of the sleep finishing) so
+        # the request would timeout.
+        #
+        # The goal is to remove the foot-guns and having to think about this for the
+        # standard cases.
+        #
+        # FIXME: Ideally, we'd advance by `0` but there is a handful of tests that
+        # assume that time advances in between requests and many requests complete from
+        # a single advance. Second best, we'd just advance by minuscule amount of time
+        # (`CLOCK_SCHEDULE_EPSILON`) but some tests assume at-least a millisecond in
+        # between as our timestamps are often recorded at the millisecond granularity
+        # (`origin_server_ts`, etc). It's a balance between test convenience of this
+        # helper and materializing test expectations so we may never fix this.
+        self._reactor.advance(Duration(milliseconds=1).as_secs())
+
+        # We only count the looping time (record the start after we advance once above)
+        start_time_seconds = self._reactor.seconds()
+        loop_count = 0
         while not self.is_finished():
-            if self._reactor.seconds() > end_time:
+            if (
+                # Exceeded the Twisted reactor time timeout
+                #
+                # We use `>=` for the reactor time condition as it's possible we advance
+                # exactly the `timeout` amount and we don't want to get stuck in an
+                # infinite loop
+                self._reactor.seconds() >= start_time_seconds + timeout.as_secs()
+                # 100 loops is arbitrary. This also makes the assumption that any work
+                # on other threads will finish before we give up after sleeping ~0.1s of
+                # real-time (100 * 0.001).
+                and loop_count > 100
+            ):
                 raise TimedOutException("Timed out waiting for request to finish.")
 
-            self._reactor.advance(0.1)
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # Note: Python has a default thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`) but we still want this here as we're
+            # able to preempt and cause the thread context switch to happen faster.
+            # Also, without any real-time sleeping, this function would complete before
+            # the 5ms switch ever happened.
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # possible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # Don't advance the Twisted reactor clock further than the timeout duration
+            # as someone should increase the timeout if they expect things to take
+            # longer.
+            if self._reactor.seconds() < start_time_seconds + timeout.as_secs():
+                self._reactor.advance(0.1)
+            else:
+                # But we want to still keep running whatever might be getting scheduled
+                # to run now.
+                #
+                # For example from other threads, they may have scheduled something on
+                # the reactor to run (like `reactor.callFromThread(...)`)
+                self._reactor.advance(0)
+
+            loop_count += 1
 
     def extract_cookies(self, cookies: MutableMapping[str, str]) -> None:
         """Process the contents of any Set-Cookie headers in the response
@@ -422,24 +511,35 @@ def make_request(
         path = b"/" + path
 
     if isinstance(content, dict):
-        content = json.dumps(content).encode("utf8")
+        content = json_encoder.encode(content).encode("utf8")
     if isinstance(content, str):
         content = content.encode("utf8")
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    req = request(channel, site, our_server_name="test_server")
+    req = request(
+        channel,
+        site,
+        our_server_name="test_server",
+        max_request_body_size=MAX_REQUEST_SIZE,
+    )
     channel.request = req
 
     req.content = BytesIO(content)
     # Twisted expects to be at the end of the content when parsing the request.
     req.content.seek(0, SEEK_END)
 
-    # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
-    # bodies if the Content-Length header is missing
-    req.requestHeaders.addRawHeader(
-        b"Content-Length", str(len(content)).encode("ascii")
-    )
+    # If `Content-Length` was passed in as a custom header, don't automatically add it
+    # here.
+    if custom_headers is None or not any(
+        (k if isinstance(k, bytes) else k.encode("ascii")) == b"Content-Length"
+        for k, _ in custom_headers
+    ):
+        # Old version of Twisted (<20.3.0) have issues with parsing x-www-form-urlencoded
+        # bodies if the Content-Length header is missing
+        req.requestHeaders.addRawHeader(
+            b"Content-Length", str(len(content)).encode("ascii")
+        )
 
     if access_token:
         req.requestHeaders.addRawHeader(
@@ -841,7 +941,7 @@ class FakeTransport:
     """Test reactor
     """
 
-    _protocol: IProtocol | None = None
+    _protocol: Optional[IProtocol] = None
     """The Protocol which is producing data for this transport. Optional, but if set
     will get called back for connectionLost() notifications etc.
     """
@@ -860,7 +960,7 @@ class FakeTransport:
     disconnected = False
     connected = True
     buffer: bytes = b""
-    producer: IPushProducer | None = None
+    producer: Optional[IPushProducer] = None
     autoflush: bool = True
 
     def getPeer(self) -> IPv4Address | IPv6Address:
@@ -928,7 +1028,7 @@ class FakeTransport:
             # mypy ignored here because:
             #   - this is part of the test infrastructure (outside of Synapse) so tracking
             #     these calls for for homeserver shutdown doesn't make sense.
-            d.addCallback(lambda x: self._reactor.callLater(0.1, _produce))  # type: ignore[call-later-not-tracked,call-overload]
+            d.addCallback(lambda x: self._reactor.callLater(0.0, _produce))  # type: ignore[call-later-not-tracked,call-overload]
 
         if not streaming:
             # mypy ignored here because:
@@ -1062,7 +1162,7 @@ def setup_test_homeserver(
     cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
     server_name: str = "test",
     config: HomeServerConfig | None = None,
-    reactor: ISynapseReactor | None = None,
+    reactor: Optional[ISynapseReactor] = None,
     homeserver_to_use: type[HomeServer] = TestHomeServer,
     db_txn_limit: int | None = None,
     **extra_homeserver_attributes: Any,
@@ -1074,10 +1174,10 @@ def setup_test_homeserver(
     If no datastore is supplied, one is created and given to the homeserver.
 
     Args:
-        cleanup_func : The function used to register a cleanup routine for
-                       after the test. If the function returns a Deferred, the
-                       test case will wait until the Deferred has fired before
-                       proceeding to the next cleanup function.
+        cleanup_func: The function used to register a cleanup routine for
+            after the test. If the function returns a Deferred, the
+            test case will wait until the Deferred has fired before
+            proceeding to the next cleanup function.
         server_name: Homeserver name
         config: Homeserver config
         reactor: Twisted reactor
@@ -1096,7 +1196,7 @@ def setup_test_homeserver(
         reactor = ThreadedMemoryReactorClock()
 
     if config is None:
-        config = default_config(server_name, parse=True)
+        config = default_config(server_name=server_name, parse=True)
 
     server_name = config.server.server_name
     if not isinstance(server_name, str):
@@ -1148,18 +1248,34 @@ def setup_test_homeserver(
         global PREPPED_SQLITE_DB_CONN
         if PREPPED_SQLITE_DB_CONN is None:
             temp_engine = create_engine(database_config)
-            PREPPED_SQLITE_DB_CONN = LoggingDatabaseConnection(
+            prepped_conn = LoggingDatabaseConnection(
                 conn=sqlite3.connect(":memory:"),
                 engine=temp_engine,
                 default_txn_name="PREPPED_CONN",
                 server_name=server_name,
             )
 
-            database = DatabaseConnectionConfig("master", database_config)
-            config.database.databases = [database]
             prepare_database(
-                PREPPED_SQLITE_DB_CONN, create_engine(database_config), config
+                prepped_conn,
+                create_engine(database_config),
+                # We pass `config=None` here so that the template database is prepared the
+                # same way regardless of which test happens to be the first one to run.
+                #
+                # Notably, `prepare_database` refuses to initialise an empty database
+                # when given a worker config, which would otherwise make any test using
+                # `homeserver_to_use=GenericWorkerServer` fail when run on its own.
+                #
+                # Each test still runs `prepare_database` with its own config against its own
+                # copy of this template (via `hs.setup()`), so anything config specific (like
+                # module schemas) is still applied per-test.
+                config=None,
             )
+
+            # Only publish the template once it's fully prepared. Previously, this was
+            # assigned before `prepare_database(...)` ran which meant that if
+            # `prepare_database(...)` failed, we ended up with an unitialized/partial
+            # database state and never tried to re-create it for subsequent tests.
+            PREPPED_SQLITE_DB_CONN = prepped_conn
 
         database_config["_TEST_PREPPED_CONN"] = PREPPED_SQLITE_DB_CONN
 
@@ -1190,67 +1306,8 @@ def setup_test_homeserver(
         cur.close()
         db_conn.close()
 
-    hs = homeserver_to_use(
-        server_name,
-        config=config,
-        reactor=reactor,
-    )
-
-    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
-    # cleanup functions result in holding the `hs` in memory.
-    cleanup_hs_ref = weakref.ref(hs)
-
-    def shutdown_hs_on_cleanup() -> "Deferred[None]":
-        cleanup_hs = cleanup_hs_ref()
-        deferred: "Deferred[None]" = defer.succeed(None)
-        if cleanup_hs is not None:
-            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
-        return deferred
-
-    # Register the cleanup hook for the homeserver.
-    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
-    # strange behaviours.
-    cleanup_func(shutdown_hs_on_cleanup)
-
-    # Install @cache_in_self attributes
-    for key, val in extra_homeserver_attributes.items():
-        setattr(hs, "_" + key, val)
-
-    # Mock TLS
-    hs.tls_server_context_factory = Mock()
-
-    # Patch `make_pool` before initialising the database, to make database transactions
-    # synchronous for testing.
-    with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
-        hs.setup()
-
-    # Register background tasks required by this server. This must be done
-    # somewhat manually due to the background tasks not being registered
-    # unless handlers are instantiated.
-    #
-    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
-    # can just start the background tasks straight away after `hs.setup`. (compare this
-    # with where we call `hs.start_background_tasks()` outside of the test environment).
-    if hs.config.worker.run_background_tasks:
-        hs.start_background_tasks()
-
-    # Since we've changed the databases to run DB transactions on the same
-    # thread, we need to stop the event fetcher hogging that one thread.
-    hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
-
-    if USE_POSTGRES_FOR_TESTS:
-        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
-        # cleanup functions result in holding the `hs` in memory.
-        database_pool = weakref.ref(hs.get_datastores().databases[0])
-
-        # We need to do cleanup on PostgreSQL
         def cleanup() -> None:
             import psycopg2
-
-            # Close all the db pools
-            db_pool = database_pool()
-            if db_pool is not None:
-                db_pool._db_pool.close()
 
             dropped = False
 
@@ -1296,6 +1353,96 @@ def setup_test_homeserver(
             # Register the cleanup hook
             cleanup_func(cleanup)
 
+    hs = homeserver_to_use(
+        server_name,
+        config=config,
+        reactor=reactor,
+    )
+
+    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
+    # cleanup functions result in holding the `hs` in memory.
+    cleanup_hs_ref = weakref.ref(hs)
+
+    def shutdown_hs_on_cleanup() -> "Deferred[None]":
+        cleanup_hs = cleanup_hs_ref()
+        deferred: "Deferred[None]" = defer.succeed(None)
+        if cleanup_hs is not None:
+            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
+        return deferred
+
+    # Register the cleanup hook for the homeserver.
+    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
+    # strange behaviours.
+    cleanup_func(shutdown_hs_on_cleanup)
+
+    # Install @cache_in_self attributes
+    for key, val in extra_homeserver_attributes.items():
+        setattr(hs, "_" + key, val)
+
+    # Mock TLS
+    hs.tls_server_context_factory = Mock()
+
+    # Patch `make_pool` before initialising the database, to make database transactions
+    # synchronous for testing.
+    with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
+        hs.setup()
+
+    # Ideally, setup/start would be separated but since this is historically used
+    # throughout tests, we keep the existing behavior for now. We probably just need to
+    # rename this function.
+    start_test_homeserver(hs=hs, cleanup_func=cleanup_func, reactor=reactor)
+
+    return hs
+
+
+def start_test_homeserver(
+    *,
+    hs: HomeServer,
+    cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
+    reactor: ISynapseReactor,
+) -> None:
+    """
+    Start a homeserver for testing.
+
+    Args:
+        hs: The homeserver to start.
+        cleanup_func: The function used to register a cleanup routine for
+            after the test. If the function returns a Deferred, the
+            test case will wait until the Deferred has fired before
+            proceeding to the next cleanup function.
+        reactor: Twisted reactor
+    """
+
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
+    # can just start the background tasks straight away after `hs.setup`. (compare this
+    # with where we call `hs.start_background_tasks()` outside of the test environment).
+    if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
+
+    # Since we've changed the databases to run DB transactions on the same
+    # thread, we need to stop the event fetcher hogging that one thread.
+    hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
+
+    if USE_POSTGRES_FOR_TESTS:
+        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
+        # cleanup functions result in holding the `hs` in memory.
+        database_pool = weakref.ref(hs.get_datastores().databases[0])
+
+        # We need to do cleanup on PostgreSQL
+        def cleanup() -> None:
+            # Close all the db pools
+            db_pool = database_pool()
+            if db_pool is not None:
+                db_pool._db_pool.close()
+
+        if not LEAVE_DB:
+            # Register the cleanup hook
+            cleanup_func(cleanup)
+
     # bcrypt is far too slow to be doing in unit tests
     # Need to let the HS build an auth handler and then mess with it
     # because AuthHandler's constructor requires the HS, so we can't make one
@@ -1316,6 +1463,16 @@ def setup_test_homeserver(
 
     hs.get_media_sender_thread_pool = thread_pool  # type: ignore[method-assign]
 
+    # Load the OIDC provider metadatas, if OIDC is enabled.
+    # This matches `start` in synapse/app/_base.py
+    #
+    # TODO: Extract common startup logic somewhere cleaner
+    if hs.config.oidc.oidc_enabled:
+        oidc = hs.get_oidc_handler()
+        # Preload the provider metadata.
+        # This will spawn fire-and-forget background processes.
+        oidc.preload_metadata()
+
     # Load any configured modules into the homeserver
     module_api = hs.get_module_api()
     for module, module_config in hs.config.modules.loaded_modules:
@@ -1330,5 +1487,3 @@ def setup_test_homeserver(
     load_legacy_third_party_event_rules(hs)
     load_legacy_presence_router(hs)
     load_legacy_password_auth_providers(hs)
-
-    return hs

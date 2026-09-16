@@ -167,13 +167,15 @@ class DeactivateAccountHandler:
         # Mark the user as erased, if they asked for that
         if erase_data:
             user = UserID.from_string(user_id)
-            # Remove avatar URL from this user
-            await self._profile_handler.set_avatar_url(
-                user, requester, "", by_admin, deactivation=True
-            )
-            # Remove displayname from this user
-            await self._profile_handler.set_displayname(
-                user, requester, "", by_admin, deactivation=True
+            # Remove displayname, avatar URL and custom profile fields from this user
+            #
+            # Note that displayname and avatar URL may persist as historical state events
+            # in rooms, but these cases behave like message history, following
+            # https://spec.matrix.org/v1.17/client-server-api/#post_matrixclientv3accountdeactivate
+            await self._profile_handler.delete_profile_upon_deactivation(
+                target_user=user,
+                requester=requester,
+                by_admin=by_admin,
             )
 
             logger.info("Marking %s as erased", user_id)
@@ -348,6 +350,9 @@ class DeactivateAccountHandler:
 
         # Ensure the user is not marked as erased.
         await self.store.mark_user_not_erased(user_id)
+
+        # The profile row is deleted on erasure, so recreate it if missing.
+        await self.store.create_profile(user)
 
         # Mark the user as active.
         await self.store.set_user_deactivated_status(user_id, False)

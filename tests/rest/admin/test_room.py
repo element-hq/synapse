@@ -44,6 +44,7 @@ from synapse.storage.databases.main.purge_events import (
 )
 from synapse.types import UserID
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -1161,7 +1162,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         # Mock PaginationHandler.purge_room to sleep for 100s, so we have time to do a second call
         # before the purge is over. Note that it doesn't purge anymore, but we don't care.
         async def purge_room(room_id: str, force: bool) -> None:
-            await self.hs.get_clock().sleep(100)
+            await self.hs.get_clock().sleep(Duration(seconds=100))
 
         self.pagination_handler.purge_room = AsyncMock(side_effect=purge_room)  # type: ignore[method-assign]
 
@@ -1464,7 +1465,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         self._is_purged(room_id)
 
@@ -1501,7 +1502,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             self._is_purged(room_id)
 
         # Wait for next scheduler run
-        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL_MS)
+        self.reactor.advance(TaskScheduler.SCHEDULE_INTERVAL.as_secs())
 
         # Test that all users has been kicked (room is shutdown)
         self._has_no_members(room_id)
@@ -2310,10 +2311,14 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertIn("state_events", channel.json_body)
         self.assertIn("room_type", channel.json_body)
         self.assertIn("forgotten", channel.json_body)
+        self.assertIn("tombstoned", channel.json_body)
+        self.assertIn("replacement_room", channel.json_body)
 
         self.assertEqual(room_id_1, channel.json_body["room_id"])
         self.assertIs(True, channel.json_body["federatable"])
         self.assertIs(True, channel.json_body["public"])
+        self.assertIs(False, channel.json_body["tombstoned"])
+        self.assertIs(None, channel.json_body["replacement_room"])
 
     def test_single_room_devices(self) -> None:
         """Test that `joined_local_devices` can be requested correctly"""
@@ -2544,7 +2549,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_topo_token_is_accepted(self) -> None:
         """Test Topo Token is accepted."""
-        token = "t1-0_0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2558,7 +2563,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
         """Test that stream token is accepted for forward pagination."""
-        token = "s0_0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2975,6 +2980,120 @@ class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(private_room_id, channel.json_body["joined_rooms"][0])
 
+    def test_joined_rooms(self) -> None:
+        """
+        Test joined_rooms admin endpoint.
+        """
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{self.public_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(self.public_room_id, channel.json_body["room_id"])
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/joined_rooms",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(self.public_room_id, channel.json_body["joined_rooms"][0])
+
+    def test_memberships(self) -> None:
+        """
+        Test user memberships admin endpoint.
+        """
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{self.public_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        other_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/join/{other_room_id}",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/memberships",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            {
+                "memberships": {
+                    self.public_room_id: Membership.JOIN,
+                    other_room_id: Membership.JOIN,
+                }
+            },
+            channel.json_body,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{other_room_id}/leave",
+            content={"user_id": self.second_user_id},
+            access_token=self.second_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        invited_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{invited_room_id}/invite",
+            content={"user_id": self.second_user_id},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        banned_room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok
+        )
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{banned_room_id}/ban",
+            content={"user_id": self.second_user_id},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.second_user_id}/memberships",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            {
+                "memberships": {
+                    self.public_room_id: Membership.JOIN,
+                    other_room_id: Membership.LEAVE,
+                    invited_room_id: Membership.INVITE,
+                    banned_room_id: Membership.BAN,
+                }
+            },
+            channel.json_body,
+        )
+
     def test_context_as_non_admin(self) -> None:
         """
         Test that, without being admin, one cannot use the context admin API
@@ -3247,7 +3366,7 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
         pl = self.helper.get_state(
             room_id, EventTypes.PowerLevels, tok=self.creator_tok
         )
-        self.assertEquals(pl["users"][self.admin_user], 100)
+        self.assertEqual(pl["users"][self.admin_user], 100)
 
     def test_v12_room_with_many_user_pls(self) -> None:
         """Test that you can be promoted to the admin user's PL in v12 rooms that contain a range of user PLs."""
@@ -3280,7 +3399,7 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
         pl = self.helper.get_state(
             room_id, EventTypes.PowerLevels, tok=self.creator_tok
         )
-        self.assertEquals(pl["users"][self.admin_user], 100)
+        self.assertEqual(pl["users"][self.admin_user], 100)
 
 
 class BlockRoomTestCase(unittest.HomeserverTestCase):

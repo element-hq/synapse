@@ -21,6 +21,8 @@
 
 import abc
 import logging
+from contextlib import ExitStack
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Callable, Iterable
 
 import attr
@@ -44,9 +46,9 @@ from synapse.api.errors import (
 )
 from synapse.config.key import TrustedKeyServer
 from synapse.events import EventBase
-from synapse.events.utils import prune_event_dict
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.storage.keys import FetchKeyResult
+from synapse.synapse_rust.events import redact_event
 from synapse.types import JsonDict
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import yieldable_gather_results
@@ -57,6 +59,15 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+# List of Unpadded Base64 server signing keys that are known to be vulnerable to attack.
+# Incoming requests from homeservers using any of these keys should be refused.
+# Events containing signatures using any of these keys should be refused.
+BANNED_SERVER_SIGNING_KEYS = (
+    # ELEMENTSEC-2025-1670
+    "l/O9hxMVKB6Lg+3Hqf0FQQZhVESQcMzbPN1Cz2nM3og=",
+)
 
 
 @attr.s(slots=True, frozen=True, cmp=False, auto_attribs=True)
@@ -109,13 +120,23 @@ class VerifyJsonRequest:
     ) -> "VerifyJsonRequest":
         """Create a VerifyJsonRequest to verify all signatures on an event
         object for the given server.
+
+        Raises immediately if the event doesn't have any signatures from the
+        given server.
         """
-        key_ids = list(event.signatures.get(server_name, []))
+        if server_name not in event.signatures:
+            raise SynapseError(
+                400,
+                f"Not signed by {server_name}",
+                Codes.UNAUTHORIZED,
+            )
+
+        key_ids = list(event.signatures[server_name])
         return VerifyJsonRequest(
             server_name,
             # We defer creating the redacted json object, as it uses a lot more
             # memory than the Event object itself.
-            lambda: prune_event_dict(event.room_version, event.get_pdu_json()),
+            lambda: redact_event(event).get_pdu_json(),
             minimum_valid_until_ms,
             key_ids=key_ids,
         )
@@ -150,57 +171,81 @@ class Keyring:
     """
 
     def __init__(
-        self, hs: "HomeServer", key_fetchers: "Iterable[KeyFetcher] | None" = None
+        self,
+        hs: "HomeServer",
+        test_only_key_fetchers: "list[KeyFetcher] | None" = None,
     ):
-        self.server_name = hs.hostname
+        """
+        Args:
+            hs: The HomeServer instance
+            test_only_key_fetchers: Dependency injection for tests only. If provided,
+                these key fetchers will be used instead of the default ones.
+        """
+        # Clean-up to avoid partial initialization leaving behind references.
+        with ExitStack() as exit:
+            self.server_name = hs.hostname
 
-        if key_fetchers is None:
-            # Always fetch keys from the database.
-            mutable_key_fetchers: list[KeyFetcher] = [StoreKeyFetcher(hs)]
-            # Fetch keys from configured trusted key servers, if any exist.
-            key_servers = hs.config.key.key_servers
-            if key_servers:
-                mutable_key_fetchers.append(PerspectivesKeyFetcher(hs))
-            # Finally, fetch keys from the origin server directly.
-            mutable_key_fetchers.append(ServerKeyFetcher(hs))
+            self._key_fetchers: list[KeyFetcher] = []
+            if test_only_key_fetchers is None:
+                # Always fetch keys from the database.
+                store_key_fetcher = StoreKeyFetcher(hs)
+                exit.callback(store_key_fetcher.shutdown)
+                self._key_fetchers.append(store_key_fetcher)
 
-            self._key_fetchers: Iterable[KeyFetcher] = tuple(mutable_key_fetchers)
-        else:
-            self._key_fetchers = key_fetchers
+                # Fetch keys from configured trusted key servers, if any exist.
+                key_servers = hs.config.key.key_servers
+                if key_servers:
+                    perspectives_key_fetcher = PerspectivesKeyFetcher(hs)
+                    exit.callback(perspectives_key_fetcher.shutdown)
+                    self._key_fetchers.append(perspectives_key_fetcher)
 
-        self._fetch_keys_queue: BatchingQueue[
-            _FetchKeyRequest, dict[str, dict[str, FetchKeyResult]]
-        ] = BatchingQueue(
-            name="keyring_server",
-            hs=hs,
-            clock=hs.get_clock(),
-            # The method called to fetch each key
-            process_batch_callback=self._inner_fetch_key_requests,
-        )
+                # Finally, fetch keys from the origin server directly.
+                server_key_fetcher = ServerKeyFetcher(hs)
+                exit.callback(server_key_fetcher.shutdown)
+                self._key_fetchers.append(server_key_fetcher)
+            else:
+                self._key_fetchers = test_only_key_fetchers
 
-        self._is_mine_server_name = hs.is_mine_server_name
+            self._fetch_keys_queue: BatchingQueue[
+                _FetchKeyRequest, dict[str, dict[str, FetchKeyResult]]
+            ] = BatchingQueue(
+                name="keyring_server",
+                hs=hs,
+                clock=hs.get_clock(),
+                # The method called to fetch each key
+                process_batch_callback=self._inner_fetch_key_requests,
+            )
+            exit.callback(self._fetch_keys_queue.shutdown)
 
-        # build a FetchKeyResult for each of our own keys, to shortcircuit the
-        # fetcher.
-        self._local_verify_keys: dict[str, FetchKeyResult] = {}
-        for key_id, key in hs.config.key.old_signing_keys.items():
-            self._local_verify_keys[key_id] = FetchKeyResult(
-                verify_key=key, valid_until_ts=key.expired
+            self._is_mine_server_name = hs.is_mine_server_name
+
+            # build a FetchKeyResult for each of our own keys, to shortcircuit the
+            # fetcher.
+            self._local_verify_keys: dict[str, FetchKeyResult] = {}
+            for key_id, key in hs.config.key.old_signing_keys.items():
+                self._local_verify_keys[key_id] = FetchKeyResult(
+                    verify_key=key, valid_until_ts=key.expired
+                )
+
+            vk = get_verify_key(hs.signing_key)
+            self._local_verify_keys[f"{vk.alg}:{vk.version}"] = FetchKeyResult(
+                verify_key=vk,
+                valid_until_ts=2**63,  # fake future timestamp
             )
 
-        vk = get_verify_key(hs.signing_key)
-        self._local_verify_keys[f"{vk.alg}:{vk.version}"] = FetchKeyResult(
-            verify_key=vk,
-            valid_until_ts=2**63,  # fake future timestamp
-        )
+            # We reached the end of the block which means everything was successful, so
+            # no exit handlers are needed (remove them all).
+            exit.pop_all()
 
     def shutdown(self) -> None:
         """
         Prepares the KeyRing for garbage collection by shutting down it's queues.
         """
         self._fetch_keys_queue.shutdown()
+
         for key_fetcher in self._key_fetchers:
             key_fetcher.shutdown()
+        self._key_fetchers.clear()
 
     async def verify_json_for_server(
         self,
@@ -323,6 +368,19 @@ class Keyring:
 
             if key_result.valid_until_ts < verify_request.minimum_valid_until_ts:
                 continue
+
+            key = encode_verify_key_base64(key_result.verify_key)
+            if key in BANNED_SERVER_SIGNING_KEYS:
+                raise SynapseError(
+                    HTTPStatus.UNAUTHORIZED,
+                    "Server signing key %s:%s for server %s has been banned by this server"
+                    % (
+                        key_result.verify_key.alg,
+                        key_result.verify_key.version,
+                        verify_request.server_name,
+                    ),
+                    Codes.UNAUTHORIZED,
+                )
 
             await self.process_json(key_result.verify_key, verify_request)
             verified = True
@@ -521,9 +579,21 @@ class StoreKeyFetcher(KeyFetcher):
     """KeyFetcher impl which fetches keys from our data store"""
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
+        # Clean-up to avoid partial initialization leaving behind references.
+        with ExitStack() as exit:
+            super().__init__(hs)
+            # `KeyFetcher` keeps a reference to `hs` which we need to clean up if
+            # something goes wrong so we can cleanly shutdown the homeserver.
+            exit.callback(super().shutdown)
 
-        self.store = hs.get_datastores().main
+            # An error can be raised here if someone tried to create a `StoreKeyFetcher`
+            # before the homeserver is fully set up (`HomeServerNotSetupException:
+            # HomeServer.setup must be called before getting datastores`).
+            self.store = hs.get_datastores().main
+
+            # We reached the end of the block which means everything was successful, so
+            # no exit handlers are needed (remove them all).
+            exit.pop_all()
 
     async def _fetch_keys(
         self, keys_to_fetch: list[_FetchKeyRequest]
@@ -543,9 +613,21 @@ class StoreKeyFetcher(KeyFetcher):
 
 class BaseV2KeyFetcher(KeyFetcher):
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
+        # Clean-up to avoid partial initialization leaving behind references.
+        with ExitStack() as exit:
+            super().__init__(hs)
+            # `KeyFetcher` keeps a reference to `hs` which we need to clean up if
+            # something goes wrong so we can cleanly shutdown the homeserver.
+            exit.callback(super().shutdown)
 
-        self.store = hs.get_datastores().main
+            # An error can be raised here if someone tried to create a `StoreKeyFetcher`
+            # before the homeserver is fully set up (`HomeServerNotSetupException:
+            # HomeServer.setup must be called before getting datastores`).
+            self.store = hs.get_datastores().main
+
+            # We reached the end of the block which means everything was successful, so
+            # no exit handlers are needed (remove them all).
+            exit.pop_all()
 
     async def process_v2_response(
         self, from_server: str, response_json: JsonDict, time_added_ms: int

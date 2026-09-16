@@ -683,7 +683,7 @@ class StateStorageController:
         #   https://github.com/matrix-org/synapse/issues/13008
 
         return await self.stores.main.get_partial_current_state_deltas(
-            prev_stream_id, max_stream_id
+            prev_stream_id, max_stream_id, limit=100
         )
 
     @trace

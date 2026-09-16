@@ -42,6 +42,7 @@ from synapse.storage.databases.main.monthly_active_users import (
 )
 from synapse.types import JsonDict, UserID
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -437,7 +438,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         )
 
         if hs.config.worker.run_background_tasks and self.user_ips_max_age:
-            self.clock.looping_call(self._prune_old_user_ips, 5 * 1000)
+            self.clock.looping_call(self._prune_old_user_ips, Duration(seconds=5))
 
         if self._update_on_this_worker:
             # This is the designated worker that can write to the client IP
@@ -448,7 +449,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
                 tuple[str, str, str], tuple[str, str | None, int]
             ] = {}
 
-            self.clock.looping_call(self._update_client_ips_batch, 5 * 1000)
+            self.clock.looping_call(self._update_client_ips_batch, Duration(seconds=5))
             hs.register_async_shutdown_handler(
                 phase="before",
                 eventType="shutdown",

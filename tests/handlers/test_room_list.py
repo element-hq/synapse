@@ -31,7 +31,7 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
         return room_id
 
     def default_config(self) -> JsonDict:
-        config = default_config("test")
+        config = default_config(server_name="test")
         config["room_list_publication_rules"] = [{"action": "allow"}]
         return config
 

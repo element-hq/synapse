@@ -23,6 +23,7 @@ import collections
 import itertools
 import logging
 from collections import OrderedDict
+from collections.abc import Set
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -42,6 +43,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    ProfileUpdateAction,
     RelationTypes,
 )
 from synapse.api.errors import PartialStateConflictError
@@ -49,9 +51,11 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import (
     EventBase,
     StrippedStateEvent,
+    event_exists_in_state_dag,
     is_creator,
     relation_from_event,
 )
+from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
 from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
@@ -74,6 +78,7 @@ from synapse.types import (
     MutableStateMap,
     StateMap,
     StrCollection,
+    UserID,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -264,6 +269,10 @@ class PersistEventsStore:
         self.database_engine = db.engine
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
+        self._include_profile_updates_in_sync = (
+            hs.config.server.include_profile_updates_in_sync
+        )
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -294,6 +303,7 @@ class PersistEventsStore:
         new_event_links: dict[str, NewEventChainLinks],
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
+        new_state_dag_forward_extremities: set[str] | None = None,
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -314,6 +324,8 @@ class PersistEventsStore:
                 from being updated by these events. This should be set to True
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
+            new_state_dag_forward_extremities: A set of event IDs that are the new forward
+                extremities for the state DAG for this room. MSC4242 only.
 
         Returns:
             Resolves when the events have been persisted
@@ -368,6 +380,24 @@ class PersistEventsStore:
                     )
                 )
 
+            sticky_events_to_un_soft_fail: set[str] = set()
+            if self._msc4354_enabled and state_delta_for_room is not None:
+                # When we change the room's current state with `state_delta_for_room`,
+                # that might cause some previously soft-failed sticky events to now pass
+                # the state-dependent auth checks.
+                # In other words, the sticky events could have been valid if they had
+                # waited for these state changes.
+                # For that reason, we give sticky events a second chance.
+                # We compute them here and then un-soft-fail them atomically with the
+                # persistence of the events.
+                sticky_events_to_un_soft_fail = (
+                    await self.store.compute_sticky_events_to_un_soft_fail(
+                        room_id,
+                        events_and_contexts,
+                        state_delta_for_room,
+                    )
+                )
+
             await self.db_pool.runInteraction(
                 "persist_events",
                 self._persist_events_txn,
@@ -378,6 +408,8 @@ class PersistEventsStore:
                 new_forward_extremities=new_forward_extremities,
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
+                new_state_dag_forward_extremities=new_state_dag_forward_extremities,
+                sticky_events_to_un_soft_fail=sticky_events_to_un_soft_fail,
             )
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
@@ -908,7 +940,9 @@ class PersistEventsStore:
         # instances as we'll potentially be pulling more events from the DB and
         # we don't need the overhead of fetching/parsing the full event JSON.
         event_to_types = {e.event_id: (e.type, e.state_key) for e in state_events}
-        event_to_auth_chain = {e.event_id: e.auth_event_ids() for e in state_events}
+        event_to_auth_chain: dict[str, StrCollection] = {
+            e.event_id: e.auth_event_ids() for e in state_events
+        }
         event_to_room_id = {e.event_id: e.room_id for e in state_events}
 
         return self._calculate_chain_cover_index(
@@ -961,8 +995,10 @@ class PersistEventsStore:
 
         return results
 
-    async def _get_prevs_before_rejected(self, event_ids: Iterable[str]) -> set[str]:
-        """Get soft-failed ancestors to remove from the extremities.
+    async def _get_prevs_before_rejected(
+        self, event_ids: Iterable[str], include_soft_failed: bool = True
+    ) -> set[str]:
+        """Get soft-failed/rejected ancestors to remove from the extremities.
 
         Given a set of events, find all those that have been soft-failed or
         rejected. Returns those soft failed/rejected events and their prev
@@ -975,7 +1011,8 @@ class PersistEventsStore:
         Args:
             event_ids: Events to find prev events for. Note that these must have
                 already been persisted.
-
+            include_soft_failed: Soft-failed events are included in the search. If false, only
+                rejected events are included.
         Returns:
             The previous events.
         """
@@ -1015,7 +1052,7 @@ class PersistEventsStore:
                         continue
 
                     soft_failed = db_to_json(metadata).get("soft_failed")
-                    if soft_failed or rejected:
+                    if (include_soft_failed and soft_failed) or rejected:
                         to_recursively_check.append(prev_event_id)
                         existing_prevs.add(prev_event_id)
 
@@ -1037,6 +1074,8 @@ class PersistEventsStore:
         new_forward_extremities: set[str] | None,
         new_event_links: dict[str, NewEventChainLinks],
         sliding_sync_table_changes: SlidingSyncTableChanges | None,
+        new_state_dag_forward_extremities: set[str] | None = None,
+        sticky_events_to_un_soft_fail: Set[str] = frozenset(),
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1065,6 +1104,8 @@ class PersistEventsStore:
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
                 `_calculate_sliding_sync_table_changes(...)`)
+            sticky_events_to_un_soft_fail:
+                Sticky events which will be un-soft-failed when persisting the events.
 
         Raises:
             PartialStateConflictError: if attempting to persist a partial state event in
@@ -1145,6 +1186,11 @@ class PersistEventsStore:
                 max_stream_order=max_stream_order,
             )
 
+        if new_state_dag_forward_extremities:
+            self._set_state_dag_extremities_txn(
+                txn, room_id, new_state_dag_forward_extremities
+            )
+
         self._persist_transaction_ids_txn(txn, events_and_contexts)
 
         # Insert into event_to_state_groups.
@@ -1184,6 +1230,18 @@ class PersistEventsStore:
                 min_stream_order,
                 sliding_sync_table_changes,
             )
+
+        if self._msc4354_enabled:
+            self.store.insert_sticky_events_txn(
+                txn, [ev for ev, _ in events_and_contexts]
+            )
+
+            # Un-soft-fail any sticky events that the state delta applied just above
+            # has made valid.
+            if sticky_events_to_un_soft_fail:
+                self.store.un_soft_fail_sticky_events_txn(
+                    txn, sticky_events_to_un_soft_fail
+                )
 
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
@@ -1771,6 +1829,11 @@ class PersistEventsStore:
             stream_id: This is expected to be the minimum `stream_ordering` for the
                 batch of events that we are persisting; which means we do not end up in a
                 situation where workers see events before the `current_state_delta` updates.
+                Note that this stamps a row *before* its own event; readers that pair
+                deltas with the events in the same window bound each delta on its
+                event's position instead, see
+                `get_current_state_deltas_for_room_by_event_position(...)`, which stays
+                correct if this stamp is ever changed.
                 FIXME: However, this function also gets called with next upcoming
                 `stream_ordering` when we re-sync the state of a partial stated room (see
                 `update_current_state(...)`) which may be "correct" but it would be good to
@@ -2093,6 +2156,129 @@ class PersistEventsStore:
         # unsubscribe from their device lists.
         self.store.handle_potentially_left_users_txn(
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
+        )
+
+        if self._include_profile_updates_in_sync:
+            # Handle changes to the profile updates stream.
+            # We've already done a bunch of work calculating the changes needed
+            # for the sliding sync tables, so we may as well re-use that information
+            # here to avoid parsing the state delta again, and handling various
+            # edge cases.
+            # FIXME: See issue https://github.com/element-hq/synapse/issues/19981
+            # for concerns around the current implementation of the profile
+            # updates stream.
+            profile_update_additions = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id)
+                # FIXME: Ideally we would filter out JOIN -> JOIN. See note below.
+                and c.membership == Membership.JOIN
+            }
+            profile_update_leaves = {
+                c.user_id
+                for c in sliding_sync_table_changes.to_insert_membership_snapshots
+                if self.hs.is_mine_id(c.user_id)
+                # Any transition from JOIN to something else counts as a leave here.
+                # Even the 'invalid' transitions might effectively happen due to
+                # state resolution.
+                and c.membership != Membership.JOIN
+            } | (
+                # We also need to consider users that get fully state reset out of the room.
+                # These should be treated as 'leave'
+                set(sliding_sync_table_changes.to_delete_membership_snapshots)
+            )
+
+            if profile_update_additions:
+                # Write the profile updates for additions to the room, from either
+                # a join, knock, invite, etc.
+                # FIXME this will add rows also when a display name changes due to
+                # the facts that `sliding_sync_table_changes` contains a JOIN
+                # membership event in that case. We should aim to filter these
+                # unnecessary rows out, as we're also generating an UPDATE profile
+                # update action row for the actual display name change itself.
+                # See https://github.com/element-hq/synapse/issues/19981
+                self.store.record_profile_updates_for_user_joined_room_txn(
+                    txn=txn,
+                    room_id=room_id,
+                    joined_users=profile_update_additions,
+                )
+            if profile_update_leaves:
+                # Write the profile updates for LEAVE events
+                for user_id in profile_update_leaves:
+                    self._record_profile_updates_for_user_left_room_txn(
+                        txn=txn,
+                        user_id=UserID.from_string(user_id),
+                        room_id=room_id,
+                    )
+
+    def _record_profile_updates_for_user_left_room_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: UserID,
+        room_id: str,
+    ) -> None:
+        """
+        Record updates into the profile updates stream for when a user leaves a room.
+
+        If this was the last shared room with a set of users, clear all old rows from
+        the `profile_updates_per_user` table relating to those users, to avoid exposing
+        any profile field changes past the point of not being in any common rooms with
+        the user.
+
+        Currently, updates are only recorded for local users.
+
+        Note, this method lives here in the events store file due to the profile
+        store not having access to the membership store (which the events store does),
+        which we need to re-use the `do_users_share_a_room_txn` method there.
+
+        Args:
+            user_id: The user who left the room.
+            room_id: The room that was left.
+        """
+        # Get the local members of the room
+        room_members = self.db_pool.simple_select_onecol_txn(
+            txn=txn,
+            table="local_current_membership",
+            retcol="user_id",
+            keyvalues={
+                "membership": Membership.JOIN,
+                "room_id": room_id,
+            },
+        )
+        # For each user check if we still share rooms
+        users_sharing_rooms = self.store.do_users_share_a_room_txn(
+            txn=txn,
+            user_id=user_id.to_string(),
+            other_user_ids=set(room_members),
+        )
+        users_no_longer_sharing_rooms = set(room_members) - set(
+            users_sharing_rooms.keys()
+        )
+
+        # First clear the previous rows from the table
+        user_clause, user_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "user_id",
+            users_no_longer_sharing_rooms,
+        )
+        txn.execute(
+            f"""
+                DELETE FROM profile_updates_per_user
+                    WHERE {user_clause}
+                    AND stream_id IN (
+                        SELECT stream_id FROM profile_updates WHERE user_id = ?
+                    )
+            """,
+            (*user_args, user_id.to_string()),
+        )
+
+        # Now record the "left room" action in the stream
+        self.store.record_profile_updates_txn(
+            txn=txn,
+            user_id=user_id,
+            action=ProfileUpdateAction.LEFT_ROOM,
+            field_names=[],
+            target_users=users_no_longer_sharing_rooms,
         )
 
     @classmethod
@@ -2469,6 +2655,29 @@ class PersistEventsStore:
             ],
         )
 
+    def _set_state_dag_extremities_txn(
+        self, txn: LoggingTransaction, room_id: str, new_extrems: Collection[str]
+    ) -> None:
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="msc4242_state_dag_forward_extremities",
+            keyvalues={
+                "room_id": room_id,
+            },
+        )
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            table="msc4242_state_dag_forward_extremities",
+            keys=("room_id", "event_id"),
+            values=[
+                (
+                    room_id,
+                    event_id,
+                )
+                for event_id in new_extrems
+            ],
+        )
+
     @classmethod
     def _filter_events_and_contexts_for_duplicates(
         cls, events_and_contexts: list[EventPersistencePair]
@@ -2646,6 +2855,11 @@ class PersistEventsStore:
                 # event isn't an outlier any more.
                 self._update_backward_extremeties(txn, [event])
 
+                if self._msc4354_enabled and event.sticky_duration():
+                    # The de-outliered event is sticky. Update the sticky events table to ensure
+                    # we deliver this down /sync.
+                    self.store.insert_sticky_events_txn(txn, [event])
+
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 
     def _store_event_txn(
@@ -2662,7 +2876,7 @@ class PersistEventsStore:
             return
 
         def event_dict(event: EventBase) -> JsonDict:
-            d = event.get_dict()
+            d = event.get_dict_for_persistence()
             d.pop("redacted", None)
             d.pop("redacted_because", None)
             return d
@@ -2848,6 +3062,9 @@ class PersistEventsStore:
 
             self._handle_event_relations(txn, event)
 
+            if supports_msc4242_state_dag(event) and event_exists_in_state_dag(event):
+                self._store_state_dag_edges(txn, event)
+
             # Store the labels for this event.
             labels = event.content.get(EventContentFields.LABELS)
             if labels:
@@ -2924,6 +3141,36 @@ class PersistEventsStore:
         txn.async_call_after(external_prefill)
         txn.call_after(local_prefill)
 
+    def _store_state_dag_edges(
+        self, txn: LoggingTransaction, event: MSC4242Event
+    ) -> None:
+        # the create event has no edge but we still need to persist it as get_state_dag just
+        # yanks all rows in this table. It's a bit gross to store NULL as the prev_state_event_id
+        # though.
+        if len(event.prev_state_events) == 0 and event.type == EventTypes.Create:
+            self.db_pool.simple_insert_txn(
+                txn,
+                table="msc4242_state_dag_edges",
+                values={
+                    "room_id": event.room_id,
+                    "event_id": event.event_id,
+                    "prev_state_event_id": None,
+                },
+            )
+            return
+        assert len(event.prev_state_events) > 0
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="msc4242_state_dag_edges",
+            key_names=["room_id", "event_id", "prev_state_event_id"],
+            key_values=[
+                (event.room_id, event.event_id, prev_state_event)
+                for prev_state_event in event.prev_state_events
+            ],
+            value_names=(),
+            value_values=(),
+        )
+
     def _store_redaction(self, txn: LoggingTransaction, event: EventBase) -> None:
         assert event.redacts is not None
         self.db_pool.simple_upsert_txn(
@@ -2933,6 +3180,7 @@ class PersistEventsStore:
             values={
                 "redacts": event.redacts,
                 "received_ts": self._clock.time_msec(),
+                "recheck": event.internal_metadata.need_to_check_redaction(),
             },
         )
 
@@ -3016,7 +3264,7 @@ class PersistEventsStore:
                     event.event_id,
                     event.internal_metadata.stream_ordering,
                     event.state_key,
-                    event.user_id,
+                    event.sender,
                     event.room_id,
                     event.membership,
                     non_null_str_or_none(event.content.get("displayname")),
@@ -3428,7 +3676,10 @@ class PersistEventsStore:
             values={
                 "event_id": event_id,
                 "reason": reason,
-                "last_check": self._clock.time_msec(),
+                # `last_check` is a TEXT column, so store the timestamp as a
+                # string rather than relying on the driver to coerce an int.
+                # (Ideally we'd fix the schema, but that is non-trivial)
+                "last_check": str(self._clock.time_msec()),
             },
         )
 
@@ -3444,7 +3695,13 @@ class PersistEventsStore:
         """
         state_groups = {}
         for event, context in events_and_contexts:
-            if event.internal_metadata.is_outlier():
+            # state dag rooms allow outliers to have state, as `/get_missing_events` state dag events are nominally
+            # outliers (not present in the timeline) but do need state persisted so we can calculate
+            # what the auth_events are for the event.
+            if (
+                not event.room_version.msc4242_state_dags
+                and event.internal_metadata.is_outlier()
+            ):
                 # double-check that we don't have any events that claim to be outliers
                 # *and* have partial state (which is meaningless: we should have no
                 # state at all for an outlier)

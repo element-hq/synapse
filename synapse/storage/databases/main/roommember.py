@@ -25,6 +25,7 @@ from typing import (
     AbstractSet,
     Collection,
     Iterable,
+    Literal,
     Mapping,
     Sequence,
     cast,
@@ -63,6 +64,7 @@ from synapse.types import (
     get_domain_from_id,
 )
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
+from synapse.util.duration import Duration
 from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
 
@@ -110,10 +112,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             self._known_servers_count = 1
             self.hs.get_clock().looping_call(
                 self._count_known_servers,
-                60 * 1000,
+                Duration(minutes=1),
             )
             self.hs.get_clock().call_later(
-                1,
+                Duration(seconds=1),
                 self._count_known_servers,
             )
             federation_known_servers_gauge.register_hook(
@@ -746,6 +748,27 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return frozenset(room_ids)
 
+    async def get_memberships_for_user(self, user_id: str) -> dict[str, str]:
+        """Returns a dict of room_id to membership state for a given user.
+
+        If a remote user only returns rooms this server is currently
+        participating in.
+        """
+
+        rows = cast(
+            list[tuple[str, str]],
+            await self.db_pool.simple_select_list(
+                "current_state_events",
+                keyvalues={
+                    "type": EventTypes.Member,
+                    "state_key": user_id,
+                },
+                retcols=["room_id", "membership"],
+                desc="get_memberships_for_user",
+            ),
+        )
+        return dict(rows)
+
     @cached(max_entries=500000, iterable=True)
     async def get_rooms_for_user(self, user_id: str) -> frozenset[str]:
         """Returns a set of room_ids the user is currently joined to.
@@ -822,63 +845,111 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     @cached(max_entries=10000)
     async def does_pair_of_users_share_a_room(
-        self, user_id: str, other_user_id: str
+        self,
+        user_id: str,
+        other_user_id: str,
+        exclude_room_ids: list[str] | None = None,
     ) -> bool:
         raise NotImplementedError()
 
-    @cachedList(
-        cached_method_name="does_pair_of_users_share_a_room", list_name="other_user_ids"
-    )
-    async def _do_users_share_a_room(
-        self, user_id: str, other_user_ids: Collection[str]
-    ) -> Mapping[str, bool | None]:
+    def do_users_share_a_room_txn(
+        self,
+        txn: LoggingTransaction,
+        user_id: str,
+        other_user_ids: Collection[str],
+        exclude_room_id: str | None = None,
+    ) -> dict[str, Literal[True]]:
         """Return mapping from user ID to whether they share a room with the
         given user.
 
-        Note: `None` and `False` are equivalent and mean they don't share a
-        room.
+        Optionally, exclude a room when querying the database.
+
+        Users sharing rooms get `True` returned, users who don't are omitted from the return.
+        (This is for friendliness with `cachedList` on `_do_users_share_a_room`)
         """
+        state_key_clause, state_key_args = make_in_list_sql_clause(
+            self.database_engine, "state_key", other_user_ids
+        )
+        # Build SQL args based on whether we are excluding a room ID or not
+        exclude_room_id_clause = ""
+        exclude_room_id_args: tuple[str, ...] = ()
 
-        def do_users_share_a_room_txn(
-            txn: LoggingTransaction, user_ids: Collection[str]
-        ) -> dict[str, bool]:
-            clause, args = make_in_list_sql_clause(
-                self.database_engine, "state_key", user_ids
-            )
+        if exclude_room_id:
+            exclude_room_id_clause = "AND room_id != ?"
+            exclude_room_id_args = (exclude_room_id,)
 
-            # This query works by fetching both the list of rooms for the target
-            # user and the set of other users, and then checking if there is any
-            # overlap.
-            sql = f"""
+        # This query works by fetching both the list of rooms for the target
+        # user and the set of other users, and then checking if there is any
+        # overlap.
+        txn.execute(
+            f"""
                 SELECT DISTINCT b.state_key
                 FROM (
                     SELECT room_id FROM current_state_events
-                    WHERE type = 'm.room.member' AND membership = 'join' AND state_key = ?
+                    WHERE type = 'm.room.member'
+                        AND membership = 'join'
+                        AND state_key = ?
+                        {exclude_room_id_clause}
                 ) AS a
                 INNER JOIN (
                     SELECT room_id, state_key FROM current_state_events
-                    WHERE type = 'm.room.member' AND membership = 'join' AND {clause}
-                ) AS b using (room_id)
-            """
+                    WHERE type = 'm.room.member'
+                        AND membership = 'join'
+                        AND {state_key_clause}
+                        {exclude_room_id_clause}
+                ) AS b USING (room_id)
+            """,
+            (
+                user_id,
+                *exclude_room_id_args,
+                *state_key_args,
+                *exclude_room_id_args,
+            ),
+        )
+        return {u: True for (u,) in txn}
 
-            txn.execute(sql, (user_id, *args))
-            return {u: True for (u,) in txn}
+    @cachedList(
+        cached_method_name="does_pair_of_users_share_a_room",
+        list_name="other_user_ids",
+    )
+    async def _do_users_share_a_room(
+        self,
+        user_id: str,
+        other_user_ids: Collection[str],
+        exclude_room_id: str | None = None,
+    ) -> Mapping[str, Literal[True] | None]:
+        """Return mapping from user ID to whether they share a room with the
+        given user.
+
+        Optionally, exclude a room when querying the database.
+
+        This returns `True` for users that share a room and `None` for users that don't.
+        (This is because of the `cachedList` annotation.)
+        """
 
         to_return = {}
         for batch_user_ids in batch_iter(other_user_ids, 1000):
             res = await self.db_pool.runInteraction(
-                "do_users_share_a_room", do_users_share_a_room_txn, batch_user_ids
+                "do_users_share_a_room",
+                self.do_users_share_a_room_txn,
+                user_id,
+                batch_user_ids,
+                exclude_room_id,
             )
             to_return.update(res)
 
         return to_return
 
     async def do_users_share_a_room(
-        self, user_id: str, other_user_ids: Collection[str]
+        self,
+        user_id: str,
+        other_user_ids: Collection[str],
+        exclude_room_id: str | None = None,
     ) -> set[str]:
         """Return the set of users who share a room with the first users"""
-
-        user_dict = await self._do_users_share_a_room(user_id, other_user_ids)
+        user_dict = await self._do_users_share_a_room(
+            user_id, other_user_ids, exclude_room_id
+        )
 
         return {u for u, share_room in user_dict.items() if share_room}
 
@@ -949,13 +1020,51 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return {u for u, share_room in user_dict.items() if share_room}
 
-    async def get_users_who_share_room_with_user(self, user_id: str) -> set[str]:
-        """Returns the set of users who share a room with `user_id`"""
+    async def get_users_who_share_room_with_user(
+        self, user_id: str, excluded_rooms: AbstractSet[str] = frozenset()
+    ) -> set[str]:
+        """Returns the set of users who share a room with `user_id`.
+
+        Args:
+            user_id: The user to find the co-occupants of.
+            excluded_rooms: Rooms which should not, on their own, count as a
+                shared room.
+        """
         room_ids = await self.get_rooms_for_user(user_id)
 
         user_who_share_room: set[str] = set()
         for room_id in room_ids:
+            if room_id in excluded_rooms:
+                continue
             user_ids = await self.get_users_in_room(room_id)
+            user_who_share_room.update(user_ids)
+
+        return user_who_share_room
+
+    async def get_local_users_who_share_room_with_user(
+        self,
+        user_id: str,
+        limit_to_rooms: set[str] | None = None,
+    ) -> set[str]:
+        """
+        Returns the set of local users who share a room with `user_id`.
+
+        This also includes the `user_id` themselves.
+
+        Args:
+            user_id: The user ID to find the local users who share rooms.
+            limit_to_rooms: Optional set of rooms to limit to.
+
+        Returns:
+            Set of local user ID's who share a room with the given user.
+        """
+        room_ids = await self.get_rooms_for_user(user_id)
+        if limit_to_rooms is not None:
+            room_ids = room_ids.intersection(limit_to_rooms)
+
+        user_who_share_room: set[str] = set()
+        for room_id in room_ids:
+            user_ids = await self.get_local_users_in_room(room_id)
             user_who_share_room.update(user_ids)
 
         return user_who_share_room
@@ -1010,7 +1119,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             # We don't update the event cache hit ratio as it completely throws off
             # the hit ratio counts. After all, we don't populate the cache if we
             # miss it here
-            event_map = self._get_events_from_local_cache(
+            event_map = await self._get_events_from_local_cache(
                 member_event_ids, update_metrics=False
             )
 

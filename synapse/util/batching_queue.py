@@ -36,6 +36,7 @@ from twisted.internet import defer
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -175,7 +176,7 @@ class BatchingQueue(Generic[V, R]):
                 # pattern is to call `add_to_queue` multiple times at once, and
                 # deferring to the next reactor tick allows us to batch all of
                 # those up.
-                await self._clock.sleep(0)
+                await self._clock.sleep(Duration(seconds=0))
 
                 next_values = self._next_values.pop(key, [])
                 if not next_values:

@@ -37,6 +37,7 @@ from twisted.conch.ssh.keys import Key
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.types import JsonDict, StrSequence
+from synapse.util.duration import Duration
 from synapse.util.module_loader import load_module
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -175,7 +176,20 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fec0::/10",
 ]
 
-DEFAULT_ROOM_VERSION = "10"
+DEFAULT_ROOM_VERSION = "11"
+
+# Defaults for the presence state machine timers, in milliseconds. Overridden
+# by the corresponding options in the `presence` config section.
+#
+# How long after a user was last active that they are still considered
+# "currently_active".
+DEFAULT_LAST_ACTIVE_GRANULARITY = 60 * 1000
+# How long to wait until a new /events or /sync request before assuming the
+# client has gone.
+DEFAULT_SYNC_ONLINE_TIMEOUT = 30 * 1000
+# How long to wait before marking the user as idle. Compared against last
+# active.
+DEFAULT_IDLE_TIMER = 5 * 60 * 1000
 
 ROOM_COMPLEXITY_TOO_GREAT = (
     "Your homeserver is unable to join rooms this large or complex. "
@@ -505,6 +519,32 @@ class ServerConfig(Config):
             "include_offline_users_on_sync", False
         )
 
+        # Timers controlling the presence state machine.
+        self.presence_last_active_granularity = self.parse_duration(
+            presence_config.get(
+                "last_active_granularity", DEFAULT_LAST_ACTIVE_GRANULARITY
+            )
+        )
+        self.presence_sync_online_timeout = self.parse_duration(
+            presence_config.get("sync_online_timeout", DEFAULT_SYNC_ONLINE_TIMEOUT)
+        )
+        self.presence_idle_timeout = self.parse_duration(
+            presence_config.get("idle_timeout", DEFAULT_IDLE_TIMER)
+        )
+        if self.presence_last_active_granularity <= 0:
+            raise ConfigError(
+                "'presence.last_active_granularity' must be a positive duration"
+            )
+        if self.presence_sync_online_timeout <= 0:
+            raise ConfigError(
+                "'presence.sync_online_timeout' must be a positive duration"
+            )
+        if self.presence_idle_timeout <= self.presence_last_active_granularity:
+            raise ConfigError(
+                "'presence.idle_timeout' must be greater than "
+                "'presence.last_active_granularity'"
+            )
+
         # Custom presence router module
         # This is the legacy way of configuring it (the config should now be put in the modules section)
         self.presence_router_module_class = None
@@ -544,6 +584,12 @@ class ServerConfig(Config):
                 " 'allow_public_rooms_without_auth' and/or"
                 " 'allow_public_rooms_over_federation' is set."
             )
+
+        # Whether to support MSC4429 and MSC4262 Profile updates down sync
+        self.include_profile_updates_in_sync = config.get(
+            "include_profile_updates_in_sync",
+            False,
+        )
 
         # Check if the legacy "restrict_public_rooms_to_local_users" flag is set. This
         # flag is now obsolete but we need to check it for backward-compatibility.
@@ -612,6 +658,15 @@ class ServerConfig(Config):
             )
         else:
             self.redaction_retention_period = None
+
+        # How long to allow event redactions for on `m.room.message`
+        redaction_allowed_period = config.get("redaction_allowed_period", None)
+        if redaction_allowed_period is not None:
+            self.redaction_allowed_period: int | None = self.parse_duration(
+                redaction_allowed_period
+            )
+        else:
+            self.redaction_allowed_period = None
 
         # How long to keep locally forgotten rooms before purging them from the DB.
         forgotten_room_retention_period = config.get(
@@ -896,6 +951,10 @@ class ServerConfig(Config):
             config.get("exclude_rooms_from_sync") or []
         )
 
+        self.rooms_to_exclude_from_presence: list[str] = (
+            config.get("exclude_rooms_from_presence") or []
+        )
+
         delete_stale_devices_after: str | None = (
             config.get("delete_stale_devices_after") or None
         )
@@ -910,39 +969,55 @@ class ServerConfig(Config):
         # The maximum allowed delay duration for delayed events (MSC4140).
         max_event_delay_duration = config.get("max_event_delay_duration")
         if max_event_delay_duration is not None:
-            self.max_event_delay_ms: int | None = self.parse_duration(
-                max_event_delay_duration
-            )
-            if self.max_event_delay_ms <= 0:
-                raise ConfigError("max_event_delay_duration must be a positive value")
+            max_event_delay_ms = self.parse_duration(max_event_delay_duration)
+            if max_event_delay_ms <= 0:
+                raise ConfigError(
+                    "'max_event_delay_duration' must be a positive value if set",
+                    ("max_event_delay_duration",),
+                )
+            self.max_event_delay_duration = Duration(milliseconds=max_event_delay_ms)
         else:
-            self.max_event_delay_ms = None
+            self.max_event_delay_duration = Duration()
+
+        # The maximum number of delayed events a user may have scheduled at a time.
+        # (Defined here despite being experimental to be near the other MSC4140 config)
+        experimental = config.get("experimental_features") or {}
+        self.max_delayed_events_per_user: int = experimental.get(
+            "msc4140_max_delayed_events_per_user", 100
+        )
+        if (
+            not isinstance(self.max_delayed_events_per_user, int)
+            or self.max_delayed_events_per_user < 0
+        ):
+            raise ConfigError(
+                "'msc4140_max_delayed_events_per_user' must be a non-negative integer",
+                ("experimental", "msc4140_max_delayed_events_per_user"),
+            )
+
+        self.msc4140_enabled = bool(
+            self.max_delayed_events_per_user and self.max_event_delay_duration
+        )
 
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
 
     def generate_config_section(
         self,
+        *,
         config_dir_path: str,
         data_dir_path: str,
         server_name: str,
-        open_private_ports: bool,
-        listeners: list[dict] | None,
+        open_private_ports: bool = False,
+        listeners: list[dict] | None = None,
         **kwargs: Any,
     ) -> str:
-        _, bind_port = parse_and_validate_server_name(server_name)
-        if bind_port is not None:
-            unsecure_port = bind_port - 400
-        else:
-            bind_port = 8448
-            unsecure_port = 8008
-
         pid_file = os.path.join(data_dir_path, "homeserver.pid")
 
-        secure_listeners = []
-        unsecure_listeners = []
+        http_bindings = "[]"
         private_addresses = ["::1", "127.0.0.1"]
         if listeners:
+            secure_listeners = []
+            unsecure_listeners = []
             for listener in listeners:
                 if listener["tls"]:
                     secure_listeners.append(listener)
@@ -957,43 +1032,17 @@ class ServerConfig(Config):
 
                     unsecure_listeners.append(listener)
 
-            secure_http_bindings = indent(
-                yaml.dump(secure_listeners), " " * 10
+            # `lstrip` is used because the first line already has whitespace in the
+            # template below
+            http_bindings = indent(
+                yaml.dump(secure_listeners + unsecure_listeners), " " * 10
             ).lstrip()
-
-            unsecure_http_bindings = indent(
-                yaml.dump(unsecure_listeners), " " * 10
-            ).lstrip()
-
-        if not unsecure_listeners:
-            unsecure_http_bindings = """- port: %(unsecure_port)s
-            tls: false
-            type: http
-            x_forwarded: true""" % locals()
-
-            if not open_private_ports:
-                unsecure_http_bindings += (
-                    "\n            bind_addresses: ['::1', '127.0.0.1']"
-                )
-
-            unsecure_http_bindings += """
-
-            resources:
-              - names: [client, federation]
-                compress: false"""
-
-            if listeners:
-                unsecure_http_bindings = ""
-
-        if not secure_listeners:
-            secure_http_bindings = ""
 
         return """\
         server_name: "%(server_name)s"
         pid_file: %(pid_file)s
         listeners:
-          %(secure_http_bindings)s
-          %(unsecure_http_bindings)s
+          %(http_bindings)s
         """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:

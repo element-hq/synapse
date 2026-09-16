@@ -53,7 +53,7 @@ class ThreadSubscriptionsHandler:
             raise NotFoundError("No such thread root")
 
         return await self.store.get_subscription_for_thread(
-            user_id.to_string(), event.room_id, thread_root_event_id
+            user_id.to_string(), event.event.room_id, thread_root_event_id
         )
 
     async def subscribe_user_to_thread(
@@ -103,7 +103,7 @@ class ThreadSubscriptionsHandler:
             )
             if autosub_cause_event is None:
                 raise NotFoundError("Automatic subscription event not found")
-            relation = relation_from_event(autosub_cause_event)
+            relation = relation_from_event(autosub_cause_event.event)
             if (
                 relation is None
                 or relation.rel_type != RelationTypes.THREAD
@@ -115,7 +115,9 @@ class ThreadSubscriptionsHandler:
                     errcode=Codes.MSC4306_NOT_IN_THREAD,
                 )
 
-            automatic_event_orderings = EventOrderings.from_event(autosub_cause_event)
+            automatic_event_orderings = EventOrderings.from_event(
+                autosub_cause_event.event
+            )
         else:
             automatic_event_orderings = None
 
@@ -174,7 +176,7 @@ class ThreadSubscriptionsHandler:
 
         outcome = await self.store.unsubscribe_user_from_thread(
             user_id.to_string(),
-            event.room_id,
+            event.event.room_id,
             thread_root_event_id,
         )
 

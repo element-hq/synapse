@@ -40,6 +40,9 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             rate_limited=True,
             sender=UserID.from_string("@as:example.com"),
         )
+        # The ratelimiter now resolves the AS via get_app_service_by_id, so the
+        # appservice must be in the store's cache for the lookup to hit.
+        self.hs.get_datastores().main.services_cache.append(appservice)
         as_requester = create_requester("@user:example.com", app_service=appservice)
 
         limiter = Ratelimiter(
@@ -76,6 +79,9 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             rate_limited=False,
             sender=UserID.from_string("@as:example.com"),
         )
+        # The ratelimiter now resolves the AS via get_app_service_by_id, so the
+        # appservice must be in the store's cache for the lookup to hit.
+        self.hs.get_datastores().main.services_cache.append(appservice)
         as_requester = create_requester("@user:example.com", app_service=appservice)
 
         limiter = Ratelimiter(

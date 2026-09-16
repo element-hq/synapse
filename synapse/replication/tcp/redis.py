@@ -53,6 +53,7 @@ from synapse.replication.tcp.protocol import (
     tcp_inbound_commands_counter,
     tcp_outbound_commands_counter,
 )
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.replication.tcp.handler import ReplicationCommandHandler
@@ -298,6 +299,7 @@ class SynapseRedisFactory(RedisFactory):
         isLazy: bool = False,
         handler: type = ConnectionHandler,
         charset: str = "utf-8",
+        username: str | None = None,
         password: str | None = None,
         replyTimeout: int = 30,
         convertNumbers: int | None = True,
@@ -309,6 +311,7 @@ class SynapseRedisFactory(RedisFactory):
             isLazy=isLazy,
             handler=handler,
             charset=charset,
+            username=username,
             password=password,
             replyTimeout=replyTimeout,
             convertNumbers=convertNumbers,
@@ -317,7 +320,7 @@ class SynapseRedisFactory(RedisFactory):
         self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.server_name = hs.hostname
 
-        hs.get_clock().looping_call(self._send_ping, 30 * 1000)
+        hs.get_clock().looping_call(self._send_ping, Duration(seconds=30))
 
     @wrap_as_background_process("redis_ping")
     async def _send_ping(self) -> None:
@@ -389,6 +392,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
             dbid=None,
             poolsize=1,
             replyTimeout=30,
+            username=hs.config.redis.redis_username,
             password=hs.config.redis.redis_password,
         )
 
@@ -424,6 +428,7 @@ def lazyConnection(
     port: int = 6379,
     dbid: int | None = None,
     reconnect: bool = True,
+    username: str | None = None,
     password: str | None = None,
     replyTimeout: int = 30,
 ) -> ConnectionHandler:
@@ -439,6 +444,7 @@ def lazyConnection(
         poolsize=1,
         isLazy=True,
         handler=ConnectionHandler,
+        username=username,
         password=password,
         replyTimeout=replyTimeout,
     )
@@ -473,6 +479,7 @@ def lazyUnixConnection(
     path: str = "/tmp/redis.sock",
     dbid: int | None = None,
     reconnect: bool = True,
+    username: str | None = None,
     password: str | None = None,
     replyTimeout: int = 30,
 ) -> ConnectionHandler:
@@ -492,6 +499,7 @@ def lazyUnixConnection(
         poolsize=1,
         isLazy=True,
         handler=UnixConnectionHandler,
+        username=username,
         password=password,
         replyTimeout=replyTimeout,
     )

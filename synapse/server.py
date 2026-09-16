@@ -34,6 +34,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Optional,
     TypeVar,
     cast,
 )
@@ -54,6 +55,7 @@ from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
+from synapse.api.errors import HomeServerNotSetupException
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
 from synapse.app._base import unregister_sighups
@@ -145,8 +147,10 @@ from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.logging.context import PreserveLoggingContext
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     all_later_gauges_to_clean_up_on_shutdown,
     register_threadpool,
+    synapse_server_name_info,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
@@ -170,6 +174,8 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust.handlers import RustHandlers
+from synapse.synapse_rust.msc4388_rendezvous import MSC4388RendezvousHandler
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import SYNAPSE_VERSION
@@ -319,7 +325,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self,
         hostname: str,
         config: HomeServerConfig,
-        reactor: ISynapseReactor | None = None,
+        reactor: Optional[ISynapseReactor] = None,
     ):
         """
         Args:
@@ -352,12 +358,15 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._module_web_resources_consumed = False
 
         # This attribute is set by the free function `refresh_certificate`.
-        self.tls_server_context_factory: IOpenSSLContextFactory | None = None
+        self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
         self._is_shutdown = False
         self._async_shutdown_handlers: list[ShutdownInfo] = []
         self._sync_shutdown_handlers: list[ShutdownInfo] = []
         self._background_processes: set[defer.Deferred[Any | None]] = set()
+
+        # For every server we spawn in the process, track it in the metrics
+        synapse_server_name_info.labels(**{SERVER_NAME_LABEL: self.hostname}).set(1)
 
     def run_as_background_process(
         self,
@@ -399,7 +408,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         """
         if self._is_shutdown:
             raise Exception(
-                f"Cannot start background process. HomeServer has been shutdown {len(self._background_processes)} {len(self.get_clock()._looping_calls)} {len(self.get_clock()._call_id_to_delayed_call)}"
+                "Cannot start background process. HomeServer has been shutdown"
             )
 
         # Ignore linter error as this is the one location this should be called.
@@ -466,7 +475,17 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # TODO: Cleanup replication pieces
 
-        self.get_keyring().shutdown()
+        keyring: Keyring | None = None
+        try:
+            keyring = self.get_keyring()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, keyring won't have existed before
+            # this and will fail to be initialized but it cleans itself up for any
+            # partial initialization problem.
+            pass
+
+        if keyring:
+            keyring.shutdown()
 
         # Cleanup metrics associated with the homeserver
         for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
@@ -478,8 +497,12 @@ class HomeServer(metaclass=abc.ABCMeta):
             self.config.server.server_name
         )
 
-        for db in self.get_datastores().databases:
-            db.stop_background_updates()
+        try:
+            for db in self.get_datastores().databases:
+                db.stop_background_updates()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, the datastores won't exist
+            pass
 
         if self.should_send_federation():
             try:
@@ -513,8 +536,12 @@ class HomeServer(metaclass=abc.ABCMeta):
                 pass
         self._background_processes.clear()
 
-        for db in self.get_datastores().databases:
-            db._db_pool.close()
+        try:
+            for db in self.get_datastores().databases:
+                db._db_pool.close()
+        except HomeServerNotSetupException:
+            # If the homeserver wasn't fully setup, the datastores won't exist
+            pass
 
     def register_async_shutdown_handler(
         self,
@@ -677,7 +704,9 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     def get_datastores(self) -> Databases:
         if not self.datastores:
-            raise Exception("HomeServer.setup must be called before getting datastores")
+            raise HomeServerNotSetupException(
+                "HomeServer.setup must be called before getting datastores"
+            )
 
         return self.datastores
 
@@ -713,10 +742,6 @@ class HomeServer(metaclass=abc.ABCMeta):
     def get_auth(self) -> Auth:
         if self.config.mas.enabled:
             return MasDelegatedAuth(self)
-        if self.config.experimental.msc3861.enabled:
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-            return MSC3861DelegatedAuth(self)
         return InternalAuth(self)
 
     @cache_in_self
@@ -934,6 +959,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_set_password_handler(self) -> SetPasswordHandler:
         return SetPasswordHandler(self)
+
+    @cache_in_self
+    def get_rust_handlers(self) -> RustHandlers:
+        return RustHandlers(self)
 
     @cache_in_self
     def get_event_sources(self) -> EventSources:
@@ -1158,6 +1187,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return RendezvousHandler(self)
 
     @cache_in_self
+    def get_msc4388_rendezvous_handler(self) -> MSC4388RendezvousHandler:
+        return MSC4388RendezvousHandler(self)
+
+    @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":
         """
         The Redis connection used for replication.
@@ -1183,6 +1216,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 host=self.config.redis.redis_host,
                 port=self.config.redis.redis_port,
                 dbid=self.config.redis.redis_dbid,
+                username=self.config.redis.redis_username,
                 password=self.config.redis.redis_password,
                 reconnect=True,
             )
@@ -1196,6 +1230,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 hs=self,
                 path=self.config.redis.redis_path,
                 dbid=self.config.redis.redis_dbid,
+                username=self.config.redis.redis_username,
                 password=self.config.redis.redis_password,
                 reconnect=True,
             )

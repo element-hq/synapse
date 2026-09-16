@@ -608,7 +608,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             stream_column="stream_ordering",
             max_value=events_max,
         )
-        self._events_stream_cache = StreamChangeCache(
+        self._events_stream_cache: StreamChangeCache = StreamChangeCache(
             name="EventsRoomStreamChangeCache",
             server_name=self.server_name,
             current_stream_pos=min_event_val,
@@ -740,13 +740,25 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         from_key: RoomStreamToken,
     ) -> StrCollection:
         """Return the rooms that probably have had updates since the given
-        token (changes that are > `from_key`)."""
+        token (changes that are > `from_key`).
+
+        May return false positives, but must not return false negatives.
+
+        If `have_finished_sliding_sync_background_jobs` is False, then we return
+        all the room IDs, as we can't be sure that the sliding sync table is
+        fully populated.
+        """
         # If the stream change cache is valid for the stream token, we can just
         # use the result of that.
         if from_key.stream >= self._events_stream_cache.get_earliest_known_position():
             return self._events_stream_cache.get_entities_changed(
                 room_ids, from_key.stream
             )
+
+        if not self.have_finished_sliding_sync_background_jobs():
+            # If the table hasn't been populated yet, we have to assume all rooms
+            # have updates.
+            return room_ids
 
         def get_rooms_that_have_updates_since_sliding_sync_table_txn(
             txn: LoggingTransaction,
@@ -2413,11 +2425,18 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             event_filter: If provided filters the events to those that match the filter.
 
         Returns:
-            The results as a list of events, a token that points to the end of
-            the result set, and a boolean to indicate if there were more events
-            but we hit the limit. If no events are returned then the end of the
+            - The results as a list of events;
+            - a token that points to the end of the result set; and
+            - a boolean to indicate if there were more events
+              but we hit the limit (`limited`)
+
+            If no events are returned and `limited` is false, then the end of the
             stream has been reached (i.e. there are no events between `from_key`
             and `to_key`).
+
+            When `limited` is true, that means that more pagination can be attempted.
+            Note that `limited` can be true even if no events are returned,
+            because rejected events are filtered out after the limit check.
 
             When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
             When Direction.BACKWARDS: from_key >= x > to_key, (descending order)

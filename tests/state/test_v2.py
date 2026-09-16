@@ -33,7 +33,7 @@ from twisted.internet import defer
 from synapse.api.constants import EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.event_auth import auth_types_for_event
-from synapse.events import EventBase, make_event_from_dict
+from synapse.events import EventBase
 from synapse.state.v2 import (
     _get_auth_chain_difference,
     _get_power_level_for_sender,
@@ -42,8 +42,10 @@ from synapse.state.v2 import (
 )
 from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import EventID, StateMap
+from synapse.util.duration import Duration
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 
 ALICE = "@alice:example.com"
 BOB = "@bob:example.com"
@@ -61,7 +63,7 @@ ORIGIN_SERVER_TS = 0
 
 
 class FakeClock:
-    async def sleep(self, msec: float) -> None:
+    async def sleep(self, duration: Duration) -> None:
         return None
 
 
@@ -95,9 +97,6 @@ class FakeEvent:
         Args:
             auth_events: list of event_ids
             prev_events: list of event_ids
-
-        Returns:
-            FrozenEvent
         """
         global ORIGIN_SERVER_TS
 
@@ -118,7 +117,7 @@ class FakeEvent:
         if self.state_key is not None:
             event_dict["state_key"] = self.state_key
 
-        return make_event_from_dict(event_dict)
+        return make_test_event(event_dict)
 
 
 # All graphs start with this set of events
@@ -877,7 +876,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         on room version"""
         store = TestStateResolutionStore({})
         for room_version in [RoomVersions.V10, RoomVersions.V11]:
-            create_event = make_event_from_dict(
+            create_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -893,9 +892,9 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         else {}
                     ),
                 },
-                room_version,
+                room_version=room_version,
             )
-            member_event = make_event_from_dict(
+            member_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -907,9 +906,9 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                     "auth_events": [create_event.event_id],
                     "prev_events": [create_event.event_id],
                 },
-                room_version,
+                room_version=room_version,
             )
-            pl_event = make_event_from_dict(
+            pl_event = make_test_event(
                 {
                     "room_id": ROOM_ID,
                     "sender": ALICE,
@@ -925,7 +924,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                     "auth_events": [create_event.event_id, member_event.event_id],
                     "prev_events": [member_event.event_id],
                 },
-                room_version,
+                room_version=room_version,
             )
 
             event_map = {
@@ -939,7 +938,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                 CHARLIE: 10,
             }
             for user_id, want_pl in want_pls.items():
-                test_event = make_event_from_dict(
+                test_event = make_test_event(
                     {
                         "room_id": ROOM_ID,
                         "sender": user_id,
@@ -953,7 +952,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         ],
                         "prev_events": [pl_event.event_id],
                     },
-                    room_version,
+                    room_version=room_version,
                 )
                 event_map[test_event.event_id] = test_event
                 got_pl = self.successResultOf(
@@ -976,7 +975,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                 CHARLIE: 0,
             }
             for user_id, want_pl in want_pls.items():
-                test_event = make_event_from_dict(
+                test_event = make_test_event(
                     {
                         "room_id": ROOM_ID,
                         "sender": user_id,
@@ -990,7 +989,7 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                         ],
                         "prev_events": [pl_event.event_id],
                     },
-                    room_version,
+                    room_version=room_version,
                 )
                 got_pl = self.successResultOf(
                     defer.ensureDeferred(

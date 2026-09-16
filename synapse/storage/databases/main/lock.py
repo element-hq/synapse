@@ -38,6 +38,7 @@ from synapse.storage.database import (
 )
 from synapse.types import ISynapseReactor
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -49,10 +50,12 @@ logger = logging.getLogger(__name__)
 
 # How often to renew an acquired lock by updating the `last_renewed_ts` time in
 # the lock table.
-_RENEWAL_INTERVAL_MS = 30 * 1000
+_RENEWAL_INTERVAL = Duration(seconds=30)
 
 # How long before an acquired lock times out.
-_LOCK_TIMEOUT_MS = 2 * 60 * 1000
+_LOCK_TIMEOUT = Duration(minutes=2)
+
+_LOCK_REAP_INTERVAL = Duration(milliseconds=_LOCK_TIMEOUT.as_millis() / 10.0)
 
 
 class LockStore(SQLBaseStore):
@@ -60,7 +63,7 @@ class LockStore(SQLBaseStore):
 
     Locks are identified by a name and key. A lock is acquired by inserting into
     the `worker_locks` table if a) there is no existing row for the name/key or
-    b) the existing row has a `last_renewed_ts` older than `_LOCK_TIMEOUT_MS`.
+    b) the existing row has a `last_renewed_ts` older than `_LOCK_TIMEOUT`.
 
     When a lock is taken out the instance inserts a random `token`, the instance
     that holds that token holds the lock until it drops (or times out).
@@ -106,9 +109,7 @@ class LockStore(SQLBaseStore):
 
         self._acquiring_locks: set[tuple[str, str]] = set()
 
-        self.clock.looping_call(
-            self._reap_stale_read_write_locks, _LOCK_TIMEOUT_MS / 10.0
-        )
+        self.clock.looping_call(self._reap_stale_read_write_locks, _LOCK_REAP_INTERVAL)
 
     @wrap_as_background_process("LockStore._on_shutdown")
     async def _on_shutdown(self) -> None:
@@ -181,7 +182,7 @@ class LockStore(SQLBaseStore):
                     self._instance_name,
                     token,
                     now,
-                    now - _LOCK_TIMEOUT_MS,
+                    now - _LOCK_TIMEOUT.as_millis(),
                 ),
             )
 
@@ -339,7 +340,9 @@ class LockStore(SQLBaseStore):
         """
 
         def reap_stale_read_write_locks_txn(txn: LoggingTransaction) -> None:
-            txn.execute(delete_sql, (self.clock.time_msec() - _LOCK_TIMEOUT_MS,))
+            txn.execute(
+                delete_sql, (self.clock.time_msec() - _LOCK_TIMEOUT.as_millis(),)
+            )
             if txn.rowcount:
                 logger.info("Reaped %d stale locks", txn.rowcount)
 
@@ -410,7 +413,7 @@ class Lock:
     def _setup_looping_call(self) -> None:
         self._looping_call = self._clock.looping_call(
             self._renew,
-            _RENEWAL_INTERVAL_MS,
+            _RENEWAL_INTERVAL,
             self._server_name,
             self._store,
             self._hs,
@@ -488,7 +491,7 @@ class Lock:
         )
         return (
             last_renewed_ts is not None
-            and self._clock.time_msec() - _LOCK_TIMEOUT_MS < last_renewed_ts
+            and self._clock.time_msec() - _LOCK_TIMEOUT.as_millis() < last_renewed_ts
         )
 
     async def __aenter__(self) -> None:

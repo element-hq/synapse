@@ -144,6 +144,28 @@ class SendDelayedEventServlet(RestServlet):
         return 200, {}
 
 
+class DelayedEventServlet(RestServlet):
+    PATTERNS = client_patterns(
+        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)$",
+        releases=(),
+    )
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+
+    async def on_GET(
+        self, request: SynapseRequest, delay_id: str
+    ) -> tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        delayed_event = await self.delayed_events_handler.get_for_user(
+            requester, delay_id
+        )
+        return 200, delayed_event.asdict()
+
+
 class DelayedEventsServlet(RestServlet):
     PATTERNS = client_patterns(
         r"/org\.matrix\.msc4140/delayed_events$",
@@ -166,13 +188,11 @@ class DelayedEventsServlet(RestServlet):
             "status",
             allowed_values=tuple(s.value for s in _DelayedEventStatus),
         )
-        delay_ids = parse_strings_from_args(args, "delay_id")
         # TODO: Support Pagination stream API
         _from_token = parse_string_from_args(args, "from")
 
         ret = await self.delayed_events_handler.get_delayed_events_for_user(
             requester,
-            delay_ids,
             statuses is None or _DelayedEventStatus.SCHEDULED.value in statuses,
             statuses is None or _DelayedEventStatus.FINALISED.value in statuses,
         )
@@ -183,10 +203,11 @@ class DelayedEventsServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    # The following can't currently be instantiated on workers.
+    # Most of the following can't currently be instantiated on workers.
     if hs.config.worker.worker_app is None:
         UpdateDelayedEventServlet(hs).register(http_server)
         CancelDelayedEventServlet(hs).register(http_server)
-        RestartDelayedEventServlet(hs).register(http_server)
         SendDelayedEventServlet(hs).register(http_server)
+    RestartDelayedEventServlet(hs).register(http_server)
+    DelayedEventServlet(hs).register(http_server)
     DelayedEventsServlet(hs).register(http_server)

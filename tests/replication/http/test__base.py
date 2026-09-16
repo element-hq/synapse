@@ -30,9 +30,10 @@ from synapse.replication.http._base import ReplicationEndpoint
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.cancellation import cancellable
+from synapse.util.duration import Duration
 
 from tests import unittest
-from tests.http.server._base import test_disconnect
+from tests.http.server._base import disconnect_and_assert
 
 
 class CancellableReplicationEndpoint(ReplicationEndpoint):
@@ -52,7 +53,7 @@ class CancellableReplicationEndpoint(ReplicationEndpoint):
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
     ) -> tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
 
@@ -73,7 +74,7 @@ class UncancellableReplicationEndpoint(ReplicationEndpoint):
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
     ) -> tuple[int, JsonDict]:
-        await self.clock.sleep(1.0)
+        await self.clock.sleep(Duration(seconds=1))
         return HTTPStatus.OK, {"result": True}
 
 
@@ -93,7 +94,7 @@ class ReplicationEndpointCancellationTestCase(unittest.HomeserverTestCase):
         """Test that handlers with the `@cancellable` flag can be cancelled."""
         path = f"{REPLICATION_PREFIX}/{CancellableReplicationEndpoint.NAME}/"
         channel = self.make_request("POST", path, await_result=False, content={})
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=True,
@@ -104,7 +105,7 @@ class ReplicationEndpointCancellationTestCase(unittest.HomeserverTestCase):
         """Test that handlers without the `@cancellable` flag cannot be cancelled."""
         path = f"{REPLICATION_PREFIX}/{UncancellableReplicationEndpoint.NAME}/"
         channel = self.make_request("POST", path, await_result=False, content={})
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=False,

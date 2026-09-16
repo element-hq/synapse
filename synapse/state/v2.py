@@ -40,6 +40,7 @@ from synapse.api.room_versions import RoomVersion, StateResolutionVersions
 from synapse.events import EventBase, is_creator
 from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import MutableStateMap, StateMap, StrCollection
+from synapse.util.duration import Duration
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class Clock(Protocol):
     # This is usually synapse.util.Clock, but it's replaced with a FakeClock in tests.
     # We only ever sleep(0) though, so that other async functions can make forward
     # progress without waiting for stateres to complete.
-    async def sleep(self, duration_ms: float) -> None: ...
+    async def sleep(self, duration: Duration) -> None: ...
 
 
 class StateResolutionStore(Protocol):
@@ -639,7 +640,7 @@ async def _reverse_topological_power_sort(
         # We await occasionally when we're working with large data sets to
         # ensure that we don't block the reactor loop for too long.
         if idx % _AWAIT_AFTER_ITERATIONS == 0:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
     event_to_pl = {}
     for idx, event_id in enumerate(graph, start=1):
@@ -651,7 +652,7 @@ async def _reverse_topological_power_sort(
         # We await occasionally when we're working with large data sets to
         # ensure that we don't block the reactor loop for too long.
         if idx % _AWAIT_AFTER_ITERATIONS == 0:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
     def _get_power_order(event_id: str) -> tuple[int, int, str]:
         ev = event_map[event_id]
@@ -745,7 +746,7 @@ async def _iterative_auth_checks(
         # We await occasionally when we're working with large data sets to
         # ensure that we don't block the reactor loop for too long.
         if idx % _AWAIT_AFTER_ITERATIONS == 0:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
     return resolved_state
 
@@ -796,7 +797,7 @@ async def _mainline_sort(
         # We await occasionally when we're working with large data sets to
         # ensure that we don't block the reactor loop for too long.
         if idx != 0 and idx % _AWAIT_AFTER_ITERATIONS == 0:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
         idx += 1
 
@@ -814,7 +815,7 @@ async def _mainline_sort(
         # We await occasionally when we're working with large data sets to
         # ensure that we don't block the reactor loop for too long.
         if idx % _AWAIT_AFTER_ITERATIONS == 0:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
     event_ids.sort(key=lambda ev_id: order_map[ev_id])
 
@@ -865,7 +866,7 @@ async def _get_mainline_depth_for_event(
         idx += 1
 
         if idx % _AWAIT_AFTER_ITERATIONS == 0:
-            await clock.sleep(0)
+            await clock.sleep(Duration(seconds=0))
 
     # Didn't find a power level auth event, so we just return 0
     return 0

@@ -14,6 +14,9 @@ It should be named `<SERVERNAME>.log.config` by default.
 Hint: If you're looking for a guide on what each of the fields in the "Processed request" log lines mean,
 see [Request log format](../administration/request_log.md).
 
+If you use `systemd.journal.JournalHandler` in your own logging config, ensure
+`systemd-python` is installed in Synapse's runtime environment.
+
 ```yaml
 {{#include ../../sample_log_config.yaml}}
 ```

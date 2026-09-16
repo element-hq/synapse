@@ -13,7 +13,6 @@
 #
 
 import logging
-import typing
 from collections import ChainMap
 from enum import Enum
 from typing import (
@@ -35,6 +34,7 @@ from pydantic import ConfigDict
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
+from synapse.events.utils import FilteredEvent
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -48,12 +48,21 @@ from synapse.types import (
     ThreadSubscriptionsToken,
     UserID,
 )
-from synapse.types.rest.client import SlidingSyncBody
+from synapse.types.rest.client import SlidingSyncBody, SlidingSyncStickyEventsToken
+from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
 
 logger = logging.getLogger(__name__)
+
+# How often to update the last seen timestamp for lazy members.
+#
+# We don't update the timestamp every time to avoid hammering the DB with
+# writes, and we don't need the timestamp to be precise (as it is used to evict
+# old entries that haven't been used in a while).
+LAZY_MEMBERS_UPDATE_INTERVAL = Duration(hours=1)
 
 
 class SlidingSyncConfig(SlidingSyncBody):
@@ -177,7 +186,7 @@ class SlidingSyncResult:
         # Should be empty for invite/knock rooms with `stripped_state`
         required_state: list[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
-        timeline_events: list[EventBase]
+        timeline_events: list[FilteredEvent]
         bundled_aggregations: dict[str, "BundledAggregations"] | None
         # Optional because it's only relevant to invite/knock rooms
         stripped_state: list[JsonDict]
@@ -194,6 +203,9 @@ class SlidingSyncResult:
         highlight_count: int
 
         def __bool__(self) -> bool:
+            """Are there any updates that should be returned immediately to
+            the client?
+            """
             return (
                 # If this is the first time the client is seeing the room, we should not filter it out
                 # under any circumstance.
@@ -261,6 +273,8 @@ class SlidingSyncResult:
             events: Sequence[JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.events)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -285,23 +299,37 @@ class SlidingSyncResult:
             device_unused_fallback_key_types: Sequence[str]
 
             def __bool__(self) -> bool:
-                # Note that "signed_curve25519" is always returned in key count responses
-                # regardless of whether we uploaded any keys for it. This is necessary until
+                """Are there any updates that should be returned immediately to
+                the client?"""
+                # Note that "signed_curve25519" is always returned in key count
+                # responses regardless of whether we uploaded any keys for it.
+                # This is necessary until
                 # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
                 #
                 # Also related:
                 # https://github.com/element-hq/element-android/issues/3725 and
                 # https://github.com/matrix-org/synapse/issues/10456
-                default_otk = self.device_one_time_keys_count.get("signed_curve25519")
-                more_than_default_otk = len(self.device_one_time_keys_count) > 1 or (
-                    default_otk is not None and default_otk > 0
-                )
+                #
+                # This is why we don't incorporate `device_one_time_keys_count`
+                # (or `device_unused_fallback_key_types`) into the `__bool__`
+                # check.
+                #
+                # FIXME: Ideally we'd detect if either of those fields have
+                # changed since the last sync, but we do not currently track
+                # such state.
+                #
+                # Note that the client will receive these fields eventually when
+                # we respond to the sync request (usually sync timeouts are set
+                # to ~30s), we just won't immediately respond (even if there are
+                # changes). This delay is acceptable for clients, as a) these
+                # fields do not trigger UI (and so don't affect user perceivable
+                # latency) and b) are handled in the background by the clients
+                # anyway. The only risk being that one-time keys could be exhausted
+                # before the client knows about adding some more. But for example,
+                # if the client is syncing with a timeout of 30s, the window of
+                # staleness is so small for this not to matter.
 
-                return bool(
-                    more_than_default_otk
-                    or self.device_list_updates
-                    or self.device_unused_fallback_key_types
-                )
+                return bool(self.device_list_updates)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class AccountDataExtension:
@@ -318,6 +346,8 @@ class SlidingSyncResult:
             account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(
                     self.global_account_data_map or self.account_data_by_room_map
                 )
@@ -334,6 +364,8 @@ class SlidingSyncResult:
             room_id_to_receipt_map: Mapping[str, JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.room_id_to_receipt_map)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -348,6 +380,8 @@ class SlidingSyncResult:
             room_id_to_typing_map: Mapping[str, JsonMapping]
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return bool(self.room_id_to_typing_map)
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -382,11 +416,44 @@ class SlidingSyncResult:
             prev_batch: ThreadSubscriptionsToken | None
 
             def __bool__(self) -> bool:
+                """Are there any updates that should be returned immediately to
+                the client?"""
                 return (
                     bool(self.subscribed)
                     or bool(self.unsubscribed)
                     or bool(self.prev_batch)
                 )
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class StickyEventsExtension:
+            """The Sticky Events extension (MSC4354)
+
+            Attributes:
+                room_id_to_sticky_events: map (room_id -> [unexpired_sticky_events])
+                    The events are ordered by the sticky events stream.
+
+                    The events haven't yet been deduplicated to remove
+                    events that also appear in the timeline.
+            """
+
+            room_id_to_sticky_events: Mapping[str, list[FilteredEvent]]
+            next_batch: SlidingSyncStickyEventsToken
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_sticky_events)
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ProfilesExtension:
+            """The Profile Updates extension (MSC4262)
+
+            Attributes:
+                users: map (user_id -> [profile_updates])
+            """
+
+            users: Mapping[str, JsonMapping | None]
+
+            def __bool__(self) -> bool:
+                return bool(self.users)
 
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
@@ -394,8 +461,12 @@ class SlidingSyncResult:
         receipts: ReceiptsExtension | None = None
         typing: TypingExtension | None = None
         thread_subscriptions: ThreadSubscriptionsExtension | None = None
+        sticky_events: StickyEventsExtension | None = None
+        profiles: ProfilesExtension | None = None
 
         def __bool__(self) -> bool:
+            """Are there any updates that should be returned immediately to
+            the client?"""
             return bool(
                 self.to_device
                 or self.e2ee
@@ -403,6 +474,8 @@ class SlidingSyncResult:
                 or self.receipts
                 or self.typing
                 or self.thread_subscriptions
+                or self.sticky_events
+                or self.profiles
             )
 
     next_pos: SlidingSyncStreamToken
@@ -411,9 +484,14 @@ class SlidingSyncResult:
     extensions: Extensions
 
     def __bool__(self) -> bool:
-        """Make the result appear empty if there are no updates. This is used
-        to tell if the notifier needs to wait for more events when polling for
-        events.
+        """Are there any updates that should be returned immediately to
+        the client?
+
+        This is used to determine if a sliding sync response should be returned
+        immediately or if the notifier needs to wait for further updates, and
+        thus MUST return false if there is no new data since the last sync. This
+        is subtly different than just checking if any of the fields are set,
+        since some fields are always included (like `bump_stamp`).
         """
         # We don't include `self.lists` here, as a) `lists` is always non-empty even if
         # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
@@ -784,7 +862,7 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
     # We use a ChainMap here so that we can easily track what has been updated
     # and what hasn't. Note that when we persist the per connection state this
     # will get flattened to a normal dict (via calling `.copy()`)
-    _statuses: typing.ChainMap[str, HaveSentRoom[T]]
+    _statuses: ChainMap[str, HaveSentRoom[T]]
 
     def __init__(
         self,
@@ -850,11 +928,16 @@ class PerConnectionState:
     since the last time you made a sync request.
 
     Attributes:
+        last_used_ts: The time this connection was last used, in milliseconds.
+            This is only accurate to `UPDATE_CONNECTION_STATE_EVERY_MS`.
         rooms: The status of each room for the events stream.
         receipts: The status of each room for the receipts stream.
         room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
+        account_data: The status of each room for the account_data stream.
     """
+
+    last_used_ts: int | None = None
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
     receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
@@ -867,6 +950,7 @@ class PerConnectionState:
         room_configs = cast(MutableMapping[str, RoomSyncConfig], self.room_configs)
 
         return MutablePerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
             account_data=self.account_data.get_mutable(),
@@ -875,6 +959,7 @@ class PerConnectionState:
 
     def copy(self) -> "PerConnectionState":
         return PerConnectionState(
+            last_used_ts=self.last_used_ts,
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
             account_data=self.account_data.copy(),
@@ -882,25 +967,111 @@ class PerConnectionState:
         )
 
     def __len__(self) -> int:
-        return len(self.rooms) + len(self.receipts) + len(self.room_configs)
+        return (
+            len(self.account_data)
+            + len(self.rooms)
+            + len(self.receipts)
+            + len(self.room_configs)
+        )
+
+
+@attr.s(auto_attribs=True)
+class RoomLazyMembershipChanges:
+    """Changes to lazily-loaded room memberships for a given room."""
+
+    returned_user_id_to_last_seen_ts_map: Mapping[str, int | None] = attr.Factory(dict)
+    """Map from user ID to timestamp for users whose membership we have lazily
+    loaded in this room an request. The timestamp indicates the time we
+    previously needed the membership, or None if we sent it down for the first
+    time in this request.
+
+    We track a *rough* `last_seen_ts` for each user in each room which indicates
+    when we last would've sent their member state to the client. This is used so
+    that we can remove members which haven't been seen for a while to save
+    space.
+
+    Note: this will include users whose membership we would have sent down but
+    didn't due to us having previously sent them.
+    """
+
+    invalidated_user_ids: AbstractSet[str] = attr.Factory(set)
+    """Set of user IDs whose latest membership we have *not* sent down"""
+
+    def get_returned_user_ids_to_update(self, clock: Clock) -> StrCollection:
+        """Get the user IDs whose last seen timestamp we need to update in the
+        database.
+
+        This is a subset of user IDs in `returned_user_id_to_last_seen_ts_map`,
+        whose timestamp is either None (first time we've sent them) or older
+        than `LAZY_MEMBERS_UPDATE_INTERVAL`.
+
+        We only update the timestamp in the database every so often to avoid
+        hammering the DB with writes. We don't need the timestamp to be precise,
+        as the timestamp is used to evict old entries that haven't been used in
+        a while.
+        """
+
+        now_ms = clock.time_msec()
+        return [
+            user_id
+            for user_id, last_seen_ts in self.returned_user_id_to_last_seen_ts_map.items()
+            if last_seen_ts is None
+            or now_ms - last_seen_ts >= LAZY_MEMBERS_UPDATE_INTERVAL.as_millis()
+        ]
+
+    def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the lazy membership changes.
+
+        Called to check if we need to persist changes to the lazy membership
+        state for the room. We want to avoid persisting the state if there are
+        no changes, to avoid unnecessary writes (and cache misses due to new
+        connection position).
+        """
+
+        # We consider there to be updates if there are any invalidated user
+        # IDs...
+        if self.invalidated_user_ids:
+            return True
+
+        # ...or if any of the returned user IDs need their last seen timestamp
+        # updating in the database.
+        return bool(self.get_returned_user_ids_to_update(clock))
 
 
 @attr.s(auto_attribs=True)
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
+    last_used_ts: int | None
+
     rooms: MutableRoomStatusMap[RoomStreamToken]
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
     account_data: MutableRoomStatusMap[int]
 
-    room_configs: typing.ChainMap[str, RoomSyncConfig]
+    room_configs: ChainMap[str, RoomSyncConfig]
 
-    def has_updates(self) -> bool:
+    # A map from room ID to the lazily-loaded memberships needed for the
+    # request in that room.
+    room_lazy_membership: dict[str, RoomLazyMembershipChanges] = attr.Factory(dict)
+
+    def has_updates(self, clock: Clock) -> bool:
+        """Check if there are any updates to the per-connection state that need
+        persisting.
+
+        It is important that we don't spuriously do persistence, as that will
+        always generate a new connection position which will invalidate some of
+        the caches. It doesn't need to be perfect, but we should avoid always
+        generating new connection positions when doing lazy loading
+        """
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
+            or any(
+                change.has_updates(clock)
+                for change in self.room_lazy_membership.values()
+            )
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:

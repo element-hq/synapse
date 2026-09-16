@@ -31,8 +31,9 @@ import sys
 import time
 import urllib.request
 from os import path
+from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Match
+from typing import Any
 
 import attr
 import click
@@ -257,10 +258,16 @@ def _prepare() -> None:
     subprocess.check_output(["poetry", "version", new_version])
 
     # Update config schema $id.
-    schema_file = "schema/synapse-config.schema.yaml"
+    schema_file_path = Path("schema/synapse-config.schema.yaml")
     major_minor_version = ".".join(new_version.split(".")[:2])
     url = f"https://element-hq.github.io/synapse/schema/synapse/v{major_minor_version}/synapse-config.schema.json"
-    subprocess.check_output(["sed", "-i", f"0,/^\\$id: .*/s||$id: {url}|", schema_file])
+    # Find/replace the `$id: ...` line in `schema/synapse-config.schema.yaml` with a new
+    # unique identifier for this release
+    schema_file_content = schema_file_path.read_text()
+    new_schema_file_content = re.sub(
+        r"^\$id: .*", f"$id: {url}", schema_file_content, count=1, flags=re.MULTILINE
+    )
+    schema_file_path.write_text(new_schema_file_content)
 
     # Generate changelogs.
     generate_and_write_changelog(synapse_repo, current_version, new_version)
@@ -291,6 +298,12 @@ def _prepare() -> None:
     synapse_repo.git.add("-u")
     subprocess.run("git diff --cached", shell=True)
 
+    print(
+        "Consider any upcoming platform deprecations that should be mentioned in the changelog. (e.g. upcoming Python, PostgreSQL or SQLite deprecations)"
+    )
+    print(
+        "Platform deprecations should be mentioned at least 1 release prior to being unsupported."
+    )
     if click.confirm("Edit changelog?", default=False):
         click.edit(filename="CHANGES.md")
 
@@ -360,19 +373,10 @@ def _tag(gh_token: str | None) -> None:
         )
         click.get_current_context().abort()
 
-    # Get the appropriate changelogs and tag.
-    changes = get_changes_for_version(current_version)
+    # We simply point to the changelog instead of duplicating the content into the git tag/release
+    tag_message = f"Changelog: https://github.com/element-hq/synapse/blob/{repo.active_branch.name}/CHANGES.md"
 
-    click.echo_via_pager(changes)
-    if click.confirm("Edit text?", default=False):
-        edited_changes = click.edit(changes, require_save=False)
-        # This assert is for mypy's benefit. click's docs are a little unclear, but
-        # when `require_save=False`, not saving the temp file in the editor returns
-        # the original string.
-        assert edited_changes is not None
-        changes = edited_changes
-
-    repo.create_tag(tag_name, message=changes, sign=True)
+    repo.create_tag(tag_name, message=tag_message, sign=True)
 
     if not click.confirm("Push tag to GitHub?", default=True):
         print("")
@@ -407,7 +411,7 @@ def _tag(gh_token: str | None) -> None:
     release = gh_repo.create_git_release(
         tag=tag_name,
         name=tag_name,
-        message=changes,
+        message=tag_message,
         draft=True,
         prerelease=current_version.is_prerelease,
     )
@@ -449,19 +453,19 @@ def _publish(gh_token: str) -> None:
     gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     for release in gh_repo.get_releases():
-        if release.title == tag_name:
+        if release.name == tag_name:
             break
     else:
         raise ClickException(f"Failed to find GitHub release for {tag_name}")
 
-    assert release.title == tag_name
+    assert release.name == tag_name
 
     if not release.draft:
         click.echo("Release already published.")
         return
 
     release = release.update_release(
-        name=release.title,
+        name=release.name,
         message=release.body,
         tag_name=release.tag_name,
         prerelease=release.prerelease,
@@ -596,27 +600,43 @@ def _wait_for_actions(gh_token: str | None) -> None:
         headers["authorization"] = f"token {gh_token}"
     req = urllib.request.Request(url, headers=headers)
 
+    # Initially, wait 10 minutes as we know the CI typically takes 15m+ anyway (no need
+    # to check over and over when we know it won't be finished yet)
     time.sleep(10 * 60)
     while True:
-        time.sleep(5 * 60)
+        # Then check once every minute. Short enough to not have to wait around too long
+        # while not spamming the GitHub API and running into the unauthenticated API
+        # request rate limit (60 requests per hour so 1 request/minute perfectly aligns
+        # to not run into any problems)
+        time.sleep(1 * 60)
         response = urllib.request.urlopen(req)
         resp = json.loads(response.read())
 
         if len(resp["workflow_runs"]) == 0:
             continue
 
-        if all(
-            workflow["status"] != "in_progress" for workflow in resp["workflow_runs"]
-        ):
-            success = all(
-                workflow["status"] == "completed" for workflow in resp["workflow_runs"]
-            )
-            if success:
-                _notify("Workflows successful. You can now continue the release.")
-            else:
-                _notify("Workflows failed.")
-                click.confirm("Continue anyway?", abort=True)
+        # Notify early if any workflow run has already failed.
+        failed_workflows = [
+            workflow
+            for workflow in resp["workflow_runs"]
+            if workflow["status"] == "completed" and workflow["conclusion"] != "success"
+        ]
+        if failed_workflows:
+            for workflow in failed_workflows:
+                print(
+                    f"Workflow run failed ({workflow['conclusion']}): {workflow['name']}"
+                )
+                print(f"    see {workflow['html_url']}")
+            _notify("A workflow run has failed.")
+            click.confirm("Continue anyway?", abort=True)
+            break
 
+        # If every run has completed successfully, we are done.
+        if all(
+            workflow["status"] == "completed" and workflow["conclusion"] == "success"
+            for workflow in resp["workflow_runs"]
+        ):
+            _notify("Workflows successful. You can now continue the release.")
             break
 
 
@@ -723,6 +743,7 @@ def _announce() -> None:
     """Generate markdown to announce the release."""
 
     current_version = get_package_version()
+    release_branch_name = get_release_branch_name(current_version)
     tag_name = f"v{current_version}"
     is_rc = "rc" in tag_name
 
@@ -741,7 +762,7 @@ Hi everyone. Synapse {current_version} has just been released.
         )
 
     release_text += f"""
-[notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
+[notes](https://github.com/element-hq/synapse/blob/{release_branch_name}/CHANGES.md) | \
 [docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
@@ -790,7 +811,6 @@ def full(gh_token: str) -> None:
     _prepare()
 
     click.echo("Deploy to matrix.org and ensure that it hasn't fallen over.")
-    click.echo("Remember to silence the alerts to prevent alert spam.")
     click.confirm("Deployed?", abort=True)
 
     click.echo("\n*** tag ***")
@@ -962,10 +982,6 @@ def generate_and_write_changelog(
     new_changes = new_changes.replace(
         "No significant changes.", f"No significant changes since {current_version}."
     )
-    new_changes += build_dependabot_changelog(
-        repo,
-        current_version,
-    )
 
     # Prepend changes to changelog
     with open("CHANGES.md", "r+") as f:
@@ -978,50 +994,6 @@ def generate_and_write_changelog(
     # Remove all the news fragments
     for filename in glob.iglob("changelog.d/*.*"):
         os.remove(filename)
-
-
-def build_dependabot_changelog(repo: Repo, current_version: version.Version) -> str:
-    """Summarise dependabot commits between `current_version` and `release_branch`.
-
-    Returns an empty string if there have been no such commits; otherwise outputs a
-    third-level markdown header followed by an unordered list."""
-    last_release_commit = repo.tag("v" + str(current_version)).commit
-    rev_spec = f"{last_release_commit.hexsha}.."
-    commits = list(git.objects.Commit.iter_items(repo, rev_spec))
-    messages = []
-    for commit in reversed(commits):
-        if commit.author.name == "dependabot[bot]":
-            message: str | bytes = commit.message
-            if isinstance(message, bytes):
-                message = message.decode("utf-8")
-            messages.append(message.split("\n", maxsplit=1)[0])
-
-    if not messages:
-        print(f"No dependabot commits in range {rev_spec}", file=sys.stderr)
-        return ""
-
-    messages.sort()
-
-    def replacer(match: Match[str]) -> str:
-        desc = match.group(1)
-        number = match.group(2)
-        return f"* {desc}. ([\\#{number}](https://github.com/element-hq/synapse/issues/{number}))"
-
-    for i, message in enumerate(messages):
-        messages[i] = re.sub(r"(.*) \(#(\d+)\)$", replacer, message)
-    messages.insert(0, "### Updates to locked dependencies\n")
-    # Add an extra blank line to the bottom of the section
-    messages.append("")
-    return "\n".join(messages)
-
-
-@cli.command()
-@click.argument("since")
-def test_dependabot_changelog(since: str) -> None:
-    """Test building the dependabot changelog.
-
-    Summarises all dependabot commits between the SINCE tag and the current git HEAD."""
-    print(build_dependabot_changelog(git.Repo("."), version.Version(since)))
 
 
 if __name__ == "__main__":
