@@ -151,19 +151,24 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
                 yield key
 
     def __len__(self) -> int:
-        count = len(self._underlying_map)
-        for key in self._deletions:
-            if key in self._underlying_map:
-                count -= 1
-
-        for key in self._mutable_map:
-            # `key` should not be in both _mutable_map and _deletions
-            assert key not in self._deletions
-
-            if key not in self._underlying_map:
-                count += 1
-
-        return count
+        # The keys are `(underlying ∪ mutable) − deletions`. A key is never in
+        # both `_mutable_map` and `_deletions`, so the only deletions to
+        # subtract are those of keys in the underlying map:
+        #
+        #   |underlying| + |mutable| − |mutable ∩ underlying| − |underlying ∩ deletions|
+        #
+        # The intersections run at C speed and iterate the smaller operand, so
+        # this costs O(min(|underlying|, |mutable|)) rather than a Python loop
+        # over every key. `ExpiringCache(iterable=True)` calls `len()` on every
+        # cached value each time it evicts one, so this matters when the
+        # overlays are large.
+        underlying_keys = self._underlying_map.keys()
+        return (
+            len(self._underlying_map)
+            + len(self._mutable_map)
+            - len(self._mutable_map.keys() & underlying_keys)
+            - len(underlying_keys & self._deletions)
+        )
 
     def clear(self) -> None:
         self._underlying_map = {}
