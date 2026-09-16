@@ -142,6 +142,42 @@ class ExecuteScriptTestCase(unittest.HomeserverTestCase):
         )
 
 
+class LiteralPercentTestCase(unittest.HomeserverTestCase):
+    """Tests that SQL containing a literal `%` can be run without parameters.
+
+    psycopg2 `%`-substitutes the SQL it is given whenever any parameters are
+    supplied, so passing it an empty collection of parameters makes it choke on
+    statements like `LIKE 'foo%'`. Several schema deltas and background updates
+    contain such statements.
+    """
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.db_pool: DatabasePool = hs.get_datastores().main.db_pool
+
+    def test_execute(self) -> None:
+        """A literal `%` survives `LoggingTransaction.execute`."""
+
+        def run(txn: LoggingTransaction) -> None:
+            txn.execute("SELECT 'a/b' LIKE 'a/%'")
+            self.assertEqual(txn.fetchall(), [(True,)])
+
+        self.get_success(self.db_pool.runInteraction("test_execute", run))
+
+    def test_executescript(self) -> None:
+        """A literal `%` survives `BaseDatabaseEngine.executescript`.
+
+        This is the path taken by `.sql` schema deltas.
+        """
+
+        def run(conn: LoggingDatabaseConnection) -> None:
+            cur = conn.cursor(txn_name="test_executescript")
+            self.db_pool.engine.executescript(
+                cur, "CREATE TABLE percent_test (name TEXT); SELECT 'a/b' LIKE 'a/%';"
+            )
+
+        self.get_success(self.db_pool.runWithConnection(run))
+
+
 @attr.s(slots=True, auto_attribs=True)
 class TransactionMocks:
     after_callback: Mock

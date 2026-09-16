@@ -8,7 +8,7 @@
 
 
 from synapse.storage.database import LoggingTransaction
-from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine
+from synapse.storage.engines import BaseDatabaseEngine
 
 
 def run_create(
@@ -16,55 +16,24 @@ def run_create(
     database_engine: BaseDatabaseEngine,
 ) -> None:
     """
-    An attempt to mitigate a painful race between foreground and background updates
-    touching the `stream_ordering` column of the events table. More info can be found
+    This delta used to repoint the `event_stream_ordering_fkey` foreign keys added by
+    delta 74/03 at `events.stream_ordering2`, so that they would survive the column
+    swap performed by the `replace_stream_ordering_column` background update. It was an
+    attempt to mitigate a painful race between foreground and background updates
+    touching the `stream_ordering` column of the events table; more info can be found
     at https://github.com/matrix-org/synapse/issues/15677.
+
+    It could never do so successfully, because the unique index that a foreign key on
+    `stream_ordering2` requires is itself built by a background update
+    (`index_stream_ordering2`), and every delta runs before any background update does.
+    Whenever this delta had work to do it therefore failed with
+
+        psycopg2.errors.InvalidForeignKey: there is no unique constraint matching
+        given keys for referenced table "events"
+
+    which left any Postgres database older than schema version 60 unable to upgrade.
+
+    `replace_stream_ordering_column` now drops and recreates these foreign keys itself,
+    which works no matter which column they currently reference, so there is nothing
+    left for this delta to do.
     """
-
-    # technically the bg update we're concerned with below should only have been added in
-    # postgres but it doesn't hurt to be extra careful
-    if isinstance(database_engine, PostgresEngine):
-        select_sql = """
-            SELECT 1 FROM background_updates
-                WHERE update_name = 'replace_stream_ordering_column'
-        """
-        cur.execute(select_sql)
-        res = cur.fetchone()
-
-        # if the background update `replace_stream_ordering_column` is still pending, we need
-        # to drop the indexes added in 7403, and re-add them to the column `stream_ordering2`
-        # with the idea that they will be preserved when the column is renamed `stream_ordering`
-        # after the background update has finished
-        if res:
-            drop_cse_sql = """
-            ALTER TABLE current_state_events DROP CONSTRAINT IF EXISTS event_stream_ordering_fkey
-            """
-            cur.execute(drop_cse_sql)
-
-            drop_lcm_sql = """
-            ALTER TABLE local_current_membership DROP CONSTRAINT IF EXISTS event_stream_ordering_fkey
-            """
-            cur.execute(drop_lcm_sql)
-
-            drop_rm_sql = """
-            ALTER TABLE room_memberships DROP CONSTRAINT IF EXISTS event_stream_ordering_fkey
-            """
-            cur.execute(drop_rm_sql)
-
-            add_cse_sql = """
-            ALTER TABLE current_state_events ADD CONSTRAINT event_stream_ordering_fkey
-            FOREIGN KEY (event_stream_ordering) REFERENCES events(stream_ordering2) NOT VALID;
-            """
-            cur.execute(add_cse_sql)
-
-            add_lcm_sql = """
-            ALTER TABLE local_current_membership ADD CONSTRAINT event_stream_ordering_fkey
-            FOREIGN KEY (event_stream_ordering) REFERENCES events(stream_ordering2) NOT VALID;
-            """
-            cur.execute(add_lcm_sql)
-
-            add_rm_sql = """
-            ALTER TABLE room_memberships ADD CONSTRAINT event_stream_ordering_fkey
-            FOREIGN KEY (event_stream_ordering) REFERENCES events(stream_ordering2) NOT VALID;
-            """
-            cur.execute(add_rm_sql)

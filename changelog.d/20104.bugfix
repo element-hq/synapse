@@ -1,0 +1,1 @@
+Fix `profiles` and `user_filters` having a different schema on SQLite depending on whether the server was installed before or after Synapse v1.88.0, and restore the `user_filters_unique` index lost on upgrade.
