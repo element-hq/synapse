@@ -254,3 +254,29 @@ class TestMutableOverlayMapping(unittest.TestCase):
                         del mapping[key]
 
                     self.assertEqual(len(mapping), len(dict(mapping)), seed)
+
+    def test_total_entries(self) -> None:
+        """total_entries() counts the base map plus every override and
+        deletion, unlike len()."""
+        mapping = MutableOverlayMapping({"a": 1, "b": 2, "c": 3})
+        self.assertEqual(mapping.total_entries(), 3)
+
+        mapping["a"] = 10  # override: +1 entry, same length
+        mapping["d"] = 4  # new key: +1 entry, +1 length
+        del mapping["b"]  # deletion: +1 entry, -1 length
+        self.assertEqual(len(mapping), 3)
+        self.assertEqual(mapping.total_entries(), 6)
+
+        # Deleting an override drops it from the overrides and records the
+        # deletion, so the entry count is unchanged.
+        del mapping["d"]
+        self.assertEqual(len(mapping), 2)
+        self.assertEqual(mapping.total_entries(), 6)
+
+        # Nested overlays are counted all the way down.
+        outer = MutableOverlayMapping(mapping)
+        outer["e"] = 5
+        self.assertEqual(outer.total_entries(), 7)
+
+        mapping.clear()
+        self.assertEqual(mapping.total_entries(), 0)

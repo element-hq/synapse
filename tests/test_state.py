@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from collections import ChainMap
 from typing import (
     Any,
     Collection,
@@ -34,9 +35,15 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
-from synapse.state import StateHandler, StateResolutionHandler, _make_state_cache_entry
+from synapse.state import (
+    StateHandler,
+    StateResolutionHandler,
+    _make_state_cache_entry,
+    _state_map_size,
+)
 from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.state import StateFilter
+from synapse.util import MutableOverlayMapping
 from synapse.util.macaroons import MacaroonGenerator
 
 from tests import unittest
@@ -862,6 +869,31 @@ class StateTestCase(unittest.TestCase):
 
         result = yield defer.ensureDeferred(self.state.compute_event_context(event))
         return result
+
+    def test_state_map_size(self) -> None:
+        "Cache sizing counts every held entry, not the distinct keys"
+
+        base: StateMap[str] = {("a", ""): "A", ("b", ""): "B", ("c", ""): "C"}
+        self.assertEqual(_state_map_size(base), 3)
+
+        # Overriding and deleting keys leaves `len()` alone but holds entries.
+        overlay = MutableOverlayMapping(base)
+        overlay[("a", "")] = "A2"
+        overlay[("d", "")] = "D"
+        del overlay[("b", "")]
+        self.assertEqual(len(overlay), 3)
+        self.assertEqual(_state_map_size(overlay), 3 + 2 + 1)
+
+        # Nested overlays are followed down.
+        outer = MutableOverlayMapping(overlay)
+        outer[("e", "")] = "E"
+        self.assertEqual(len(outer), 4)
+        self.assertEqual(_state_map_size(outer), 6 + 1)
+
+        # A `ChainMap` holds every layer in full, however much they overlap.
+        chain = ChainMap({("a", ""): "A3", ("f", ""): "F"}, outer)
+        self.assertEqual(len(chain), 5)
+        self.assertEqual(_state_map_size(chain), 2 + 7)
 
     def test_make_state_cache_entry(self) -> None:
         "Test that calculating a prev_group and delta is correct"

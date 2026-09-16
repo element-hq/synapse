@@ -159,9 +159,7 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
         #
         # The intersections run at C speed and iterate the smaller operand, so
         # this costs O(min(|underlying|, |mutable|)) rather than a Python loop
-        # over every key. `ExpiringCache(iterable=True)` calls `len()` on every
-        # cached value each time it evicts one, so this matters when the
-        # overlays are large.
+        # over every key, which matters when the overlays are large.
         underlying_keys = self._underlying_map.keys()
         return (
             len(self._underlying_map)
@@ -169,6 +167,22 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
             - len(self._mutable_map.keys() & underlying_keys)
             - len(underlying_keys & self._deletions)
         )
+
+    def total_entries(self) -> int:
+        """The number of entries held across the underlying map, the
+        overrides and the deletions, following nested overlays down.
+
+        `len()` counts the keys visible through the overlay, which is not what
+        this object costs in memory: an override of an existing key or a
+        deletion adds an entry without changing the length. Use this to size
+        caches that store overlays.
+        """
+        underlying = self._underlying_map
+        if isinstance(underlying, MutableOverlayMapping):
+            underlying_size = underlying.total_entries()
+        else:
+            underlying_size = len(underlying)
+        return underlying_size + len(self._mutable_map) + len(self._deletions)
 
     def clear(self) -> None:
         self._underlying_map = {}

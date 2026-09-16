@@ -24,8 +24,8 @@ from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Generic,
-    Iterable,
     Literal,
     TypeVar,
     overload,
@@ -66,6 +66,7 @@ class ExpiringCache(Generic[KT, VT]):
         expiry_ms: int = 0,
         reset_expiry_on_get: bool = False,
         iterable: bool = False,
+        size_callback: Callable[[VT], int] | None = None,
     ):
         """
         Args:
@@ -83,7 +84,20 @@ class ExpiringCache(Generic[KT, VT]):
                 an item on access. Defaults to False.
             iterable: If true, the size is calculated by summing the
                 sizes of all entries, rather than the number of entries.
+                Shorthand for `size_callback=len`.
+            size_callback: If given, the size of the cache is the sum of this
+                function over all values, rather than the number of entries.
+                Use it when `len()` of a value is not a good measure of the
+                memory it holds.
         """
+        if iterable and size_callback is not None:
+            raise ValueError("`iterable` and `size_callback` are exclusive")
+        if iterable:
+            # type-ignore: if `iterable` is true, then the value type VT should
+            # be Sized (i.e. have a `__len__` method). We don't enforce this via
+            # the type system at present.
+            size_callback = len  # type: ignore[assignment]
+
         self._cache_name = cache_name
 
         self._original_max_size = max_len
@@ -97,7 +111,7 @@ class ExpiringCache(Generic[KT, VT]):
 
         self._cache: OrderedDict[KT, _CacheEntry[VT]] = OrderedDict()
 
-        self.iterable = iterable
+        self._size_callback = size_callback
 
         self.metrics = register_cache(
             cache_type="expiring",
@@ -124,13 +138,7 @@ class ExpiringCache(Generic[KT, VT]):
         # Evict if there are now too many items
         while self._max_size and len(self) > self._max_size:
             _key, value = self._cache.popitem(last=False)
-            if self.iterable:
-                # type-ignore, here and below: if self.iterable is true, then the value
-                # type VT should be Sized (i.e. have a __len__ method). We don't enforce
-                # this via the type system at present.
-                self.metrics.inc_evictions(EvictionReason.size, len(value.value))  # type: ignore[arg-type]
-            else:
-                self.metrics.inc_evictions(EvictionReason.size)
+            self.metrics.inc_evictions(EvictionReason.size, self._size_of(value.value))
 
     def __getitem__(self, key: KT) -> VT:
         try:
@@ -161,10 +169,9 @@ class ExpiringCache(Generic[KT, VT]):
                 raise KeyError(key)
             return default
 
-        if self.iterable:
-            self.metrics.inc_evictions(EvictionReason.invalidation, len(value.value))
-        else:
-            self.metrics.inc_evictions(EvictionReason.invalidation)
+        self.metrics.inc_evictions(
+            EvictionReason.invalidation, self._size_of(value.value)
+        )
 
         return value.value
 
@@ -207,10 +214,7 @@ class ExpiringCache(Generic[KT, VT]):
 
         for k in keys_to_delete:
             value = self._cache.pop(k)
-            if self.iterable:
-                self.metrics.inc_evictions(EvictionReason.time, len(value.value))  # type: ignore[arg-type]
-            else:
-                self.metrics.inc_evictions(EvictionReason.time)
+            self.metrics.inc_evictions(EvictionReason.time, self._size_of(value.value))
 
         logger.debug(
             "[%s] _prune_cache before: %d, after len: %d",
@@ -219,12 +223,16 @@ class ExpiringCache(Generic[KT, VT]):
             len(self),
         )
 
+    def _size_of(self, value: VT) -> int:
+        """How much a value counts towards `max_len`."""
+        if self._size_callback is None:
+            return 1
+        return self._size_callback(value)
+
     def __len__(self) -> int:
-        if self.iterable:
-            g: Iterable[int] = (len(entry.value) for entry in self._cache.values())  # type: ignore[arg-type]
-            return sum(g)
-        else:
+        if self._size_callback is None:
             return len(self._cache)
+        return sum(self._size_callback(entry.value) for entry in self._cache.values())
 
     def set_cache_factor(self, factor: float) -> bool:
         """

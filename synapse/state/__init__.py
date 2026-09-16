@@ -52,6 +52,7 @@ from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
+from synapse.util import MutableOverlayMapping
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.duration import Duration
@@ -168,12 +169,29 @@ class _StateCacheEntry:
         length = 0
 
         if self._state:
-            length += len(self._state)
+            length += _state_map_size(self._state)
 
         if self.delta_ids:
-            length += len(self.delta_ids)
+            length += _state_map_size(self.delta_ids)
 
         return length or 1  # Make sure its not 0.
+
+
+def _state_map_size(state_map: Mapping[Any, Any]) -> int:
+    """Estimate the memory a state map holds, for sizing caches.
+
+    This is the total number of entries across every layer of the map.
+    `len()` is the number of distinct keys, which undercounts layered maps: a
+    `ChainMap` holds every entry of every layer, and a `MutableOverlayMapping`
+    holds its base map plus every override and deletion. Both also compute
+    `len()` by walking their keys, whereas this is a handful of `len()` calls
+    on plain dicts.
+    """
+    if isinstance(state_map, ChainMap):
+        return sum(_state_map_size(layer) for layer in state_map.maps)
+    if isinstance(state_map, MutableOverlayMapping):
+        return state_map.total_entries()
+    return len(state_map)
 
 
 class StateHandler:
@@ -642,8 +660,11 @@ class StateResolutionHandler:
         # such as `FederationEventHandler`. Neither the keys nor the values
         # mention state groups, so deleting state groups invalidates nothing.
         #
-        # With `iterable=True`, `max_len` bounds the total number of state
-        # entries across all values rather than the number of values.
+        # `max_len` bounds the total number of state entries held across all
+        # values rather than the number of values. The values are
+        # `MutableOverlayMapping`s, so this is measured with `_state_map_size`
+        # rather than `len()`, which would miss the overrides and deletions
+        # they hold on top of their base state.
         self._conflict_resolution_cache: ExpiringCache[bytes, StateMap[str]] = (
             ExpiringCache(
                 cache_name="state_conflict_resolution_cache",
@@ -652,7 +673,7 @@ class StateResolutionHandler:
                 clock=self.clock,
                 max_len=100000,
                 expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,
-                iterable=True,
+                size_callback=_state_map_size,
                 reset_expiry_on_get=True,
             )
         )
