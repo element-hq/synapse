@@ -647,7 +647,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
             ids = await self._get_current_state_event_ids(room_id, concrete_types)
             results.update(
-                (key, event_id) for key, event_id in ids.items() if event_id is not None
+                (type_and_state_key, event_id)
+                for type_and_state_key, event_id in ids.items()
+                if event_id is not None
             )
             return results
 
