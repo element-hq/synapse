@@ -98,9 +98,10 @@ class TestTaskScheduler(HomeserverTestCase):
         return TaskStatus.COMPLETE, None, None
 
     def test_schedule_lot_of_tasks(self) -> None:
-        """Schedule more than `TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS` tasks and check the behavior."""
+        """Schedule more than `self.task_scheduler._max_concurrent_tasks` tasks and check the behavior."""
+        max_concurrent = self.task_scheduler._max_concurrent_tasks
         task_ids = []
-        for i in range(TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS + 1):
+        for i in range(max_concurrent + 1):
             task_ids.append(
                 self.get_success(
                     self.task_scheduler.schedule_task(
@@ -117,11 +118,11 @@ class TestTaskScheduler(HomeserverTestCase):
             )
             return [t for t in tasks if t is not None and t.status == status]
 
-        # At this point, there should be MAX_CONCURRENT_RUNNING_TASKS active tasks and
+        # At this point, there should be max_concurrent active tasks and
         # one scheduled task.
         self.assertEqual(
             len(get_tasks_of_status(TaskStatus.ACTIVE)),
-            TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
+            max_concurrent,
         )
         self.assertEqual(
             len(get_tasks_of_status(TaskStatus.SCHEDULED)),
@@ -131,11 +132,11 @@ class TestTaskScheduler(HomeserverTestCase):
         # Give the time to the active tasks to finish
         self.reactor.advance(1)
 
-        # Check that MAX_CONCURRENT_RUNNING_TASKS tasks have run and that one
+        # Check that max_concurrent tasks have run and that one
         # is still scheduled.
         self.assertEqual(
             len(get_tasks_of_status(TaskStatus.COMPLETE)),
-            TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
+            max_concurrent,
         )
         scheduled_tasks = get_tasks_of_status(TaskStatus.SCHEDULED)
         self.assertEqual(len(scheduled_tasks), 1)
@@ -154,6 +155,38 @@ class TestTaskScheduler(HomeserverTestCase):
         self.assertEqual(
             prev_scheduled_task.status,
             TaskStatus.COMPLETE,
+        )
+
+    @override_config({"task_scheduler": {"max_concurrent_tasks": 4}})
+    def test_schedule_lot_of_tasks_custom_concurrency(self) -> None:
+        """Test that configuring a higher concurrency limit allows more concurrent tasks."""
+        self.assertEqual(self.task_scheduler._max_concurrent_tasks, 4)
+        max_concurrent = self.task_scheduler._max_concurrent_tasks
+        task_ids = []
+        for i in range(max_concurrent + 1):
+            task_ids.append(
+                self.get_success(
+                    self.task_scheduler.schedule_task(
+                        "_sleeping_task",
+                        params={"val": i},
+                    )
+                )
+            )
+
+        def get_tasks_of_status(status: TaskStatus) -> list[ScheduledTask]:
+            tasks = (
+                self.get_success(self.task_scheduler.get_task(task_id))
+                for task_id in task_ids
+            )
+            return [t for t in tasks if t is not None and t.status == status]
+
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.ACTIVE)),
+            4,
+        )
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.SCHEDULED)),
+            1,
         )
 
     async def _raising_task(
