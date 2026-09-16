@@ -89,6 +89,19 @@ STATE_EVENT_TYPES_TO_MARK_UNREAD = {
 SENTINEL = object()
 
 
+def _coerce_power_level(level: object, default: int) -> int:
+    """Interpret a power level from `m.room.power_levels` content as an
+    integer, tolerating the non-integer levels (floats, strings, nulls) that
+    old room versions permit. Falls back to `default` if uninterpretable.
+    """
+    if type(level) is int:  # noqa: E721
+        return level
+    try:
+        return int(level)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return default
+
+
 def _should_count_as_unread(event: EventBase, context: EventContext) -> bool:
     # Exclude rejected and soft-failed events.
     if context.rejected or event.internal_metadata.is_soft_failed():
@@ -177,6 +190,15 @@ class BulkPushRuleEvaluator:
                 )
                 if target_already_in_room:
                     local_users = [event.state_key]
+            elif (
+                self.hs.config.experimental.msc4506_enabled
+                and event.membership == Membership.KNOCK
+            ):
+                # MSC4506: a knock (sender == state_key, so not caught above)
+                # should notify the members of the room who can act on it, so
+                # we can't take the membership-events-only-notify-their-target
+                # fast path.
+                local_users = await self.store.get_local_users_in_room(event.room_id)
         else:
             # We get the users who may need to be notified by first fetching the
             # local users currently in the room, finding those that have push rules,
@@ -458,6 +480,29 @@ class BulkPushRuleEvaluator:
                     except (TypeError, ValueError):
                         del notification_levels[key]
 
+        # MSC4506 (knock push rules): the level required to perform each of the
+        # room's power-levels actions, and the data to compute each recipient's
+        # own level, for the `recipient_permission` condition. As above,
+        # non-integer levels in old room versions are interpreted as integers
+        # where possible and otherwise dropped.
+        action_power_levels = {
+            "invite": power_levels.get("invite", 0),
+            "kick": power_levels.get("kick", 50),
+            "ban": power_levels.get("ban", 50),
+            "redact": power_levels.get("redact", 50),
+        }
+        for key in list(action_power_levels.keys()):
+            level = action_power_levels[key]
+            if type(level) is not int:  # noqa: E721
+                try:
+                    action_power_levels[key] = int(level)
+                except (TypeError, ValueError):
+                    del action_power_levels[key]
+        users_default_level = _coerce_power_level(
+            power_levels.get("users_default", 0), 0
+        )
+        user_power_levels = power_levels.get("users", {})
+
         # Pull out any user and room mentions.
         has_mentions = EventContentFields.MENTIONS in event.content
 
@@ -467,6 +512,7 @@ class BulkPushRuleEvaluator:
             room_member_count,
             sender_power_level,
             notification_levels,
+            action_power_levels,
             related_events,
             self._related_event_match_enabled,
             event.room_version.msc3931_push_features,
@@ -512,8 +558,18 @@ class BulkPushRuleEvaluator:
             if msc4306_thread_subscribers is not None:
                 msc4306_thread_subscription_state = uid in msc4306_thread_subscribers
 
+            # MSC4506: this user's own power level, for the
+            # `recipient_permission` condition.
+            recipient_power_level = _coerce_power_level(
+                user_power_levels.get(uid, users_default_level), users_default_level
+            )
+
             actions = evaluator.run(
-                rules, uid, display_name, msc4306_thread_subscription_state
+                rules,
+                uid,
+                display_name,
+                msc4306_thread_subscription_state,
+                recipient_power_level,
             )
             if "notify" in actions:
                 # Push rules say we should notify the user of this event
