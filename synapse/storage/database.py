@@ -2637,6 +2637,9 @@ def make_in_list_sql_clause(
     using the `ANY` form on postgres means that it views queries with
     different length iterables as the same, helping the query stats.
 
+    An empty `iterable` yields a constant clause: nothing can be a member of an empty
+    list, so the clause is `FALSE` (or `TRUE` when `negative`).
+
     Args:
         database_engine
         column: Name of the column
@@ -2646,6 +2649,11 @@ def make_in_list_sql_clause(
     Returns:
         A tuple of SQL query and the args
     """
+
+    if not iterable:
+        # Spell the empty case out rather than relying on each engine's handling of an
+        # empty list: sqlite permits `IN ()` but postgres does not.
+        return ("TRUE" if negative else "FALSE"), []
 
     if database_engine.supports_using_any_list:
         # This should hopefully be faster, but also makes postgres query

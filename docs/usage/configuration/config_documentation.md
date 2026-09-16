@@ -1073,6 +1073,21 @@ Example configuration:
 redaction_retention_period: 28d
 ```
 ---
+### `redaction_allowed_period`
+
+How long after an `m.room.message` was sent a local user is still allowed to redact it. If a local user tries to redact a `m.room.message` older than this period Synapse responds with `403 M_FORBIDDEN` and does not redact the event.
+
+Only applies to `m.room.message` events redacted by local users.  Redactions of other event types and redactions received over federation are unaffected. When the target of the redaction is an edit (`m.replace`), the age and type are taken from the original event and not the edit.
+
+Set to `null` (the default) to disable, allowing events to be redacted at any time.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+redaction_allowed_period: 7d
+```
+---
 ### `forgotten_room_retention_period`
 
 How long to keep locally forgotten rooms before purging them from the DB. A value of `null` means it's disabled. Defaults to `null`.
@@ -4010,6 +4025,8 @@ Possible options are "all", "invite", and "off". They are defined as:
 
 Note that this option will only affect rooms created after it is set. It will also not affect rooms created by other servers.
 
+A client may supply its own `m.room.encryption` event in the `initial_state` of its `/createRoom` request. If that event is valid (it specifies an `algorithm` as a string), it takes precedence and this option will not overwrite it, allowing the client to, for example, choose a different encryption algorithm. An empty or otherwise invalid `m.room.encryption` event does not disable forced encryption: the default will still be applied on top of it.
+
 Defaults to `"off"`.
 
 Example configuration:
@@ -4653,6 +4670,8 @@ _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
 _Changed in Synapse 1.116.0: Added password\_path_
 
+_Changed in Synapse 1.162.0: Added username_
+
 This setting has the following sub-options:
 
 * `enabled` (boolean): Whether to use Redis support. Defaults to `false`.
@@ -4662,6 +4681,8 @@ This setting has the following sub-options:
 * `port` (integer): Optional port to use to connect to Redis. Defaults to `6379`.
 
 * `path` (string): The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.** Defaults to `"/tmp/redis.sock"`.
+
+* `username` (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set. Defaults to `null`.
 
 * `password` (string|null): Optional password if configured on the Redis instance. Defaults to `null`.
 
@@ -4685,6 +4706,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
+  username: <username>
   password_path: <path_to_the_password_file>
   dbid: <dbid>
 ```
