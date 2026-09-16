@@ -1973,7 +1973,6 @@ class FederationEventHandler:
                     calculated_auth_events = {
                         event_id: event_map[event_id]
                         for event_id in calculated_auth_event_ids
-                        if event_id in event_map
                     }
                     # In theory we should not be missing any auth events because event_map contains
                     # the entire state DAG, but if we do we can ask the database if it knows about them.
@@ -2111,7 +2110,11 @@ class FederationEventHandler:
             SynapseError if the event has no `prev_state_events` and is not a create
             event.
         """
-        if len(event.prev_state_events) == 0 and event.type != EventTypes.Create:
+        is_create_event = len(event.prev_state_events) == 0 and (
+            event.type,
+            event.get_state_key(),
+        ) == (EventTypes.Create, "")
+        if len(event.prev_state_events) == 0 and not is_create_event:
             raise SynapseError(502, f"event {event.event_id} has no prev_state_events")
 
         if known_prev_state_maps:
@@ -2145,10 +2148,7 @@ class FederationEventHandler:
 
         # We should always have some resolved state after the prev_state_events, except
         # for the create event which is the start of the state DAG.
-        is_create_event = len(event.prev_state_events) == 0 and (
-            event.type,
-            event.get_state_key(),
-        ) == (EventTypes.Create, "")
+
         if not is_create_event:
             # We must have calculated room state for every event by now.
             # Only the create event can have no room state (since it's the first event in the room)
