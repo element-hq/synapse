@@ -31,7 +31,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests import unittest
-from tests.test_utils.event_injection import inject_event
+from tests.test_utils.event_injection import create_event, inject_event
 from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
@@ -283,6 +283,98 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, event_non_outlier.event_id)
 
+    def test_redacted_before_persisted_not_tracked(self) -> None:
+        """
+        Tests that a sticky event which was redacted before we persisted it
+        (i.e. we learned of its redaction first, as can happen over federation)
+        is not sent down to clients over sync and is not added to the `sticky_events` table.
+        """
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        room_id = self.helper.create_room_as(
+            self.user_id, tok=self.token, room_version=RoomVersions.V10.identifier
+        )
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+
+        # Create the sticky event, but do not persist it yet
+        sticky_event, sticky_event_context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=room_id,
+                sender=user2_id,
+                type=EventTypes.Message,
+                content={"body": "sticky", "msgtype": "m.text"},
+                # Corresponds to StickyEvent.EVENT_FIELD_NAME
+                msc4354_sticky=StickyEventField(
+                    duration_ms=Duration(minutes=1).as_millis()
+                ),
+            )
+        )
+
+        # Create the redaction of the sticky event and persist it first,
+        # as if it had arrived over federation before the sticky event.
+        redaction_event, redaction_event_context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=room_id,
+                sender=user2_id,
+                type=EventTypes.Redaction,
+                content={"reason": "nothing here but us trees"},
+                redacts=sticky_event.event_id,
+            )
+        )
+
+        # Auth & persist the event
+        self.get_success(
+            self.hs.get_event_auth_handler().check_auth_rules_from_context(
+                redaction_event
+            )
+        )
+        self.get_success(
+            persist_controller.persist_event(redaction_event, redaction_event_context)
+        )
+
+        # Sanity check: the redaction is recorded as needing a recheck, since the
+        # redaction's sender doesn't have power to redact arbitrary events and we
+        # don't have the redacted event yet.
+        row = self.get_success(
+            self.store.db_pool.simple_select_one(
+                table="redactions",
+                keyvalues={"redacts": sticky_event.event_id},
+                retcols=("event_id", "recheck"),
+            )
+        )
+        self.assertEqual(row, (redaction_event.event_id, True))
+
+        # Now the sticky event arrives over federation and is persisted.
+        self.get_success(
+            persist_controller.persist_event(sticky_event, sticky_event_context)
+        )
+
+        # The event should have been persisted in its redacted form.
+        event = self.get_success(self.store.get_event(sticky_event.event_id))
+        self.assertEqual(event.event_id, sticky_event.event_id)
+        self.assertEqual(event.internal_metadata.redacted_by, redaction_event.event_id)
+        self.assertEqual(event.content, {})
+        self.assertIsNone(event.sticky_duration())
+
+        # Since it is redacted, it must not have been added to the sticky_events
+        # table...
+        sticky_events = self.get_success(
+            self.store.db_pool.simple_select_list(
+                table="sticky_events", keyvalues=None, retcols=("event_id",)
+            )
+        )
+        self.assertEqual(sticky_events, [])
+
+        # ...nor shown to clients down sync.
+        self.assertEqual(
+            self._get_visible_sticky_event_ids(room_id=room_id, token=user2_tok), set()
+        )
+
     def test_soft_failed_events_are_tracked(self) -> None:
         """
         Tests that sticky events marked as soft_failed ARE inserted
@@ -434,10 +526,16 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0].event_id, valid_sticky_event.event_id)
 
-    def _get_visible_sticky_event_ids(self) -> set[str]:
+    def _get_visible_sticky_event_ids(
+        self, room_id: str | None = None, token: str | None = None
+    ) -> set[str]:
         """
         Returns the IDs of the sticky events visible to clients in sync.
+
+        Defaults to `self.room_id` and `self.token`.
         """
+        room_id = room_id or self.room_id
+        token = token or self.token
         sync_body: JsonDict = {
             "lists": {
                 "main": {
@@ -467,7 +565,7 @@ class StickyEventsTestCase(unittest.HomeserverTestCase):
         if sticky_events is None:
             return set()
         events_in_room = (
-            sticky_events.get("rooms", {}).get(self.room_id, {}).get("events", [])
+            sticky_events.get("rooms", {}).get(room_id, {}).get("events", [])
         )
         return {event["event_id"] for event in events_in_room}
 
