@@ -158,6 +158,8 @@ class EventBuilder:
         if self.room_version.msc4242_state_dags:
             assert prev_state_events is not None
             calculated_auth_event_ids: list[str] = []
+            # We can't use internal_metadata.out_of_band_membership as it isn't set pre-build time,
+            # only the .outlier is.
             if self.internal_metadata.outlier:
                 # An out-of-band membership (e.g. a locally generated invite rejection):
                 # we have no state at its `prev_state_events`, and it isn't auth checked.

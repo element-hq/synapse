@@ -2065,8 +2065,9 @@ class FederationEventHandler:
         # persister does another round of deduplication.
         seen_remotes = await self._store.have_seen_events(room_id, event_map.keys())
         if is_state_dag_room:
-            # Out-of-band memberships were persisted without state; now that we have
-            # their `prev_state_events` process them again so they gain some.
+            # Pretend we haven't seen events which lack state groups. Events which lack state groups
+            # in state DAG rooms are exclusively out-of-band memberships. This ensures we calculate
+            # state for out-of-band events we have previously persisted.
             seen_remotes = await self._store.get_events_with_state_groups(seen_remotes)
         for s in seen_remotes:
             event_map.pop(s, None)
@@ -3172,21 +3173,23 @@ class FederationEventHandler:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many auth_events")
 
 
-def rescinds_invite(pdu: EventBase, invite_event: EventBase) -> bool:
+def rescinds_invite(leave_event: EventBase, invite_event: EventBase) -> bool:
     """Returns True if the given leave event references the given invite.
 
     We are not in the room, so we cannot authorise the leave event: the most we can do is
     check that it names the invite we are holding. Without this an old leave event could
     be replayed by anyone to cancel a newer invite.
     """
-    if supports_msc4242_state_dag(pdu):
+    assert leave_event.membership == Membership.LEAVE
+    assert invite_event.membership == Membership.INVITE
+    if supports_msc4242_state_dag(leave_event):
         # MSC4242 state DAG events don't list their auth events: they are calculated from
         # the state DAG, which we cannot do as we are not in the room. Instead, a leave
-        # event which rescinds an invite must name the invite in its prev_state_events.
-        return invite_event.event_id in pdu.prev_state_events
+        # event which rescinds an invite must name the invite in its prev_state_events, see MSC4242.
+        return invite_event.event_id in leave_event.prev_state_events
 
     # The invite should be in the auth events of the rescission.
-    return invite_event.event_id in pdu.auth_event_ids()
+    return invite_event.event_id in leave_event.auth_event_ids()
 
 
 def is_state_dag_connected(state_dag: Collection[MSC4242Event]) -> bool:
