@@ -934,6 +934,46 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             "remove_from_user_dir", self._remove_from_user_dir_txn, user_id
         )
 
+    def _remove_federated_remote_users_txn(
+        self, txn: LoggingTransaction, user_ids: Iterable[str]
+    ) -> None:
+        """Remove federation visibility, keeping users still visible through rooms."""
+        for user_id in user_ids:
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="users_in_federated_search",
+                keyvalues={"user_id": user_id},
+            )
+
+            if not self._get_user_dir_rooms_user_is_in_txn(txn, user_id):
+                self._remove_from_user_dir_txn(txn, user_id)
+
+    async def prune_federated_remote_users(
+        self, allowed_homeservers: Collection[str]
+    ) -> None:
+        """Remove imports from homeservers absent from the current whitelist.
+
+        An empty collection removes all federated-search visibility. Profiles
+        and search entries are retained for users still visible through rooms.
+        Selection and removal happen in the same transaction.
+        """
+        allowed = set(allowed_homeservers)
+
+        def _prune_txn(txn: LoggingTransaction) -> None:
+            txn.execute("SELECT DISTINCT homeserver FROM users_in_federated_search")
+            removed_homeservers = {row[0] for row in txn} - allowed
+
+            for homeserver in removed_homeservers:
+                user_ids = self.db_pool.simple_select_onecol_txn(
+                    txn,
+                    table="users_in_federated_search",
+                    keyvalues={"homeserver": homeserver},
+                    retcol="user_id",
+                )
+                self._remove_federated_remote_users_txn(txn, user_ids)
+
+        await self.db_pool.runInteraction("prune_federated_remote_users", _prune_txn)
+
     async def reconcile_federated_remote_users(
         self,
         homeserver: str,
@@ -971,18 +1011,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 self._upsert_federated_remote_users_txn(txn, profiles)
 
             stale_user_ids = set(existing_user_ids) - new_user_ids
-            for stale_user_id in stale_user_ids:
-                # Drop the federated-search visibility first.
-                self.db_pool.simple_delete_txn(
-                    txn,
-                    table="users_in_federated_search",
-                    keyvalues={"user_id": stale_user_id},
-                )
-
-                # Only remove the user from the directory entirely if they are
-                # not still visible through a shared room.
-                if not self._get_user_dir_rooms_user_is_in_txn(txn, stale_user_id):
-                    self._remove_from_user_dir_txn(txn, stale_user_id)
+            self._remove_federated_remote_users_txn(txn, stale_user_ids)
 
         await self.db_pool.runInteraction(
             "reconcile_federated_remote_users", _reconcile_txn

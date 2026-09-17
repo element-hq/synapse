@@ -872,20 +872,32 @@ class UserDirectoryHandler(StateDeltasHandler):
 
     @wrap_as_background_process("federated_user_directory_sync")
     async def _sync_federated_user_directory(self) -> None:
-        """Fetch and reconcile known homeservers' user directories.
-        Logs and skips failed destinations without stopping others.
+        """Sync federated user directories from whitelisted homeservers.
+
+        Fetch and reconcile each remote directory.
+
+        Prune removes previous federation imports from homeservers no longer in the whitelist.
         """
-        destinations = await self.store.get_known_destinations()
+        whitelist = self.hs.config.federation.federation_domain_whitelist or {}
+        destinations: list[str] = [
+            destination for destination in whitelist if destination != self.server_name
+        ]
+
+        if self.update_user_directory:
+            # Clean up removed sources even when no destinations remain.
+            # An empty or unset whitelist clears all federation imports.
+            await self.store.prune_federated_remote_users(destinations)
+
         if not destinations:
-            logger.debug("ending federated user directory sync: no known destinations")
+            logger.debug(
+                "Ending federated user directory sync: "
+                "no remote destinations configured in federation_domain_whitelist"
+            )
             return
 
         total_reconciled = 0
 
         for destination in destinations:
-            if destination == self.server_name:
-                continue
-
             try:
                 response = await self._federation_client.user_directory_fetch(
                     destination,
