@@ -73,8 +73,25 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         container: list[JsonDict],
         contains_these: list[JsonDict],
     ) -> None:
+        """
+        Fail the test if the count of elements in both `container` and `contains_these`
+        do not match, and if the individual elements in `container` is not a super set
+        of the individual elements of `contains_these`.
+
+        Useful for comparison of lists of PDU dictionaries that may or may not have
+        stripped state, so the minimum required data is asserted to be present.
+
+        (Note: maybe revert after https://github.com/element-hq/synapse/pull/19723 if
+        this is still necessary)
+        """
         assert contains_these, "`contains_these` was empty"
         assert container, "`container` was empty"
+
+        self.assertEqual(
+            len(container),
+            len(contains_these),
+            f"container must have the same number of elements as contains_these:\n\n{container=}\n\n{contains_these=}",
+        )
 
         for dict_to_search_for in contains_these:
             for container_entry in container:
