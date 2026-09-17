@@ -48,7 +48,9 @@ class TaskSchedulerConfigTestCase(HomeserverTestCase):
             config.read_config({"task_scheduler": {"max_concurrent_tasks": -1}})
 
         with self.assertRaises(ConfigError):
-            config.read_config({"task_scheduler": {"max_concurrent_tasks": "not-an-int"}})
+            config.read_config(
+                {"task_scheduler": {"max_concurrent_tasks": "not-an-int"}}
+            )
 
         with self.assertRaises(ConfigError):
             config.read_config({"task_scheduler": {"max_concurrent_tasks": True}})

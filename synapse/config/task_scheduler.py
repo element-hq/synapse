@@ -32,6 +32,8 @@ class TaskSchedulerConfig(Config):
         max_concurrent_tasks = task_scheduler_config.get(
             "max_concurrent_tasks", DEFAULT_MAX_CONCURRENT_TASKS
         )
+        # In Python, bool is a subclass of int (isinstance(True, int) is True).
+        # We explicitly check for bool to reject YAML booleans like `true`/`false`.
         if (
             not isinstance(max_concurrent_tasks, int)
             or isinstance(max_concurrent_tasks, bool)
