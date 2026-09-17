@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventUnsignedContentFields
+from synapse.api.constants import AccountDataTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -341,7 +341,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
         )
         self.assertEqual(
             [e.event_id for e in [self.regular_event]],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
     def test_see_soft_failed_events(self) -> None:
@@ -380,7 +380,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
         )
         self.assertEqual(
             [e.event_id for e in [self.regular_event, self.soft_failed_event]],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
     def test_see_policy_server_spammy_events(self) -> None:
@@ -427,7 +427,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
         )
         self.assertEqual(
             [e.event_id for e in [self.regular_event, self.spammy_event]],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
     def test_see_soft_failed_and_policy_server_spammy_events(self) -> None:
@@ -477,7 +477,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
                 e.event_id
                 for e in [self.regular_event, self.soft_failed_event, self.spammy_event]
             ],
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
         )
 
 
@@ -559,14 +559,11 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
         # and messages sent between the two, but not before or after.
         self.assertEqual(
             [e.event_id for e in [join_event, during_event, leave_event]],
-            [e.event_id for e in joiner_filtered_events],
+            [e.event.event_id for e in joiner_filtered_events],
         )
         self.assertEqual(
             ["join", "join", "leave"],
-            [
-                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
-                for e in joiner_filtered_events
-            ],
+            [e.membership for e in joiner_filtered_events],
         )
 
         # The resident user should see all the events.
@@ -581,14 +578,11 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
                     after_event,
                 ]
             ],
-            [e.event_id for e in resident_filtered_events],
+            [e.event.event_id for e in resident_filtered_events],
         )
         self.assertEqual(
             ["join", "join", "join", "join", "join"],
-            [
-                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
-                for e in resident_filtered_events
-            ],
+            [e.membership for e in resident_filtered_events],
         )
 
 
@@ -651,15 +645,12 @@ class FilterEventsOutOfBandEventsForClientTestCase(
             )
         )
         self.assertEqual(
-            [e.event_id for e in filtered_events],
+            [e.event.event_id for e in filtered_events],
             [e.event_id for e in [invite_event, reject_event]],
         )
         self.assertEqual(
             ["invite", "leave"],
-            [
-                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
-                for e in filtered_events
-            ],
+            [e.membership for e in filtered_events],
         )
 
         # other users should see neither

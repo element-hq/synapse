@@ -41,7 +41,7 @@ from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 
 from tests import unittest
-from tests.http.server._base import test_disconnect
+from tests.http.server._base import disconnect_and_assert
 from tests.server import (
     FakeChannel,
     FakeSite,
@@ -506,7 +506,7 @@ class DirectServeJsonResourceCancellationTests(unittest.TestCase):
         channel = make_request(
             self.reactor, self.site, "GET", "/sleep", await_result=False
         )
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=True,
@@ -518,7 +518,7 @@ class DirectServeJsonResourceCancellationTests(unittest.TestCase):
         channel = make_request(
             self.reactor, self.site, "POST", "/sleep", await_result=False
         )
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=False,
@@ -540,7 +540,7 @@ class DirectServeHtmlResourceCancellationTests(unittest.TestCase):
         channel = make_request(
             self.reactor, self.site, "GET", "/sleep", await_result=False
         )
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor,
             channel,
             expect_cancellation=True,
@@ -552,6 +552,6 @@ class DirectServeHtmlResourceCancellationTests(unittest.TestCase):
         channel = make_request(
             self.reactor, self.site, "POST", "/sleep", await_result=False
         )
-        test_disconnect(
+        disconnect_and_assert(
             self.reactor, channel, expect_cancellation=False, expected_body=b"ok"
         )

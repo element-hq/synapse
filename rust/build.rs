@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use blake2::{Blake2b512, Digest};
+use rustc_version::version_meta;
 
 fn main() -> Result<(), std::io::Error> {
     let mut dirs = vec![PathBuf::from("src")];
@@ -47,6 +48,11 @@ fn main() -> Result<(), std::io::Error> {
 
     let hex_digest = hex::encode(hasher.finalize());
     println!("cargo:rustc-env=SYNAPSE_RUST_DIGEST={hex_digest}");
+
+    let rustc_version = version_meta()
+        .map(|v| v.short_version_string)
+        .unwrap_or_else(|_| "unknown".to_string());
+    println!("cargo:rustc-env=SYNAPSE_RUSTC_VERSION={}", rustc_version,);
 
     // The default rules don't pick up trivial changes to the workspace config
     // files, but we need to rebuild if those change to pick up the changed

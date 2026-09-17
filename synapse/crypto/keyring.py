@@ -46,9 +46,9 @@ from synapse.api.errors import (
 )
 from synapse.config.key import TrustedKeyServer
 from synapse.events import EventBase
-from synapse.events.utils import prune_event_dict
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.storage.keys import FetchKeyResult
+from synapse.synapse_rust.events import redact_event
 from synapse.types import JsonDict
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import yieldable_gather_results
@@ -120,13 +120,23 @@ class VerifyJsonRequest:
     ) -> "VerifyJsonRequest":
         """Create a VerifyJsonRequest to verify all signatures on an event
         object for the given server.
+
+        Raises immediately if the event doesn't have any signatures from the
+        given server.
         """
-        key_ids = list(event.signatures.get(server_name, []))
+        if server_name not in event.signatures:
+            raise SynapseError(
+                400,
+                f"Not signed by {server_name}",
+                Codes.UNAUTHORIZED,
+            )
+
+        key_ids = list(event.signatures[server_name])
         return VerifyJsonRequest(
             server_name,
             # We defer creating the redacted json object, as it uses a lot more
             # memory than the Event object itself.
-            lambda: prune_event_dict(event.room_version, event.get_pdu_json()),
+            lambda: redact_event(event).get_pdu_json(),
             minimum_valid_until_ms,
             key_ids=key_ids,
         )

@@ -218,12 +218,18 @@ class SQLBaseStore(metaclass=ABCMeta):
         self.external_cached_functions[cache_name] = func
 
 
-def db_to_json(db_content: memoryview | bytes | bytearray | str) -> Any:
+def db_to_json(
+    db_content: memoryview | bytes | bytearray | str | dict[str, Any] | list[Any],
+) -> Any:
     """
     Take some data from a database row and return a JSON-decoded object.
 
     Args:
         db_content: The JSON-encoded contents from the database.
+            Supports TEXT columns, as well as JSON/JSONB columns containing lists or objects.
+            Note that psycopg will decode JSON/JSONB automatically but SQLite doesn't have
+            such a data type (and returns the text verbatim), so this function can help
+            paper over the difference.
 
     Returns:
         The object decoded from JSON.
@@ -237,6 +243,13 @@ def db_to_json(db_content: memoryview | bytes | bytearray | str) -> Any:
     # it only supports handling strings
     if isinstance(db_content, (bytes, bytearray)):
         db_content = db_content.decode("utf8")
+
+    if isinstance(db_content, (dict, list)):
+        # psycopg2 has already decoded this JSON or JSONB value
+        # Maybe we should be splitting this case out to a separate helper where
+        # we expect JSON/JSONB columns and switch behaviour based on
+        # the database driver
+        return db_content
 
     try:
         return json_decoder.decode(db_content)

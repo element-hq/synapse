@@ -61,22 +61,6 @@ class WellKnownBuilder:
                 "account": await self._auth.account_management_url(),
             }
 
-        elif self._config.experimental.msc3861.enabled:
-            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
-            # We import lazily here because of the authlib requirement
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-            assert isinstance(self._auth, MSC3861DelegatedAuth)
-
-            result["org.matrix.msc2965.authentication"] = {
-                "issuer": await self._auth.issuer(),
-            }
-            account_management_url = await self._auth.account_management_url()
-            if account_management_url is not None:
-                result["org.matrix.msc2965.authentication"]["account"] = (
-                    account_management_url
-                )
-
         if self._config.server.extra_well_known_client_content:
             for (
                 key,

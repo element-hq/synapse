@@ -4,6 +4,7 @@
 # Copyright 2020 Sorunome
 # Copyright 2014-2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2025 Element Creations Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -23,6 +24,7 @@ import logging
 from typing import TYPE_CHECKING, Iterable, Literal
 
 from synapse.api.errors import FederationDeniedError, SynapseError
+from synapse.federation.transport.server import appservice_proxy
 from synapse.federation.transport.server._base import (
     Authenticator,
     BaseFederationServlet,
@@ -33,6 +35,7 @@ from synapse.federation.transport.server.federation import (
     FederationMediaDownloadServlet,
     FederationMediaThumbnailServlet,
     FederationUnstableClientKeysClaimServlet,
+    FederationUnstableGetExtremitiesServlet,
 )
 from synapse.http.server import HttpServer, JsonResource
 from synapse.http.servlet import (
@@ -326,9 +329,18 @@ def register_servlets(
                 if not hs.config.media.can_load_media_repo:
                     continue
 
+            if (
+                servletclass == FederationUnstableGetExtremitiesServlet
+                and not hs.config.experimental.msc4370_enabled
+            ):
+                continue
+
             servletclass(
                 hs=hs,
                 authenticator=authenticator,
                 ratelimiter=ratelimiter,
                 server_name=hs.hostname,
             ).register(resource)
+
+    if "federation" in servlet_groups:
+        appservice_proxy.register_servlets(hs, resource, authenticator, ratelimiter)

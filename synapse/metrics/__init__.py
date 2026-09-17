@@ -62,12 +62,16 @@ from twisted.web.server import Request
 import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
 from synapse.metrics._types import Collector
+from synapse.synapse_rust import get_rustc_version
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
 
 logger = logging.getLogger(__name__)
 
 METRICS_PREFIX = "/_synapse/metrics"
+
+# Rust version used for compilation
+RUSTC_VERSION = get_rustc_version()
 
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
@@ -672,14 +676,16 @@ event_processing_lag_by_event = Histogram(
 # consider this process-level because all Synapse homeservers running in the process
 # will use the same Synapse version.
 build_info = Gauge(  # type: ignore[missing-server-name-label]
-    "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
+    "synapse_build_info",
+    "Build information",
+    ["pythonversion", "version", "osversion", "rustcversion"],
 )
 build_info.labels(
     " ".join([platform.python_implementation(), platform.python_version()]),
     SYNAPSE_VERSION,
     " ".join([platform.system(), platform.release()]),
+    RUSTC_VERSION,
 ).set(1)
-
 
 synapse_server_name_info = Gauge(
     "synapse_server_name_info",

@@ -59,8 +59,8 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
         self.store = self.hs.get_datastores().main
 
     async def update(self, progress: JsonDict, count: int) -> int:
-        duration_ms = 10
-        await self.clock.sleep(Duration(milliseconds=count * duration_ms))
+        fake_work_duration = Duration(seconds=1)
+        await self.clock.sleep(fake_work_duration)
         progress = {"my_key": progress["my_key"] + 1}
         await self.store.db_pool.runInteraction(
             "update_progress",
@@ -86,10 +86,15 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
 
         self.update_handler.side_effect = self.update
         self.update_handler.reset_mock()
-        res = self.get_success(
-            self.updates.do_next_background_update(False),
-            by=0.02,
+        background_update_d = ensureDeferred(
+            self.updates.do_next_background_update(False)
         )
+        # Wait for database queries to run in `do_next_background_update(...)` so the
+        # background update actually gets scheduled
+        self.reactor.advance(0)
+        # Wait for the actual background update `fake_work_duration`
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        res = self.get_success(background_update_d)
         self.assertFalse(res)
 
         # on the first call, we should get run with the default background update size
@@ -143,10 +148,15 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
 
         self.update_handler.side_effect = self.update
         self.update_handler.reset_mock()
-        res = self.get_success(
-            self.updates.do_next_background_update(False),
-            by=0.01,
+        background_update_d = ensureDeferred(
+            self.updates.do_next_background_update(False)
         )
+        # Wait for database queries to run in `do_next_background_update(...)` so the
+        # background update actually gets scheduled
+        self.reactor.advance(0)
+        # Wait for the actual background update `fake_work_duration`
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        res = self.get_success(background_update_d)
         self.assertFalse(res)
 
         # on the first call, we should get run with the default background update size specified in the config
@@ -265,10 +275,15 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
 
         self.update_handler.side_effect = self.update
         self.update_handler.reset_mock()
-        res = self.get_success(
-            self.updates.do_next_background_update(False),
-            by=0.02,
+        background_update_d = ensureDeferred(
+            self.updates.do_next_background_update(False)
         )
+        # Wait for database queries to run in `do_next_background_update(...)` so the
+        # background update actually gets scheduled
+        self.reactor.advance(0)
+        # Wait for the actual background update `fake_work_duration`
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        res = self.get_success(background_update_d)
         self.assertFalse(res)
 
         # the first update was run with the default batch size, this should be run with 500ms as the
@@ -298,9 +313,6 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
         """
         Test that the minimum batch size set in the config is used
         """
-        # a very long-running individual update
-        duration_ms = 50
-
         self.get_success(
             self.store.db_pool.simple_insert(
                 "background_updates",
@@ -310,7 +322,8 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
 
         # Run the update with the long-running update item
         async def update_long(progress: JsonDict, count: int) -> int:
-            await self.clock.sleep(Duration(milliseconds=count * duration_ms))
+            very_long_fake_work_duration = Duration(seconds=5)
+            await self.clock.sleep(very_long_fake_work_duration)
             progress = {"my_key": progress["my_key"] + 1}
             await self.store.db_pool.runInteraction(
                 "update_progress",
@@ -322,10 +335,15 @@ class BackgroundUpdateTestCase(unittest.HomeserverTestCase):
 
         self.update_handler.side_effect = update_long
         self.update_handler.reset_mock()
-        res = self.get_success(
-            self.updates.do_next_background_update(False),
-            by=1,
+        background_update_d = ensureDeferred(
+            self.updates.do_next_background_update(False)
         )
+        # Wait for database queries to run in `do_next_background_update(...)` so the
+        # background update actually gets scheduled
+        self.reactor.advance(0)
+        # Wait for the actual background update `very_long_fake_work_duration`
+        self.reactor.advance(Duration(seconds=5).as_secs())
+        res = self.get_success(background_update_d)
         self.assertFalse(res)
 
         # the first update was run with the default batch size, this should be run with minimum batch size
