@@ -452,6 +452,74 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.update_profile_in_user_dir(BELA, "Bela", None))
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
 
+    def test_prune_federated_remote_users_removes_only_unlisted_imports(self) -> None:
+        helper = GetUserDirectoryTables(self.store)
+        self.get_success(
+            self.store.update_profile_in_user_dir("@local:test", "Local", None)
+        )
+        self.get_success(
+            self.store.upsert_federated_remote_users(
+                [(BOBBY, "bobby", None), (BOB, "bob", None)]
+            )
+        )
+        expected_profiles = self.get_success(helper.get_profiles_in_user_directory())
+        del expected_profiles[BOBBY]
+
+        # Repeating cleanup must preserve the remaining imports and unrelated users.
+        for _ in range(2):
+            self.get_success(self.store.prune_federated_remote_users(["b"]))
+
+            self.assertEqual(
+                self.get_success(helper.get_users_in_federated_search()), {(BOB, "b")}
+            )
+            self.assertEqual(
+                self.get_success(helper.get_profiles_in_user_directory()),
+                expected_profiles,
+            )
+            indexed_users = self.get_success(
+                self.store.db_pool.simple_select_onecol(
+                    table="user_directory_search", keyvalues=None, retcol="user_id"
+                )
+            )
+            self.assertEqual(set(indexed_users), set(expected_profiles))
+            self.assertEqual(
+                self.get_success(helper.get_users_in_public_rooms()),
+                {(ALICE, "!room:id"), (BOB, "!room:id")},
+            )
+
+    def test_federated_cleanup_preserves_public_room_users(self) -> None:
+        helper = GetUserDirectoryTables(self.store)
+        for cleanup in ("prune", "reconcile"):
+            with self.subTest(cleanup=cleanup):
+                self.get_success(
+                    self.store.upsert_federated_remote_users([(ALICE, "alice", None)])
+                )
+
+                if cleanup == "prune":
+                    self.get_success(self.store.prune_federated_remote_users([]))
+                    # Cleanup also works when no federation imports remain.
+                    self.get_success(self.store.prune_federated_remote_users([]))
+                else:
+                    self.get_success(
+                        self.store.reconcile_federated_remote_users("a", [])
+                    )
+
+                self.assertEqual(
+                    self.get_success(helper.get_users_in_federated_search()), set()
+                )
+                profiles = self.get_success(helper.get_profiles_in_user_directory())
+                self.assertEqual(
+                    profiles[ALICE], ProfileInfo(display_name="alice", avatar_url=None)
+                )
+                self.assertIn(
+                    (ALICE, "!room:id"),
+                    self.get_success(helper.get_users_in_public_rooms()),
+                )
+                results = self.get_success(self.store.search_user_dir(BOB, "alice", 10))
+                self.assertEqual(
+                    [user["user_id"] for user in results["results"]], [ALICE]
+                )
+
     def test_get_local_users_in_user_dir(self) -> None:
         """Only registered local directory entries and their profiles are returned."""
         local_user = "@local:test"
