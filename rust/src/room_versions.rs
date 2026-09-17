@@ -164,12 +164,14 @@ pub struct RoomVersion {
     /// Determines whether a room version *SHOULD* rather than *MAY* reject invites/knocks
     /// with invalid stripped state events.
     ///
-    /// According to MSC4311:
-    /// > If any of the [stripped state] events are not a PDU, not for the room ID specified, or fail
-    /// > signature checks, or the `m.room.create` event is missing, the receiving
-    /// > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
-    /// > error (new to the endpoint). For invites to room version 12+ rooms, servers
-    /// > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+    /// According to Matrix v1.18 (introduced in MSC4311):
+    /// > The `invite_room_state` has additional validation, which servers MAY apply to
+    /// > room versions 1 through 11 and SHOULD apply to all other room versions. As with
+    /// > the above errors, servers SHOULD return `M_INVALID_PARAM` if:
+    /// >  - The `m.room.create` event is missing from `invite_room_state`.
+    /// >  - One or more entries in `invite_room_state` are not formatted according to the room's version.
+    /// >  - One or more events fails a signature check.
+    /// >  - One or more events does not reside in the same room as the invite.
     ///
     /// Regardless of room version (we should always do these things):
     /// 1. The `m.room.create` event *MUST* be included in
