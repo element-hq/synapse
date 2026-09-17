@@ -189,6 +189,33 @@ class TestTaskScheduler(HomeserverTestCase):
             1,
         )
 
+        # Give the time to the active tasks to finish
+        self.reactor.advance(1)
+
+        # Check that 4 tasks have run and that one is still scheduled.
+        self.assertEqual(
+            len(get_tasks_of_status(TaskStatus.COMPLETE)),
+            4,
+        )
+        scheduled_tasks = get_tasks_of_status(TaskStatus.SCHEDULED)
+        self.assertEqual(len(scheduled_tasks), 1)
+
+        # The scheduled task should start 0.1s after the first of the active tasks
+        # finishes
+        self.reactor.advance(0.1)
+        self.assertEqual(len(get_tasks_of_status(TaskStatus.ACTIVE)), 1)
+
+        # ... and should finally complete after another second
+        self.reactor.advance(1)
+        prev_scheduled_task = self.get_success(
+            self.task_scheduler.get_task(scheduled_tasks[0].id)
+        )
+        assert prev_scheduled_task is not None
+        self.assertEqual(
+            prev_scheduled_task.status,
+            TaskStatus.COMPLETE,
+        )
+
     async def _raising_task(
         self, task: ScheduledTask
     ) -> tuple[TaskStatus, JsonMapping | None, str | None]:
