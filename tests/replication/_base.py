@@ -523,12 +523,18 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
         results_mapping = {}
 
-        # Maintain a count, in case of a runaway process.
+        # Maintain a count, in case of a runaway process. The number 3 has no magical
+        # significance other than at the time of writing it allowed all tests that used
+        # this function to pass. The count is on a one based index(counts down to 1 and
+        # doesn't go past), so this will allow for (3 * num_of_workers) attempts before
+        # giving up if `try_at_most_count` does not override.
         count = try_at_most_count or len(set_of_workernames) * 3
 
         while set_of_workernames:
+            # Rooms created at the same millisecond will have the same room_id for
+            # MSC4291 rooms. Bump the reactor by that much so a different room_id will
+            # be tried on the next iteration.
             self.reactor.advance(Duration(milliseconds=1).as_secs())
-            count -= 1
             _room_id = self.helper.create_room_as(user_id, tok=user_tok)
 
             _worker_responsible = events_writers_config.get_instance(_room_id)
@@ -538,7 +544,8 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
                 # Remember to remove the worker now that it is found
                 set_of_workernames.remove(_worker_responsible)
 
-            if count == 0:
+            count -= 1
+            if count == 1:
                 raise AssertionError(
                     "Count exhausted attempting to generate rooms. Aborting and failing test"
                 )
