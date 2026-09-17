@@ -240,6 +240,39 @@ class BaseAuth:
 
         return user_level >= send_level
 
+    async def get_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester:
+        """Get a registered user's ID. See `Auth.get_user_by_req`."""
+        raise NotImplementedError()
+
+    async def get_optional_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester | None:
+        """Like `get_user_by_req`, except returns None when the request carries
+        no access token at all. A token that is present but invalid still
+        raises, as with `get_user_by_req`.
+
+        For endpoints where authentication is optional.
+        """
+        if not self.has_access_token(request):
+            return None
+
+        return await self.get_user_by_req(
+            request,
+            allow_guest=allow_guest,
+            allow_expired=allow_expired,
+            allow_locked=allow_locked,
+        )
+
     @staticmethod
     def has_access_token(request: Request) -> bool:
         """Checks if the request has an access_token.
