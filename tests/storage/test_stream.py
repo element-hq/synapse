@@ -1382,7 +1382,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             self.room_version,
         )
         # This handles FrozenEvent* creation for us, and will create the room_id if this
-        # is a msc4921 room
+        # is a msc4291 room
         creation_event = make_test_pdu_event(
             creation_event_source,
             self.room_version,

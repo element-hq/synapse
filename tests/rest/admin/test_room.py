@@ -3318,7 +3318,7 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
             self.creator, tok=self.creator_tok, is_public=True
         )
 
-        # In the case that this is a msc4291 compliant room, we can not use the room
+        # In the case that this is a msc4289 compliant room, we can not use the room
         # creator as the "puppeted" user. Join another user to use as a sentinel
         # instead. The room's creator will leave the room before the command runs.
         self.helper.join(room_id, self.second_user_id, tok=self.second_tok)
