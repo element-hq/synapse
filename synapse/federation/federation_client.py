@@ -1450,21 +1450,21 @@ class FederationClient(FederationBase):
                         "User's homeserver does not support this room version",
                         Codes.UNSUPPORTED_ROOM_VERSION,
                     )
-            # MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
-            # error by the sending server over the Client-Server API. This is done
-            # because there's nothing the client can materially do differently to make
-            # the request succeed.
+            # MSC4311: The 400 `M_MISSING_PARAM`/`M_INVALID_PARAM` error SHOULD be
+            # translated to a 5xx error by the sending server over the Client-Server
+            # API. This is done because there's nothing the client can materially do
+            # differently to make the request succeed.
             #
-            # But this was actually further clarified in MSC4528 to be `400` with
-            # `M_INCOMPATIBLE_SERVER`.
-            elif (
-                err.code == HTTPStatus.BAD_REQUEST
-                and err.errcode == Codes.MISSING_PARAM
+            # But this was actually further clarified in MSC4528 that it should be
+            # translated to a `400` with `M_INCOMPATIBLE_SERVER`.
+            elif err.code == HTTPStatus.BAD_REQUEST and err.errcode in (
+                Codes.MISSING_PARAM,
+                Codes.INVALID_PARAM,
             ):
                 raise SynapseError(
                     400,
                     f"Invite was rejected by the recipient's server.\n\n"
-                    f"The remote homeserver ({destination}) returned {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} "
+                    f"The remote homeserver ({destination}) returned {err.code} {err.errcode} "
                     "which indicates a compatibility problem between your homeserver and the "
                     "homeserver you're trying to send the invite to (either one could be at fault).",
                     Codes.INCOMPATIBLE_SERVER,
@@ -1498,22 +1498,22 @@ class FederationClient(FederationBase):
                 content=event_json,
             )
         except HttpResponseException as e:
-            # MSC4311: The 400 `M_MISSING_PARAM` error SHOULD be translated to a 5xx
-            # error by the sending server over the Client-Server API. This is done
-            # because there's nothing the client can materially do differently to make
-            # the request succeed.
+            # MSC4311: The 400 `M_MISSING_PARAM`/`M_INVALID_PARAM` error SHOULD be
+            # translated to a 5xx error by the sending server over the Client-Server
+            # API. This is done because there's nothing the client can materially do
+            # differently to make the request succeed.
             #
-            # But this was actually further clarified in MSC4528 to be `400` with
-            # `M_INCOMPATIBLE_SERVER`.
+            # But this was actually further clarified in MSC4528 that it should be
+            # translated to a `400` with `M_INCOMPATIBLE_SERVER`.
             err = e.to_synapse_error()
-            if (
-                err.code == HTTPStatus.BAD_REQUEST
-                and err.errcode == Codes.MISSING_PARAM
+            if err.code == HTTPStatus.BAD_REQUEST and err.errcode in (
+                Codes.MISSING_PARAM,
+                Codes.INVALID_PARAM,
             ):
                 raise SynapseError(
                     400,
                     f"Invite was rejected by the recipient's server.\n\n"
-                    f"The remote homeserver ({destination}) returned {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} "
+                    f"The remote homeserver ({destination}) returned {err.code} {err.errcode} "
                     "which indicates a compatibility problem between your homeserver and the "
                     "homeserver you're trying to send the invite to (either one could be at fault).",
                     Codes.INCOMPATIBLE_SERVER,
