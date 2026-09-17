@@ -1553,8 +1553,8 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             with self.subTest(whitelist=whitelist):
                 self.hs.config.federation.federation_domain_whitelist = whitelist
                 self.get_success(
-                    self.store.upsert_federated_remote_users(
-                        [("@bob:remote.example.com", "Bob", None)]
+                    self.store.reconcile_federated_remote_users(
+                        "remote.example.com", [("@bob:remote.example.com", "Bob", None)]
                     )
                 )
 
@@ -1578,7 +1578,9 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
     def test_sync_does_not_prune_when_directory_updates_are_disabled(self) -> None:
         user_id = "@bob:remote.example.com"
         self.get_success(
-            self.store.upsert_federated_remote_users([(user_id, "Bob", None)])
+            self.store.reconcile_federated_remote_users(
+                "remote.example.com", [(user_id, "Bob", None)]
+            )
         )
         self.handler.update_user_directory = False
 
@@ -1791,7 +1793,9 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         # other servers fail to respond.
         removed_user = "@old:removed.example.com"
         self.get_success(
-            self.store.upsert_federated_remote_users([(removed_user, "Old", None)])
+            self.store.reconcile_federated_remote_users(
+                "removed.example.com", [(removed_user, "Old", None)]
+            )
         )
 
         for destination in failures:
@@ -1855,16 +1859,17 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout,
         )
 
-    def test_upsert_remote_users_persists_profiles_and_visibility(self) -> None:
+    def test_reconcile_remote_users_persists_profiles_and_visibility(self) -> None:
         self.get_success(
-            self.handler.upsert_remote_users(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
                 [
                     RemoteUserDirectoryEntry(
                         user_id="@alice:remote.example.com",
                         display_name="Alice Remote",
                         avatar_url="mxc://remote.example.com/abc",
                     )
-                ]
+                ],
             )
         )
 
@@ -1893,16 +1898,17 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
             self.get_success(self.user_dir_helper.get_users_in_public_rooms()), set()
         )
 
-    def test_upsert_remote_users_ignores_local_users(self) -> None:
+    def test_reconcile_remote_users_ignores_local_users(self) -> None:
         self.get_success(
-            self.handler.upsert_remote_users(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
                 [
                     RemoteUserDirectoryEntry(
                         user_id="@localuser:test",
                         display_name="Local User",
                         avatar_url=None,
                     )
-                ]
+                ],
             )
         )
 
@@ -1948,14 +1954,15 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
     def test_search_users_returns_cached_remote_users(self) -> None:
         self.get_success(
-            self.handler.upsert_remote_users(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
                 [
                     RemoteUserDirectoryEntry(
                         user_id="@carol:remote.example.com",
                         display_name="Carol Remote",
                         avatar_url=None,
                     )
-                ]
+                ],
             )
         )
 
@@ -1973,14 +1980,15 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
         room_id = "!real-room:test"
 
         self.get_success(
-            self.handler.upsert_remote_users(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
                 [
                     RemoteUserDirectoryEntry(
                         user_id=user_id,
                         display_name="Dave Remote",
                         avatar_url=None,
                     )
-                ]
+                ],
             )
         )
         self.get_success(self.store.add_users_in_public_rooms(room_id, [user_id]))
@@ -2003,14 +2011,15 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
     def test_remove_from_user_directory_clears_federated_visibility(self) -> None:
         user_id = "@erin:remote.example.com"
         self.get_success(
-            self.handler.upsert_remote_users(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
                 [
                     RemoteUserDirectoryEntry(
                         user_id=user_id,
                         display_name="Erin Remote",
                         avatar_url=None,
                     )
-                ]
+                ],
             )
         )
 
@@ -2027,14 +2036,15 @@ class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
 
     def test_delete_all_from_user_directory_clears_federated_visibility(self) -> None:
         self.get_success(
-            self.handler.upsert_remote_users(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
                 [
                     RemoteUserDirectoryEntry(
                         user_id="@frank:remote.example.com",
                         display_name="Frank Remote",
                         avatar_url=None,
                     )
-                ]
+                ],
             )
         )
 

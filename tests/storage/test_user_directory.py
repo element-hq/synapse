@@ -458,9 +458,10 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
             self.store.update_profile_in_user_dir("@local:test", "Local", None)
         )
         self.get_success(
-            self.store.upsert_federated_remote_users(
-                [(BOBBY, "bobby", None), (BOB, "bob", None)]
-            )
+            self.store.reconcile_federated_remote_users("a", [(BOBBY, "bobby", None)])
+        )
+        self.get_success(
+            self.store.reconcile_federated_remote_users("b", [(BOB, "bob", None)])
         )
         expected_profiles = self.get_success(helper.get_profiles_in_user_directory())
         del expected_profiles[BOBBY]
@@ -492,7 +493,9 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         for cleanup in ("prune", "reconcile"):
             with self.subTest(cleanup=cleanup):
                 self.get_success(
-                    self.store.upsert_federated_remote_users([(ALICE, "alice", None)])
+                    self.store.reconcile_federated_remote_users(
+                        "a", [(ALICE, "alice", None)]
+                    )
                 )
 
                 if cleanup == "prune":
