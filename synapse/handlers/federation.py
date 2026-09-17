@@ -1280,7 +1280,7 @@ class FederationHandler:
             #
             # We do this after the above checks to make sure it's a valid event
             # from this room.
-            if pdu.type == EventTypes.Create:
+            if (pdu.type, pdu.state_key) == (EventTypes.Create, ""):
                 includes_create_event = True
 
             # Parse the stripped events to ensure it has all of the fields necessary
