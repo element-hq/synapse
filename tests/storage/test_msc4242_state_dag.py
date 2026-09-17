@@ -19,7 +19,8 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import FrozenEventVMSC4242, make_event_from_dict
+from synapse.events import EventBase
+from synapse.events.py_protocol import MSC4242Event
 from synapse.events.snapshot import EventContext
 from synapse.rest.client import room
 from synapse.server import HomeServer
@@ -152,22 +153,17 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
         id: str,
         prev_state_events: list[str],
         rejected: bool = False,
-    ) -> tuple[FrozenEventVMSC4242, EventContext]:
-        ev = make_event_from_dict(
-            {
-                "prev_state_events": prev_state_events,
-                "content": {
-                    "membership": "join",
-                },
-                "sender": "@unimportant:info",
-                "state_key": "@unimportant:info",
-                "type": "m.room.member",
-                "room_id": self.room_id,
-            },
-            room_version=RoomVersions.MSC4242v12,
-        )
-        assert isinstance(ev, FrozenEventVMSC4242)
-        ev._event_id = id
+    ) -> tuple[MSC4242Event, EventContext]:
+        # We use a mock here to allow us to set the `event_id`.
+        #
+        # FIXME: Having consistent human-readable event IDs in these tests is
+        # nice but the `Mock` is less than ideal. It would be better to use a
+        # real event but that is more complex to set up.
+        ev = Mock(spec=EventBase)
+        ev.event_id = id
+        ev.prev_state_events = prev_state_events
+        ev.state_key = "@unimportant:info"
+        ev.is_state.return_value = True
         ctx = Mock()
         ctx.rejected = rejected
         return ev, ctx
@@ -175,7 +171,7 @@ class MSC4242EventPersistenceStateDagsStoreTestCase(HomeserverTestCase):
     def _test(
         self,
         current_fwds: list[str],
-        new_events: list[tuple[FrozenEventVMSC4242, EventContext]],
+        new_events: list[tuple[MSC4242Event, EventContext]],
         want_new_extrems: set[str],
         want_raises: bool = False,
     ) -> None:

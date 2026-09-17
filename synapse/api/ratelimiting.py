@@ -163,7 +163,12 @@ class Ratelimiter:
         if requester:
             # Disable rate limiting of users belonging to any AS that is configured
             # not to be rate limited in its registration file (rate_limited: true|false).
-            if requester.app_service and not requester.app_service.is_rate_limited():
+            app_service = (
+                self.store.get_app_service_by_id(requester.app_service_id)
+                if requester.app_service_id
+                else None
+            )
+            if app_service and not app_service.is_rate_limited():
                 return True, -1.0
 
             # Check if ratelimiting has been disabled for the user.

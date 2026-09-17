@@ -277,9 +277,7 @@ class AuthHandler:
         # response.
         self._extra_attributes: dict[str, SsoLoginExtraAttributes] = {}
 
-        self._auth_delegation_enabled = (
-            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
-        )
+        self._auth_delegation_enabled = hs.config.mas.enabled
 
     async def validate_user_via_ui_auth(
         self,
@@ -332,7 +330,8 @@ class AuthHandler:
         """
         if self._auth_delegation_enabled:
             raise SynapseError(
-                HTTPStatus.INTERNAL_SERVER_ERROR, "UIA shouldn't be used with MSC3861"
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "UIA shouldn't be used when auth is delegated",
             )
 
         if not requester.access_token_id:

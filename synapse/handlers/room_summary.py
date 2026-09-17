@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 import attr
 
 from synapse.api.constants import (
+    EventContentFields,
     EventTypes,
     HistoryVisibility,
     JoinRules,
@@ -368,7 +369,7 @@ class RoomSummaryHandler:
             # inaccessible to the requesting user.
             if room_entry:
                 # Add the room (including the stripped m.space.child events).
-                rooms_result.append(room_entry.as_json(for_client=True))
+                rooms_result.append(room_entry.as_json())
 
                 # If this room is not at the max-depth, check if there are any
                 # children to process.
@@ -513,7 +514,7 @@ class RoomSummaryHandler:
         ):
             return None
 
-        room_entry = await self._build_room_entry(room_id, for_federation=bool(origin))
+        room_entry = await self._build_room_entry(room_id)
 
         # If the room is not a space return just the room information.
         if room_entry.get("room_type") != RoomTypes.SPACE or not include_children:
@@ -685,9 +686,10 @@ class RoomSummaryHandler:
             if await self._event_auth_handler.has_restricted_join_rules(
                 state_ids, room_version
             ):
-                allowed_rooms = (
-                    await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
-                )
+                (
+                    allowed_rooms,
+                    _,
+                ) = await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
                 if await self._event_auth_handler.is_user_in_rooms(
                     allowed_rooms, requester
                 ):
@@ -707,9 +709,10 @@ class RoomSummaryHandler:
             if await self._event_auth_handler.has_restricted_join_rules(
                 state_ids, room_version
             ):
-                allowed_rooms = (
-                    await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
-                )
+                (
+                    allowed_rooms,
+                    _,
+                ) = await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
                 for space_id in allowed_rooms:
                     if await self._event_auth_handler.is_host_in_room(space_id, origin):
                         return True
@@ -769,14 +772,12 @@ class RoomSummaryHandler:
         # pending invite, etc.
         return await self._is_local_room_accessible(room_id, requester)
 
-    async def _build_room_entry(self, room_id: str, for_federation: bool) -> JsonDict:
+    async def _build_room_entry(self, room_id: str) -> JsonDict:
         """
         Generate en entry summarising a single room.
 
         Args:
             room_id: The room ID to summarize.
-            for_federation: True if this is a summary requested over federation
-                (which includes additional fields).
 
         Returns:
             The JSON dictionary for the room.
@@ -796,7 +797,6 @@ class RoomSummaryHandler:
             "canonical_alias": stats.canonical_alias,
             "num_joined_members": stats.joined_members,
             "avatar_url": stats.avatar,
-            "join_rule": stats.join_rules,
             "world_readable": (
                 stats.history_visibility == HistoryVisibility.WORLD_READABLE
             ),
@@ -805,24 +805,47 @@ class RoomSummaryHandler:
             "encryption": stats.encryption,
         }
 
-        # Federation requests need to provide additional information so the
-        # requested server is able to filter the response appropriately.
-        if for_federation:
-            current_state_ids = (
-                await self._storage_controllers.state.get_current_state_ids(room_id)
+        # Include allowed_room_ids for rooms with restricted join rules so that
+        # clients can determine which memberships grant access.
+        # Only the join rules event is needed for both has_restricted_join_rules
+        # and get_rooms_that_allow_join, so avoid fetching full state.
+        join_rules_state_ids = (
+            await self._storage_controllers.state.get_current_state_ids(
+                room_id,
+                state_filter=StateFilter.from_types([(EventTypes.JoinRules, "")]),
             )
-            room_version = await self._store.get_room_version(room_id)
+        )
+        if join_event_id := join_rules_state_ids.get((EventTypes.JoinRules, ""), None):
+            # To get the freshest data available, pull the state for the join_rules
+            # directly. In the unlikely case it is None, it will still be filtered out
+            # below.
+            #
+            # XXX: The current `/room_summary` spec (as of 2026-09-15) says that the
+            #  room is assumed to be `public` when `join_rule` isn't present but this
+            #  directly contradicts the scenarios where `join_rule` doesn't exist. For
+            #  example, if there is no `m.room.join_rules` event in the room, there is
+            #  no default and the the auth rules effectively make it so no one can join
+            #  except the room creator. The other scenario is if `join_rule` isn't a
+            #  string (not a valid `m.room.join_rules` event). See
+            #  https://github.com/matrix-org/matrix-spec/issues/2444
+            join_event = await self._store.get_event(join_event_id)
+            join_rule_content = join_event.content.get(EventContentFields.JOIN_RULE)
+            if isinstance(join_rule_content, str):
+                entry["join_rule"] = join_rule_content
 
-            if await self._event_auth_handler.has_restricted_join_rules(
-                current_state_ids, room_version
-            ):
-                allowed_rooms = (
-                    await self._event_auth_handler.get_rooms_that_allow_join(
-                        current_state_ids
-                    )
-                )
-                if allowed_rooms:
-                    entry["allowed_room_ids"] = allowed_rooms
+        try:
+            room_version = await self._store.get_room_version(room_id)
+        except UnsupportedRoomVersionError:
+            room_version = None
+
+        if room_version and await self._event_auth_handler.has_restricted_join_rules(
+            join_rules_state_ids, room_version
+        ):
+            allowed_rooms, _ = await self._event_auth_handler.get_rooms_that_allow_join(
+                join_rules_state_ids
+            )
+            if allowed_rooms:
+                entry["allowed_room_ids"] = allowed_rooms
 
         # Filter out Nones – rather omit the field altogether
         room_entry = {k: v for k, v in entry.items() if v is not None}
@@ -866,7 +889,8 @@ class RoomSummaryHandler:
         remote_room_hosts: list[str] | None = None,
     ) -> JsonDict:
         """
-        Implementation of the room summary C-S API from MSC3266
+        Implementation of the room summary C-S API, see
+        https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1room_summaryroomidoralias
 
         Args:
             requester:  user id of the user making this request, will be None
@@ -932,7 +956,6 @@ class RoomSummaryHandler:
                 raise NotFoundError("Room not found or is not accessible")
 
             room = dict(room_entry.room)
-            room.pop("allowed_room_ids", None)
 
             # If there was a requester, add their membership.
             # We keep the membership in the local membership table unless the
@@ -975,25 +998,14 @@ class _RoomEntry:
     # This may not include all children.
     children_state_events: Sequence[JsonDict] = ()
 
-    def as_json(self, for_client: bool = False) -> JsonDict:
+    def as_json(self) -> JsonDict:
         """
         Returns a JSON dictionary suitable for the room hierarchy endpoint.
 
         It returns the room summary including the stripped m.space.child events
         as a sub-key.
-
-        Args:
-            for_client: If true, any server-server only fields are stripped from
-                the result.
-
         """
         result = dict(self.room)
-
-        # Before returning to the client, remove the allowed_room_ids key, if it
-        # exists.
-        if for_client:
-            result.pop("allowed_room_ids", False)
-
         result["children_state"] = self.children_state_events
         return result
 

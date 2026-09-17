@@ -50,7 +50,7 @@ jobs:
     needs:
       - pre
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Fetch all history so that the schema_versions script works.
           fetch-depth: 0
@@ -63,19 +63,21 @@ jobs:
       - name: Set version of docs
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
 
-      - name: Setup python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      # Building the book requires running the `scripts-dev/schema_versions.py`
+      # script first, which has some python dependencies.
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          python-version: "3.x"
-
-      - run: "pip install 'packaging>=20.0' 'GitPython>=3.1.20'"
+          install-project: "false"
+          groups: "docs"
+          poetry-version: "2.4.1"
 
       - name: Build the documentation
         # mdbook will only create an index.html if we're including docs/README.md in SUMMARY.md.
         # However, we're using docs/README.md for other purposes and need to pick a new page
         # as the default. Let's opt for the welcome page instead.
         run: |
-          mdbook build
+          poetry run mdbook build
           cp book/welcome_and_overview.html book/index.html
 
       - name: Prepare and publish schema files
@@ -92,7 +94,7 @@ jobs:
 
       # Deploy to the target directory.
       - name: Deploy to gh pages
-        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./book

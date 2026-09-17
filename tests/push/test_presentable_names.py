@@ -23,11 +23,12 @@ from typing import Iterable, cast
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, FrozenEvent
+from synapse.events import EventBase
 from synapse.push.presentable_names import calculate_room_name
 from synapse.types import StateKey, StateMap
 
 from tests import unittest
+from tests.test_utils.event_builders import make_test_event
 
 
 class MockDataStore:
@@ -44,7 +45,7 @@ class MockDataStore:
         self._events = {}
 
         for i, (event_id, content) in enumerate(events):
-            self._events[event_id] = FrozenEvent(
+            self._events[event_id] = make_test_event(
                 {
                     "event_id": "$event_id",
                     "type": event_id[0],
@@ -59,7 +60,7 @@ class MockDataStore:
 
     async def get_event(
         self, event_id: str, allow_none: bool = False
-    ) -> FrozenEvent | None:
+    ) -> EventBase | None:
         assert allow_none, "Mock not configured for allow_none = False"
 
         # Decode the state key from the event ID.

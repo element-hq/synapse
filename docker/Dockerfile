@@ -22,7 +22,7 @@
 
 ARG DEBIAN_VERSION=trixie
 ARG PYTHON_VERSION=3.13
-ARG POETRY_VERSION=2.2.1
+ARG POETRY_VERSION=2.4.1
 
 ###
 ### Stage 0: generate requirements.txt
@@ -202,6 +202,9 @@ EXPOSE 8008/tcp 8448/tcp
 # 19090: Metrics listener port for the main process (metrics must be enabled with
 # SYNAPSE_ENABLE_METRICS=1).
 EXPOSE 19090/tcp
+
+# Python's `print()` buffers output by default, this tells Python to disable buffering.
+ENV PYTHONUNBUFFERED=1
 
 ENTRYPOINT ["/start.py"]
 

@@ -26,7 +26,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.builder import EventBuilder
 from synapse.server import HomeServer
 from synapse.synapse_rust.events import EventInternalMetadata
@@ -238,11 +238,16 @@ class RedactionTestCase(unittest.HomeserverTestCase):
                     prev_event_ids=prev_event_ids, auth_event_ids=auth_event_ids
                 )
 
-                built_event._event_id = self._event_id  # type: ignore[attr-defined]
-                built_event._dict["event_id"] = self._event_id
-                assert built_event.event_id == self._event_id
+                event_dict = built_event.get_dict()
+                event_dict["event_id"] = self._event_id
+                rebuilt_event = make_event_from_dict(
+                    event_dict,
+                    room_version=built_event.room_version,
+                    internal_metadata_dict=built_event.internal_metadata.get_dict(),
+                )
+                assert rebuilt_event.event_id == self._event_id
 
-                return built_event
+                return rebuilt_event
 
             @property
             def room_id(self) -> str:

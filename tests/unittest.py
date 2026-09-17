@@ -25,10 +25,12 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import secrets
+import sys
 import time
+from collections.abc import Set
 from typing import (
-    AbstractSet,
     Any,
     Awaitable,
     Callable,
@@ -46,8 +48,9 @@ from unittest.mock import Mock, patch
 import canonicaljson
 import signedjson.key
 import unpaddedbase64
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, Never, ParamSpec, override
 
+from twisted.internet import defer
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from twisted.python.failure import Failure
@@ -76,7 +79,7 @@ from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
-from synapse.util.clock import Clock
+from synapse.util.clock import CLOCK_SCHEDULE_EPSILON, Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -102,6 +105,19 @@ _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
 P = ParamSpec("P")
 R = TypeVar("R")
 S = TypeVar("S")
+
+
+def _use_colour() -> bool:
+    """
+    Whether assertion failures should be coloured with ANSI escapes.
+
+    Follow the `NO_COLOR`/`FORCE_COLOR` conventions (https://no-color.org, https://force-color.org/).
+    """
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    return sys.stdout.isatty()
 
 
 class _TypedFailure(Generic[_ExcType], Protocol):
@@ -268,10 +284,145 @@ class TestCase(unittest.TestCase):
                 required[key], actual[key], msg="%s mismatch. %s" % (key, actual)
             )
 
+    def _fail_with_set_inequality(
+        self,
+        actual_items: Set[TV],
+        expected_items: Set[TV],
+        message: str | None,
+        exact: bool,
+    ) -> Never:
+        """
+        Fail the current test, printing a rich message showing
+        the set inequality.
+
+        If `exact` is True, we expect no extra items in `actual_items`.
+        If `exact` is False, we clarify that extra items are permissible.
+        """
+        if _use_colour():
+            BOLD = "\033[1m"
+            DIM_GREY = "\033[2;37m"
+            RED = "\033[31m"
+            BRIGHT_YELLOW = "\033[93m"
+            DIM_BLUE = "\033[94m"
+            RESET = "\033[0m"
+        else:
+            BOLD = DIM_GREY = RED = BRIGHT_YELLOW = DIM_BLUE = RESET = ""
+
+        # If it's correct, use dim grey: we don't want to draw your attention to it
+        # Grey out the whole item
+        CORRECT_MARKER = f"{DIM_GREY}      ok"
+
+        # If it's wrong, use red: that's the most important information here
+        MISSING_MARKER = f" {RED}missing{RESET}{BRIGHT_YELLOW}"
+        UNEXPECTED_MARKER = f"{RED}unwanted{RESET}{BRIGHT_YELLOW}"
+
+        # If it's a harmless extra, give it a slight bit more emphasis than something correct
+        # (as it could be a sign of something unexpected), but not enough to make it seem wrong.
+        EXTRA_MARKER = f"{DIM_BLUE}   extra{RESET}"
+
+        used_markers = set()
+        expected_lines: list[str] = []
+
+        # Sort the items in the sets for ease of reading. Motivation:
+        # - keeps `(A, B)` and `(A, C)` next to each other in sets of tuples
+        # - makes it easier to cross-compare the two sets visually if they are in the same order
+        #
+        # sorted() only accepts objects that support at least `<` or `>`.
+        # Virtually every immutable data type in Python supports these, so virtually
+        # everything inside a set supports these.
+        # Ignore the type error arising from not proving that `TV` supports comparison.
+        for expected_item in sorted(expected_items):  # type: ignore[type-var]
+            is_missing = expected_item not in actual_items
+
+            marker = MISSING_MARKER if is_missing else CORRECT_MARKER
+
+            used_markers.add(marker)
+            expected_lines.append(f"{marker}   {expected_item!r}{RESET}")
+
+        actual_lines: list[str] = []
+        # See note above about type ignore.
+        for actual_item in sorted(actual_items):  # type: ignore[type-var]
+            is_expected = actual_item in expected_items
+
+            if is_expected:
+                marker = CORRECT_MARKER
+            elif exact:
+                # We want an exact match, so this 'extra' is actively 'unwanted'
+                marker = UNEXPECTED_MARKER
+            else:
+                # Harmless 'extra'
+                marker = EXTRA_MARKER
+
+            used_markers.add(marker)
+            actual_lines.append(f"{marker}   {actual_item!r}{RESET}")
+
+        newline = "\n"
+        expected_string = f"{BOLD}Expected items:{RESET}\n         {{\n{newline.join(expected_lines)}\n         }}"
+        actual_string = f"{BOLD}Actually received items:{RESET}\n         {{\n{newline.join(actual_lines)}\n         }}"
+        first_message = (
+            "Items must match exactly (sets are not equal)"
+            if exact
+            else "Some expected items are missing."
+        )
+
+        legend = f"{BOLD}Legend:{RESET}\n"
+        if CORRECT_MARKER in used_markers:
+            legend += f"  {CORRECT_MARKER}{RESET}: item is correct as it was both expected and received\n"
+        if MISSING_MARKER in used_markers:
+            legend += (
+                f"  {MISSING_MARKER}{RESET}: item is expected but was not received\n"
+            )
+        if UNEXPECTED_MARKER in used_markers:
+            legend += (
+                f"  {UNEXPECTED_MARKER}{RESET}: item was received but is not expected\n"
+            )
+        if EXTRA_MARKER in used_markers:
+            legend += f"  {EXTRA_MARKER}{RESET}: item was received and allowed, though not explicitly expected\n"
+
+        diff_message = (
+            f"{first_message}\n{legend}\n{expected_string}\n\n{actual_string}"
+        )
+
+        extra_message = ""
+        if message is not None:
+            extra_message = "f\n{message}"
+
+        self.fail(f"{diff_message}{extra_message}")
+
+    @override
+    def assertEqual(self, first: TV, second: TV, msg: object | None = None) -> None:
+        """
+        Override of `assertEqual` to make it print better errors.
+
+        Note that `first` is treated as 'actual' and `second` as 'expected`.
+        (We can't rename them in our override because that is not a compatible change,
+        Mypy forbids it.)
+
+        Specifically:
+            - better errors for set inequality
+        """
+        if first == second:
+            return
+
+        if isinstance(first, Set) and isinstance(second, Set):
+            self._fail_with_set_inequality(
+                first,
+                second,
+                # Any `str()`-able object is valid as a message. We frequently pass in raw JSON responses, for instance.
+                str(msg) if msg is not None else msg,
+                exact=True,
+            )
+
+        # Fall back to the base implementation for other types
+        # Since we know `first == second` does not hold,
+        # we expect this must diverge by raising an exception.
+        super().assertEqual(first=first, second=second, msg=msg)
+        raise AssertionError("unreachable")
+
     def assertIncludes(
         self,
-        actual_items: AbstractSet[TV],
-        expected_items: AbstractSet[TV],
+        actual_items: Set[TV],
+        expected_items: Set[TV],
         exact: bool = False,
         message: str | None = None,
     ) -> None:
@@ -294,29 +445,7 @@ class TestCase(unittest.TestCase):
         elif not exact and actual_items >= expected_items:
             return
 
-        expected_lines: list[str] = []
-        for expected_item in expected_items:
-            is_expected_in_actual = expected_item in actual_items
-            expected_lines.append(
-                "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
-            )
-
-        actual_lines: list[str] = []
-        for actual_item in actual_items:
-            is_actual_in_expected = actual_item in expected_items
-            actual_lines.append(
-                "{}  {}".format("+" if is_actual_in_expected else " ", actual_item)
-            )
-
-        newline = "\n"
-        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n {{\n{newline.join(expected_lines)}\n }}"
-        actual_string = f"Actual ('+' = found expected items):\n {{\n{newline.join(actual_lines)}\n }}"
-        first_message = (
-            "Items must match exactly" if exact else "Some expected items are missing."
-        )
-        diff_message = f"{first_message}\n{expected_string}\n{actual_string}"
-
-        self.fail(f"{diff_message}\n{message}")
+        self._fail_with_set_inequality(actual_items, expected_items, message, exact)
 
 
 def DEBUG(target: TV) -> TV:
@@ -474,27 +603,13 @@ class HomeserverTestCase(TestCase):
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False
 
-    def wait_on_thread(self, deferred: Deferred, timeout: int = 10) -> None:
-        """
-        Wait until a Deferred is done, where it's waiting on a real thread.
-        """
-        start_time = time.time()
-
-        while not deferred.called:
-            if start_time + timeout < time.time():
-                raise ValueError("Timed out waiting for threadpool")
-            self.reactor.advance(0.01)
-            time.sleep(0.01)
-
     def wait_for_background_updates(self) -> None:
         """Block until all background database updates have completed."""
         store = self.hs.get_datastores().main
         while not self.get_success(
             store.db_pool.updates.has_completed_background_updates()
         ):
-            self.get_success(
-                store.db_pool.updates.do_next_background_update(False), by=0.1
-            )
+            self.get_success(store.db_pool.updates.do_next_background_update(False))
 
     def make_homeserver(
         self, reactor: ThreadedMemoryReactorClock, clock: Clock
@@ -545,7 +660,7 @@ class HomeserverTestCase(TestCase):
         """
         Get a default HomeServer config dict.
         """
-        config = default_config("test")
+        config = default_config(server_name="test")
 
         # apply any additional config which was specified via the override_config
         # decorator.
@@ -736,21 +851,165 @@ class HomeserverTestCase(TestCase):
         # whole chain to completion.
         self.reactor.pump([by] * 100)
 
-    def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
+    def _wait_for_deferred(
+        self,
+        d: "Deferred[Any]",
+    ) -> None:
+        """
+        Wait for the deferred to finish or raise.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        Args:
+            d: Twisted Deferred
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the deferred completes.
+        """
+        # Wait until the deferred has a result
+        #
+        # Checking `d.called` by itself is not sufficient by itself as this is possible:
+        #
+        # If you have a first `Deferred` `D1`, you can add a callback which returns
+        # another `Deferred` `D2`, and `D2` must then complete before any further
+        # callbacks on `D1` will execute (and later callbacks on `D1` get the *result*
+        # of `D2` rather than `D2` itself).
+        #
+        # So, `D1` might have `called=True` (as in, it has started running its
+        # callbacks), but any new callbacks added to `D1` won't get run until `D2`
+        # completes. Fortunately, we can detect this by checking `d.paused`.
+        loop_count = 0
+        while not d.called or d.paused:
+            # 100 loops is arbitrary but based on previous code which used to "pump" and
+            # advance the reactor 100 times. This also makes the assumption that any
+            # work on other threads will finish before we give up after sleeping ~0.1s
+            # of real-time (100 * 0.001).
+            if loop_count > 100:
+                raise defer.TimeoutError("Timed out waiting for deferred to finish")
+
+            # Suspend execution of this thread to allow other threads to do work. This
+            # could be things spawned on the Twisted reactor threadpool or Tokio thread
+            # pool (async Rust code).
+            #
+            # Note: Python has a default thread switch interval (5ms for cpython) (see
+            # `sys.setswitchinterval(interval)`) but we still want this here as we're
+            # able to preempt and cause the thread context switch to happen faster.
+            # Also, without any real-time sleeping, this function would complete before
+            # the 5ms switch ever happened.
+            #
+            # After a few cycles, we use `time.sleep(0.001)` instead of `time.sleep(0)`
+            # to avoid tightlooping on the main thread (CPU 100%) because it's wasteful
+            # and may starve out other threads. 10 is arbitrary but many cases will have
+            # none or only a few round-trips so we can just try to go as fast as
+            # possible.
+            if loop_count < 10:
+                time.sleep(0)
+            else:
+                time.sleep(0.001)
+
+            # Advance the Twisted reactor and run any scheduled callbacks
+            #
+            # In terms of other threads, they may have scheduled something on the
+            # reactor to run (like `reactor.callFromThread(...)`)
+            #
+            # Ideally, we'd advance by `0` but the `Cooperator` used in our HTTP clients
+            # use `CLOCK_SCHEDULE_EPSILON` and we want to make usage in downstream tests
+            # as simple as possible. A common use case this helps with is anything that
+            # needs to make a HTTP request (like a replication requests)
+            self.reactor.advance(CLOCK_SCHEDULE_EPSILON.as_secs())
+
+            loop_count += 1
+
+    def get_success(
+        self,
+        d: Awaitable[TV],
+    ) -> TV:
+        """
+        Get the success result of an awaitable.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
+
+        Args:
+            d: awaitable
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a failure result or has no result
+                (although you would probably run into `defer.TimeoutError` in that case).
+        """
         deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by=by)
+        self._wait_for_deferred(deferred)
+
         return self.successResultOf(deferred)
 
     def get_failure(
-        self, d: Awaitable[Any], exc: type[_ExcType], by: float = 0.0
+        self,
+        d: Awaitable[Any],
+        exc: type[_ExcType],
     ) -> _TypedFailure[_ExcType]:
         """
-        Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
+        Get the failure result of an awaitable. The failure must be of the type `exc`.
+
+        Does not advance time in the Twisted reactor clock but will loop 100 times
+        waiting for a result. The loop 1) allows `clock.call_later` scheduled callbacks
+        to run if they are scheduled to run now and 2) will also allow other threads to
+        make progress. This could be things spawned on the Twisted reactor threadpool or
+        Tokio runtime (async Rust code).
+
+        If you need to advance the Twisted reactor by an actual time increment, you can
+        use the following pattern:
+        ```python
+        # We use `ensureDeferred(...)` as a `Deferred` can run in the background on its own (unlike a Python coroutine)
+        task_d = ensureDeferred(my_async_task())
+        # Please explain why/what scheduled call you're trying to trigger
+        self.reactor.advance(Duration(seconds=1).as_secs())
+        result = self.get_success(sync_d)
+        ```
+
+        Args:
+            d: awaitable
+            exc: Exception type to expect
+
+        Raises:
+            defer.TimeoutError: If the timeout expires before the awaitable completes.
+            SynchronousTestCase.failureException: If the awaitable has a success result,
+                or has an unexpected failure result, or has no result (although you would
+                probably run into `defer.TimeoutError` in that case).
         """
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump(by)
+        self._wait_for_deferred(deferred)
+
         return self.failureResultOf(deferred, exc)
 
+    # FIXME: Remove as this has the exact same semantics as `get_success()`. In
+    # https://github.com/matrix-org/synapse/pull/8402#discussion_r495992506 where it was
+    # introduced, it was claimed that "get_success fails the test if the deferred fails
+    # rather than raising, which I find a bit unintuitive." but `get_success()` actually
+    # does raise "@raise SynchronousTestCase.failureException : If the
+    # L{Deferred<twisted.internet.defer.Deferred>} has no result or has a failure
+    # result." at-least in today's world.
+    #
+    # As another alternative, we could also just update `get_success(...)` to have this
+    # behavior as the default, see
+    # https://github.com/element-hq/synapse/pull/19871#discussion_r3483616710
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
         """Drive deferred to completion and return result or raise exception
         on failure.

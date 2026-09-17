@@ -16,9 +16,9 @@
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use pyo3::{
-    exceptions::{PyKeyError, PyRuntimeError, PyTypeError},
+    exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError},
     pyclass, pymethods,
-    types::{PyAnyMethods, PyList, PyListMethods, PyMapping},
+    types::{PyAnyMethods, PyList, PyListMethods},
     Bound, IntoPyObjectExt, PyAny, PyResult, Python,
 };
 use pythonize::{depythonize, pythonize};
@@ -101,13 +101,27 @@ impl Unsigned {
             .write()
             .map_err(|_| PyRuntimeError::new_err("Unsigned lock poisoned"))
     }
+
+    /// Create a deep copy of this `Unsigned` to allow modification without
+    /// affecting other references to the same unsigned data. This is needed
+    /// when we clone an event.
+    pub fn deep_copy(&self) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(self.py_read().expect("lock poisoned").clone())),
+        }
+    }
 }
 
 #[pymethods]
 impl Unsigned {
+    /// Create a new `Unsigned` from a JSON string.
+    ///
+    /// We do no accept a Python dict directly because of the issues with
+    /// depythonize and large integers (see [`FormattedEvent`] for details).
     #[new]
-    fn py_new(unsigned: Bound<'_, PyMapping>) -> PyResult<Self> {
-        let inner = depythonize(&unsigned)?;
+    fn py_new(unsigned_json: &str) -> PyResult<Self> {
+        let inner = serde_json::from_str(unsigned_json)
+            .map_err(|err| PyValueError::new_err(format!("Failed to parse unsigned: {}", err)))?;
 
         Ok(Self {
             inner: Arc::new(RwLock::new(inner)),
@@ -268,12 +282,20 @@ impl Unsigned {
         }
     }
 
-    fn for_persistence<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    pub fn for_persistence<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(pythonize(py, &self.py_read()?.persisted_fields)?)
     }
 
-    fn for_event<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    pub fn for_event<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         Ok(pythonize(py, &*self.py_read()?)?)
+    }
+}
+
+impl Unsigned {
+    /// Get the `age_ts` field, which is used to generate the `age` field when
+    /// serializing an event.
+    pub fn age_ts(&self) -> PyResult<Option<Number>> {
+        Ok(self.py_read()?.persisted_fields.age_ts.clone())
     }
 }
 

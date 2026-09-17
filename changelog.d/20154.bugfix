@@ -1,0 +1,1 @@
+Return `allowed_room_ids` in the client [`GET /_matrix/client/v1/rooms/{roomId}/hierarchy`](https://spec.matrix.org/v1.19/client-server-api/#get_matrixclientv1roomsroomidhierarchy) response, as required since Matrix 1.15.

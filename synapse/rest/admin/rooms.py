@@ -58,7 +58,14 @@ from synapse.rest.admin._base import (
 from synapse.rest.client.room import SerializeMessagesDeps, encode_messages_response
 from synapse.storage.databases.main.room import RoomSortOrder
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, RoomID, ScheduledTask, UserID, create_requester
+from synapse.types import (
+    JsonDict,
+    JsonMapping,
+    RoomID,
+    ScheduledTask,
+    UserID,
+    create_requester,
+)
 from synapse.types.state import StateFilter
 
 if TYPE_CHECKING:
@@ -682,6 +689,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
         create_event = filtered_room_state[(EventTypes.Create, "")]
         power_levels = filtered_room_state.get((EventTypes.PowerLevels, ""))
 
+        pl_content: JsonMapping
         if power_levels is not None:
             # We pick the local user with the highest power.
             user_power = power_levels.content.get("users", {})
@@ -1020,7 +1028,7 @@ class RoomMessagesRestServlet(RestServlet):
         ):
             as_client_event = False
 
-        serialize_options = SerializeEventConfig(
+        serialize_options = await self._event_serializer.create_config(
             as_client_event=as_client_event, requester=requester
         )
 

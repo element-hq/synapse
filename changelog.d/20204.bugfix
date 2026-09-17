@@ -1,0 +1,1 @@
+Add support for un-soft-failing [MSC4354 Sticky Events](https://github.com/matrix-org/matrix-spec-proposals/pull/4354) when room state changes, making federation support more reliable.

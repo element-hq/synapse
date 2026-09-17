@@ -36,7 +36,12 @@ from synapse.http.server import (
     set_corp_headers,
     set_cors_headers,
 )
-from synapse.http.servlet import RestServlet, parse_integer, parse_string
+from synapse.http.servlet import (
+    RestServlet,
+    parse_boolean,
+    parse_integer,
+    parse_string,
+)
 from synapse.http.site import SynapseRequest
 from synapse.media._base import (
     DEFAULT_MAX_TIMEOUT_MS,
@@ -45,7 +50,7 @@ from synapse.media._base import (
 )
 from synapse.media.media_repository import MediaRepository
 from synapse.media.media_storage import MediaStorage
-from synapse.media.thumbnailer import ThumbnailProvider
+from synapse.media.thumbnailer import ANIMATED_THUMBNAIL_TYPE, ThumbnailProvider
 from synapse.server import HomeServer
 from synapse.util.stringutils import parse_and_validate_server_name
 
@@ -163,8 +168,9 @@ class ThumbnailResource(RestServlet):
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")
+        animated = parse_boolean(request, "animated", default=False)
         # TODO Parse the Accept header to get an prioritised list of thumbnail types.
-        m_type = "image/png"
+        m_type = ANIMATED_THUMBNAIL_TYPE if animated else "image/png"
         max_timeout_ms = parse_integer(
             request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
         )
@@ -181,6 +187,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    animated=animated,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
@@ -204,23 +211,33 @@ class ThumbnailResource(RestServlet):
                 return
 
             ip_address = request.getClientAddress().host
-            remote_resp_function = (
-                self.thumbnailer.select_or_generate_remote_thumbnail
-                if self.dynamic_thumbnails
-                else self.thumbnailer.respond_remote_thumbnail
-            )
-            await remote_resp_function(
-                request,
-                server_name,
-                media_id,
-                width,
-                height,
-                method,
-                m_type,
-                max_timeout_ms,
-                ip_address,
-                True,
-            )
+            if self.dynamic_thumbnails:
+                await self.thumbnailer.select_or_generate_remote_thumbnail(
+                    request,
+                    server_name,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    ip_address,
+                    True,
+                    animated=animated,
+                )
+            else:
+                await self.thumbnailer.respond_remote_thumbnail(
+                    request,
+                    server_name,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    ip_address,
+                    True,
+                )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
 

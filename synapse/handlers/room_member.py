@@ -661,8 +661,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         key = (room_id,)
 
         as_id = object()
-        if requester.app_service:
-            as_id = requester.app_service.id
+        if requester.app_service_id:
+            as_id = requester.app_service_id
 
         # We first linearise by the application service (to try to limit concurrent joins
         # by application services), and then by room ID.
@@ -1355,7 +1355,15 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         current_state = {
             state_key: event_map[event_id]
             for state_key, event_id in state_before_join.items()
+            # TODO figure out why events present in state_before_join are sometimes not found in event_map
+            #  See https://github.com/element-hq/synapse/issues/19465
+            if event_id in event_map
         }
+        if len(current_state) < len(state_before_join):
+            logger.warning(
+                "Some events from state_before_join were not found in event_map: %s",
+                set(state_before_join.values()) - set(event_map.keys()),
+            )
         servers_that_can_issue_invite = get_servers_from_users(
             get_users_which_can_issue_invite(current_state)
         )
@@ -1371,9 +1379,15 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             return True, list(servers_that_can_issue_invite)
 
         # Ensure the member should be allowed access via membership in a room.
-        await self.event_auth_handler.check_restricted_join_rules(
-            state_before_join, room_version, user_id, previous_membership
-        )
+        try:
+            await self.event_auth_handler.check_restricted_join_rules(
+                state_before_join, room_version, user_id, previous_membership
+            )
+        except SynapseError as e:
+            if e.errcode == Codes.UNABLE_AUTHORISE_JOIN:
+                servers_that_can_issue_invite.discard(self.hs.hostname)
+                return True, list(servers_that_can_issue_invite)
+            raise
 
         # If this is going to be a local join, additional information must
         # be included in the event content in order to efficiently validate
@@ -1528,7 +1542,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             prev_member_event_id = prev_state_ids.get(
                 (EventTypes.Member, event.state_key), None
             )
-
             if prev_member_event_id:
                 prev_member_event = await self.store.get_event(prev_member_event_id)
                 if prev_member_event.membership == Membership.JOIN:

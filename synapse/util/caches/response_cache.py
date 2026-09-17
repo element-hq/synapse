@@ -32,6 +32,7 @@ from typing import (
 import attr
 
 from twisted.internet import defer
+from twisted.python.failure import Failure
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import (
@@ -226,14 +227,19 @@ class ResponseCache(Generic[KV]):
         Returns:
             The cache entry object.
         """
-        result = ObservableDeferred(deferred, consumeErrors=True)
+        result = ObservableDeferred(
+            deferred,
+            # We set `consumeErrors=False` as we want to handle errors ourselves (`on_fail`) instead of
+            # replacing them with a `None` successful result that would go to `on_succeed`
+            consumeErrors=False,
+        )
         key = context.cache_key
         entry = ResponseCacheEntry(
             result, opentracing_span_context, cancellable=cancellable
         )
         self._result_cache[key] = entry
 
-        def on_complete(r: RV) -> RV:
+        def on_succeed(r: RV) -> RV:
             # if this cache has a non-zero timeout, and the callback has not cleared
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
@@ -254,10 +260,29 @@ class ResponseCache(Generic[KV]):
                 self.unset(key)
             return r
 
-        # make sure we do this *after* adding the entry to result_cache,
-        # in case the result is already complete (in which case flipping the order would
-        # leave us with a stuck entry in the cache).
-        result.addBoth(on_complete)
+        def on_fail(failure: Failure) -> None:
+            """
+            If the deferred fails, unset the cache entry.
+            """
+            self.unset(key)
+
+            # Consider the Failure handled so they don't get thrown by the reactor
+            return None
+
+        # Two ordering constraints to be aware of for registering the callback and errback:
+        # 1. Both of them must be registered _after_ adding the entry to the result_cache,
+        #    otherwise it is possible for them to trigger immediately (before the entry
+        #    is added to the result_cache), the net effect of which is that it would leave
+        #    us with a stuck entry in the cache.
+        # 2. We must register the errback after callback.
+        #    If the errback was registered first, `on_fail` returning `None` would
+        #    cause `on_succeed` to be called with that `None` as argument.
+        #    This would start a timer to remove a cache entry, even though there isn't a
+        #    valid cache entry yet.
+        #    (This could prematurely remove a future cache entry with the same key.)
+        result.addCallback(on_succeed)
+        result.addErrback(on_fail)
+
         return entry
 
     def unset(self, key: KV) -> None:

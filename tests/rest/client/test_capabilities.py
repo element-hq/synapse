@@ -26,6 +26,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.rest.client import capabilities, login
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 
 from tests import unittest
 from tests.unittest import override_config, skip_unless
@@ -201,6 +202,43 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             capabilities["uk.tcpip.msc4133.profile_fields"]["disallowed"],
             ["avatar_url"],
+        )
+
+    def test_get_delayed_events_capabilities_default_config_msc4140(self) -> None:
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_delay_ms"], 0
+        )
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_scheduled"], 100
+        )
+
+    @override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "experimental_features": {
+                "msc4140_max_delayed_events_per_user": 50,
+            },
+        }
+    )
+    def test_get_delayed_events_capabilities_custom_config_msc4140(self) -> None:
+        access_token = self.login(self.localpart, self.password)
+
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_delay_ms"],
+            Duration(days=1).as_millis(),
+        )
+        self.assertEqual(
+            capabilities["org.matrix.msc4140.delayed_events"]["max_scheduled"], 50
         )
 
     @override_config({"enable_3pid_changes": False})

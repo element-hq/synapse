@@ -11,15 +11,22 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+from canonicaljson import encode_canonical_json
+
 from synapse.synapse_rust.events import Unsigned
+from synapse.types import JsonDict
 
 from tests import unittest
+
+
+def _make_unsigned(d: JsonDict) -> Unsigned:
+    return Unsigned(encode_canonical_json(d).decode("utf-8"))
 
 
 class UnsignedTestCase(unittest.TestCase):
     def test_prev_content(self) -> None:
         """Test that the prev_content field is correctly exposed as a JsonObject."""
-        unsigned = Unsigned({"prev_content": {"key1": "value1", "key2": 42}})
+        unsigned = _make_unsigned({"prev_content": {"key1": "value1", "key2": 42}})
 
         self.assert_dict(unsigned["prev_content"], {"key1": "value1", "key2": 42})
 
@@ -32,7 +39,7 @@ class UnsignedTestCase(unittest.TestCase):
         than the maximum rust native integer size."""
 
         large_int = 2**200
-        unsigned = Unsigned({"age_ts": large_int})
+        unsigned = _make_unsigned({"age_ts": large_int})
 
         self.assertEqual(unsigned["age_ts"], large_int)
 
@@ -44,7 +51,7 @@ class UnsignedTestCase(unittest.TestCase):
         JSON."""
 
         large_int = 2**200
-        unsigned = Unsigned({"prev_content": {"some_field": large_int}})
+        unsigned = _make_unsigned({"prev_content": {"some_field": large_int}})
 
         self.assertEqual(unsigned["prev_content"]["some_field"], large_int)
         self.assert_dict(

@@ -18,9 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import urllib.parse
 from http import HTTPStatus
-from unittest.mock import patch
 
 from signedjson.key import (
     encode_verify_key_base64,
@@ -32,12 +30,10 @@ from signedjson.sign import sign_json
 from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import keys, login
-from synapse.types import JsonDict, Requester, create_requester
+from synapse.types import JsonDict
 
 from tests import unittest
 from tests.http.server._base import make_request_with_cancellation_test
-from tests.unittest import override_config
-from tests.utils import HAS_AUTHLIB
 
 
 class KeyUploadTestCase(unittest.HomeserverTestCase):
@@ -355,191 +351,3 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
 
     OIDC_ADMIN_TOKEN = "_oidc_admin_token"
     ACCOUNT_MANAGEMENT_URL = "https://my-account.issuer"
-
-    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
-    @override_config(
-        {
-            "enable_registration": False,
-            "experimental_features": {
-                "msc3861": {
-                    "enabled": True,
-                    "issuer": "https://issuer",
-                    "account_management_url": ACCOUNT_MANAGEMENT_URL,
-                    "client_id": "id",
-                    "client_auth_method": "client_secret_post",
-                    "client_secret": "secret",
-                    "admin_token": OIDC_ADMIN_TOKEN,
-                },
-            },
-        }
-    )
-    def test_master_cross_signing_key_replacement_msc3861(self) -> None:
-        # Provision a user like MAS would, cribbing from
-        # https://github.com/matrix-org/matrix-authentication-service/blob/08d46a79a4adb22819ac9d55e15f8375dfe2c5c7/crates/matrix-synapse/src/lib.rs#L224-L229
-        alice = "@alice:test"
-        channel = self.make_request(
-            "PUT",
-            f"/_synapse/admin/v2/users/{urllib.parse.quote(alice)}",
-            access_token=self.OIDC_ADMIN_TOKEN,
-            content={},
-        )
-        self.assertEqual(channel.code, HTTPStatus.CREATED, channel.json_body)
-
-        # Provision a device like MAS would, cribbing from
-        # https://github.com/matrix-org/matrix-authentication-service/blob/08d46a79a4adb22819ac9d55e15f8375dfe2c5c7/crates/matrix-synapse/src/lib.rs#L260-L262
-        alice_device = "alice_device"
-        channel = self.make_request(
-            "POST",
-            f"/_synapse/admin/v2/users/{urllib.parse.quote(alice)}/devices",
-            access_token=self.OIDC_ADMIN_TOKEN,
-            content={"device_id": alice_device},
-        )
-        self.assertEqual(channel.code, HTTPStatus.CREATED, channel.json_body)
-
-        # Prepare a mock MAS access token.
-        alice_token = "alice_token_1234_oidcwhatyoudidthere"
-
-        async def mocked_get_user_by_access_token(
-            token: str, allow_expired: bool = False
-        ) -> Requester:
-            self.assertEqual(token, alice_token)
-            return create_requester(
-                user_id=alice,
-                device_id=alice_device,
-                scope=[],
-                is_guest=False,
-            )
-
-        patch_get_user_by_access_token = patch.object(
-            self.hs.get_auth(),
-            "get_user_by_access_token",
-            wraps=mocked_get_user_by_access_token,
-        )
-
-        # Copied from E2eKeysHandlerTestCase
-        master_pubkey = "nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unI9kDYcHwk"
-        master_pubkey2 = "fHZ3NPiKxoLQm5OoZbKa99SYxprOjNs4TwJUKP+twCM"
-        master_pubkey3 = "85T7JXPFBAySB/jwby4S3lBPTqY3+Zg53nYuGmu1ggY"
-
-        master_key: JsonDict = {
-            "user_id": alice,
-            "usage": ["master"],
-            "keys": {"ed25519:" + master_pubkey: master_pubkey},
-        }
-        master_key2: JsonDict = {
-            "user_id": alice,
-            "usage": ["master"],
-            "keys": {"ed25519:" + master_pubkey2: master_pubkey2},
-        }
-        master_key3: JsonDict = {
-            "user_id": alice,
-            "usage": ["master"],
-            "keys": {"ed25519:" + master_pubkey3: master_pubkey3},
-        }
-
-        with patch_get_user_by_access_token:
-            # Upload an initial cross-signing key.
-            channel = self.make_request(
-                "POST",
-                "/_matrix/client/v3/keys/device_signing/upload",
-                access_token=alice_token,
-                content={
-                    "master_key": master_key,
-                },
-            )
-            self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-
-            # Should not be able to upload another master key.
-            channel = self.make_request(
-                "POST",
-                "/_matrix/client/v3/keys/device_signing/upload",
-                access_token=alice_token,
-                content={
-                    "master_key": master_key2,
-                },
-            )
-            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
-            # Ensure that the response contains the expected UIA flows from https://spec.matrix.org/v1.17/client-server-api/#oauth-authentication
-            self.assertIn(
-                {"stages": ["m.oauth"]},
-                channel.json_body["flows"],
-                "m.oauth flow not found",
-            )
-            self.assertSubstring(
-                self.ACCOUNT_MANAGEMENT_URL,
-                channel.json_body["params"]["m.oauth"]["url"],
-                "m.oauth url does not match account management URL",
-            )
-            self.assertSubstring(
-                "action=org.matrix.cross_signing_reset",
-                channel.json_body["params"]["m.oauth"]["url"],
-                "m.oauth url does not include expected action",
-            )
-            # Unstable version of the flow
-            self.assertIn(
-                {"stages": ["org.matrix.cross_signing_reset"]},
-                channel.json_body["flows"],
-                "unstable org.matrix.cross_signing_reset flow not found",
-            )
-            self.assertEqual(
-                channel.json_body["params"]["org.matrix.cross_signing_reset"]["url"],
-                channel.json_body["params"]["m.oauth"]["url"],
-                "unstable org.matrix.cross_signing_reset url does not match m.oauth url",
-            )
-
-        # Pretend that MAS did UIA and allowed us to replace the master key.
-        channel = self.make_request(
-            "POST",
-            f"/_synapse/admin/v1/users/{urllib.parse.quote(alice)}/_allow_cross_signing_replacement_without_uia",
-            access_token=self.OIDC_ADMIN_TOKEN,
-        )
-        self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.json_body)
-
-        with patch_get_user_by_access_token:
-            # Should now be able to upload master key2.
-            channel = self.make_request(
-                "POST",
-                "/_matrix/client/v3/keys/device_signing/upload",
-                access_token=alice_token,
-                content={
-                    "master_key": master_key2,
-                },
-            )
-            self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-
-            # Even though we're still in the grace period, we shouldn't be able to
-            # upload master key 3 immediately after uploading key 2.
-            channel = self.make_request(
-                "POST",
-                "/_matrix/client/v3/keys/device_signing/upload",
-                access_token=alice_token,
-                content={
-                    "master_key": master_key3,
-                },
-            )
-            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
-
-        # Pretend that MAS did UIA and allowed us to replace the master key.
-        channel = self.make_request(
-            "POST",
-            f"/_synapse/admin/v1/users/{urllib.parse.quote(alice)}/_allow_cross_signing_replacement_without_uia",
-            access_token=self.OIDC_ADMIN_TOKEN,
-        )
-        self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.json_body)
-        timestamp_ms = channel.json_body["updatable_without_uia_before_ms"]
-
-        # Advance to 1 second after the replacement period ends.
-        self.reactor.advance(timestamp_ms - self.clock.time_msec() + 1000)
-
-        with patch_get_user_by_access_token:
-            # We should not be able to upload master key3 because the replacement has
-            # expired.
-            channel = self.make_request(
-                "POST",
-                "/_matrix/client/v3/keys/device_signing/upload",
-                access_token=alice_token,
-                content={
-                    "master_key": master_key3,
-                },
-            )
-            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)

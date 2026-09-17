@@ -7,13 +7,15 @@ on:
       - book.toml
       - .github/workflows/docs-pr.yaml
       - scripts-dev/schema_versions.py
+      # If the docs' python dependencies change, rebuild the book and test links.
+      - pyproject.toml
 
 jobs:
   pages:
     name: GitHub Pages
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Fetch all history so that the schema_versions script works.
           fetch-depth: 0
@@ -23,19 +25,21 @@ jobs:
         with:
           mdbook-version: '0.5.2'
 
-      - name: Setup python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      # Building the book requires running the `scripts-dev/schema_versions.py`
+      # script first, which has some python dependencies.
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          python-version: "3.x"
-
-      - run: "pip install 'packaging>=20.0' 'GitPython>=3.1.20'"
+          install-project: "false"
+          groups: "docs"
+          poetry-version: "2.4.1"
 
       - name: Build the documentation
         # mdbook will only create an index.html if we're including docs/README.md in SUMMARY.md.
         # However, we're using docs/README.md for other purposes and need to pick a new page
         # as the default. Let's opt for the welcome page instead.
         run: |
-          mdbook build
+          poetry run mdbook build
           cp book/welcome_and_overview.html book/index.html
 
       - name: Upload Artifact
@@ -50,12 +54,21 @@ jobs:
     name: Check links in documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup mdbook
         uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
           mdbook-version: '0.5.2'
+
+      # Building the book requires running the `scripts-dev/schema_versions.py`
+      # script first, which has some python dependencies.
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          install-project: "false"
+          groups: "docs"
+          poetry-version: "2.4.1"
 
       - name: Setup htmltest
         run: |
@@ -66,7 +79,7 @@ jobs:
       - name: Test links with htmltest
         run: |
           # Build the book with `./` as the site URL (to make checks on 404.html possible)
-          MDBOOK_OUTPUT__HTML__SITE_URL="./" mdbook build
+          MDBOOK_OUTPUT__HTML__SITE_URL="./" poetry run mdbook build
 
           # Delete the contents of the print.html file, as it can raise false
           # positives during link checking.

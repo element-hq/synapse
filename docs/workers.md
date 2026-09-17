@@ -239,6 +239,7 @@ information.
     ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
     ^/_matrix/client/v1/rooms/.*/threads$
     ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
+    ^/_matrix/client/v1/room_summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
     ^/_matrix/client/(r0|v3|unstable)/account/deactivate$
@@ -290,6 +291,9 @@ information.
     # Unstable MSC4140 support
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$
 
+    # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
+    ^/_synapse/mas/
+
 Additionally, the following REST endpoints can be handled for GET requests:
 
     # Push rules requests
@@ -305,6 +309,9 @@ Additionally, the following REST endpoints can be handled for GET requests:
     # Admin API requests
     ^/_synapse/admin/v2/users/[^/]+$
 
+    # Unstable MSC4140 support
+    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/[^/]+$
+
 Pagination requests can also be handled, but all requests for a given
 room must be routed to the same instance. Additionally, care must be taken to
 ensure that the purge history admin API is not used while pagination requests
@@ -314,7 +321,7 @@ for the room are in flight:
 
 Additionally, the following endpoints should be included if Synapse is configured
 to use SSO (you only need to include the ones for whichever SSO provider you're
-using):
+using) and delegated authentication isn't enabled:
 
     # for all SSO providers
     ^/_matrix/client/(api/v1|r0|v3|unstable)/login/sso/redirect
@@ -336,14 +343,6 @@ Ensure that all SSO logins go to a single process.
 For multiple workers not handling the SSO endpoints properly, see
 [#7530](https://github.com/matrix-org/synapse/issues/7530) and
 [#9427](https://github.com/matrix-org/synapse/issues/9427).
-
-Additionally, when MSC3861 is enabled (`experimental_features.msc3861.enabled`
-set to `true`), the following endpoints can be handled by the worker:
-
-    ^/_synapse/admin/v2/users/[^/]+$
-    ^/_synapse/admin/v1/username_available$
-    ^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
-    ^/_synapse/admin/v1/users/[^/]+/devices$
 
 Note that a [HTTP listener](usage/configuration/config_documentation.md#listeners)
 with `client` and `federation` `resources` must be configured in the
@@ -579,10 +578,15 @@ configured as stream writer for the `device_lists` stream:
 ##### The `quarantined_media_changes` stream
 
 The `quarantined_media_changes` stream supports multiple writers. The following endpoints
-can be handled by any worker, but should be routed directly to one of the workers
-configured as stream writer for the `quarantined_media_changes` stream:
+must be routed directly to one of the workers configured as stream writer for the
+`quarantined_media_changes` stream (which must also be able to run the media
+repository, as these endpoints are only registered on media-capable workers):
 
     ^/_synapse/admin/v1/quarantine_media/.*$
+    ^/_synapse/admin/v1/room/.*/media/quarantine$
+    ^/_synapse/admin/v1/user/.*/media/quarantine$
+    ^/_synapse/admin/v1/media/quarantine/.*$
+    ^/_synapse/admin/v1/media/unquarantine/.*$
 
 #### Restrict outbound federation traffic to a specific set of workers
 

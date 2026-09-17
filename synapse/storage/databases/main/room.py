@@ -62,12 +62,12 @@ from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
 from synapse.types import (
     JsonDict,
+    MultiWriterStreamToken,
     RetentionPolicy,
     StrCollection,
     ThirdPartyInstanceID,
 )
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.duration import Duration
 from synapse.util.json import json_encoder
 from synapse.util.stringutils import MXC_REGEX
 
@@ -245,6 +245,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         last_remote_media_id = progress.get("last_remote_media_id", "")
         last_remote_origin = progress.get("last_remote_origin", "")
 
+        # Once a table has been fully processed we record it in the progress so that
+        # we stop re-running its (now empty) query on every subsequent iteration while
+        # the other table is still being worked through.
+        local_done = progress.get("local_done", False)
+        remote_done = progress.get("remote_done", False)
+
         # The `ORDER BY` here would normally miss records if the admin (un)quarantined a
         # record, but that doesn't affect the background update because we also insert
         # into the stream table upon quarantine status changing. Worst case is the admin
@@ -266,54 +272,75 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # is further reinforced by not all changes being captured by the table anyway.
         # See https://github.com/element-hq/synapse/issues/19672 for more details.
         def flag_quarantined(txn: LoggingTransaction) -> int:
-            # It doesn't matter which order we do these in, as long as we do both of them.
-            txn.execute(
-                """
-                SELECT NULL AS media_origin, media_id
-                FROM local_media_repository
-                WHERE quarantined_by IS NOT NULL
-                    AND media_id > ?
-                ORDER BY media_id
-                LIMIT ?
-            """,
-                (last_local_media_id, batch_size),
-            )
-            local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
-            if len(local_media_result) > 0:
-                self._insert_quarantine_changes_txn(txn, local_media_result, True)
+            local_media_result: list[tuple[str | None, str]] = []
+            remote_media_result: list[tuple[str | None, str]] = []
 
-            # We use a >= ? on the media origin to avoid missing records when media IDs
-            # collide between origins (the table's unique constraint is on `(media_origin, media_id)`).
-            # Filtering by `(media_origin, media_id)` also makes sure we're using an index.
-            txn.execute(
-                """
-                SELECT media_origin, media_id
-                FROM remote_media_cache
-                WHERE quarantined_by IS NOT NULL
-                    AND media_origin >= ? AND media_id > ?
-                ORDER BY media_origin, media_id
-                LIMIT ?
-            """,
-                (last_remote_origin, last_remote_media_id, batch_size),
-            )
-            remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
-            if len(remote_media_result) > 0:
-                self._insert_quarantine_changes_txn(txn, remote_media_result, True)
+            # It doesn't matter which order we do these in, as long as we do both of
+            # them. We skip a table once it's been fully processed so we don't keep
+            # running an empty query for it every iteration until the other finishes.
+            if not local_done:
+                txn.execute(
+                    """
+                    SELECT NULL AS media_origin, media_id
+                    FROM local_media_repository
+                    WHERE quarantined_by IS NOT NULL
+                        AND media_id > ?
+                    ORDER BY media_id
+                    LIMIT ?
+                """,
+                    (last_local_media_id, batch_size),
+                )
+                local_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+                if len(local_media_result) > 0:
+                    self._insert_quarantine_changes_txn(txn, local_media_result, True)
+
+            # We page through `remote_media_cache` with a tuple comparison on
+            # `(media_origin, media_id)`. This matches a unique index, and so
+            # will a) page through all rows, and b) will be fast.
+            #
+            # Comparing the columns independently (e.g. `media_origin >= ? AND
+            # media_id > ?`) would incorrectly skip rows in a newly-reached
+            # origin whose media_id is <= the last processed media_id.
+            if not remote_done:
+                txn.execute(
+                    """
+                    SELECT media_origin, media_id
+                    FROM remote_media_cache
+                    WHERE quarantined_by IS NOT NULL
+                        AND (media_origin, media_id) > (?, ?)
+                    ORDER BY media_origin, media_id
+                    LIMIT ?
+                """,
+                    (last_remote_origin, last_remote_media_id, batch_size),
+                )
+                remote_media_result = cast(list[tuple[str | None, str]], txn.fetchall())
+                if len(remote_media_result) > 0:
+                    self._insert_quarantine_changes_txn(txn, remote_media_result, True)
+
+            # Carry the previous progress forward, then for each table advance its
+            # cursor to the last row we fetched, or mark it done if its query (which
+            # only runs while it isn't already done) came back empty.
+            new_progress = {
+                "last_local_media_id": last_local_media_id,
+                "last_remote_media_id": last_remote_media_id,
+                "last_remote_origin": last_remote_origin,
+                "local_done": local_done,
+                "remote_done": remote_done,
+            }
+            if local_media_result:
+                new_progress["last_local_media_id"] = local_media_result[-1][1]
+            else:
+                new_progress["local_done"] = True
+            if remote_media_result:
+                new_progress["last_remote_origin"] = remote_media_result[-1][0]
+                new_progress["last_remote_media_id"] = remote_media_result[-1][1]
+            else:
+                new_progress["remote_done"] = True
 
             self.db_pool.updates._background_update_progress_txn(
                 txn,
                 _BackgroundUpdates.FLAG_EXISTING_QUARANTINED_MEDIA,
-                {
-                    "last_local_media_id": local_media_result[-1][1]
-                    if len(local_media_result) > 0
-                    else last_local_media_id,
-                    "last_remote_media_id": remote_media_result[-1][1]
-                    if len(remote_media_result) > 0
-                    else last_remote_media_id,
-                    "last_remote_origin": remote_media_result[-1][0]
-                    if len(remote_media_result) > 0
-                    else last_remote_origin,
-                },
+                new_progress,
             )
 
             return len(local_media_result) + len(remote_media_result)
@@ -1302,7 +1329,15 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return local_media_ids
 
-    async def get_current_quarantined_media_stream_id(self) -> int:
+    def get_quarantined_media_stream_token(self) -> MultiWriterStreamToken:
+        return MultiWriterStreamToken.from_generator(
+            self._quarantined_media_changes_id_gen
+        )
+
+    def get_quarantined_media_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._quarantined_media_changes_id_gen
+
+    def get_current_quarantined_media_stream_id(self) -> int:
         """Gets the position of the quarantined media changes stream.
 
         Returns:
@@ -1317,74 +1352,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             int - the maximum stream ID
         """
         return await self._quarantined_media_changes_id_gen.get_max_allocated_token()
-
-    async def wait_for_quarantined_media_stream_id(self, target_id: int) -> bool:
-        """Waits until the quarantined media changes stream reaches the given stream ID.
-
-        See https://github.com/element-hq/synapse/pull/19644 for more details.
-
-        TODO: Replace function and call sites with https://github.com/element-hq/synapse/pull/19644
-
-        Args:
-            target_id: The stream ID to wait for.
-
-        Returns:
-            True when caught up to the target stream ID.
-            False when timing out while waiting.
-        """
-        # We ideally would use something like `wait_for_stream_position` in the meantime,
-        # but that short circuits if the instance name matches the current instance name.
-        # Doing so means that if *another* writer is actually leading the to_id, then we'll
-        # assume that we're caught up when we aren't.
-        #
-        # NOTE: Because this is implemented to wait for stream positions by integer ID,
-        # we're technically waiting for *all* workers to catch up rather than just waiting
-        # for *our* worker to catch up. This is okay for now because the quarantined media
-        # stream should be pretty fast to update, and if it's not then the only thing we're
-        # affecting is an admin API that probably has a tool automatically retrying requests
-        # anyway. https://github.com/element-hq/synapse/pull/19644 does the waiting properly
-        # so this should be replaced by that (or similar).
-
-        # Get the minimum shared position/ID across all workers
-        current_id = self._quarantined_media_changes_id_gen.get_current_token()
-        if current_id >= target_id:
-            return True  # nothing to wait for: we're already caught up.
-
-        # "This should never happen". Tokens we hand out via the API should exist. If they
-        # don't, then we're in a bad state and need to explode.
-        max_persisted_position = (
-            await self._quarantined_media_changes_id_gen.get_max_allocated_token()
-        )
-        assert max_persisted_position >= target_id, (
-            f"Unable to wait for invalid future token (token={target_id} has positions "
-            f"ahead of our max persisted position={max_persisted_position})"
-        )
-
-        # Start waiting until we've caught up to the `stream_token`
-        start = self.clock.time_msec()
-        logged = False
-        while True:
-            # Like above, get the minimum shared ID across all workers
-            current_id = self._quarantined_media_changes_id_gen.get_current_token()
-            if current_id >= target_id:
-                return True
-
-            now = self.clock.time_msec()
-
-            # Timed out
-            if now - start > 10_000:
-                return False
-
-            if not logged:
-                logger.info(
-                    "Waiting for current token to reach %s; currently at %s",
-                    target_id,
-                    current_id,
-                )
-                logged = True
-
-            # TODO: be better
-            await self.clock.sleep(Duration(milliseconds=500))
 
     async def get_quarantined_media_changes(
         self, *, from_id: int, to_id: int, limit: int

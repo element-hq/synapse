@@ -1,6 +1,6 @@
 [project]
 name = "matrix-synapse"
-version = "1.153.0rc2"
+version = "1.161.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 readme = "README.rst"
 authors = [
@@ -61,12 +61,11 @@ dependencies = [
     "msgpack>=0.5.2",
     "phonenumbers>=8.2.0",
     # we use GaugeHistogramMetric, which was added in prom-client 0.4.0.
-    # `prometheus_client.metrics` was added in 0.5.0, so we require that too.
-    # We chose 0.6.0 as that is the current version in Debian Buster (oldstable).
-    "prometheus-client>=0.6.0",
+    # `Gauge.clear()` was added in 0.10.0.
+    "prometheus-client>=0.10.0",
     # we use `order`, which arrived in attrs 19.2.0.
     # Note: 21.1.0 broke `/sync`, see https://github.com/matrix-org/synapse/issues/9936
-    "attrs>=26.1.0,!=21.1.0",
+    "attrs>=19.2.0,!=21.1.0",
     "netaddr>=0.7.18",
     # Jinja 2.x is incompatible with MarkupSafe>=2.1. To ensure that admins do not
     # end up with a broken installation, with recent MarkupSafe but old Jinja, we
@@ -154,7 +153,9 @@ opentracing = [
 jwt = ["authlib"]
 # hiredis is not a *strict* dependency, but it makes things much faster.
 # (if it is not installed, we fall back to slow code.)
-redis = ["txredisapi>=1.4.7", "hiredis>=0.3"]
+# txredisapi 1.4.12 is the first release to accept a `username` kwarg for
+# Redis ACL auth: https://github.com/IlyaSkriblovsky/txredisapi/releases/tag/1.4.12
+redis = ["txredisapi>=1.4.12", "hiredis>=0.3"]
 # Required to use experimental `caches.track_memory_usage` config option.
 cache-memory = ["pympler>=1.0"]
 # If this is updated, don't forget to update the equivalent lines in
@@ -187,7 +188,7 @@ all = [
     # opentracing
     "jaeger-client>=4.2.0", "opentracing>=2.2.0",
     # redis
-    "txredisapi>=1.4.7", "hiredis>=0.3",
+    "txredisapi>=1.4.12", "hiredis>=0.3",
     # cache-memory
     # 1.0 added support for python 3.10, our current minimum supported python version
     "pympler>=1.0",
@@ -291,7 +292,6 @@ dev = [
 
     # The following are used by the release script
     "click>=8.1.3",
-    # GitPython was == 3.1.14; bumped to 3.1.20, the first release with type hints.
     "GitPython>=3.1.47",
     "markdown-it-py>=3.0.0",
     "pygithub>=1.59",
@@ -305,6 +305,11 @@ dev = [
 
     # Used for checking the schema delta files
     "sqlglot>=28.0.0",
+]
+# Dependencies for building Synapse's documentation.
+docs = [
+    "packaging>=20.0",
+    "GitPython>=3.1.20",
 ]
 
 [tool.towncrier]
