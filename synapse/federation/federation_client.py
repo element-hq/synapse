@@ -1450,10 +1450,11 @@ class FederationClient(FederationBase):
                         "User's homeserver does not support this room version",
                         Codes.UNSUPPORTED_ROOM_VERSION,
                     )
-            # MSC4311: The 400 `M_MISSING_PARAM`/`M_INVALID_PARAM` error SHOULD be
-            # translated to a 5xx error by the sending server over the Client-Server
-            # API. This is done because there's nothing the client can materially do
-            # differently to make the request succeed.
+            # Matrix v1.18 (introduced in MSC4311) says that for a `400` response, "If
+            # `M_MISSING_PARAM` or `M_INVALID_PARAM` is returned and the request is
+            # associated with a Client-Server API request, the Client-Server API request
+            # SHOULD fail with a 5xx error rather than being passed through." (see
+            # https://spec.matrix.org/v1.18/server-server-api/#put_matrixfederationv2inviteroomideventid)
             #
             # But this was actually further clarified in MSC4528 that it should be
             # translated to a `400` with `M_INCOMPATIBLE_SERVER`.
@@ -1498,10 +1499,11 @@ class FederationClient(FederationBase):
                 content=event_json,
             )
         except HttpResponseException as e:
-            # MSC4311: The 400 `M_MISSING_PARAM`/`M_INVALID_PARAM` error SHOULD be
-            # translated to a 5xx error by the sending server over the Client-Server
-            # API. This is done because there's nothing the client can materially do
-            # differently to make the request succeed.
+            # Matrix v1.18 (introduced in MSC4311) says that for a `400` response, "If
+            # `M_MISSING_PARAM` or `M_INVALID_PARAM` is returned and the request is
+            # associated with a Client-Server API request, the Client-Server API request
+            # SHOULD fail with a 5xx error rather than being passed through." (see
+            # https://spec.matrix.org/v1.18/server-server-api/#put_matrixfederationv2inviteroomideventid)
             #
             # But this was actually further clarified in MSC4528 that it should be
             # translated to a `400` with `M_INCOMPATIBLE_SERVER`.
