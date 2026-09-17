@@ -1177,9 +1177,6 @@ class EventsWorkerStore(SQLBaseStore):
         Retrieve the stripped state IDs for an event, given an event context to retrieve state
         from as well as the state types to include.
 
-        "Stripped" state means that only the `type`, `state_key`, `content` and `sender` keys
-        are included from each state event.
-
         Args:
             context: The event context to retrieve state of the room from.
 
