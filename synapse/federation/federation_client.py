@@ -1454,17 +1454,20 @@ class FederationClient(FederationBase):
             # error by the sending server over the Client-Server API. This is done
             # because there's nothing the client can materially do differently to make
             # the request succeed.
+            #
+            # But this was actually further clarified in MSC4528 to be `400` with
+            # `M_INCOMPATIBLE_SERVER`.
             elif (
                 err.code == HTTPStatus.BAD_REQUEST
                 and err.errcode == Codes.MISSING_PARAM
             ):
                 raise SynapseError(
-                    500,
+                    400,
                     f"Invite was rejected by the recipient's server.\n\n"
                     f"The remote homeserver ({destination}) returned {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} "
                     "which indicates a compatibility problem between your homeserver and the "
                     "homeserver you're trying to send the invite to (either one could be at fault).",
-                    Codes.UNKNOWN,
+                    Codes.INCOMPATIBLE_SERVER,
                     additional_fields={
                         "cause": err.msg,
                         "destination_server": destination,
@@ -1499,18 +1502,21 @@ class FederationClient(FederationBase):
             # error by the sending server over the Client-Server API. This is done
             # because there's nothing the client can materially do differently to make
             # the request succeed.
+            #
+            # But this was actually further clarified in MSC4528 to be `400` with
+            # `M_INCOMPATIBLE_SERVER`.
             err = e.to_synapse_error()
             if (
                 err.code == HTTPStatus.BAD_REQUEST
                 and err.errcode == Codes.MISSING_PARAM
             ):
                 raise SynapseError(
-                    500,
+                    400,
                     f"Invite was rejected by the recipient's server.\n\n"
                     f"The remote homeserver ({destination}) returned {HTTPStatus.BAD_REQUEST} {Codes.MISSING_PARAM} "
                     "which indicates a compatibility problem between your homeserver and the "
                     "homeserver you're trying to send the invite to (either one could be at fault).",
-                    Codes.UNKNOWN,
+                    Codes.INCOMPATIBLE_SERVER,
                     additional_fields={
                         "cause": err.msg,
                         "destination_server": destination,
