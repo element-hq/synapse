@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
+import urllib
 from unittest import mock
 
 import twisted.web.client
@@ -151,7 +151,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
         self._mock_agent.request.assert_called_once_with(
             b"GET",
             # Please double-check me that ascii encoding is correct thing to do here
-            f"matrix-federation://yet.another.server/_matrix/federation/v1/state/%21{room_id[1:]}?event_id=event_id".encode(
+            f"matrix-federation://yet.another.server/_matrix/federation/v1/state/{urllib.parse.quote(room_id, '')}?event_id=event_id".encode(
                 "ascii"
             ),
             headers=mock.ANY,
