@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 import attr
 from pydantic import StrictBool, StrictInt, StrictStr
 
-from synapse.api.constants import Direction
+from synapse.api.constants import Direction, ProfileFields
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
     RestServlet,
@@ -49,6 +49,7 @@ from synapse.rest.admin._base import (
     assert_user_is_admin,
 )
 from synapse.rest.client._base import client_patterns
+from synapse.storage.databases.main import UserPaginateResponse
 from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.types import JsonDict, JsonMapping, TaskStatus, UserID
@@ -181,13 +182,16 @@ class UsersRestServletV2(RestServlet):
         )
 
         # If support for MSC3866 is not enabled, don't show the approval flag.
-        filter = None
+        users_filter = None
         if not self._msc3866_enabled:
+            users_filter = attr.filters.exclude(
+                attr.fields(UserPaginateResponse).approved
+            )
 
-            def _filter(a: attr.Attribute) -> bool:
-                return a.name != "approved"
-
-        ret = {"users": [attr.asdict(u, filter=filter) for u in users], "total": total}
+        ret = {
+            "users": [attr.asdict(u, filter=users_filter) for u in users],
+            "total": total,
+        }
         if (start + limit) < total:
             ret["next_token"] = str(start + len(users))
 
@@ -366,8 +370,12 @@ class UserRestServletV2(UserRestServletV2Get):
 
         if user:  # modify user
             if "displayname" in body:
-                await self.profile_handler.set_displayname(
-                    target_user, requester, body["displayname"], by_admin=True
+                await self.profile_handler.dispatch_set_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=ProfileFields.DISPLAYNAME,
+                    new_value=body["displayname"],
+                    by_admin=True,
                 )
 
             if threepids is not None:
@@ -415,8 +423,12 @@ class UserRestServletV2(UserRestServletV2Get):
                     )
 
             if "avatar_url" in body:
-                await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], by_admin=True
+                await self.profile_handler.dispatch_set_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=ProfileFields.AVATAR_URL,
+                    new_value=body["avatar_url"],
+                    by_admin=True,
                 )
 
             if "admin" in body:
@@ -523,8 +535,12 @@ class UserRestServletV2(UserRestServletV2Get):
                     )
 
             if "avatar_url" in body and isinstance(body["avatar_url"], str):
-                await self.profile_handler.set_avatar_url(
-                    target_user, requester, body["avatar_url"], by_admin=True
+                await self.profile_handler.dispatch_set_profile_field(
+                    target_user=target_user,
+                    requester=requester,
+                    field_name=ProfileFields.AVATAR_URL,
+                    new_value=body["avatar_url"],
+                    by_admin=True,
                 )
 
             user_info_dict = await self.admin_handler.get_user(target_user)

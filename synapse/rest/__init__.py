@@ -27,7 +27,9 @@ from synapse.rest.client import (
     account,
     account_data,
     account_validity,
+    appservice_federation_proxy,
     appservice_ping,
+    appservice_proxy,
     auth,
     auth_metadata,
     capabilities,
@@ -60,6 +62,7 @@ from synapse.rest.client import (
     retention,
     room,
     room_keys,
+    room_membership,
     room_upgrade_rest_servlet,
     sendtodevice,
     sync,
@@ -128,6 +131,9 @@ CLIENT_SERVLET_FUNCTIONS: tuple[RegisterServletsFunc, ...] = (
     rendezvous.register_servlets,
     auth_metadata.register_servlets,
     thread_subscriptions.register_servlets,
+    room_membership.register_servlets,
+    appservice_proxy.register_servlets,
+    appservice_federation_proxy.register_servlets,
 )
 
 SERVLET_GROUPS: dict[str, Iterable[RegisterServletsFunc]] = {

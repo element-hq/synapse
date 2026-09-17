@@ -68,7 +68,12 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
-from synapse.replication.tcp.streams import BackfillStream, UnPartialStatedEventStream
+from synapse.replication.tcp.streams import (
+    BackfillStream,
+    StickyEventsStream,
+    UnPartialStatedEventStream,
+)
+from synapse.replication.tcp.streams._base import StickyEventsStreamRow
 from synapse.replication.tcp.streams.events import EventsStream
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedEventStreamRow
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -472,6 +477,15 @@ class EventsWorkerStore(SQLBaseStore):
                     # If the partial-stated event became rejected or unrejected
                     # when it wasn't before, we need to invalidate this cache.
                     self._invalidate_local_get_event_cache(row.event_id)
+        elif stream_name == StickyEventsStream.NAME:
+            for row in rows:
+                assert isinstance(row, StickyEventsStreamRow)
+
+                # A sticky event only gets a new row on this stream when it is first
+                # persisted (in which case there's nothing cached to invalidate) or when
+                # its soft-failure status changed, which is stored in the event's
+                # internal metadata, so invalidate the cached event.
+                self._invalidate_local_get_event_cache(row.event_id)
 
         super().process_replication_rows(stream_name, instance_name, token, rows)
 
@@ -1496,7 +1510,7 @@ class EventsWorkerStore(SQLBaseStore):
                 #
                 if d["type"] != EventTypes.Member:
                     raise InvalidEventError(
-                        "Room %s for event %s is unknown" % (d["room_id"], event_id)
+                        "Room %s for event %s is unknown" % (d.get("room_id"), event_id)
                     )
 
                 # so, assuming this is an out-of-band-invite that arrived before
@@ -1527,7 +1541,7 @@ class EventsWorkerStore(SQLBaseStore):
                     logger.warning(
                         "Event %s in room %s has unknown room version %s",
                         event_id,
-                        d["room_id"],
+                        d.get("room_id"),
                         room_version_id,
                     )
                     continue
@@ -1537,7 +1551,7 @@ class EventsWorkerStore(SQLBaseStore):
                         "Event %s in room %s with version %s has wrong format: "
                         "expected %s, was %s",
                         event_id,
-                        d["room_id"],
+                        d.get("room_id"),
                         room_version_id,
                         room_version.event_format,
                         format_version,
@@ -1566,7 +1580,7 @@ class EventsWorkerStore(SQLBaseStore):
                 # it's difficult to see what to do here. Pretty much all bets are off
                 # if Synapse cannot rely on the consistency of its database.
                 raise DatabaseCorruptionError(
-                    d["room_id"], event_id, original_ev.event_id
+                    d.get("room_id"), event_id, original_ev.event_id
                 )
 
             event_map[event_id] = original_ev

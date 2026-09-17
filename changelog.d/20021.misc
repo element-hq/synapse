@@ -1,1 +1,0 @@
-Fix `RemoteJoinHelper` test helper to handle room version "12" rooms. Contributed by @famedly @jason-famedly.
