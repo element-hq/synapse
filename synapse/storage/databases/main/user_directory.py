@@ -657,29 +657,6 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             [_UserDirProfile(user_id, display_name, avatar_url)],
         )
 
-    async def upsert_federated_remote_users(
-        self,
-        users: Sequence[tuple[str, str | None, str | None]],
-    ) -> None:
-        """Upsert remote users discovered via federated user directory sync.
-
-        Updates profile and search index entries and marks the users as visible
-        in user directory searches via `users_in_federated_search`.
-        """
-        if not users:
-            return
-
-        profiles = [
-            _UserDirProfile(user_id, display_name, avatar_url)
-            for user_id, display_name, avatar_url in users
-        ]
-
-        await self.db_pool.runInteraction(
-            "upsert_federated_remote_users",
-            self._upsert_federated_remote_users_txn,
-            profiles,
-        )
-
     def _upsert_federated_remote_users_txn(
         self,
         txn: LoggingTransaction,
