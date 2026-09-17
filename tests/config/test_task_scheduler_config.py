@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
-from synapse.config._base import ConfigError
+from synapse.config._base import ConfigError, RootConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.task_scheduler import TaskSchedulerConfig
 
@@ -35,7 +35,7 @@ class TaskSchedulerConfigTestCase(TestCase):
         self.assertEqual(config.task_scheduler.max_concurrent_tasks, 4)
 
     def test_invalid_configuration(self) -> None:
-        config = TaskSchedulerConfig()
+        config = TaskSchedulerConfig(RootConfig())
         with self.assertRaises(ConfigError):
             config.read_config({"task_scheduler": {"max_concurrent_tasks": 0}})
 
