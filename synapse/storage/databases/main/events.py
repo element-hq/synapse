@@ -2930,10 +2930,15 @@ class PersistEventsStore:
                 continue
 
             event = events_by_id[redaction_redacts]
-            if redaction_event_needs_v3_recheck:
-                # sanity-check: v1/v2 don't ever need rechecks because the checks are part of auth rules
-                assert room_version.event_format != EventFormatVersions.ROOM_V1_V2
-
+            if (
+                redaction_event_needs_v3_recheck
+                # Normally v1/v2 don't ever need rechecks because the checks are part of auth rules.
+                # However the `recheck` column was only recently introduced as a retrofit,
+                # with a database-level default of `true`.
+                # For that reason, we can't `assert` on this condition as even v1/v2 rooms can appear
+                # with a `recheck` value of true, even though they don't need a recheck.
+                and room_version.event_format != EventFormatVersions.ROOM_V1_V2
+            ):
                 # Apply the same logic as `_maybe_redact_event_row`
                 if get_domain_from_id(redaction_event_sender) != get_domain_from_id(
                     event.sender
