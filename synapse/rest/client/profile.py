@@ -26,7 +26,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 from synapse.api.constants import ProfileFields
-from synapse.api.errors import Codes, MissingClientTokenError, SynapseError
+from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -70,9 +70,12 @@ async def _auth_and_ratelimit_profile_lookup(
     Returns:
         The requester if the request was authenticated, else None.
     """
-    requester = await hs.get_auth().get_optional_user_by_req(request, allow_guest=True)
-    if requester is None and hs.config.server.require_auth_for_profile_requests:
-        raise MissingClientTokenError()
+    auth = hs.get_auth()
+    requester: Requester | None
+    if hs.config.server.require_auth_for_profile_requests:
+        requester = await auth.get_user_by_req(request)
+    else:
+        requester = await auth.get_optional_user_by_req(request, allow_guest=True)
 
     await hs.get_profile_lookup_ratelimiter().ratelimit(
         requester, key=None if requester else request.getClientAddress().host
