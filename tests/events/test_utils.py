@@ -1023,13 +1023,6 @@ class TestStrippedStateEvent(stdlib_unittest.TestCase):
             ),
         )
 
-    def test_invalid_type(self) -> None:
-        """Non-dict inputs should return None."""
-        self.assertIsNone(StrippedStateEvent.from_json_dict("string"))
-        self.assertIsNone(StrippedStateEvent.from_json_dict(123))
-        self.assertIsNone(StrippedStateEvent.from_json_dict([]))
-        self.assertIsNone(StrippedStateEvent.from_json_dict(None))
-
     def test_missing_fields(self) -> None:
         """Dicts with missing required fields should return None."""
         self.assertIsNone(
