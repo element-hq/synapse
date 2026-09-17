@@ -35,7 +35,6 @@ from synapse.events.utils import (
     format_event_for_client_v2_without_room_id,
     format_event_raw,
     maybe_upsert_event_field,
-    parse_stripped_state_event,
     prune_event,
 )
 from synapse.types import JsonDict
@@ -1004,7 +1003,7 @@ class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
             copy_and_fixup_power_levels_contents({"a": {"b": {"c": 1}}})  # type: ignore[dict-item]
 
 
-class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
+class TestStrippedStateEvent(stdlib_unittest.TestCase):
     def test_valid_dict(self) -> None:
         """A valid dict should be parsed into a StrippedStateEvent."""
         raw = {
@@ -1013,7 +1012,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
             "sender": "@alice:example.com",
             "content": {"membership": "join"},
         }
-        result = parse_stripped_state_event(raw)
+        result = StrippedStateEvent.from_json_dict(raw)
         self.assertEqual(
             result,
             StrippedStateEvent(
@@ -1026,15 +1025,15 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
 
     def test_invalid_type(self) -> None:
         """Non-dict inputs should return None."""
-        self.assertIsNone(parse_stripped_state_event("string"))
-        self.assertIsNone(parse_stripped_state_event(123))
-        self.assertIsNone(parse_stripped_state_event([]))
-        self.assertIsNone(parse_stripped_state_event(None))
+        self.assertIsNone(StrippedStateEvent.from_json_dict("string"))
+        self.assertIsNone(StrippedStateEvent.from_json_dict(123))
+        self.assertIsNone(StrippedStateEvent.from_json_dict([]))
+        self.assertIsNone(StrippedStateEvent.from_json_dict(None))
 
     def test_missing_fields(self) -> None:
         """Dicts with missing required fields should return None."""
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "state_key": "@alice:example.com",
                     "sender": "@alice:example.com",
@@ -1043,7 +1042,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
             )
         )
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "type": "m.room.member",
                     "sender": "@alice:example.com",
@@ -1052,7 +1051,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
             )
         )
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "type": "m.room.member",
                     "state_key": "@alice:example.com",
@@ -1061,7 +1060,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
             )
         )
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "type": "m.room.member",
                     "state_key": "@alice:example.com",
@@ -1074,7 +1073,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
         """Dicts with invalid field types should return None."""
         # Type must be string
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "type": 123,
                     "state_key": "@alice:example.com",
@@ -1085,7 +1084,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
         )
         # State key must be string
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "type": "m.room.member",
                     "state_key": 123,
@@ -1096,7 +1095,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
         )
         # Sender must be string
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "type": "m.room.member",
                     "state_key": "@alice:example.com",
@@ -1107,7 +1106,7 @@ class TestParseStrippedStateEvent(stdlib_unittest.TestCase):
         )
         # Content must be dict
         self.assertIsNone(
-            parse_stripped_state_event(
+            StrippedStateEvent.from_json_dict(
                 {
                     "type": "m.room.member",
                     "state_key": "@alice:example.com",
