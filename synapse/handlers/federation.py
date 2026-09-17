@@ -40,6 +40,8 @@ from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import verify_signed_json
 from unpaddedbase64 import decode_base64
 
+from twisted.internet.defer import CancelledError
+
 from synapse import event_auth
 from synapse.api.constants import (
     MAX_DEPTH,
@@ -972,6 +974,8 @@ class FederationHandler:
                 stripped_state_event.as_json_dict()
                 for stripped_state_event in stripped_room_state
             ]
+        except CancelledError:
+            raise
         except Exception as exc:
             # FIXME(MSC4311): Apply this validation for all room versions after
             # 2027-06-01 (to allow some time for the ecosystem to adapt and support
@@ -1389,6 +1393,8 @@ class FederationHandler:
                 stripped_state_event.as_json_dict()
                 for stripped_state_event in stripped_room_state
             ]
+        except CancelledError:
+            raise
         except Exception as exc:
             # FIXME(MSC4311): Apply this validation for all room versions after
             # 2027-06-01 (to allow some time for the ecosystem to adapt and support
