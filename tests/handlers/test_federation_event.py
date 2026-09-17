@@ -830,6 +830,9 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
         )
         room_version = self.get_success(main_store.get_room_version(room_id))
 
+        # This test requires a user that is not the room creator. Infinite power levels
+        # from MSC4289 change the dynamics of the power level state resolution later to
+        # not fallback on `origin_server_ts` as described in more detail below.
         ernie_user_id = self.register_user("ernie", "test")
         ernie_tok = self.login("ernie", "test")
         self.helper.join(room_id, user=ernie_user_id, tok=ernie_tok)
