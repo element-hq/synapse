@@ -2397,7 +2397,7 @@ properties:
       otherwise per client IP address.
 
 
-      _Added in Synapse 1.159.0._
+      _Added in Synapse 1.162.0._
     default:
       per_second: 1.0
       burst_count: 500.0

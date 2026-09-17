@@ -2121,7 +2121,7 @@ rc_user_directory:
 
 Requests are limited per user when the request is authenticated, otherwise per client IP address.
 
-_Added in Synapse 1.159.0._
+_Added in Synapse 1.162.0._
 
 This setting has the following sub-options:
 
