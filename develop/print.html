@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-8d3ef834.js";
+            window.path_to_searchindex_js = "searchindex-f106ee01.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -18284,7 +18284,7 @@ pipx install poetry
 </code></pre>
 <p>but see poetry’s <a href="https://python-poetry.org/docs/#installation">installation instructions</a>
 for other installation methods.</p>
-<p>Developing Synapse requires Poetry version 1.3.2 or later.</p>
+<p>The minimum poetry version is specified by the <code>requires-poetry</code> line in <a href="https://github.com/element-hq/synapse/blob/develop/pyproject.toml">pyproject.toml</a>.</p>
 <p>Next, open a terminal and install dependencies as follows:</p>
 <pre><code class="language-sh">cd path/where/you/have/cloned/the/repository
 poetry install --extras all
