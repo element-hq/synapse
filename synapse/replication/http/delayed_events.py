@@ -19,7 +19,7 @@ from twisted.web.server import Request
 
 from synapse.http.server import HttpServer
 from synapse.replication.http._base import ReplicationEndpoint
-from synapse.types import JsonDict, JsonMapping
+from synapse.types import JsonDict, JsonMapping, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -58,5 +58,41 @@ class ReplicationAddedDelayedEventRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+class ReplicationCancelDelayedEventsForUserRestServlet(ReplicationEndpoint):
+    """Cancel all of a user's delayed events, on behalf of another worker.
+
+    Request format:
+
+        POST /_synapse/replication/cancel_delayed_events_for_user/:user_id
+
+        {}
+    """
+
+    NAME = "cancel_delayed_events_for_user"
+    PATH_ARGS = ("user_id",)
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.handler = hs.get_delayed_events_handler()
+
+    @staticmethod
+    async def _serialize_payload(user_id: str) -> JsonDict:  # type: ignore[override]
+        """
+        Args:
+            user_id: The ID of the user whose delayed events to cancel.
+        """
+        return {}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, user_id: str
+    ) -> tuple[int, JsonDict]:
+        await self.handler.cancel_all_for_user(UserID.from_string(user_id))
+
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationAddedDelayedEventRestServlet(hs).register(http_server)
+    ReplicationCancelDelayedEventsForUserRestServlet(hs).register(http_server)
