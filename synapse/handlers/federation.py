@@ -1006,7 +1006,7 @@ class FederationHandler:
                 # MSC4311), update this to be
                 # `InvalidStrippedStateBehaviour.remove_invalid` alongside removing the
                 # whole `_minimal_parse_stripped_room_state` fallback.
-                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.reject_all,
+                invalid_stripped_state_behaviour=InvalidStrippedStateBehaviour.reject_all,
             )
             # Replace with our sanitized `knock_room_state`
             event.unsigned["knock_room_state"] = [
@@ -1025,7 +1025,7 @@ class FederationHandler:
                 # /_matrix/federation/v1/send_knock/{roomId}/{eventId}` endpoint:
                 # > Entries which are improperly signed or formatted SHOULD be removed by the
                 # > server prior to supplying them over the Client-Server API.
-                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.remove_invalid,
+                invalid_stripped_state_behaviour=InvalidStrippedStateBehaviour.remove_invalid,
             )
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `knock_room_state`
@@ -1203,7 +1203,7 @@ class FederationHandler:
         self,
         *,
         stripped_room_state: Any,
-        invalid_stripped_state_behavior: InvalidStrippedStateBehaviour,
+        invalid_stripped_state_behaviour: InvalidStrippedStateBehaviour,
     ) -> list[StrippedStateEvent] | None:
         """
         The goal of this function is to sanitize whatever we got from federation and
@@ -1213,7 +1213,7 @@ class FederationHandler:
 
         Args:
             stripped_room_state: The raw `invite_room_state`/`knock_room_state` JSON
-            invalid_stripped_state_behavior: How to handle the scenario where we see a
+            invalid_stripped_state_behaviour: How to handle the scenario where we see a
                 single invalid stripped state event
         """
         parsed_stripped_room_state: list[StrippedStateEvent] = []
@@ -1228,17 +1228,17 @@ class FederationHandler:
         # We're going to strictly enforce that they at-least gave us a list.
         elif not isinstance(stripped_room_state, list):
             if (
-                invalid_stripped_state_behavior
+                invalid_stripped_state_behaviour
                 == InvalidStrippedStateBehaviour.reject_all
             ):
                 raise TypeError("Stripped state must be a list of PDU's")
             elif (
-                invalid_stripped_state_behavior
+                invalid_stripped_state_behaviour
                 == InvalidStrippedStateBehaviour.remove_invalid
             ):
                 return parsed_stripped_room_state
             else:
-                assert_never(invalid_stripped_state_behavior)
+                assert_never(invalid_stripped_state_behaviour)
 
         for raw_stripped_event in stripped_room_state:
             # Parse each stripped event
@@ -1259,7 +1259,7 @@ class FederationHandler:
         stripped_room_state: Any,
         room_id: str,
         room_version: RoomVersion,
-        invalid_stripped_state_behavior: InvalidStrippedStateBehaviour,
+        invalid_stripped_state_behaviour: InvalidStrippedStateBehaviour,
     ) -> list[StrippedStateEvent]:
         """
         Parse and validate `invite_room_state`/`knock_room_state` according to the
@@ -1288,7 +1288,7 @@ class FederationHandler:
             stripped_room_state: The raw `invite_room_state`/`knock_room_state` JSON
             room_id: The room ID the invite/knock is happening in
             room_version: The version of the room the invite/knock is happening in
-            invalid_stripped_state_behavior: How to handle the scenario where we see a
+            invalid_stripped_state_behaviour: How to handle the scenario where we see a
                 single invalid stripped state event
 
         Returns:
@@ -1304,19 +1304,19 @@ class FederationHandler:
         # Scrutinize JSON values
         if not isinstance(stripped_room_state, list):
             if (
-                invalid_stripped_state_behavior
+                invalid_stripped_state_behaviour
                 == InvalidStrippedStateBehaviour.reject_all
             ):
                 raise TypeError(
                     "Stripped state must be a list of PDU's that includes the `m.room.create` event"
                 )
             elif (
-                invalid_stripped_state_behavior
+                invalid_stripped_state_behaviour
                 == InvalidStrippedStateBehaviour.remove_invalid
             ):
                 return parsed_stripped_room_state
             else:
-                assert_never(invalid_stripped_state_behavior)
+                assert_never(invalid_stripped_state_behaviour)
 
         already_counted_fail_metric = False
         for raw_stripped_event in stripped_room_state:
@@ -1366,17 +1366,17 @@ class FederationHandler:
 
                 # React to invalid event
                 if (
-                    invalid_stripped_state_behavior
+                    invalid_stripped_state_behaviour
                     == InvalidStrippedStateBehaviour.reject_all
                 ):
                     raise exc
                 elif (
-                    invalid_stripped_state_behavior
+                    invalid_stripped_state_behaviour
                     == InvalidStrippedStateBehaviour.remove_invalid
                 ):
                     continue
                 else:
-                    assert_never(invalid_stripped_state_behavior)
+                    assert_never(invalid_stripped_state_behaviour)
 
         return parsed_stripped_room_state
 
@@ -1473,7 +1473,7 @@ class FederationHandler:
                 # >  - One or more entries in `invite_room_state` are not formatted according to the room's version.
                 # >  - One or more events fails a signature check.
                 # >  - One or more events does not reside in the same room as the invite.
-                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.reject_all,
+                invalid_stripped_state_behaviour=InvalidStrippedStateBehaviour.reject_all,
             )
             # Validate `m.room.create` event is included (see spec blurb above)
             includes_create_event = any(
@@ -1529,7 +1529,7 @@ class FederationHandler:
                 # >  - One or more entries in `invite_room_state` are not formatted according to the room's version.
                 # >  - One or more events fails a signature check.
                 # >  - One or more events does not reside in the same room as the invite.
-                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.reject_all,
+                invalid_stripped_state_behaviour=InvalidStrippedStateBehaviour.reject_all,
             )
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `invite_room_state`
