@@ -151,19 +151,35 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
                 yield key
 
     def __len__(self) -> int:
-        count = len(self._underlying_map)
-        for key in self._deletions:
-            if key in self._underlying_map:
-                count -= 1
+        # The distinct keys can be calculated via `(underlying ∪ mutable) −
+        # deletions`. A key is never in both `_mutable_map` and `_deletions`, so
+        # the only deletions to subtract are those of keys in the underlying
+        # map:
+        #
+        #   |underlying| + |mutable| − |mutable ∩ underlying| − |underlying ∩ deletions|
+        #
+        # The intersections run at C speed and iterates over the smaller
+        # operand, so this is much cheaperthan a Python loop over every key..
+        underlying_keys = self._underlying_map.keys()
+        return (
+            len(self._underlying_map)
+            + len(self._mutable_map)
+            - len(self._mutable_map.keys() & underlying_keys)
+            - len(underlying_keys & self._deletions)
+        )
 
-        for key in self._mutable_map:
-            # `key` should not be in both _mutable_map and _deletions
-            assert key not in self._deletions
+    def total_entries(self) -> int:
+        """The number of entries held across the underlying map, the
+        overrides and the deletions, following nested overlays down.
 
-            if key not in self._underlying_map:
-                count += 1
-
-        return count
+        Useful for estimating the memory usage of the overlay mapping.
+        """
+        underlying = self._underlying_map
+        if isinstance(underlying, MutableOverlayMapping):
+            underlying_size = underlying.total_entries()
+        else:
+            underlying_size = len(underlying)
+        return underlying_size + len(self._mutable_map) + len(self._deletions)
 
     def clear(self) -> None:
         self._underlying_map = {}

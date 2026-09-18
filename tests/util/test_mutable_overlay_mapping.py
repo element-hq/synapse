@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+import random
 import unittest
 
 from synapse.util import MutableOverlayMapping
@@ -187,3 +188,95 @@ class TestMutableOverlayMapping(unittest.TestCase):
         self.assertNotIn("c", mapping)
         self.assertIn("d", mapping)
         self.assertNotIn("e", mapping)
+
+    def test_len_after_reset_and_redelete(self) -> None:
+        """len() must follow keys that move between the underlying map, the
+        overrides and the deletions."""
+        underlying = {"a": 1, "b": 2, "c": 3}
+        mapping = MutableOverlayMapping(underlying)
+
+        # Delete an underlying key, then set it again.
+        del mapping["a"]
+        self.assertEqual(len(mapping), 2)
+        mapping["a"] = 10
+        self.assertEqual(len(mapping), 3)
+
+        # Add a key only the overlay knows about, delete it, and add it back.
+        mapping["d"] = 4
+        self.assertEqual(len(mapping), 4)
+        del mapping["d"]
+        self.assertEqual(len(mapping), 3)
+        mapping["d"] = 40
+        self.assertEqual(len(mapping), 4)
+
+        # Override then delete an underlying key.
+        mapping["b"] = 20
+        del mapping["b"]
+        self.assertEqual(len(mapping), 3)
+
+        self.assertEqual(len(mapping), len(dict(mapping)))
+
+    def test_len_nested(self) -> None:
+        """An overlay over an overlay reports the right length."""
+        inner = MutableOverlayMapping({"a": 1, "b": 2})
+        inner["c"] = 3
+        del inner["a"]
+
+        outer = MutableOverlayMapping(inner)
+        self.assertEqual(len(outer), 2)
+
+        outer["a"] = 10  # deleted in inner, so new to outer
+        outer["b"] = 20  # present in inner's underlying map
+        outer["c"] = 30  # present in inner's overrides
+        outer["d"] = 40  # new
+        self.assertEqual(len(outer), 4)
+
+        del outer["b"]
+        del outer["d"]
+        self.assertEqual(len(outer), 2)
+        self.assertEqual(len(outer), len(dict(outer)))
+
+    def test_len_matches_dict_under_random_operations(self) -> None:
+        """Cross-check len() against a flattened copy over many random
+        sequences of sets and deletes."""
+        for seed in range(50):
+            rng = random.Random(seed)
+            underlying = {rng.randrange(20): 0 for _ in range(rng.randrange(15))}
+            inner = MutableOverlayMapping(underlying)
+            outer = MutableOverlayMapping(inner)
+
+            for mapping in (inner, outer):
+                for _ in range(rng.randrange(40)):
+                    key = rng.randrange(20)
+                    if rng.random() < 0.6:
+                        mapping[key] = 1
+                    elif key in mapping:
+                        del mapping[key]
+
+                    self.assertEqual(len(mapping), len(dict(mapping)), seed)
+
+    def test_total_entries(self) -> None:
+        """total_entries() counts the base map plus every override and
+        deletion, unlike len()."""
+        mapping = MutableOverlayMapping({"a": 1, "b": 2, "c": 3})
+        self.assertEqual(mapping.total_entries(), 3)
+
+        mapping["a"] = 10  # override: +1 entry, same length
+        mapping["d"] = 4  # new key: +1 entry, +1 length
+        del mapping["b"]  # deletion: +1 entry, -1 length
+        self.assertEqual(len(mapping), 3)
+        self.assertEqual(mapping.total_entries(), 6)
+
+        # Deleting an override drops it from the overrides and records the
+        # deletion, so the entry count is unchanged.
+        del mapping["d"]
+        self.assertEqual(len(mapping), 2)
+        self.assertEqual(mapping.total_entries(), 6)
+
+        # Nested overlays are counted all the way down.
+        outer = MutableOverlayMapping(mapping)
+        outer["e"] = 5
+        self.assertEqual(outer.total_entries(), 7)
+
+        mapping.clear()
+        self.assertEqual(mapping.total_entries(), 0)
