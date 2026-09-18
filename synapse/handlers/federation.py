@@ -1289,7 +1289,10 @@ class FederationHandler:
 
             # Parse the stripped events to ensure it has all of the fields necessary
             parsed_stripped_event = StrippedStateEvent.from_json_dict(
-                raw_stripped_event
+                # We use this over `raw_stripped_event` because `pdu` may have been
+                # redacted by `_check_sigs_and_hash` above which is the proper thing to
+                # use according to the spec if the hash check fails.
+                pdu.get_dict()
             )
             if parsed_stripped_event is None:
                 raise ValueError("Unable to parse as stripped event")
