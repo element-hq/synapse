@@ -19,6 +19,7 @@
 #
 #
 import logging
+from abc import ABC, abstractmethod
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BaseAuth:
+class BaseAuth(ABC):
     """Common base class for all auth implementations."""
 
     def __init__(self, hs: "HomeServer"):
@@ -187,6 +188,7 @@ class BaseAuth:
                 403, "Application service has not registered this user (%s)" % user_id
             )
 
+    @abstractmethod
     async def is_server_admin(self, requester: Requester) -> bool:
         """Check if the given user is a local server admin.
 
@@ -240,6 +242,7 @@ class BaseAuth:
 
         return user_level >= send_level
 
+    @abstractmethod
     async def get_user_by_req(
         self,
         request: SynapseRequest,
