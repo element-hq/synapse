@@ -1,0 +1,1 @@
+Don't log client IP during captcha verification (privacy issue fix). Contibuted by Louis Gregg.
