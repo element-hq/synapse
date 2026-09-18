@@ -20,6 +20,7 @@
 #
 
 import logging
+import threading
 from contextlib import contextmanager
 from typing import Callable, Generator, cast
 from unittest.mock import patch
@@ -813,19 +814,22 @@ class LogContextErrorMessageTestCase(unittest.TestCase):
     def test_start_on_different_thread(self) -> None:
         with _capture_logcontext_errors() as messages:
             ctx = LoggingContext(name="ctx", server_name="s")
-            # Pretend the context was created on another OS thread.
-            ctx.main_thread += 1
 
-            ctx.start(None)
+            # Call `start` on a different thread
+            thread = threading.Thread(target=ctx.start, args=(None,))
+            thread.start()
+            thread.join()
 
             self.assertEqual(messages, ["Started logcontext ctx on different thread"])
 
     def test_stop_on_different_thread(self) -> None:
         with _capture_logcontext_errors() as messages:
             ctx = LoggingContext(name="ctx", server_name="s")
-            ctx.main_thread += 1
 
-            ctx.stop(None)
+            # Call `stop` on a different thread
+            thread = threading.Thread(target=ctx.stop, args=(None,))
+            thread.start()
+            thread.join()
 
             self.assertEqual(messages, ["Stopped logcontext ctx on different thread"])
 

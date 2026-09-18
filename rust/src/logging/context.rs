@@ -365,7 +365,7 @@ pub struct LoggingContext {
     /// created on (see [`get_thread_id`] for why it is not a real OS tid).
     /// Activity on any other thread is an error. Settable only so tests can
     /// simulate activity on the wrong thread.
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     main_thread: u64,
     /// Whether `__exit__` has run. Re-activating a finished context is an error.
     #[pyo3(get, set)]
