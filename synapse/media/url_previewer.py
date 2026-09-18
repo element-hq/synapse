@@ -41,7 +41,11 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.http.client import SimpleHttpClient
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.media._base import FileInfo, get_filename_from_headers
-from synapse.media.media_storage import MediaStorage, SHA256TransparentIOWriter
+from synapse.media.media_storage import (
+    MediaStorage,
+    QuarantinedMediaException,
+    SHA256TransparentIOWriter,
+)
 from synapse.media.oembed import OEmbedProvider
 from synapse.media.preview_html import decode_body, parse_html_to_open_graph
 from synapse.types import JsonDict, UserID
@@ -63,6 +67,30 @@ OG_TAG_VALUE_MAXLEN = 1000
 ONE_HOUR = 60 * 60 * 1000
 ONE_DAY = 24 * ONE_HOUR
 IMAGE_CACHE_EXPIRY_MS = 2 * ONE_DAY
+
+
+def _try_remove_parent_dirs(dirs: Iterable[str]) -> None:
+    """Attempt to remove the given chain of parent directories
+
+    Args:
+        dirs: The list of directory paths to delete, with children appearing
+            before their parents.
+    """
+    for dir in dirs:
+        try:
+            os.rmdir(dir)
+        except FileNotFoundError:
+            # Already deleted, continue with deleting the rest
+            pass
+        except OSError as e:
+            # Failed, skip deleting the rest of the parent dirs
+            if e.errno != errno.ENOTEMPTY:
+                logger.warning(
+                    "Failed to remove media directory while clearing url preview cache: %r: %s",
+                    dir,
+                    e,
+                )
+            break
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -613,15 +641,20 @@ class UrlPreviewer:
             else:
                 download_result = await self._download_url(url, sha256writer.wrap())
 
+        sha256 = sha256writer.hexdigest()
+        if await self.store.get_is_hash_quarantined(sha256):
+            # The media matches something that has been quarantined. Rather than
+            # storing it (and handing the client an mxc:// URI that will always
+            # 404), throw the download away entirely and let the caller decide
+            # how to cope without it.
+            logger.warning(
+                "Discarding %s from URL preview as it matched existing quarantined media",
+                url,
+            )
+            self._delete_url_cache_file(file_id)
+            raise QuarantinedMediaException()
+
         try:
-            sha256 = sha256writer.hexdigest()
-            should_quarantine = await self.store.get_is_hash_quarantined(sha256)
-
-            if should_quarantine:
-                logger.warning(
-                    "Media has been automatically quarantined as it matched existing quarantined media"
-                )
-
             time_now_ms = self.clock.time_msec()
 
             await self.store.store_local_media(
@@ -633,7 +666,6 @@ class UrlPreviewer:
                 user_id=user,
                 url_cache=url,
                 sha256=sha256,
-                quarantined_by="system" if should_quarantine else None,
             )
 
         except Exception as e:
@@ -654,6 +686,26 @@ class UrlPreviewer:
             response_code=download_result.response_code,
             expires=download_result.expires,
             etag=download_result.etag,
+        )
+
+    def _delete_url_cache_file(self, file_id: str) -> None:
+        """Remove a file from the url cache directory, along with any parent
+        directories left empty by its removal.
+
+        Note that url cache files are never handed to the storage providers (see
+        `StorageProviderWrapper.store_file`), so the local file is the only copy.
+        """
+        fname = self.filepaths.url_cache_filepath(file_id)
+        try:
+            os.remove(fname)
+        except FileNotFoundError:
+            pass  # If the path doesn't exist, meh
+        except OSError as e:
+            logger.warning("Failed to remove media from url preview cache: %r", e)
+            return
+
+        _try_remove_parent_dirs(
+            self.filepaths.url_cache_filepath_dirs_to_delete(file_id)
         )
 
     async def _precache_image_url(
@@ -760,29 +812,6 @@ class UrlPreviewer:
 
         logger.debug("Running url preview cache expiry")
 
-        def try_remove_parent_dirs(dirs: Iterable[str]) -> None:
-            """Attempt to remove the given chain of parent directories
-
-            Args:
-                dirs: The list of directory paths to delete, with children appearing
-                    before their parents.
-            """
-            for dir in dirs:
-                try:
-                    os.rmdir(dir)
-                except FileNotFoundError:
-                    # Already deleted, continue with deleting the rest
-                    pass
-                except OSError as e:
-                    # Failed, skip deleting the rest of the parent dirs
-                    if e.errno != errno.ENOTEMPTY:
-                        logger.warning(
-                            "Failed to remove media directory while clearing url preview cache: %r: %s",
-                            dir,
-                            e,
-                        )
-                    break
-
         # First we delete expired url cache entries
         media_ids = await self.store.get_expired_url_cache(now)
 
@@ -804,7 +833,7 @@ class UrlPreviewer:
             removed_media.append(media_id)
 
             dirs = self.filepaths.url_cache_filepath_dirs_to_delete(media_id)
-            try_remove_parent_dirs(dirs)
+            _try_remove_parent_dirs(dirs)
 
         await self.store.delete_url_cache(removed_media)
 
@@ -836,7 +865,7 @@ class UrlPreviewer:
                 continue
 
             dirs = self.filepaths.url_cache_filepath_dirs_to_delete(media_id)
-            try_remove_parent_dirs(dirs)
+            _try_remove_parent_dirs(dirs)
 
             thumbnail_dir = self.filepaths.url_cache_thumbnail_directory(media_id)
             try:
@@ -854,7 +883,7 @@ class UrlPreviewer:
             dirs = self.filepaths.url_cache_thumbnail_dirs_to_delete(media_id)
             # Note that one of the directories to be deleted has already been
             # removed by the `rmtree` above.
-            try_remove_parent_dirs(dirs)
+            _try_remove_parent_dirs(dirs)
 
         await self.store.delete_url_cache_media(removed_media)
 
