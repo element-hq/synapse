@@ -165,6 +165,274 @@ class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
         self.assertDictEqual(event_id_to_depth, dict(rows))
 
 
+class TestFixupMaxDepthTieOrderingBgUpdate(HomeserverTestCase):
+    """Test the background update that re-spreads events tied at (or above)
+    MAX_DEPTH by origin_server_ts."""
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = self.hs.get_datastores().main
+        self.db_pool = self.store.db_pool
+        self._next_stream_ordering = 1
+
+        # Reinsert the background update as it was already run at the start of
+        # the test.
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="background_updates",
+                values={
+                    "update_name": "fixup_max_depth_tie_ordering",
+                    "progress_json": "{}",
+                },
+            )
+        )
+
+    def create_room(
+        self,
+        room_id: str,
+        room_version: RoomVersion,
+        events: list[tuple[str, int, int]],
+    ) -> None:
+        """Create a room and insert events given as
+        (event_id, topological_ordering, origin_server_ts)."""
+
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="rooms",
+                values={
+                    "room_id": room_id,
+                    "room_version": room_version.identifier,
+                },
+            )
+        )
+
+        for event_id, topological_ordering, origin_server_ts in events:
+            self.get_success(
+                self.db_pool.simple_insert(
+                    table="events",
+                    values={
+                        "event_id": event_id,
+                        "room_id": room_id,
+                        "stream_ordering": self._next_stream_ordering,
+                        "topological_ordering": topological_ordering,
+                        "depth": topological_ordering,
+                        "origin_server_ts": origin_server_ts,
+                        "type": "m.test",
+                        "sender": "@user:test",
+                        "processed": True,
+                        "outlier": False,
+                    },
+                )
+            )
+            self._next_stream_ordering += 1
+
+    def run_update(self) -> int:
+        return self.get_success(
+            self.store.fixup_max_depth_tie_ordering_bg_update({"room_id": ""}, 10)
+        )
+
+    def get_orderings(self, room_id: str) -> dict[str, int]:
+        rows = self.get_success(
+            self.db_pool.simple_select_list(
+                table="events",
+                keyvalues={"room_id": room_id},
+                retcols=["event_id", "topological_ordering"],
+            )
+        )
+        return dict(rows)
+
+    def test_tie_block_respread_by_ts(self) -> None:
+        """Events tied at MAX_DEPTH end up ordered by origin_server_ts, above
+        the room's last real depth."""
+
+        room_id = "!tied:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal1:e", 1, 1000),
+                ("$normal2:e", 2, 2000),
+                ("$normal3:e", 3, 3000),
+                # Tie block, deliberately out of chronological order relative
+                # to insertion (= stream) order.
+                ("$tie_c:e", MAX_DEPTH, 6000),
+                ("$tie_a:e", MAX_DEPTH, 4000),
+                ("$tie_b:e", MAX_DEPTH, 5000),
+            ],
+        )
+
+        self.assertEqual(self.run_update(), 1)
+
+        orderings = self.get_orderings(room_id)
+
+        # Normal events untouched.
+        self.assertEqual(orderings["$normal1:e"], 1)
+        self.assertEqual(orderings["$normal2:e"], 2)
+        self.assertEqual(orderings["$normal3:e"], 3)
+
+        # Tied events now sit strictly between the last real depth and
+        # MAX_DEPTH, in chronological order, with distinct orderings.
+        tied = [orderings["$tie_a:e"], orderings["$tie_b:e"], orderings["$tie_c:e"]]
+        self.assertEqual(tied, sorted(tied))
+        self.assertEqual(len(set(tied)), 3)
+        self.assertGreater(tied[0], 3)
+        self.assertLess(tied[-1], MAX_DEPTH)
+
+    def test_overflow_rows_in_old_room_version(self) -> None:
+        """In room versions without strict canonical JSON, events above
+        MAX_DEPTH (which the fixup_max_depth_cap update skipped) are also
+        re-spread, fixing the inverted ordering."""
+
+        room_id = "!old:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V5,
+            [
+                ("$normal:e", 1, 1000),
+                # The original bomb-era events, above MAX_DEPTH.
+                ("$bomb1:e", 2**63 - 1, 2000),
+                ("$bomb2:e", 2**63 - 1, 3000),
+                # Post-1.127.1 events, capped at MAX_DEPTH, which sorted below
+                # the bomb-era events despite being newer.
+                ("$capped1:e", MAX_DEPTH, 4000),
+                ("$capped2:e", MAX_DEPTH, 5000),
+            ],
+        )
+
+        self.assertEqual(self.run_update(), 1)
+
+        orderings = self.get_orderings(room_id)
+        self.assertEqual(orderings["$normal:e"], 1)
+
+        by_ordering = sorted((o, e) for e, o in orderings.items() if e != "$normal:e")
+        self.assertEqual(
+            [e for _, e in by_ordering],
+            ["$bomb1:e", "$bomb2:e", "$capped1:e", "$capped2:e"],
+        )
+        self.assertLess(by_ordering[-1][0], MAX_DEPTH)
+
+    def test_rooms_without_ties_untouched(self) -> None:
+        """A room with at most one event at MAX_DEPTH is left alone."""
+
+        room_id = "!healthy:example.com"
+        self.create_room(
+            room_id,
+            RoomVersions.V6,
+            [
+                ("$normal1:e", 1, 1000),
+                ("$normal2:e", 2, 2000),
+                ("$single:e", MAX_DEPTH, 3000),
+            ],
+        )
+
+        self.assertEqual(self.run_update(), 0)
+
+        orderings = self.get_orderings(room_id)
+        self.assertEqual(orderings["$normal1:e"], 1)
+        self.assertEqual(orderings["$normal2:e"], 2)
+        self.assertEqual(orderings["$single:e"], MAX_DEPTH)
+
+
+class TestCappedDepthTopologicalPlacement(HomeserverTestCase):
+    """Test that newly persisted events with depth >= MAX_DEPTH are placed
+    just above the room's current maximum topological ordering."""
+
+    class _StubInternalMetadata:
+        def __init__(self, stream_ordering: int) -> None:
+            self.stream_ordering = stream_ordering
+
+    class _StubEvent:
+        def __init__(
+            self, event_id: str, room_id: str, depth: int, stream_ordering: int = 1
+        ) -> None:
+            self.event_id = event_id
+            self.room_id = room_id
+            self.depth = depth
+            self.internal_metadata = (
+                TestCappedDepthTopologicalPlacement._StubInternalMetadata(
+                    stream_ordering
+                )
+            )
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = self.hs.get_datastores().main
+        self.persist_store = self.hs.get_datastores().persist_events
+        assert self.persist_store is not None
+        self.db_pool = self.store.db_pool
+
+    def seed_room(self, room_id: str, max_ordering: int) -> None:
+        self.get_success(
+            self.db_pool.simple_insert(
+                table="events",
+                values={
+                    "event_id": f"$seed{max_ordering}:{room_id}",
+                    "room_id": room_id,
+                    "topological_ordering": max_ordering,
+                    "depth": max_ordering,
+                    "origin_server_ts": 1000,
+                    "type": "m.test",
+                    "sender": "@user:test",
+                    "processed": True,
+                    "outlier": False,
+                },
+            )
+        )
+
+    def compute(self, events: list["_StubEvent"]) -> dict[str, int]:
+        assert self.persist_store is not None
+        return self.get_success(
+            self.db_pool.runInteraction(
+                "test_compute_topological_orderings",
+                self.persist_store._compute_topological_orderings_txn,
+                [(event, None) for event in events],
+            )
+        )
+
+    def test_normal_events_keep_their_depth(self) -> None:
+        room_id = "!normal:example.com"
+        self.seed_room(room_id, 500)
+        orderings = self.compute([self._StubEvent("$new:e", room_id, 501)])
+        self.assertEqual(orderings["$new:e"], 501)
+
+    def test_capped_events_continue_past_block_top(self) -> None:
+        """In a room whose tie block has been re-spread, at-cap events chain
+        chronologically from the current maximum."""
+
+        room_id = "!spliced:example.com"
+        self.seed_room(room_id, 500)
+        orderings = self.compute(
+            [
+                self._StubEvent("$cap1:e", room_id, MAX_DEPTH),
+                self._StubEvent("$cap2:e", room_id, MAX_DEPTH),
+            ]
+        )
+        self.assertEqual(orderings["$cap1:e"], 501)
+        self.assertEqual(orderings["$cap2:e"], 502)
+
+    def test_backfilled_capped_events_keep_the_cap(self) -> None:
+        """A backfilled at-cap event (negative stream ordering) is older than
+        the room's maximum, so it must not be placed at the live edge."""
+
+        room_id = "!backfill:example.com"
+        self.seed_room(room_id, 500)
+        orderings = self.compute(
+            [self._StubEvent("$old:e", room_id, MAX_DEPTH, stream_ordering=-5)]
+        )
+        self.assertEqual(orderings["$old:e"], MAX_DEPTH)
+
+    def test_unspliced_room_falls_back_to_cap(self) -> None:
+        """While the room still has events at MAX_DEPTH as its maximum, the
+        old capping behaviour is preserved."""
+
+        room_id = "!unspliced:example.com"
+        self.seed_room(room_id, MAX_DEPTH)
+        orderings = self.compute([self._StubEvent("$cap:e", room_id, MAX_DEPTH)])
+        self.assertEqual(orderings["$cap:e"], MAX_DEPTH)
+
+
 class TestRedactionsRecheckBgUpdate(HomeserverTestCase):
     """Test the background update that backfills the `recheck` column in redactions."""
 
