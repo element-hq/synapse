@@ -142,6 +142,39 @@ class VersionsTestCase(unittest.HomeserverTestCase):
             channel.json_body,
         )
 
+    def test_msc4525_advertised_per_user(self) -> None:
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Disabled by default.
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/versions",
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(
+            channel.json_body["unstable_features"]["org.matrix.msc4525"],
+            False,
+            channel.json_body,
+        )
+
+        # Advertised once enabled for the user.
+        self._enable_experimental_feature_for_user(
+            target_user_id=user1_id, features={"msc4525": True}
+        )
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/versions",
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(
+            channel.json_body["unstable_features"]["org.matrix.msc4525"],
+            True,
+            channel.json_body,
+        )
+
     def test_msc4446_false_by_default(self) -> None:
         channel = self.make_request("GET", "/_matrix/client/versions")
         self.assertEqual(channel.code, 200, channel.result)
