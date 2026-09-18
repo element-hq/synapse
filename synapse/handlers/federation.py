@@ -1478,14 +1478,14 @@ class FederationHandler:
             # 2027-06-01 (to allow some time for the ecosystem to adapt and support
             # MSC4311), see https://github.com/element-hq/synapse/issues/19943
             #
-            # The Matrix spec says that for "version 12+ rooms, servers SHOULD rather than
-            # MAY respond to such requests with 400 M_MISSING_PARAM". Given we have the
+            # The Matrix spec says that for version 12+ rooms, servers SHOULD rather than
+            # MAY respond to such requests with 400 M_INVALID_PARAM. Given we have the
             # lee-way to enforce this in all room versions, we might as well.
             #
             # For now, we'll only log in room versions 12+ where this SHOULD be the case
             # already.
             if room_version.msc4311_stripped_state:
-                # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
+                # FIXME(MSC4311): Instead of logging, reject with 400 `M_INVALID_PARAM`
                 # after 2027-06-01. Given Synapse claimed to support room version 12 but
                 # didn't adhere to this behavior until 2026-07, we will only warn for
                 # now.
