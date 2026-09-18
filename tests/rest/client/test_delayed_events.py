@@ -94,8 +94,8 @@ class DelayedEventsUnstableSupportTestCase(HomeserverTestCase):
         self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc4140"])
 
 
-class DelayedEventsTestCase(HomeserverTestCase):
-    """Tests getting and managing delayed events."""
+class DelayedEventsTestCaseBase(HomeserverTestCase):
+    """Room and user fixtures, and request helpers, for the delayed events tests."""
 
     servlets = [
         admin.register_servlets,
@@ -137,6 +137,115 @@ class DelayedEventsTestCase(HomeserverTestCase):
         # Advance enough time where any requests we made during `prepare(...)` doesn't
         # affect the rate-limits in the test itself
         self.reactor.advance(Duration(days=1).as_secs())
+
+    def _send_delayed_event_request(
+        self,
+        *,
+        room_id: str,
+        delay_ms: int,
+        event_type: str,
+        state_key: str | None = None,
+        content: JsonDict,
+        method: Literal["PUT", "POST"] = "PUT",
+        txn_id: str | None = None,
+        access_token: str,
+    ) -> FakeChannel:
+        """Build and send a request for scheduling a delayed event via the
+        dedicated endpoint. See `_build_delayed_event_request` for the arguments.
+        """
+        return self.make_request(
+            *_build_delayed_event_request(
+                room_id=room_id,
+                delay_ms=delay_ms,
+                event_type=event_type,
+                state_key=state_key,
+                content=content,
+                method=method,
+                txn_id=txn_id,
+            ),
+            access_token,
+        )
+
+    def _get_delayed_events(self) -> list[JsonDict]:
+        channel = self.make_request(
+            "GET",
+            _MANAGEMENT_PATH_PREFIX,
+            access_token=self.user1_access_token,
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        key = "delayed_events"
+        self.assertIn(key, channel.json_body)
+
+        events = channel.json_body[key]
+        self.assertIsInstance(events, list)
+
+        return events
+
+    def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
+        key = "content"
+        self.assertIn(key, event)
+
+        content = event[key]
+        self.assertIsInstance(content, dict)
+
+        return content
+
+    def _update_delayed_event(
+        self,
+        delay_id: str,
+        action: str,
+        action_in_path: bool,
+        access_token: str | None = None,
+    ) -> FakeChannel:
+        path = f"{_MANAGEMENT_PATH_PREFIX}/{delay_id}"
+        body = {}
+        if action_in_path:
+            path += f"/{action}"
+        else:
+            body["action"] = action
+        return self.make_request("POST", path, body, access_token)
+
+    def _find_sent_delayed_event(
+        self, access_token: str, delay_id: str, should_find: bool
+    ) -> JsonDict | None:
+        """Call /sync and look for a synced event with a specified delay_id.
+        At most one event will ever have a matching delay_id.
+
+        Args:
+            access_token: The access token of the user to call /sync for.
+            delay_id: The delay_id to search for in synced events.
+            should_find: Whether /sync should include an event with a matching delay_id.
+
+        Returns:
+            The synced event with the matching delay_id, if any.
+        """
+        channel = self.make_request("GET", "/sync", access_token=access_token)
+        self.assertEqual(HTTPStatus.OK, channel.code)
+
+        rooms = channel.json_body["rooms"]
+        events = []
+        for membership in "join", "leave":
+            if membership in rooms:
+                events += rooms[membership][self.room_id]["timeline"]["events"]
+
+        found: JsonDict | None = None
+        for event in events:
+            if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
+                if not should_find:
+                    self.fail(
+                        "Found event with matching delay_id, but expected to not find one"
+                    )
+                if found is not None:
+                    self.fail("Found multiple events with matching delay_id")
+                found = event
+        if should_find and found is None:
+            self.fail("Did not find event with matching delay_id")
+        return found
+
+
+class DelayedEventsTestCase(DelayedEventsTestCaseBase):
+    """Tests getting and managing delayed events."""
 
     def test_delayed_events_empty_on_startup(self) -> None:
         self.assertListEqual([], self._get_delayed_events())
@@ -332,44 +441,6 @@ class DelayedEventsTestCase(HomeserverTestCase):
         event = self._find_sent_delayed_event(guest_access_token, delay_id, True)
         assert event is not None
         self.assertEqual(guest_user_id, event["sender"], event)
-
-    @unittest.override_config({"experimental_features": {"msc4354_enabled": True}})
-    def test_delayed_sticky_event_is_sent_with_sticky_duration(self) -> None:
-        """Test that the sticky duration given when scheduling a delayed event
-        is applied to the event once it is sent (MSC4354)."""
-        if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
-            # We need the JSON functionality in SQLite
-            self.skipTest(
-                f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
-            )
-
-        sticky_duration = Duration(minutes=1)
-        method, path, body = _build_delayed_event_request(
-            room_id=self.room_id,
-            delay_ms=900,
-            event_type=_EVENT_TYPE,
-            content={"body": "sticky"},
-        )
-        channel = self.make_request(
-            method,
-            f"{path}?{StickyEvent.QUERY_PARAM_NAME}={sticky_duration.as_millis()}",
-            body,
-            self.user1_access_token,
-        )
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-        delay_id = channel.json_body.get("delay_id")
-        assert delay_id is not None
-
-        self.reactor.advance(1)
-        self.assertListEqual([], self._get_delayed_events())
-
-        event = self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
-        assert event is not None
-        self.assertGreater(
-            event["unsigned"].get(EventUnsignedContentFields.STICKY_TTL, 0),
-            0,
-            event,
-        )
 
     def test_delayed_member_events_are_sent_on_timeout(self) -> None:
         channel = self._send_delayed_event_request(
@@ -885,110 +956,51 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self._find_sent_delayed_event(self.user1_access_token, delay_id, False)
         self._find_sent_delayed_event(self.user2_access_token, delay_id, False)
 
-    def _send_delayed_event_request(
-        self,
-        *,
-        room_id: str,
-        delay_ms: int,
-        event_type: str,
-        state_key: str | None = None,
-        content: JsonDict,
-        method: Literal["PUT", "POST"] = "PUT",
-        txn_id: str | None = None,
-        access_token: str,
-    ) -> FakeChannel:
-        """Build and send a request for scheduling a delayed event via the
-        dedicated endpoint. See `_build_delayed_event_request` for the arguments.
-        """
-        return self.make_request(
-            *_build_delayed_event_request(
-                room_id=room_id,
-                delay_ms=delay_ms,
-                event_type=event_type,
-                state_key=state_key,
-                content=content,
-                method=method,
-                txn_id=txn_id,
-            ),
-            access_token,
-        )
 
-    def _get_delayed_events(self) -> list[JsonDict]:
+class DelayedStickyEventsTestCase(DelayedEventsTestCaseBase):
+    """Tests scheduling delayed sticky events (MSC4354)."""
+
+    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
+        # We need the JSON functionality in SQLite
+        # (the sticky events store refuses to start without it, so this has to be
+        # a class-level skip: the homeserver is built before the test body runs)
+        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4354_enabled": True}
+        return config
+
+    def test_delayed_sticky_event_is_sent_with_sticky_duration(self) -> None:
+        """Test that the sticky duration given when scheduling a delayed event
+        is applied to the event once it is sent (MSC4354)."""
+        sticky_duration = Duration(minutes=1)
+        method, path, body = _build_delayed_event_request(
+            room_id=self.room_id,
+            delay_ms=900,
+            event_type=_EVENT_TYPE,
+            content={"body": "sticky"},
+        )
         channel = self.make_request(
-            "GET",
-            _MANAGEMENT_PATH_PREFIX,
-            access_token=self.user1_access_token,
+            method,
+            f"{path}?{StickyEvent.QUERY_PARAM_NAME}={sticky_duration.as_millis()}",
+            body,
+            self.user1_access_token,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        assert delay_id is not None
 
-        key = "delayed_events"
-        self.assertIn(key, channel.json_body)
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
 
-        events = channel.json_body[key]
-        self.assertIsInstance(events, list)
-
-        return events
-
-    def _get_delayed_event_content(self, event: JsonDict) -> JsonDict:
-        key = "content"
-        self.assertIn(key, event)
-
-        content = event[key]
-        self.assertIsInstance(content, dict)
-
-        return content
-
-    def _update_delayed_event(
-        self,
-        delay_id: str,
-        action: str,
-        action_in_path: bool,
-        access_token: str | None = None,
-    ) -> FakeChannel:
-        path = f"{_MANAGEMENT_PATH_PREFIX}/{delay_id}"
-        body = {}
-        if action_in_path:
-            path += f"/{action}"
-        else:
-            body["action"] = action
-        return self.make_request("POST", path, body, access_token)
-
-    def _find_sent_delayed_event(
-        self, access_token: str, delay_id: str, should_find: bool
-    ) -> JsonDict | None:
-        """Call /sync and look for a synced event with a specified delay_id.
-        At most one event will ever have a matching delay_id.
-
-        Args:
-            access_token: The access token of the user to call /sync for.
-            delay_id: The delay_id to search for in synced events.
-            should_find: Whether /sync should include an event with a matching delay_id.
-
-        Returns:
-            The synced event with the matching delay_id, if any.
-        """
-        channel = self.make_request("GET", "/sync", access_token=access_token)
-        self.assertEqual(HTTPStatus.OK, channel.code)
-
-        rooms = channel.json_body["rooms"]
-        events = []
-        for membership in "join", "leave":
-            if membership in rooms:
-                events += rooms[membership][self.room_id]["timeline"]["events"]
-
-        found: JsonDict | None = None
-        for event in events:
-            if event["unsigned"].get("org.matrix.msc4140.delay_id") == delay_id:
-                if not should_find:
-                    self.fail(
-                        "Found event with matching delay_id, but expected to not find one"
-                    )
-                if found is not None:
-                    self.fail("Found multiple events with matching delay_id")
-                found = event
-        if should_find and found is None:
-            self.fail("Did not find event with matching delay_id")
-        return found
+        event = self._find_sent_delayed_event(self.user1_access_token, delay_id, True)
+        assert event is not None
+        self.assertGreater(
+            event["unsigned"].get(EventUnsignedContentFields.STICKY_TTL, 0),
+            0,
+            event,
+        )
 
 
 class DelayedEventsWorkerTestCase(BaseMultiWorkerStreamTestCase):
