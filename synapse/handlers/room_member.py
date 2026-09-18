@@ -1040,6 +1040,24 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             "You cannot reject this invite",
                             errcode=Codes.CANNOT_LEAVE_SERVER_NOTICE_ROOM,
                         )
+
+                # If we are rescinding an invite to a user on a server which is not in the
+                # room, that server cannot authorise the leave event: it has no state DAG,
+                # so it cannot calculate the auth events which would otherwise tell it that
+                # the leave supersedes the invite it is holding. Name the invite in
+                # prev_state_events so that it can, see MSC4242.
+                if (
+                    is_state_dags
+                    and prev_state_events is None
+                    and old_membership == Membership.INVITE
+                    and effective_membership_state == Membership.LEAVE
+                    and requester.user.to_string() != target.to_string()
+                    and not self.hs.is_mine(target)
+                ):
+                    # `latest_event_ids` are the state DAG extremities for these rooms.
+                    prev_state_events = list(latest_event_ids)
+                    if old_state_id not in prev_state_events:
+                        prev_state_events.append(old_state_id)
             else:
                 if action == "kick":
                     raise AuthError(403, "The target user is not in the room")
