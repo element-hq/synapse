@@ -2311,8 +2311,10 @@ class SlidingSyncRoomLists:
         encryption_event_id = state_ids.get((EventTypes.RoomEncryption, ""))
 
         # Now roll back the state by looking at the state deltas between
-        # to_token and now.
-        deltas = await self.store.get_current_state_deltas_for_room(
+        # to_token and now (bounding each delta on its event's position, so
+        # that a `to_token` inside a persist batch rolls back exactly the
+        # events after it).
+        deltas = await self.store.get_current_state_deltas_for_room_by_event_position(
             room_id,
             from_token=to_token,
             to_token=self.store.get_room_max_token(),
