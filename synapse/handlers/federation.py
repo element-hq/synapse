@@ -1482,6 +1482,9 @@ class FederationHandler:
                 for stripped_state_event in stripped_room_state
             )
             if not includes_create_event:
+                invalid_stripped_state_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc(1)
                 raise ValueError(
                     "Stripped state must include `m.room.create` event (MSC4311)"
                 )
