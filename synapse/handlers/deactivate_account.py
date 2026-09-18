@@ -47,6 +47,7 @@ class DeactivateAccountHandler:
         self._room_member_handler = hs.get_room_member_handler()
         self._identity_handler = hs.get_identity_handler()
         self._profile_handler = hs.get_profile_handler()
+        self._delayed_events_handler = hs.get_delayed_events_handler()
         self._pusher_pool = hs.get_pusherpool()
         self.user_directory_handler = hs.get_user_directory_handler()
         self._server_name = hs.hostname
@@ -107,6 +108,12 @@ class DeactivateAccountHandler:
             user_id,
             erase_data,
             id_server,
+        )
+
+        # Cancel the user's delayed events (MSC4140). Do this first, so that none
+        # of them get sent while the rest of the deactivation is in progress.
+        await self._delayed_events_handler.cancel_all_for_user(
+            UserID.from_string(user_id)
         )
 
         # FIXME: Theoretically there is a race here wherein user resets
