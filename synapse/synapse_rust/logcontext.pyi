@@ -24,22 +24,47 @@ DEBUG_LOGGER_NAME: str
 names stay in sync."""
 
 class ContextResourceUsage:
-    """Tracks the resources used by a log context."""
+    """Tracks the resources used by a log context.
+
+    The attributes, operators and `repr` format are relied on by Python callers
+    (`Measure`, request and background-process metrics, the task scheduler,
+    etc). Implemented in Rust so that `set_current_context` can update the
+    counters without allocating a Python object each time.
+    """
 
     ru_stime: float
+    """System CPU time, in seconds."""
     ru_utime: float
+    """User CPU time, in seconds."""
     db_txn_count: int
+    """Number of database transactions done."""
     db_txn_duration_sec: float
+    """Time spent doing database transactions (excluding scheduling), in seconds."""
     db_sched_duration_sec: float
+    """Time spent waiting for a database connection, in seconds."""
     evt_db_fetch_count: int
+    """Number of events requested from the database."""
 
-    def __init__(self, copy_from: "Optional[ContextResourceUsage]" = None) -> None: ...
-    def copy(self) -> "ContextResourceUsage": ...
-    def reset(self) -> None: ...
-    def __iadd__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
-    def __isub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
-    def __add__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
-    def __sub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage": ...
+    def __init__(self, copy_from: "Optional[ContextResourceUsage]" = None) -> None:
+        """If `copy_from` is given, copy its stats; otherwise start at zero."""
+
+    def copy(self) -> "ContextResourceUsage":
+        """Return a copy of this object."""
+
+    def reset(self) -> None:
+        """Reset all stats to zero."""
+
+    def __iadd__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
+        """`self += other`, mutating in place."""
+
+    def __isub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
+        """`self -= other`, mutating in place."""
+
+    def __add__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
+        """`self + other`, returning a new object."""
+
+    def __sub__(self, other: "ContextResourceUsage") -> "ContextResourceUsage":
+        """`self - other`, returning a new object."""
 
 class LoggingContext:
     """Additional context for log formatting. Contexts are scoped within a
