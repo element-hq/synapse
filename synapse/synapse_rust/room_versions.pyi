@@ -128,7 +128,8 @@ class RoomVersion:
     Determines whether a room version *SHOULD* rather than *MAY* reject invites/knocks
     with invalid stripped state events.
 
-    According to Matrix v1.18 (introduced in MSC4311):
+    According to Matrix v1.18 (introduced in MSC4311) for the `PUT
+    /_matrix/federation/v1/invite/{roomId}/{eventId}` endpoint:
     > The `invite_room_state` has additional validation, which servers MAY apply to
     > room versions 1 through 11 and SHOULD apply to all other room versions. As with
     > the above errors, servers SHOULD return `M_INVALID_PARAM` if:

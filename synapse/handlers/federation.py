@@ -38,6 +38,7 @@ import attr
 from prometheus_client import Histogram
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import verify_signed_json
+from typing_extensions import assert_never
 from unpaddedbase64 import decode_base64
 
 from twisted.internet.defer import CancelledError
@@ -141,6 +142,22 @@ class _BackfillPoint:
     event_id: str
     depth: int
     type: _BackfillPointType
+
+
+class InvalidStrippedStateBehaviour(Enum):
+    """
+    What to do when parsing stripped state events
+    """
+
+    remove_invalid = enum.auto()
+    """
+    Remove the individual event from the set of stripped state.
+    """
+
+    reject_all = enum.auto()
+    """
+    Reject the entire set of stripped state events if there is a single invalid event
+    """
 
 
 class FederationHandler:
@@ -968,6 +985,11 @@ class FederationHandler:
                 stripped_room_state=knock_response.get("knock_room_state"),
                 room_id=event.room_id,
                 room_version=event_format_version,
+                # According to Matrix v1.18 (introduced in MSC4311) for the `PUT
+                # /_matrix/federation/v1/send_knock/{roomId}/{eventId}` endpoint:
+                # > Entries which are improperly signed or formatted SHOULD be removed by the
+                # > server prior to supplying them over the Client-Server API.
+                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.remove_invalid,
             )
             # Replace with our sanitized `knock_room_state`
             event.unsigned["knock_room_state"] = [
@@ -1006,6 +1028,11 @@ class FederationHandler:
             # can fail for non-compliant servers but we should still use stripped state.
             stripped_room_state_for_client = self._minimal_parse_stripped_room_state(
                 stripped_room_state=knock_response.get("knock_room_state"),
+                # According to Matrix v1.18 (introduced in MSC4311) for the `PUT
+                # /_matrix/federation/v1/send_knock/{roomId}/{eventId}` endpoint:
+                # > Entries which are improperly signed or formatted SHOULD be removed by the
+                # > server prior to supplying them over the Client-Server API.
+                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.remove_invalid,
             )
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `knock_room_state`
@@ -1183,13 +1210,20 @@ class FederationHandler:
         self,
         *,
         stripped_room_state: Any,
+        invalid_stripped_state_behavior: InvalidStrippedStateBehaviour,
     ) -> list[StrippedStateEvent] | None:
         """
         The goal of this function is to sanitize whatever we got from federation and
         make it presentable to the client. The minimum amount of parsing necessary to
         ensure `invite_room_state`/`knock_room_state` is at-least a list of stripped
         state events (compared to `_parse_stripped_room_state`).
+
+        Args:
+            stripped_room_state: The raw `invite_room_state`/`knock_room_state` JSON
+            invalid_stripped_state_behavior: How to handle the scenario where we see a
+                single invalid stripped state event
         """
+        parsed_stripped_room_state: list[StrippedStateEvent] = []
 
         # Scrutinize JSON values
         #
@@ -1200,9 +1234,19 @@ class FederationHandler:
             return None
         # We're going to strictly enforce that they at-least gave us a list.
         elif not isinstance(stripped_room_state, list):
-            raise TypeError("Stripped state must be a list of PDU's")
+            if (
+                invalid_stripped_state_behavior
+                == InvalidStrippedStateBehaviour.reject_all
+            ):
+                raise TypeError("Stripped state must be a list of PDU's")
+            elif (
+                invalid_stripped_state_behavior
+                == InvalidStrippedStateBehaviour.remove_invalid
+            ):
+                return parsed_stripped_room_state
+            else:
+                assert_never(invalid_stripped_state_behavior)
 
-        parsed_stripped_room_state = []
         for raw_stripped_event in stripped_room_state:
             # Parse each stripped event
             parsed_stripped_event = StrippedStateEvent.from_json_dict(
@@ -1222,16 +1266,26 @@ class FederationHandler:
         stripped_room_state: Any,
         room_id: str,
         room_version: RoomVersion,
+        invalid_stripped_state_behavior: InvalidStrippedStateBehaviour,
     ) -> list[StrippedStateEvent]:
         """
         Parse and validate `invite_room_state`/`knock_room_state` according to the
         Matrix spec (c.f. MSC4311).
 
-        > If any of the events are not a PDU, not for the room ID specified, or fail
-        > signature checks, or the `m.room.create` event is missing, the receiving
-        > server MAY respond to invites with a `400 M_MISSING_PARAM` standard Matrix
-        > error (new to the endpoint). For invites to room version 12+ rooms, servers
-        > SHOULD rather than MAY respond to such requests with `400 M_MISSING_PARAM`.
+        According to Matrix v1.18 (introduced in MSC4311) for the `PUT
+        /_matrix/federation/v1/invite/{roomId}/{eventId}` endpoint:
+        > The `invite_room_state` has additional validation, which servers MAY apply to
+        > room versions 1 through 11 and SHOULD apply to all other room versions. As with
+        > the above errors, servers SHOULD return `M_INVALID_PARAM` if:
+        >  - [...]
+        >  - One or more entries in `invite_room_state` are not formatted according to the room's version.
+        >  - One or more events fails a signature check.
+        >  - One or more events does not reside in the same room as the invite.
+
+        According to Matrix v1.18 (introduced in MSC4311) for the `PUT
+        /_matrix/federation/v1/send_knock/{roomId}/{eventId}` endpoint:
+        > Entries which are improperly signed or formatted SHOULD be removed by the
+        > server prior to supplying them over the Client-Server API.
 
         We refer to `invite_room_state`/`knock_room_state` as `stripped_room_state` but
         the events contained within can be full PDU's or stripped state events (older
@@ -1241,68 +1295,84 @@ class FederationHandler:
             stripped_room_state: The raw `invite_room_state`/`knock_room_state` JSON
             room_id: The room ID the invite/knock is happening in
             room_version: The version of the room the invite/knock is happening in
+            invalid_stripped_state_behavior: How to handle the scenario where we see a
+                single invalid stripped state event
 
         Returns:
             A list of parsed `StrippedStateEvent`
 
         Raises:
-            `TypeError`/`ValueError` when the stripped room state is invalid
+            When `InvalidStrippedStateBehaviour.reject_all`, raises
+            `TypeError`/`ValueError` when one of the stripped room state events is
+            invalid
         """
+        parsed_stripped_room_state: list[StrippedStateEvent] = []
+
         # Scrutinize JSON values
         if not isinstance(stripped_room_state, list):
-            raise TypeError(
-                "Stripped state must be a list of PDU's that includes the `m.room.create` event"
-            )
+            if (
+                invalid_stripped_state_behavior
+                == InvalidStrippedStateBehaviour.reject_all
+            ):
+                raise TypeError(
+                    "Stripped state must be a list of PDU's that includes the `m.room.create` event"
+                )
+            elif (
+                invalid_stripped_state_behavior
+                == InvalidStrippedStateBehaviour.remove_invalid
+            ):
+                return parsed_stripped_room_state
+            else:
+                assert_never(invalid_stripped_state_behavior)
 
-        parsed_stripped_room_state = []
-        includes_create_event = False
         for raw_stripped_event in stripped_room_state:
-            # Validate PDU
             try:
-                pdu = event_from_pdu_json(raw_stripped_event, room_version)
-            except Exception as exc:
-                raise ValueError(
-                    "Unable to parse one of the stripped state events as a PDU"
-                ) from exc
+                # Validate PDU
+                try:
+                    pdu = event_from_pdu_json(raw_stripped_event, room_version)
+                except Exception as exc:
+                    raise ValueError(
+                        "Unable to parse one of the stripped state events as a PDU"
+                    ) from exc
 
-            # Validate that it's from the same room
-            if pdu.room_id != room_id:
-                raise ValueError(
-                    "PDU from stripped state must be from the room ID specified in the request"
+                # Validate that it's from the same room
+                if pdu.room_id != room_id:
+                    raise ValueError(
+                        "PDU from stripped state must be from the room ID specified in the request"
+                    )
+                # Validate signature/hashes
+                try:
+                    pdu = await self.federation_client._check_sigs_and_hash(
+                        room_version, pdu
+                    )
+                except InvalidEventSignatureError as exc:
+                    raise ValueError(
+                        "PDU from stripped state must pass signature/hash checks"
+                    ) from exc
+
+                # Parse the stripped events to ensure it has all of the fields necessary
+                parsed_stripped_event = StrippedStateEvent.from_json_dict(
+                    # We use this over `raw_stripped_event` because `pdu` may have been
+                    # redacted by `_check_sigs_and_hash` above which is the proper thing to
+                    # use according to the spec if the hash check fails.
+                    pdu.get_dict()
                 )
-            # Validate signature/hashes
-            try:
-                pdu = await self.federation_client._check_sigs_and_hash(
-                    room_version, pdu
-                )
-            except InvalidEventSignatureError as exc:
-                raise ValueError(
-                    "PDU from stripped state must pass signature/hash checks"
-                ) from exc
-
-            # Mark down whether we saw the create event which we will validate just below
-            #
-            # We do this after the above checks to make sure it's a valid event
-            # from this room.
-            if (pdu.type, pdu.state_key) == (EventTypes.Create, ""):
-                includes_create_event = True
-
-            # Parse the stripped events to ensure it has all of the fields necessary
-            parsed_stripped_event = StrippedStateEvent.from_json_dict(
-                # We use this over `raw_stripped_event` because `pdu` may have been
-                # redacted by `_check_sigs_and_hash` above which is the proper thing to
-                # use according to the spec if the hash check fails.
-                pdu.get_dict()
-            )
-            if parsed_stripped_event is None:
-                raise ValueError("Unable to parse as stripped event")
-            parsed_stripped_room_state.append(parsed_stripped_event)
-
-        # Validate `m.room.create` event is included
-        if not includes_create_event:
-            raise ValueError(
-                "Stripped state must include `m.room.create` event (MSC4311)"
-            )
+                if parsed_stripped_event is None:
+                    raise ValueError("Unable to parse as stripped event")
+                parsed_stripped_room_state.append(parsed_stripped_event)
+            except ValueError as exc:
+                if (
+                    invalid_stripped_state_behavior
+                    == InvalidStrippedStateBehaviour.reject_all
+                ):
+                    raise exc
+                elif (
+                    invalid_stripped_state_behavior
+                    == InvalidStrippedStateBehaviour.remove_invalid
+                ):
+                    continue
+                else:
+                    assert_never(invalid_stripped_state_behavior)
 
         return parsed_stripped_room_state
 
@@ -1390,7 +1460,27 @@ class FederationHandler:
                 stripped_room_state=event.unsigned.get("invite_room_state"),
                 room_id=event.room_id,
                 room_version=room_version,
+                # According to Matrix v1.18 (introduced in MSC4311) for the `PUT
+                # /_matrix/federation/v1/invite/{roomId}/{eventId}` endpoint:
+                # > The `invite_room_state` has additional validation, which servers MAY apply to
+                # > room versions 1 through 11 and SHOULD apply to all other room versions. As with
+                # > the above errors, servers SHOULD return `M_INVALID_PARAM` if:
+                # >  - The `m.room.create` event is missing from `invite_room_state`.
+                # >  - One or more entries in `invite_room_state` are not formatted according to the room's version.
+                # >  - One or more events fails a signature check.
+                # >  - One or more events does not reside in the same room as the invite.
+                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.reject_all,
             )
+            # Validate `m.room.create` event is included (see spec blurb above)
+            includes_create_event = any(
+                (stripped_state_event.type, stripped_state_event.state_key)
+                == (EventTypes.Create, "")
+                for stripped_state_event in stripped_room_state
+            )
+            if not includes_create_event:
+                raise ValueError(
+                    "Stripped state must include `m.room.create` event (MSC4311)"
+                )
             # Replace with our sanitized `invite_room_state`
             event.unsigned["invite_room_state"] = [
                 stripped_state_event.as_json_dict()
@@ -1426,6 +1516,16 @@ class FederationHandler:
             # can fail for non-compliant servers but we should still use stripped state.
             stripped_room_state_for_client = self._minimal_parse_stripped_room_state(
                 stripped_room_state=event.unsigned.get("invite_room_state"),
+                # According to Matrix v1.18 (introduced in MSC4311) for the `PUT
+                # /_matrix/federation/v1/invite/{roomId}/{eventId}` endpoint:
+                # > The `invite_room_state` has additional validation, which servers MAY apply to
+                # > room versions 1 through 11 and SHOULD apply to all other room versions. As with
+                # > the above errors, servers SHOULD return `M_INVALID_PARAM` if:
+                # >  - The `m.room.create` event is missing from `invite_room_state`.
+                # >  - One or more entries in `invite_room_state` are not formatted according to the room's version.
+                # >  - One or more events fails a signature check.
+                # >  - One or more events does not reside in the same room as the invite.
+                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.reject_all,
             )
             if stripped_room_state_for_client is not None:
                 # Replace with our sanitized `invite_room_state`
