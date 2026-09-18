@@ -35,7 +35,7 @@ from typing import (
 )
 
 import attr
-from prometheus_client import Histogram
+from prometheus_client import Counter, Histogram
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import verify_signed_json
 from typing_extensions import assert_never
@@ -119,6 +119,14 @@ backfill_processing_before_timer = Histogram(
         80.0,
         "+Inf",
     ),
+)
+
+# So we have some sort of measure of Matrix ecosystem adoption so we know better how
+# safe it is to make the migration to strict validation after 2027-06-01.
+invalid_stripped_state_counter = Counter(
+    "synapse_federation_saw_invalid_stripped_state",
+    "The number of invites/knocks we saw with invalid stripped state.",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -1310,6 +1318,7 @@ class FederationHandler:
             else:
                 assert_never(invalid_stripped_state_behavior)
 
+        already_counted_fail_metric = False
         for raw_stripped_event in stripped_room_state:
             try:
                 # Validate PDU
@@ -1346,6 +1355,16 @@ class FederationHandler:
                     raise ValueError("Unable to parse as stripped event")
                 parsed_stripped_room_state.append(parsed_stripped_event)
             except ValueError as exc:
+                # Count how many times we saw invalid stripped state. We're counting the
+                # number of times we saw invalid state overall, not each individual
+                # invalid stripped state event.
+                if not already_counted_fail_metric:
+                    invalid_stripped_state_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(1)
+                    already_counted_fail_metric = True
+
+                # React to invalid event
                 if (
                     invalid_stripped_state_behavior
                     == InvalidStrippedStateBehaviour.reject_all
