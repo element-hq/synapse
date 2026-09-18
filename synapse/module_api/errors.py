@@ -29,6 +29,12 @@ from synapse.api.errors import (
 )
 from synapse.config._base import ConfigError
 from synapse.handlers.push_rules import InvalidRuleException
+from synapse.module_api.module_errors import (
+    FederationHttpDeniedException,
+    FederationHttpNotRetryingDestinationException,
+    FederationHttpRequestSendFailedException,
+    FederationHttpResponseException,
+)
 from synapse.storage.push_rule import RuleNotFoundException
 
 __all__ = [
@@ -37,6 +43,10 @@ __all__ = [
     "RedirectException",
     "SynapseError",
     "ConfigError",
+    "FederationHttpDeniedException",
+    "FederationHttpNotRetryingDestinationException",
+    "FederationHttpRequestSendFailedException",
+    "FederationHttpResponseException",
     "InvalidRuleException",
     "RuleNotFoundException",
 ]
