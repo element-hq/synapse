@@ -118,6 +118,23 @@ stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 
+# Upgrading to v1.162.0
+
+## `limit_profile_requests_to_users_who_share_rooms` now requires `require_auth_for_profile_requests`
+
+The shared-room check enabled by
+[`limit_profile_requests_to_users_who_share_rooms`](usage/configuration/config_documentation.md#limit_profile_requests_to_users_who_share_rooms)
+is only applied to authenticated requests, and profile requests are only
+authenticated when
+[`require_auth_for_profile_requests`](usage/configuration/config_documentation.md#require_auth_for_profile_requests)
+is enabled. Enabling the former without the latter therefore never restricted
+any profile lookup.
+
+Synapse will now refuse to start with that combination. If you have
+`limit_profile_requests_to_users_who_share_rooms: true` in your configuration,
+either also set `require_auth_for_profile_requests: true`, or remove the option to
+keep the behaviour you have today.
+
 # Upgrading to v1.161.0
 
 ## Deprecation of `matrix_rtc.livekit_service_url`
