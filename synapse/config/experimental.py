@@ -254,7 +254,8 @@ class ExperimentalConfig(Config):
         self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
 
         # MSC4210: Remove legacy mentions
-        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
+        # TODO: Remove the flag and the legacy rules after 2026-12-01.
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", True)
 
         # MSC4222: Adding `state_after` to sync v2
         self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)

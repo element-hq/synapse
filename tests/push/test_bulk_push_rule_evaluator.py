@@ -149,6 +149,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                     "content": {
                         "msgtype": "m.text",
                         "body": "helo @room",
+                        EventContentFields.MENTIONS: {"room": True},
                     },
                     "sender": self.alice,
                 },
@@ -240,6 +241,44 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
             )
         )
         return len(result) > 0
+
+    def test_legacy_mention_rules_removed(self) -> None:
+        """
+        Matrix v1.17 (MSC4210) removed the legacy mention rules from the base rule
+        set: an event which merely contains the user's name in its body, without
+        an `m.mentions` property, must no longer notify.
+        """
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        # Note that the events are not `m.room.message`s, so that the generic
+        # underride rules do not fire and only the mention rules can notify.
+        self.assertFalse(
+            self._create_and_process(bulk_evaluator, {"body": "hello alice"}),
+            "alice should not be notified (legacy mention rules are removed)",
+        )
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "body": "hello alice",
+                    EventContentFields.MENTIONS: {"user_ids": [self.alice]},
+                },
+            ),
+            "alice should be notified (intentional mention)",
+        )
+
+    @override_config({"experimental_features": {"msc4210_enabled": False}})
+    def test_legacy_mention_rules_opt_out(self) -> None:
+        """
+        The legacy mention rules can temporarily be restored, in which case an
+        event which contains the user's name in its body notifies again.
+        """
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+
+        self.assertTrue(
+            self._create_and_process(bulk_evaluator, {"body": "hello alice"}),
+            "alice should be notified (legacy mention)",
+        )
 
     def test_user_mentions(self) -> None:
         """Test the behavior of an event which includes invalid user mentions."""
@@ -593,6 +632,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                 {
                     "msgtype": "m.text",
                     "body": "this is a message that mentions alice",
+                    EventContentFields.MENTIONS: {"user_ids": [self.alice]},
                 },
                 type="m.room.message",
             ),
