@@ -732,10 +732,6 @@ def _capture_logcontext_errors() -> Generator[list[str], None, None]:
 class LogContextErrorMessageTestCase(unittest.TestCase):
     """Tests asserting the exact messages passed to `logcontext_error`, and
     the conditions that trigger each one.
-
-    The implementation lives in Rust. Downstream log scraping depends on the
-    wording and argument order of these messages, so accidental changes must
-    fail a test.
     """
 
     def setUp(self) -> None:
