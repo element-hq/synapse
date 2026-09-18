@@ -291,7 +291,8 @@ class SynapseHomeServer(HomeServer):
                     )
                 else:
                     raise ConfigError(
-                        "Can not use a unix socket for manhole at this time."
+                        "Can not use a unix socket or systemd socket activation "
+                        "for manhole at this time."
                     )
             elif listener.type == "metrics":
                 if not self.config.metrics.enable_metrics:
@@ -308,7 +309,8 @@ class SynapseHomeServer(HomeServer):
                         )
                     else:
                         raise ConfigError(
-                            "Can not use a unix socket for metrics at this time."
+                            "Can not use a unix socket or systemd socket activation "
+                            "for metrics at this time."
                         )
 
             else:
