@@ -460,10 +460,15 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 AND notif_count != 0
                 AND (
                     (
+                        -- The row does not know which receipt it is relative to,
                         last_receipt_stream_ordering IS NULL
+                        -- but its counts reach past the user's latest receipt,
                         AND stream_ordering > {max_clause}
+                        -- and that receipt is too old to recount from
+                        -- event_push_actions (bound: the pruning position).
                         AND {max_clause} <= ?
                     )
+                    -- Or the row was computed against the user's latest receipt.
                     OR last_receipt_stream_ordering = {max_clause}
                 )
         """
@@ -659,6 +664,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             # it rather than recounting push actions that may already have been
             # deleted.
             unreconcilable_clause = """
+                    -- Or the row is relative to a receipt this query cannot see
+                    -- (one from before the user's latest join): keep it.
                     OR (
                         last_receipt_stream_ordering IS NOT NULL
                         AND threaded_receipt_stream_ordering IS NULL
@@ -684,10 +691,17 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 WHERE room_id = ? AND user_id = ?
                 AND (
                     (
+                        -- The row does not know which receipt it is relative to,
                         last_receipt_stream_ordering IS NULL
+                        -- but its counts reach past the user's latest receipt
+                        -- for the thread (threaded, else unthreaded or join),
                         AND stream_ordering > COALESCE(threaded_receipt_stream_ordering, ?)
+                        -- and that receipt (threaded, else unthreaded or none)
+                        -- is too old to recount from event_push_actions
+                        -- (bound: the pruning position).
                         AND COALESCE(threaded_receipt_stream_ordering, ?) <= ?
                     )
+                    -- Or the row was computed against the user's latest receipt.
                     OR last_receipt_stream_ordering = COALESCE(threaded_receipt_stream_ordering, ?)
                     {unreconcilable_clause}
                 ) AND (notif_count != 0 OR COALESCE(unread_count, 0) != 0)
