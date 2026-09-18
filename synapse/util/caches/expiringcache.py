@@ -87,8 +87,6 @@ class ExpiringCache(Generic[KT, VT]):
                 Shorthand for `size_callback=len`.
             size_callback: If given, the size of the cache is the sum of this
                 function over all values, rather than the number of entries.
-                Use it when `len()` of a value is not a good measure of the
-                memory it holds.
         """
         if iterable and size_callback is not None:
             raise ValueError("`iterable` and `size_callback` are exclusive")

@@ -198,14 +198,15 @@ def _member(node_id: str, sender: str, state_key: str, content: dict) -> FakeEve
     )
 
 
-# Events for the conflict cache tests, all hanging off START.
+# Events for the conflict cache tests. All branch off START.
 #
-# Bob sets the topic twice. He has no power under IPOWER, so both fail auth
-# unless PA, which gives him some, is in the unconflicted state.
+# PA is a power levels event that gives Bob PL 50. T1 and T2 are topic changes
+# by Bob. Bob has no power under IPOWER, so they only pass auth if PA is in the
+# state.
 #
-# Zara joins again on two branches and invites Evelyn from the end of each. The
-# invites are what put the second pair of Zara joins into the auth chain
-# difference. See `test_conflict_cache_key_repartitioned`.
+# ZJ1 and ZJ2 are Zara re-joining on two branches, and INV1 and INV2 are
+# invites she sends to Evelyn on each branch. The invites pull the joins into
+# the auth chain difference (see `test_conflict_cache_key_repartitioned`).
 CACHE_TEST_CASE_EVENTS = [
     FakeEvent(
         id="PA",
@@ -230,10 +231,9 @@ CACHE_TEST_CASE_EDGES = [
     ["INV2", "ZJ2", "START"],
 ]
 
-# A room version that resolves with plain v2, and one that resolves with v2.1.
-# They share their auth rules, so the two only differ in the way that matters
-# to the conflict cache: v2.1 starts the iterative auth checks from the empty
-# state, plain v2 from the unconflicted state.
+# Room versions that use v2 and v2.1 state resolution respectively. Both have
+# the same auth rules. The difference is that v2.1 starts the iterative auth
+# checks from empty state rather than from the unconflicted state.
 V2_ROOM = RoomVersions.V11
 V21_ROOM = RoomVersions.HydraV11
 
@@ -509,9 +509,9 @@ class StateTestCase(unittest.TestCase):
 
         self.do_check(events, edges, expected_state_ids)
 
-    # The conflict cache tests below resolve `CACHE_TEST_CASE_EVENTS` with a plain dict
-    # as the cache. A miss adds an entry to it and a hit does not, so its size
-    # afterwards is the number of times the conflicted set was resolved.
+    # Helpers for the conflict cache tests. These use a plain dict as the
+    # cache, so `len(conflict_cache)` after a call tells us whether it was a
+    # hit or a miss.
 
     def _build_cache_scenario(self) -> None:
         self.event_map, self.state_at_event = self.build_event_graph(
@@ -550,12 +550,12 @@ class StateTestCase(unittest.TestCase):
     def test_conflict_cache_shared_across_unconflicted_state(
         self, room_version: RoomVersion
     ) -> None:
-        """Two calls with the same conflicted set share a cache entry, and each
-        still gets its own unconflicted state back.
+        """Test that two resolutions with the same conflicted set but different
+        unconflicted state share a cache entry, and that each result still
+        includes its own unconflicted state.
 
-        Zara's membership is the unconflicted key that differs. Nothing in the
-        conflict over the topic is authed against it, so under plain v2 it
-        stays out of the cache key too.
+        The unconflicted state differs on Zara's membership. The topic events
+        aren't authed against that, so under v2 it isn't part of the cache key.
         """
         self._build_cache_scenario()
         conflict_cache: dict[bytes, StateMap[str]] = {}
@@ -577,8 +577,9 @@ class StateTestCase(unittest.TestCase):
         self.assertEqual({k: v for k, v in first.items() if k != ZARA_KEY}, second)
 
     def test_conflict_cache_keys_on_base_state(self) -> None:
-        """Changing an unconflicted key that the auth checks read is a miss
-        under plain v2, and the two resolutions reach different answers."""
+        """Test that under v2 the cache key includes the unconflicted state the
+        auth checks depend on. Changing the power levels is a cache miss and
+        gives a different result."""
         self._build_cache_scenario()
 
         powerless = [self._state("T1"), self._state("T2")]
@@ -594,14 +595,15 @@ class StateTestCase(unittest.TestCase):
         self.assertIn(TOPIC_KEY, under_pa)
 
     def test_conflict_cache_key_repartitioned(self) -> None:
-        """The same conflicted set can split into different conflicted keys.
+        """Test that a cached result is correct when the same conflicted set is
+        split differently between conflicted and unconflicted keys.
 
-        Zara's membership is unconflicted in the first call, with the joins
-        that compete for it reaching the conflicted set through the auth chain
-        difference of the two invites. In the second call it is a conflicted
-        key. Both calls have the same cache key, so what is cached has to carry
-        Zara's key even though the first call's own answer for it came from
-        its unconflicted state.
+        In the first call Zara's membership is unconflicted, but ZJ1 and ZJ2 are
+        in the auth chain difference (via the invites) and so are in the
+        conflicted set. In the second call Zara's membership is itself
+        conflicted. Both calls have the same cache key, so the cached result
+        must include the resolved Zara membership, even though the first call
+        overrides it with its unconflicted state.
         """
         self._build_cache_scenario()
 
@@ -613,7 +615,8 @@ class StateTestCase(unittest.TestCase):
         warm = self._resolve_with_cache(V21_ROOM, conflicting, conflict_cache)
         self.assertEqual(len(conflict_cache), 1, "expected a cache hit")
 
-        # The unconflicted state wins for the call that had one.
+        # The first call's unconflicted state takes precedence over the cached
+        # resolution.
         self.assertEqual(agreed_result[ZARA_KEY], self._state()[ZARA_KEY])
 
         # The second call gets the winner from the cached resolution, the same

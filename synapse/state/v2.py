@@ -181,16 +181,15 @@ async def resolve_events_with_store(
     # set.
     base_state: StateMap[str] = {}
     if room_version.state_res != StateResolutionVersions.V2_1:
-        # `_iterative_auth_checks` reads the base state only at the auth types
-        # of the events it checks, and `_mainline_sort` reads only the power
-        # levels. Restricting the base state to those keys therefore changes
-        # nothing, and it keeps keys that cannot affect the outcome out of the
-        # cache key. The rest of the unconflicted state is layered back on
-        # below.
+        # Resolving conflicted sets requires the following types from the base
+        # state:
+        #   - the `auth_types_for_event(..)` of the conflicted events for
+        #     `_iterative_auth_checks`
+        #   - the power levels for `_mainline_sort`
         #
-        # The keys come from `auth_types_for_event`, not from the events' own
-        # auth events, because the checks read the resolved state at every auth
-        # type rather than looking up the auth event ID.
+        # We can therefore safely restrict the base state to those keys, which
+        # keeps keys that cannot affect the outcome out of the cache key. The
+        # rest of the unconflicted state is layered back on below.
         base_state_keys = {(EventTypes.PowerLevels, "")}
         for event_id in full_conflicted_set:
             base_state_keys.update(
@@ -230,10 +229,14 @@ async def resolve_events_with_store(
 
     logger.debug("done")
 
-    # We make sure that unconflicted state always still applies. A `ChainMap`
-    # rather than a copy, because `resolved_state` may be the cached map and
-    # must not be modified. The casts only satisfy `ChainMap`'s signature.
-    # Nothing writes through the result.
+    # Finally, we copy the unconflicted state over the resolved state.
+    #
+    # We use a `ChainMap` here to avoid a copy.
+    #
+    # `ChainMap` expects mutable mappings as it is a mutable mapping. However,
+    # the return type of this function is an immutable mapping so it is safe to
+    # cast the underlying mappings to mutable mappings to satify `ChainMap`'s
+    # signature.
     return ChainMap(
         cast(MutableMapping[StateKey, str], unconflicted_state),
         cast(MutableMapping[StateKey, str], resolved_state),
@@ -260,15 +263,10 @@ def _conflict_cache_key(
     full_conflicted_set: AbstractSet[str],
     base_state: StateMap[str],
 ) -> bytes:
-    """Fingerprint everything `_resolve_conflicted_set` depends on.
+    """Create a key for the conflict cache. Incorporates everything
+    that would affect the result of `_resolve_conflicted_set`.
 
-    Its result is a function of the room version, the events in the conflicted
-    set and the base state it starts from. Two calls that agree on all three
-    reach the same resolved state, however different their callers'
-    unconflicted state is otherwise.
-
-    A digest rather than the inputs themselves, so that a cache keyed on this
-    doesn't hold onto thousands of event ID strings per entry.
+    We use a digest as the key as the inputs can be very large.
     """
 
     # We use JSON as the serialization format for ease, we could use a

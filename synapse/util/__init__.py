@@ -151,15 +151,15 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
                 yield key
 
     def __len__(self) -> int:
-        # The keys are `(underlying ∪ mutable) − deletions`. A key is never in
-        # both `_mutable_map` and `_deletions`, so the only deletions to
-        # subtract are those of keys in the underlying map:
+        # The distinct keys can be calculated via `(underlying ∪ mutable) −
+        # deletions`. A key is never in both `_mutable_map` and `_deletions`, so
+        # the only deletions to subtract are those of keys in the underlying
+        # map:
         #
         #   |underlying| + |mutable| − |mutable ∩ underlying| − |underlying ∩ deletions|
         #
-        # The intersections run at C speed and iterate the smaller operand, so
-        # this costs O(min(|underlying|, |mutable|)) rather than a Python loop
-        # over every key, which matters when the overlays are large.
+        # The intersections run at C speed and iterates over the smaller
+        # operand, so this is much cheaperthan a Python loop over every key..
         underlying_keys = self._underlying_map.keys()
         return (
             len(self._underlying_map)
@@ -172,10 +172,7 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
         """The number of entries held across the underlying map, the
         overrides and the deletions, following nested overlays down.
 
-        `len()` counts the keys visible through the overlay, which is not what
-        this object costs in memory: an override of an existing key or a
-        deletion adds an entry without changing the length. Use this to size
-        caches that store overlays.
+        Useful for estimating the memory usage of the overlay mapping.
         """
         underlying = self._underlying_map
         if isinstance(underlying, MutableOverlayMapping):

@@ -178,14 +178,12 @@ class _StateCacheEntry:
 
 
 def _state_map_size(state_map: Mapping[Any, Any]) -> int:
-    """Estimate the memory a state map holds, for sizing caches.
+    """Estimate a proxy for the memory a state map holds, for sizing caches.
 
-    This is the total number of entries across every layer of the map.
-    `len()` is the number of distinct keys, which undercounts layered maps: a
-    `ChainMap` holds every entry of every layer, and a `MutableOverlayMapping`
-    holds its base map plus every override and deletion. Both also compute
-    `len()` by walking their keys, whereas this is a handful of `len()` calls
-    on plain dicts.
+    Since state maps are often combinations of `ChainMap` and
+    `MutableOverlayMapping`, we look at the total number of entries across all
+    layers rather than just the number of distinct keys. This is both faster and
+    a more accurate proxy for memory usage.
     """
     if isinstance(state_map, ChainMap):
         return sum(_state_map_size(layer) for layer in state_map.maps)
@@ -649,22 +647,17 @@ class StateResolutionHandler:
         )
 
         # The result of resolving a conflicted set of state, keyed on a digest
-        # of the room version, the conflicted set and the slice of the
-        # unconflicted state the resolution reads. See `v2._conflict_cache_key`.
+        # of the inputs to `_resolve_conflicted_set`. See
+        # `v2._conflict_cache_key`.
         #
-        # `_state_cache` above is keyed on the exact set of state groups, so
-        # adding or swapping one forward extremity misses it. Different subsets
-        # of a room's forward extremities often produce the same conflicted
-        # set, and all of those hit here. This cache also covers the callers
-        # that use `resolve_events_with_store` directly, without state groups,
-        # such as `FederationEventHandler`. Neither the keys nor the values
-        # mention state groups, so deleting state groups invalidates nothing.
+        # This is different to `_state_cache` above, which caches the resolved
+        # state based on the state groups. This cache aims to address the case
+        # where resolving across different state groups often produces the same
+        # conflicted set, which we can then cache.
         #
-        # `max_len` bounds the total number of state entries held across all
-        # values rather than the number of values. The values are
-        # `MutableOverlayMapping`s, so this is measured with `_state_map_size`
-        # rather than `len()`, which would miss the overrides and deletions
-        # they hold on top of their base state.
+        # We bound the size of the cache based on the size calculated by
+        # `_state_map_size`, which calculates a proxy for a rough estimate of
+        # the memory footprint of a state map.
         self._conflict_resolution_cache: ExpiringCache[bytes, StateMap[str]] = (
             ExpiringCache(
                 cache_name="state_conflict_resolution_cache",
