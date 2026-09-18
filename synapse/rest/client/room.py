@@ -23,10 +23,9 @@
 
 import logging
 import re
-from abc import ABC, abstractmethod
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Awaitable, NoReturn
+from typing import TYPE_CHECKING, Awaitable
 from urllib import parse as urlparse
 
 import attr
@@ -518,7 +517,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
-class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
+class RoomDelayedEventRestServlet(TransactionRestServlet):
     CATEGORY = "Delayed event management requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -526,20 +525,17 @@ class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/delayed_event/$event_type[/$txn_id]
         PATTERNS = "/rooms/(?P<room_id>[^/]*)/delayed_event/(?P<event_type>[^/]*)"
         register_txn_path(self, PATTERNS, http_server, "org.matrix.msc4140")
 
-    @abstractmethod
-    async def _do(
-        self,
-        request: SynapseRequest,
-        requester: Requester,
-        room_id: str,
-        event_type: str,
-    ) -> tuple[int, JsonDict]: ...
+    class DelayedEventBodyModel(RequestBodyModel):
+        delay_ms: PositiveInt
+        content: JsonDict
+        state_key: StrictStr | None = None
 
     async def on_POST(
         self,
@@ -566,18 +562,6 @@ class RoomDelayedEventRestServletBase(ABC, TransactionRestServlet):
             event_type,
         )
 
-
-class RoomDelayedEventRestServletUnsupported(RoomDelayedEventRestServletBase):
-    async def _do(self, *_: Any) -> NoReturn:
-        _raise_delayed_events_unsupported()
-
-
-class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
-    class DelayedEventBodyModel(RequestBodyModel):
-        delay: PositiveInt
-        content: JsonDict
-        state_key: StrictStr | None = None
-
     async def _do(
         self,
         request: SynapseRequest,
@@ -593,6 +577,10 @@ class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
         if requester.app_service_id:
             origin_server_ts = parse_integer(request, "ts")
 
+        sticky_duration_ms: int | None = None
+        if self._msc4354_enabled:
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+
         delay_id = await self.delayed_events_handler.add(
             requester,
             room_id=room_id,
@@ -600,8 +588,8 @@ class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
             state_key=request_body.state_key,
             origin_server_ts=origin_server_ts,
             content=request_body.content,
-            delay=Duration(milliseconds=request_body.delay),
-            sticky_duration_ms=None,
+            delay=Duration(milliseconds=request_body.delay_ms),
+            sticky_duration_ms=sticky_duration_ms,
         )
 
         set_tag("delay_id", delay_id)
@@ -633,14 +621,6 @@ def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration 
             Codes.INVALID_PARAM,
         )
     return Duration(milliseconds=delay_ms)
-
-
-def _raise_delayed_events_unsupported() -> NoReturn:
-    raise SynapseError(
-        HTTPStatus.FORBIDDEN,
-        "Sending delayed events has been disallowed",
-        Codes.FORBIDDEN,
-    )
 
 
 # TODO: Needs unit testing for room ID + alias joins
@@ -1884,11 +1864,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomCreateRestServlet(hs).register(http_server)
     TimestampLookupRestServlet(hs).register(http_server)
 
-    (
-        RoomDelayedEventRestServlet(hs)
-        if hs.config.server.msc4140_enabled
-        else RoomDelayedEventRestServletUnsupported(hs)
-    ).register(http_server)
+    RoomDelayedEventRestServlet(hs).register(http_server)
 
     # Some servlets only get registered for the main process.
     if hs.config.worker.worker_app is None:
