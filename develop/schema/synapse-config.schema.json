@@ -2041,6 +2041,14 @@
         "burst_count": 200.0
       }
     },
+    "rc_profile": {
+      "$ref": "#/$defs/rc",
+      "description": "This option allows admins to ratelimit profile lookups by clients.\n\nRequests are limited per user when the request is authenticated, otherwise per client IP address.\n\n_Added in Synapse 1.162.0._",
+      "default": {
+        "per_second": 1.0,
+        "burst_count": 500.0
+      }
+    },
     "federation_rr_transactions_per_room_per_second": {
       "type": "integer",
       "description": "Sets outgoing federation transaction frequency for sending read-receipts, per-room.\n\nIf we end up trying to send out more read-receipts, they will get buffered up into fewer transactions.",
