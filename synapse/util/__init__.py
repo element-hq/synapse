@@ -38,10 +38,8 @@ from matrix_common.versionstring import get_distribution_version_string
 from twisted.internet import defer
 from twisted.python.failure import Failure
 
-from synapse.types import JsonDict
-
 if typing.TYPE_CHECKING:
-    pass
+    from synapse.types import JsonDict
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +187,7 @@ def split_dict_to_fit_to_size(
     *,
     soft_max_size: int,
     wrapping_object_size: int = 2,
-) -> Iterator[tuple[dict[str, JsonDict], int]]:
+) -> Iterator[tuple[dict[str, "JsonDict"], int]]:
     """Splits a dict up into a list of dicts, each of which is small enough to
     fit into the given size when encoded as JSON. Every entry in the original
     dict is in exactly one of the resulting dicts.
