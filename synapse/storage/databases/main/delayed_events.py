@@ -621,6 +621,35 @@ class DelayedEventsStore(SQLBaseStore):
             "cancel_delayed_state_events", cancel_delayed_state_events_txn
         )
 
+    async def cancel_delayed_events_for_user(
+        self, user_localpart: str
+    ) -> Timestamp | None:
+        """
+        Cancels all delayed events owned by the given user, i.e. remove them as long as they haven't been processed.
+
+        Args:
+            user_localpart: The localpart of the user whose delayed events to cancel.
+
+        Returns: The send time of the next delayed event to be sent, if any.
+        """
+
+        def cancel_delayed_events_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> Timestamp | None:
+            txn.execute(
+                """
+                DELETE FROM delayed_events
+                WHERE user_localpart = ?
+                    AND NOT is_processed
+                """,
+                (user_localpart,),
+            )
+            return self._get_next_delayed_event_send_ts_txn(txn)
+
+        return await self.db_pool.runInteraction(
+            "cancel_delayed_events_for_user", cancel_delayed_events_for_user_txn
+        )
+
     async def delete_processed_delayed_event(self, delay_id: DelayID) -> None:
         """
         Delete the matching delayed event, as long as it has been marked as processed.
