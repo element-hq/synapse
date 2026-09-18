@@ -1,0 +1,2 @@
+Reject `null` profile field values (following an optional clause in the specification), in order to avoid clients accidentally harming interoperability.
+
