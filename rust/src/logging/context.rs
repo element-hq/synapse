@@ -42,9 +42,12 @@
 //! rusage via libc, calls `stop` on the old context and `start` on the new one,
 //! and writes the new context with [`swap_current_context`]. It is only ever
 //! called on reactor or threadpool threads, never on tokio worker threads, so
-//! it always writes the thread-local. The task-local is written exactly once,
-//! at spawn time, by [`LogContextHandle::scope`]. [`swap_current_context`]
-//! checks that invariant rather than trusting it.
+//! it always writes the thread-local. Therefore, CPU accounting is not captured
+//! when executing purely Rust work.
+//!
+//! The task-local is written exactly once, at spawn time, by
+//! [`LogContextHandle::scope`]. [`swap_current_context`] checks that invariant
+//! rather than trusting it.
 
 use std::{cell::RefCell, future::Future};
 
