@@ -34,6 +34,11 @@ from tests.unittest import checked_cast, override_config
 rz_endpoint = "/_matrix/client/unstable/io.element.msc4388/rendezvous"
 
 
+def send_endpoint(rendezvous_id: str, txn_id: str) -> str:
+    """The endpoint for sending a payload, which includes a transaction ID."""
+    return f"{rz_endpoint}/{rendezvous_id}/{txn_id}"
+
+
 class RendezvousServletTestCase(unittest.HomeserverTestCase):
     """
     Test the experimental MSC4388 rendezvous endpoint.
@@ -194,7 +199,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         # We can update the data
         channel = self.make_request(
             "PUT",
-            session_endpoint,
+            send_endpoint(rendezvous_id, "txn1"),
             {"sequence_token": sequence_token, "data": "foo=baz"},
             access_token=None,
         )
@@ -202,11 +207,12 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         old_sequence_token = sequence_token
         new_sequence_token = channel.json_body["sequence_token"]
+        self.assertNotEqual(new_sequence_token, old_sequence_token)
 
-        # If we try to update it again with the old etag, it should fail
+        # If we try to update it again with the old sequence token, it should fail
         channel = self.make_request(
             "PUT",
-            session_endpoint,
+            send_endpoint(rendezvous_id, "txn2"),
             {"sequence_token": old_sequence_token, "data": "bar=baz"},
             access_token=None,
         )
@@ -262,10 +268,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
     )
     def test_rendezvous_put_is_idempotent(self) -> None:
         """
-        A PUT using the previous sequence_token but with data that already
-        matches what is currently stored should be treated as an idempotent
-        retry and succeed (rather than returning 409). This lets clients
-        safely retry a PUT after a network error without losing the session.
+        A PUT which reuses a transaction ID the server has already seen for the
+        session is answered with the response recorded for the original
+        request, without the payload being advanced. This lets clients safely
+        retry a PUT whose response was lost.
         """
         channel = self.make_request(
             "POST",
@@ -281,30 +287,60 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         # Perform an update.
         channel = self.make_request(
             "PUT",
-            session_endpoint,
+            send_endpoint(rendezvous_id, "txn1"),
             {"sequence_token": initial_sequence_token, "data": "foo=baz"},
             access_token=None,
         )
         self.assertEqual(channel.code, 200)
         updated_sequence_token = channel.json_body["sequence_token"]
 
-        # Replaying the same PUT with the previous (now-stale) sequence_token
-        # and matching data should succeed and return the current token.
+        # Replaying the same PUT with the same transaction ID should succeed
+        # and return the same sequence token, without advancing the payload.
         channel = self.make_request(
             "PUT",
-            session_endpoint,
+            send_endpoint(rendezvous_id, "txn1"),
             {"sequence_token": initial_sequence_token, "data": "foo=baz"},
             access_token=None,
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
 
-        # But replaying with the previous token and *different* data must
-        # still be rejected as a concurrent write.
+        # A transaction ID identifies a single send attempt rather than a
+        # payload, so reusing it with different data replays the recorded
+        # response and the new payload is not considered.
         channel = self.make_request(
             "PUT",
-            session_endpoint,
+            send_endpoint(rendezvous_id, "txn1"),
+            {"sequence_token": updated_sequence_token, "data": "something=else"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+        channel = self.make_request("GET", session_endpoint, access_token=None)
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["data"], "foo=baz")
+        self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+        # A new transaction ID with a stale sequence token is rejected as a
+        # concurrent write...
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn2"),
             {"sequence_token": initial_sequence_token, "data": "something=else"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 409)
+        self.assertEqual(
+            channel.json_body["errcode"], "IO_ELEMENT_MSC4388_CONCURRENT_WRITE"
+        )
+
+        # ...and retrying it replays that error, even with a now-valid
+        # sequence token.
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn2"),
+            {"sequence_token": updated_sequence_token, "data": "something=else"},
             access_token=None,
         )
         self.assertEqual(channel.code, 409)
@@ -317,6 +353,76 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["data"], "foo=baz")
         self.assertEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+        # A fresh transaction ID with the current sequence token is accepted.
+        channel = self.make_request(
+            "PUT",
+            send_endpoint(rendezvous_id, "txn3"),
+            {"sequence_token": updated_sequence_token, "data": "something=else"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertNotEqual(channel.json_body["sequence_token"], updated_sequence_token)
+
+    @override_config(
+        {
+            "disable_registration": True,
+            "matrix_authentication_service": {
+                "enabled": True,
+                "secret": "secret_value",
+                "endpoint": "https://issuer",
+            },
+            "experimental_features": {
+                "msc4388_mode": "open",
+            },
+        }
+    )
+    def test_rendezvous_put_transaction_id(self) -> None:
+        """
+        The transaction ID must be supplied in the path and comply with the
+        opaque identifier grammar.
+        """
+        channel = self.make_request(
+            "POST",
+            rz_endpoint,
+            {"data": "foo=bar"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        rendezvous_id = channel.json_body["id"]
+        sequence_token = channel.json_body["sequence_token"]
+
+        # A PUT without a transaction ID is not a supported request.
+        channel = self.make_request(
+            "PUT",
+            rz_endpoint + f"/{rendezvous_id}",
+            {"sequence_token": sequence_token, "data": "foo=baz"},
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 405)
+        self.assertEqual(channel.json_body["errcode"], "M_UNRECOGNIZED")
+
+        # Transaction IDs which don't comply with the opaque identifier grammar
+        # are rejected.
+        for invalid_txn_id in ("txn!1", "a" * 256, "txn%201"):
+            channel = self.make_request(
+                "PUT",
+                send_endpoint(rendezvous_id, invalid_txn_id),
+                {"sequence_token": sequence_token, "data": "foo=baz"},
+                access_token=None,
+            )
+            self.assertEqual(channel.code, 400, invalid_txn_id)
+            self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+
+        # The payload should not have been updated by any of the above.
+        channel = self.make_request(
+            "GET",
+            rz_endpoint + f"/{rendezvous_id}",
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["data"], "foo=bar")
+        self.assertEqual(channel.json_body["sequence_token"], sequence_token)
 
     @override_config(
         {
@@ -390,7 +496,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         # We can update the data without authentication
         channel = self.make_request(
             "PUT",
-            session_endpoint,
+            send_endpoint(rendezvous_id, "txn1"),
             {"sequence_token": sequence_token, "data": "foo=baz"},
             access_token=None,
         )
@@ -646,13 +752,11 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         rendezvous_id = channel.json_body["id"]
         sequence_token = channel.json_body["sequence_token"]
 
-        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
-
         # We can't update the data with invalid data
-        for invalid_data in invalid_datas:
+        for i, invalid_data in enumerate(invalid_datas):
             channel = self.make_request(
                 "PUT",
-                session_endpoint,
+                send_endpoint(rendezvous_id, f"txn{i}"),
                 {"sequence_token": sequence_token, "data": invalid_data},
                 access_token=None,
             )
@@ -698,12 +802,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         rendezvous_id = channel.json_body["id"]
         sequence_token = channel.json_body["sequence_token"]
 
-        session_endpoint = rz_endpoint + f"/{rendezvous_id}"
-
         # We can't update the data with invalid data
         channel = self.make_request(
             "PUT",
-            session_endpoint,
+            send_endpoint(rendezvous_id, "txn1"),
             {"sequence_token": sequence_token, "data": too_long_data},
             access_token=None,
         )
