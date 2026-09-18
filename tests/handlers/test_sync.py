@@ -2074,7 +2074,8 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         self,
     ) -> None:
         """Test that with `include_profile_updates_in_sync` enabled the incremental
-        sync response includes a 'null' for users who are no longer sharing rooms.
+        sync response includes a 'null' for users who are no longer sharing rooms, due
+        to the other user leaving the last room.
         """
         requester = create_requester(self.user)
         initial_result = self.get_success(
@@ -2096,6 +2097,59 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
         )
         self.helper.leave(
             room=self.joined_room, user=self.other_user, tok=self.other_tok
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.assertIsNone(
+            incremental_result.profile_updates["@other_user:test"],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_down_null_profile_we_no_longer_sharing_rooms(
+        self,
+    ) -> None:
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response includes a 'null' for users who are no longer sharing rooms, due
+        us leaving the last shared room.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["m.status", "displayname", "avatar_url"]
+                            }
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        self.helper.leave(
+            room=self.joined_room,
+            user=self.user,
+            tok=self.tok,
         )
         incremental_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
@@ -2308,6 +2362,115 @@ class SyncProfileUpdatesTestCase(tests.unittest.HomeserverTestCase):
                 # avatar_url unset (user doesn't have one)
                 # m.status unset (not requested in sync)
             },
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_incremental_sync_sends_requested_fields_of_members_when_we_leave_and_join(
+        self,
+    ) -> None:
+        """Test that with `include_profile_updates_in_sync` enabled the incremental
+        sync response includes all the requested fields of room members when
+        we join a room.
+        """
+        requester = create_requester(self.user)
+        initial_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=initial_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+
+        third_user = self.register_user("third_user", "password")
+        third_tok = self.login("third_user", "password")
+        self.helper.join(
+            room=self.joined_room,
+            user=third_user,
+            tok=third_tok,
+        )
+        # Let's leave and join
+        self.helper.leave(
+            room=self.joined_room,
+            user=self.user,
+            tok=self.tok,
+        )
+        # TODO this needs to clear old leave rows
+        self.helper.join(
+            room=self.joined_room,
+            user=self.user,
+            tok=self.tok,
+        )
+        # Set a status field we don't except to see in sync
+        self.get_success(
+            self.profile_handler.set_field(
+                target_user=UserID.from_string(third_user),
+                requester=create_requester(third_user),
+                field_name="m.status",
+                new_value={"text": "On fire", "emoji": "🔥"},
+            )
+        )
+        incremental_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                requester,
+                since_token=incremental_result.next_batch,
+                sync_config=generate_sync_config(
+                    user_id=self.user,
+                    filter_collection=FilterCollection(
+                        hs=self.hs,
+                        filter_json={
+                            "org.matrix.msc4429.profile_fields": {
+                                "ids": ["displayname", "avatar_url"]
+                            },
+                        },
+                    ),
+                ),
+                request_key=generate_request_key(),
+            )
+        )
+        assert incremental_result.profile_updates["@third_user:test"] is not None
+        assert incremental_result.profile_updates["@other_user:test"] is not None
+        self.assertCountEqual(
+            incremental_result.profile_updates.keys(),
+            [third_user, self.other_user],
+        )
+        self.assertEqual(
+            incremental_result.profile_updates["@other_user:test"]["displayname"],
+            "other_user",
+        )
+        self.assertEqual(
+            incremental_result.profile_updates["@third_user:test"]["displayname"],
+            "third_user",
+        )
+        self.assertFalse(
+            "m.status" in incremental_result.profile_updates["@third_user:test"].keys(),
         )
 
     @parameterized.expand(

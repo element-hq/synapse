@@ -78,6 +78,31 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         return hs
 
+    def _verify_update_in_updates(
+        self,
+        updates: list[ProfileUpdate],
+        user_id: str,
+        action: ProfileUpdateAction,
+        affected_fields: frozenset[str] | None = None,
+    ) -> bool:
+        """
+        Verify that a ProfileUpdate is found in the list of ProfileUpdates, and
+        it's as expected. The stream ID is not reliable to be orderedx in more complex,
+        for example if we insert stream updates based on a db query where ordering
+        is not important.
+
+        Returns:
+            True if the list of updates contains exactly one update we're looking for.
+        """
+        update = [
+            update
+            for update in updates
+            if update.user_id == user_id
+            and update.action == action
+            and update.affected_fields == affected_fields
+        ]
+        return len(update) == 1
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.storage_controllers = self.hs.get_storage_controllers()
@@ -421,22 +446,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 field_names={"m.status"},
             )
         )
-        self.assertEqual(
-            per_user_updates,
-            [
-                ProfileUpdate(
-                    stream_id=3,
-                    user_id="@millie:test",
-                    action="joined_room",
-                    affected_fields=None,
-                ),
-                ProfileUpdate(
-                    stream_id=4,
-                    user_id=self.frank.to_string(),
-                    action="update",
-                    affected_fields=frozenset({"m.status"}),
-                ),
-            ],
+        # Visible to roger
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.UPDATE,
+                affected_fields=frozenset({"m.status"}),
+            )
         )
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
@@ -446,16 +463,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 field_names={"m.status"},
             )
         )
-        self.assertEqual(
-            per_user_updates,
-            [
-                ProfileUpdate(
-                    stream_id=4,
-                    user_id=self.frank.to_string(),
-                    action="update",
-                    affected_fields=frozenset({"m.status"}),
-                ),
-            ],
+        # Visible to millie
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.UPDATE,
+                affected_fields=frozenset({"m.status"}),
+            )
         )
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
@@ -465,28 +480,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 field_names={"m.status"},
             )
         )
-        self.assertEqual(
-            per_user_updates,
-            [
-                ProfileUpdate(
-                    stream_id=2,
-                    user_id="@roger:test",
-                    action="joined_room",
-                    affected_fields=None,
-                ),
-                ProfileUpdate(
-                    stream_id=3,
-                    user_id="@millie:test",
-                    action="joined_room",
-                    affected_fields=None,
-                ),
-                ProfileUpdate(
-                    stream_id=4,
-                    user_id=self.frank.to_string(),
-                    action="update",
-                    affected_fields=frozenset({"m.status"}),
-                ),
-            ],
+        # Visible to frank themselves
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.UPDATE,
+                affected_fields=frozenset({"m.status"}),
+            )
         )
 
     @override_config({"include_profile_updates_in_sync": True})
@@ -569,46 +570,35 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
                 from_id=0,
-                to_id=10,
+                to_id=20,
                 user_id="@roger:test",
                 field_names={"m.status"},
             )
         )
-        self.assertEqual(
-            per_user_updates,
-            [
-                ProfileUpdate(
-                    stream_id=4,
-                    user_id="@gracie:test",
-                    action="joined_room",
-                    affected_fields=None,
-                ),
-                ProfileUpdate(
-                    stream_id=5,
-                    user_id=self.frank.to_string(),
-                    action="update",
-                    affected_fields=frozenset({"m.status"}),
-                ),
-            ],
+        # Ensure status is there
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.UPDATE,
+                affected_fields=frozenset({"m.status"}),
+            )
         )
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
                 from_id=0,
-                to_id=10,
+                to_id=20,
                 user_id="@millie:test",
                 field_names={"m.status"},
             )
         )
-        self.assertEqual(
-            per_user_updates,
-            [
-                ProfileUpdate(
-                    stream_id=5,
-                    user_id=self.frank.to_string(),
-                    action="update",
-                    affected_fields=frozenset({"m.status"}),
-                ),
-            ],
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.UPDATE,
+                affected_fields=frozenset({"m.status"}),
+            )
         )
 
         # Make frank leave room and verify only the "left room" + gracies join exists
@@ -617,62 +607,141 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
                 from_id=0,
-                to_id=10,
+                to_id=20,
                 user_id="@roger:test",
                 field_names={"m.status"},
             )
         )
-        self.assertEqual(
-            per_user_updates,
-            [
-                ProfileUpdate(
-                    stream_id=4,
-                    user_id="@gracie:test",
-                    action="joined_room",
-                    affected_fields=None,
-                ),
-                ProfileUpdate(
-                    stream_id=6,
-                    user_id=self.frank.to_string(),
-                    action="left_room",
-                    affected_fields=None,
-                ),
-            ],
+        self.assertEqual(len(per_user_updates), 2)
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                "@gracie:test",
+                ProfileUpdateAction.JOINED_ROOM,
+            )
         )
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.LEFT_ROOM,
+            )
+        )
+
         # Make gracie leave room and verify only the "left room"'s
         self.helper.leave(room_id, "@gracie:test", tok=gracie_token)
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
                 from_id=0,
-                to_id=10,
+                to_id=20,
                 user_id="@roger:test",
                 field_names={"m.status"},
             )
         )
-        self.assertEqual(
-            per_user_updates,
-            [
-                ProfileUpdate(
-                    stream_id=6,
-                    user_id=self.frank.to_string(),
-                    action="left_room",
-                    affected_fields=None,
-                ),
-                ProfileUpdate(
-                    stream_id=7,
-                    user_id="@gracie:test",
-                    action="left_room",
-                    affected_fields=None,
-                ),
-            ],
+        self.assertEqual(len(per_user_updates), 2)
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                "@gracie:test",
+                ProfileUpdateAction.LEFT_ROOM,
+            )
+        )
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.LEFT_ROOM,
+            )
         )
 
         # Sanity check we didn't clear any rows for millie
         per_user_updates = self.get_success(
             self.store.get_profile_updates_for_user_and_fields(
                 from_id=0,
-                to_id=10,
+                to_id=20,
                 user_id="@millie:test",
+                field_names={"m.status"},
+            )
+        )
+        self.assertEqual(len(per_user_updates), 2)
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.JOINED_ROOM,
+            )
+        )
+        self.assertTrue(
+            self._verify_update_in_updates(
+                per_user_updates,
+                self.frank.to_string(),
+                ProfileUpdateAction.UPDATE,
+                affected_fields=frozenset({"m.status"}),
+            )
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_left_room_event_if_we_leave_the_last_shared_room(
+        self,
+    ) -> None:
+        """Test that when we leave a room, we get profile update rows with a "left room"
+        action for users we no longer share a room with.
+        """
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+
+        # Make us leave the room
+        self.helper.leave(room_id, self.frank.to_string(), tok=self.frank_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id=self.frank.to_string(),
+                field_names={"m.status"},
+            )
+        )
+        # We're no longer in any rooms with roger, and the profile update stream
+        # should have an update regarding that.
+        self.assertEqual(
+            per_user_updates,
+            [
+                ProfileUpdate(
+                    stream_id=5,
+                    user_id="@roger:test",
+                    action="left_room",
+                    affected_fields=None,
+                ),
+            ],
+        )
+
+    @override_config({"include_profile_updates_in_sync": True})
+    def test_left_room_event_if_we_leave_and_rejoin_a_room(
+        self,
+    ) -> None:
+        """Test that when we leave a room, and then rejoin, we get profile update rows
+        with a "joined room" action for users in the room.
+        """
+        self.register_user("roger", "password")
+        roger_token = self.login("roger", "password")
+        room_id = self.helper.create_room_as(
+            room_creator=self.frank.to_string(),
+            tok=self.frank_token,
+        )
+        self.helper.join(room_id, "@roger:test", tok=roger_token)
+
+        # Make us leave and join the room
+        self.helper.leave(room_id, self.frank.to_string(), tok=self.frank_token)
+        self.helper.join(room_id, self.frank.to_string(), tok=self.frank_token)
+        per_user_updates = self.get_success(
+            self.store.get_profile_updates_for_user_and_fields(
+                from_id=0,
+                to_id=10,
+                user_id=self.frank.to_string(),
                 field_names={"m.status"},
             )
         )
@@ -680,10 +749,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             per_user_updates,
             [
                 ProfileUpdate(
-                    stream_id=5,
-                    user_id=self.frank.to_string(),
-                    action="update",
-                    affected_fields=frozenset({"m.status"}),
+                    stream_id=7,
+                    user_id="@roger:test",
+                    action="joined_room",
+                    affected_fields=None,
                 ),
             ],
         )
