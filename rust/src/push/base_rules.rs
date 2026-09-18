@@ -146,6 +146,45 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         default_enabled: true,
     },
     PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4075.rule.rtc.invite_for_me"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc4075.rtc.invite"),
+            })),
+            Condition::Known(KnownCondition::ExactEventPropertyContainsType(
+                EventPropertyIsTypeCondition {
+                    key: Cow::Borrowed(r"content.m\.mentions.user_ids"),
+                    value_type: Cow::Borrowed(&EventMatchPatternType::UserId),
+                },
+            )),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION, SOUND_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
+        rule_id: Cow::Borrowed("global/override/.org.matrix.msc4075.rule.rtc.invite_for_room"),
+        priority_class: 5,
+        conditions: Cow::Borrowed(&[
+            Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
+                key: Cow::Borrowed("type"),
+                pattern: Cow::Borrowed("org.matrix.msc4075.rtc.invite"),
+            })),
+            Condition::Known(KnownCondition::EventPropertyIs(EventPropertyIsCondition {
+                key: Cow::Borrowed(r"content.m\.mentions.room"),
+                value: Cow::Owned(SimpleJsonValue::Bool(true)),
+            })),
+            Condition::Known(KnownCondition::SenderNotificationPermission {
+                key: Cow::Borrowed("room"),
+            }),
+        ]),
+        actions: Cow::Borrowed(&[Action::Notify, HIGHLIGHT_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
         rule_id: Cow::Borrowed("global/override/.m.rule.is_user_mention"),
         priority_class: 5,
         conditions: Cow::Borrowed(&[Condition::Known(
