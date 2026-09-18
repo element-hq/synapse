@@ -73,12 +73,15 @@ from synapse.storage.databases.main.search import SearchEntry
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import AbstractStreamIdGenerator
 from synapse.storage.util.sequence import SequenceGenerator
+from synapse.synapse_rust.events import redact_event
+from synapse.synapse_rust.room_versions import EventFormatVersions, RoomVersion
 from synapse.types import (
     JsonDict,
     MutableStateMap,
     StateMap,
     StrCollection,
     UserID,
+    get_domain_from_id,
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
@@ -1115,6 +1118,7 @@ class PersistEventsStore:
 
         min_stream_order = events_and_contexts[0][0].internal_metadata.stream_ordering
         max_stream_order = events_and_contexts[-1][0].internal_metadata.stream_ordering
+        room_version = events_and_contexts[0][0].room_version
 
         # We check that the room still exists for events we're trying to
         # persist. This is to protect against races with deleting a room.
@@ -1175,6 +1179,10 @@ class PersistEventsStore:
 
         # From this point onwards the events are only events that we haven't
         # seen before.
+
+        events_and_contexts = self._apply_existing_redaction_txn(
+            txn, room_id, room_version, events_and_contexts=events_and_contexts
+        )
 
         self._store_event_txn(txn, events_and_contexts=events_and_contexts)
 
@@ -2861,6 +2869,105 @@ class PersistEventsStore:
                     self.store.insert_sticky_events_txn(txn, [event])
 
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
+
+    def _apply_existing_redaction_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        room_version: RoomVersion,
+        events_and_contexts: list[EventPersistencePair],
+    ) -> list[EventPersistencePair]:
+        """
+        If we have any redactions for the events we're about to persist,
+        pre-applies those if they are appropriate.
+
+        Redaction events themselves won't be redacted immediately, to avoid
+        breaking circular redactions (which are tested in `test_circular_redaction`).
+
+        Returns a copy of the `events_and_contexts` lists with redactions applied.
+        """
+
+        # Get all the event IDs, whilst also filtering out redaction events
+        # which we don't want to redact immediately anyway
+        event_ids = [
+            ev.event_id
+            for ev, _ in events_and_contexts
+            if ev.type != EventTypes.Redaction
+        ]
+
+        if not event_ids:
+            # nothing to do here
+            return events_and_contexts
+
+        events_by_id = {ev.event_id: ev for ev, _ in events_and_contexts}
+        event_id_in_list_clause, event_id_in_list_args = make_in_list_sql_clause(
+            txn.database_engine,
+            "redactions.redacts",
+            event_ids,
+        )
+        txn.execute(
+            f"""
+            SELECT redactions.event_id, redactions.redacts, redaction_events.sender, redactions.recheck
+            FROM redactions
+            INNER JOIN events AS redaction_events
+                ON redactions.event_id = redaction_events.event_id
+                AND redaction_events.room_id = ?
+            WHERE {event_id_in_list_clause}
+            """,
+            (room_id, *event_id_in_list_args),
+        )
+
+        # map from redacted event ID to the event ID that redacts it
+        redacted = {}
+        for (
+            redaction_event_id,
+            redaction_redacts,
+            redaction_event_sender,
+            redaction_event_needs_v3_recheck,
+        ) in txn:
+            if redaction_redacts in redacted:
+                # Already redacted
+                continue
+
+            event = events_by_id[redaction_redacts]
+            if (
+                redaction_event_needs_v3_recheck
+                # Normally v1/v2 don't ever need rechecks because the checks are part of auth rules.
+                # However the `recheck` column was only recently introduced as a retrofit,
+                # with a database-level default of `true`.
+                # For that reason, we can't `assert` on this condition as even v1/v2 rooms can appear
+                # with a `recheck` value of true, even though they don't need a recheck.
+                and room_version.event_format != EventFormatVersions.ROOM_V1_V2
+            ):
+                # Apply the same logic as `_maybe_redact_event_row`
+                if get_domain_from_id(redaction_event_sender) != get_domain_from_id(
+                    event.sender
+                ):
+                    logger.debug(
+                        "redaction of %s skipped as it required a v3 recheck and sender servers differ: %r != %r",
+                        redaction_redacts,
+                        redaction_event_sender,
+                        event.sender,
+                    )
+                    continue
+
+            redacted[redaction_redacts] = redaction_event_id
+            logger.debug(
+                "%r redacted at persistence time by %r",
+                redaction_redacts,
+                redaction_event_id,
+            )
+
+        out: list[EventPersistencePair] = []
+        for event, context in events_and_contexts:
+            if redacted_by := redacted.get(event.event_id):
+                redacted_event = redact_event(event)
+                redacted_event.internal_metadata.redacted_by = redacted_by
+                out.append((redacted_event, context))
+            else:
+                out.append((event, context))
+
+        return out
 
     def _store_event_txn(
         self,
