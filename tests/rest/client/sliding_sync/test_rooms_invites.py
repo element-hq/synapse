@@ -21,7 +21,7 @@ import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import UserID
+from synapse.types import JsonDict, UserID
 from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -66,6 +66,48 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         self.storage_controllers = hs.get_storage_controllers()
 
         super().prepare(reactor, clock, hs)
+        self.room_version = hs.config.server.default_room_version
+
+    def assertHasSubset(
+        self,
+        container: list[JsonDict],
+        contains_these: list[JsonDict],
+    ) -> None:
+        """
+        Fail the test if the count of elements in both `container` and `contains_these`
+        do not match, and if the individual elements in `container` is not a super set
+        of the individual elements of `contains_these`.
+
+        Useful for comparison of lists of PDU dictionaries that may or may not have
+        stripped state, so the minimum required data is asserted to be present.
+
+        (Note: maybe revert after https://github.com/element-hq/synapse/pull/19723 if
+        this is still necessary)
+        """
+        assert contains_these, "`contains_these` was empty"
+        assert container, "`container` was empty"
+
+        self.assertEqual(
+            len(container),
+            len(contains_these),
+            f"container must have the same number of elements as contains_these:\n\n{container=}\n\n{contains_these=}",
+        )
+
+        for dict_to_search_for in contains_these:
+            for container_entry in container:
+                # The <= operator is a subset comparison operator when used on
+                # 'set-like' containers
+                if dict_to_search_for.items() <= container_entry.items():
+                    # The searched for item was found, move on. Break will skip the
+                    # else statement below
+                    break
+            else:
+                # Searching the 'container' for this subset yielded nothing, that is
+                # an error.
+                raise AssertionError(
+                    "The searched for dict was not present in the container:\n\n"
+                    f"Searched for {dict_to_search_for}\n\nContainer: {container}"
+                )
 
     def test_rooms_invite_shared_history_initial_sync(self) -> None:
         """
@@ -73,7 +115,7 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         initial sync.
 
         This is an `invite` room so we should only have `stripped_state` (no `timeline`)
-        but we also shouldn't see any timeline events because the history visiblity is
+        but we also shouldn't see any timeline events because the history visibility is
         `shared` and we haven't joined the room yet.
         """
         user1_id = self.register_user("user1", "pass")
@@ -85,7 +127,7 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
 
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
         # Ensure we're testing with a room with `shared` history visibility which means
-        # history visible until you actually join the room.
+        # history won't be visible until you actually join the room.
         history_visibility_response = self.helper.get_state(
             room_id1, EventTypes.RoomHistoryVisibility, tok=user2_tok
         )
@@ -138,12 +180,15 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
-        # room (we don't care about the order).
-        self.assertCountEqual(
+        # room (we don't care about the order). The exception is the creation event
+        # which is a full PDU format from room v12 and newer
+        self.assertHasSubset(
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"room_version": "11"},
+                    "content": {
+                        "room_version": self.room_version.identifier,
+                    },
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",
@@ -167,7 +212,6 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
                     "type": "m.room.member",
                 },
             ],
-            response_body["rooms"][room_id1]["invite_state"],
         )
 
     def test_rooms_invite_shared_history_incremental_sync(self) -> None:
@@ -248,12 +292,15 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
-        # room (we don't care about the order).
-        self.assertCountEqual(
+        # room (we don't care about the order). The exception is the creation event
+        # which is a full PDU format from room v12 and newer
+        self.assertHasSubset(
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"room_version": "11"},
+                    "content": {
+                        "room_version": self.room_version.identifier,
+                    },
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",
@@ -277,7 +324,6 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
                     "type": "m.room.member",
                 },
             ],
-            response_body["rooms"][room_id1]["invite_state"],
         )
 
     def test_rooms_invite_world_readable_history_initial_sync(self) -> None:
@@ -369,12 +415,15 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
-        # room (we don't care about the order).
-        self.assertCountEqual(
+        # room (we don't care about the order). The exception is the creation event
+        # which is a full PDU format from room v12 and newer
+        self.assertHasSubset(
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"room_version": "11"},
+                    "content": {
+                        "room_version": self.room_version.identifier,
+                    },
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",
@@ -398,7 +447,6 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
                     "type": "m.room.member",
                 },
             ],
-            response_body["rooms"][room_id1]["invite_state"],
         )
 
     def test_rooms_invite_world_readable_history_incremental_sync(self) -> None:
@@ -495,12 +543,15 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
-        # room (we don't care about the order).
-        self.assertCountEqual(
+        # room (we don't care about the order). The exception is the creation event
+        # which is a full PDU format from room v12 and newer
+        self.assertHasSubset(
             response_body["rooms"][room_id1]["invite_state"],
             [
                 {
-                    "content": {"room_version": "11"},
+                    "content": {
+                        "room_version": self.room_version.identifier,
+                    },
                     "sender": user2_id,
                     "state_key": "",
                     "type": "m.room.create",
@@ -524,5 +575,4 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
                     "type": "m.room.member",
                 },
             ],
-            response_body["rooms"][room_id1]["invite_state"],
         )
