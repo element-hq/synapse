@@ -1617,23 +1617,36 @@ class MediaRepository:
 
             logger.info("Deleting: %r", key)
 
-            # TODO: Should we delete from the backup store
-
             async with self.remote_media_linearizer.queue(key):
-                full_path = self.filepaths.remote_media_filepath(origin, file_id)
-                try:
-                    os.remove(full_path)
-                except OSError as e:
-                    logger.warning("Failed to remove file: %r", full_path)
-                    if e.errno == errno.ENOENT:
-                        pass
-                    else:
-                        continue
-
+                file_info = FileInfo(origin, file_id)
+                thumbnails = await self.store.get_remote_media_thumbnails(
+                    origin, media_id
+                )
+                thumbnails_ok = True
+                for thumbnail_info in thumbnails:
+                    file = FileInfo(origin, file_id, thumbnail=thumbnail_info)
+                    try:
+                        await self.media_storage.remove_file(file)
+                    except OSError as e:
+                        logger.warning("Failed to remove file: %r", file)
+                        if thumbnails_ok:
+                            thumbnails_ok = e.errno == errno.ENOENT
+                if not thumbnails_ok:
+                    # Leave the parent intact to avoid dangling thumbnails
+                    continue
+                # remove the (now empty) dir if it existed at all
                 thumbnail_dir = self.filepaths.remote_media_thumbnail_dir(
                     origin, file_id
                 )
                 shutil.rmtree(thumbnail_dir, ignore_errors=True)
+                try:
+                    await self.media_storage.remove_file(file_info)
+                except OSError as e:
+                    logger.warning("Failed to remove file: %r", file_info)
+                    if e.errno == errno.ENOENT:
+                        pass
+                    else:
+                        continue
 
                 await self.store.delete_remote_media(origin, media_id)
                 deleted += 1
@@ -1700,19 +1713,31 @@ class MediaRepository:
         """
         removed_media = []
         for media_id in media_ids:
+            file_info = FileInfo(None, media_id)
+            thumbnails = await self.store.get_local_media_thumbnails(media_id)
+            thumbnails_ok = True
+            for thumbnail in thumbnails:
+                file = FileInfo(None, media_id, thumbnail=thumbnail)
+                try:
+                    await self.media_storage.remove_file(file)
+                except OSError as e:
+                    logger.warning("Failed to remove file: %r", file)
+                    if thumbnails_ok:
+                        thumbnails_ok = e.errno == errno.ENOENT
+            if not thumbnails_ok:
+                # Don't leave dangling thumbnails
+                continue
+            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
+            shutil.rmtree(thumbnail_dir, ignore_errors=True)
             logger.info("Deleting media with ID '%s'", media_id)
-            full_path = self.filepaths.local_media_filepath(media_id)
             try:
-                os.remove(full_path)
+                await self.media_storage.remove_file(file_info)
             except OSError as e:
-                logger.warning("Failed to remove file: %r: %s", full_path, e)
+                logger.warning("Failed to remove file: %r: %s", file_info, e)
                 if e.errno == errno.ENOENT:
                     pass
                 else:
                     continue
-
-            thumbnail_dir = self.filepaths.local_media_thumbnail_dir(media_id)
-            shutil.rmtree(thumbnail_dir, ignore_errors=True)
 
             await self.store.delete_remote_media(self.server_name, media_id)
 
