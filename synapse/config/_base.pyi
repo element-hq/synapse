@@ -46,6 +46,7 @@ from synapse.config import (  # noqa: F401
     retention,
     room,
     room_directory,
+    safety,
     saml2,
     server,
     server_notices,
@@ -124,6 +125,7 @@ class RootConfig:
     user_types: user_types.UserTypesConfig
     mas: mas.MasConfig
     matrix_rtc: matrixrtc.MatrixRtcConfig
+    safety: safety.SafetyConfig
 
     config_classes: list[type["Config"]] = ...
     config_files: list[str]

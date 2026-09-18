@@ -54,6 +54,7 @@ from .repository import ContentRepositoryConfig
 from .retention import RetentionConfig
 from .room import RoomConfig
 from .room_directory import RoomDirectoryConfig
+from .safety import SafetyConfig
 from .saml2 import SAML2Config
 from .server import ServerConfig
 from .server_notices import ServerNoticesConfig
@@ -112,6 +113,7 @@ class HomeServerConfig(RootConfig):
         StatsConfig,
         ServerNoticesConfig,
         RoomDirectoryConfig,
+        SafetyConfig,
         ThirdPartyRulesConfig,
         TracerConfig,
         WorkerConfig,
