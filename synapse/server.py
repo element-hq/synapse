@@ -723,6 +723,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
+    def get_profile_lookup_ratelimiter(self) -> Ratelimiter:
+        return Ratelimiter(
+            store=self.get_datastores().main,
+            clock=self.get_clock(),
+            cfg=self.config.ratelimiting.rc_profile,
+        )
+
+    @cache_in_self
     def get_federation_client(self) -> FederationClient:
         return FederationClient(self)
 
