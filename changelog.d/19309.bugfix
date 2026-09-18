@@ -1,0 +1,2 @@
+Add `HttpOnly` flag to OIDC session cookies and dynamically add `Secure` flag only when the connection is over HTTPS, 
+fixing OIDC login issues in local development environments.
