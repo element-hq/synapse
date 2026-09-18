@@ -1,6 +1,7 @@
+import sqlite3
 from typing import Callable, Collection
 from unittest import mock
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 from twisted.internet.testing import MemoryReactor
 
@@ -11,24 +12,27 @@ from synapse.federation.sender import (
     PerDestinationQueue,
     TransactionManager,
 )
+from synapse.federation.sender.per_destination_queue import _PreparedTransaction
 from synapse.federation.units import Edu, Transaction
+from synapse.replication.tcp.streams._base import StickyEventStreamPosition
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, RoomID
 from synapse.util.clock import Clock
+from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 
 from tests.test_utils import event_injection
 from tests.unittest import FederatingHomeserverTestCase
+from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
-class FederationCatchUpTestCases(FederatingHomeserverTestCase):
+class _FederationCatchUpTestCaseBase(FederatingHomeserverTestCase):
     """
-    Tests cases of catching up over federation.
-
-    By default for test cases federation sending is disabled. This Test class has it
-    re-enabled for the main process.
+    Scaffolding for a homeserver with federation sending enabled
+    and a mocked-out federation transport, so that
+    outbound transactions can be recorded (or made to fail).
     """
 
     servlets = [
@@ -44,16 +48,6 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         )
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # stub out get_current_hosts_in_room
-        state_storage_controller = hs.get_storage_controllers().state
-
-        # This mock is crucial for destination_rooms to be populated.
-        # TODO: this seems to no longer be the case---tests pass with this mock
-        # commented out.
-        state_storage_controller.get_current_hosts_in_room = AsyncMock(  # type: ignore[method-assign]
-            return_value={"test", "host2"}
-        )
-
         # whenever send_transaction is called, record the pdu data
         self.pdus: list[JsonDict] = []
         self.failed_pdus: list[JsonDict] = []
@@ -111,6 +105,55 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
             )
         )[0]
         return {"event_id": event_id, "stream_ordering": stream_ordering}
+
+    def make_fake_destination_queue(
+        self, destination: str = "host2"
+    ) -> tuple[PerDestinationQueue, list[EventBase]]:
+        """
+        Makes a fake per-destination queue.
+        """
+        transaction_manager = TransactionManager(self.hs)
+        per_dest_queue = PerDestinationQueue(self.hs, transaction_manager, destination)
+        results_list = []
+
+        async def fake_send(
+            destination_tm: str,
+            pending_pdus: list[EventBase],
+            _pending_edus: list[Edu],
+        ) -> None:
+            assert destination == destination_tm
+            results_list.extend(pending_pdus)
+
+        transaction_manager.send_new_transaction = fake_send  # type: ignore[assignment]
+
+        return per_dest_queue, results_list
+
+    def run_transaction(
+        self, per_dest_queue: PerDestinationQueue
+    ) -> _PreparedTransaction | None:
+        """
+        Prepares and completes one transaction, returning it.
+
+        Returns None if there was no transaction to be made.
+        """
+
+        async def run() -> _PreparedTransaction | None:
+            transaction = await per_dest_queue._prepare_transaction()
+            if transaction is not None:
+                # As the transmission loop does once the transaction has been sent.
+                await per_dest_queue._complete_transaction(transaction)
+            return transaction
+
+        return self.get_success(run())
+
+
+class FederationCatchUpTestCases(_FederationCatchUpTestCaseBase):
+    """
+    Tests cases of catching up over federation.
+
+    By default for test cases federation sending is disabled. This Test class has it
+    re-enabled for the main process.
+    """
 
     def test_catch_up_destination_rooms_tracking(self) -> None:
         """
@@ -266,28 +309,6 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         self.assertEqual(len(self.pdus), 2)
         self.assertEqual(self.pdus[0]["content"]["body"], "hi user!")
         self.assertEqual(self.pdus[1]["content"]["body"], "wombats!")
-
-    def make_fake_destination_queue(
-        self, destination: str = "host2"
-    ) -> tuple[PerDestinationQueue, list[EventBase]]:
-        """
-        Makes a fake per-destination queue.
-        """
-        transaction_manager = TransactionManager(self.hs)
-        per_dest_queue = PerDestinationQueue(self.hs, transaction_manager, destination)
-        results_list = []
-
-        async def fake_send(
-            destination_tm: str,
-            pending_pdus: list[EventBase],
-            _pending_edus: list[Edu],
-        ) -> None:
-            assert destination == destination_tm
-            results_list.extend(pending_pdus)
-
-        transaction_manager.send_new_transaction = fake_send  # type: ignore[assignment]
-
-        return per_dest_queue, results_list
 
     def test_catch_up_loop(self) -> None:
         """
@@ -583,3 +604,359 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
             per_dest_queue._last_successful_stream_ordering,
             event_2.internal_metadata.stream_ordering,
         )
+
+
+class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
+    """
+    Tests for the catch-up of backlogged sticky events over federation.
+    """
+
+    if not USE_POSTGRES_FOR_TESTS and sqlite3.sqlite_version_info < (3, 40, 0):
+        skip = f"SQLite version is too old to support sticky events: {sqlite3.sqlite_version_info} (See https://github.com/element-hq/synapse/issues/19428)"
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4354_enabled": True}
+        return config
+
+    def _send_sticky(self, room_id: str, body: str, tok: str) -> str:
+        """
+        Send a sticky event.
+        """
+        return self.helper.send_sticky_event(
+            room_id,
+            EventTypes.Message,
+            duration=Duration(minutes=1),
+            content={"body": body, "msgtype": "m.text"},
+            tok=tok,
+        )["event_id"]
+
+    def _stream_ordering_for(self, event_id: str) -> int:
+        """
+        Get the `stream_ordering` for the given event.
+        """
+        event = self.get_success(self.hs.get_datastores().main.get_event(event_id))
+        stream_ordering = event.internal_metadata.stream_ordering
+        assert stream_ordering is not None
+        return stream_ordering
+
+    def _sticky_stream_id_for(self, event_id: str) -> int:
+        """
+        Get the `sticky_events` `stream_id` for the given event.
+        """
+        return self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_one_onecol(
+                table="sticky_events",
+                keyvalues={"event_id": event_id},
+                retcol="stream_id",
+                desc="test:get_sticky_stream_id",
+            )
+        )
+
+    def _backlog_rows(self) -> list[tuple[str, str, int]]:
+        """
+        All rows of the `destination_room_sticky_events_backlog` table.
+        """
+        rows = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_list(
+                table="destination_room_sticky_events_backlog",
+                keyvalues=None,
+                retcols=("destination", "room_id", "sticky_events_stream_position"),
+            )
+        )
+        return sorted(rows)
+
+    def _assert_up_to_date_as_of(self, event_id: str) -> None:
+        """
+        Sanity-checks that `host2` was last successfully sent `event_id`, i.e. that
+        catch-up will resume from there.
+        """
+        self.assertEqual(
+            self.get_success(
+                self.hs.get_datastores().main.get_destination_last_successful_stream_ordering(
+                    "host2"
+                )
+            ),
+            self._stream_ordering_for(event_id),
+            "test fault: host2 is not up to date as of the expected event",
+        )
+
+    def test_catch_up_records_skipped_sticky_events_as_backlogged(self) -> None:
+        """
+        Tests that 'regular' federation catch-up marks the sticky events in the gaps
+        that it skips.
+
+        See the docstring on `mark_backlogged_sticky_events_after_catchup_transaction`
+        for a diagrammatical explanation.
+        """
+
+        per_dest_queue, sent_pdus = self.make_fake_destination_queue()
+        # The queue starts up in 'sticky event backlogged' mode, but we want our test to cover
+        # the steady-state. So clear the backlogged flag and allow it to be set naturally.
+        per_dest_queue._sticky_event_backlog_tracker._backlogged = False
+
+        # Create a local user and 3 rooms
+        self.register_user("u1", "you the one")
+        u1_token = self.login("u1", "you the one")
+        room_1 = self.helper.create_room_as("u1", tok=u1_token)
+        room_2 = self.helper.create_room_as("u1", tok=u1_token)
+        room_3 = self.helper.create_room_as("u1", tok=u1_token)
+        for room_id in (room_1, room_2, room_3):
+            self.get_success(
+                event_injection.inject_member_event(
+                    self.hs, room_id, "@user:host2", "join"
+                )
+            )
+
+        # Set up some events according to this sequence:
+        #
+        #         stream_ordering ------------------------------->
+        # room 1    •                  •
+        #        (message)        sticky_id_5
+        # room 2      •          •
+        #        event_id_2  event_id_4
+        # room 3        •                  •
+        #           sticky_id_3        event_id_6
+
+        self.helper.send_messages(room_1, 1, tok=u1_token)
+        (event_id_2,) = self.helper.send_messages(room_2, 1, tok=u1_token)
+        # Let the federation sender act on the events above.
+        self.reactor.advance(0)
+
+        # Put host2 down, to prevent the federation sender from succeeding in sending the
+        # next events out (and to trigger catch-up mode).
+        self.is_online = False
+        self._assert_up_to_date_as_of(event_id_2)
+
+        # This sticky event will fall in the gap that the first catch-up transaction
+        # skips over, so it must end up backlogged.
+        sticky_id_3 = self._send_sticky(room_3, "sticky in the gap", u1_token)
+        (event_id_4,) = self.helper.send_messages(room_2, 1, tok=u1_token)
+        # This one is itself a forward extremity, so it will get sent as catch-up and
+        # must _not_ be backlogged.
+        sticky_id_5 = self._send_sticky(room_1, "sticky extremity", u1_token)
+        (event_id_6,) = self.helper.send_messages(room_3, 1, tok=u1_token)
+        # Advance for the federation sender to trigger on those newly-sent events
+        self.reactor.advance(0)
+
+        # Now trigger a catch-up loop
+        self.get_success(per_dest_queue._catch_up_transmission_loop())
+
+        # First sanity-check what got sent and what the state of the 'regular'
+        # catch-up is.
+        # Each room's latest local event was sent, oldest first.
+        self.assertEqual(
+            [pdu.event_id for pdu in sent_pdus],
+            [event_id_4, sticky_id_5, event_id_6],
+        )
+        self.assertFalse(per_dest_queue._catching_up, "should have completed catch-up")
+        self.assertEqual(
+            per_dest_queue._last_successful_stream_ordering,
+            self._stream_ordering_for(event_id_6),
+        )
+
+        # Check the state of the sticky event backlog
+        # - `sticky_id_3` fell in the gap that got skipped over by the catch-up
+        #   transaction for room 2 (as room 2 had the oldest forward extremity
+        #   of all the rooms.)
+        #   So room 3 is backlogged.
+        # - `sticky_id_5` got sent as a forward extremity, so room 1 is _not_
+        #   backlogged.
+        self.assertEqual(
+            self._backlog_rows(),
+            [("host2", room_3, self._sticky_stream_id_for(sticky_id_3))],
+        )
+        self.assertTrue(
+            per_dest_queue._sticky_event_backlog_tracker.is_backlogged,
+            "the queue must notice the backlog that it has just recorded",
+        )
+
+    def test_backlogged_sticky_events_are_sent_in_dedicated_transactions(self) -> None:
+        """
+        Tests the dedicated transactions that send backlogged sticky events.
+        """
+        per_dest_queue, _sent_pdus = self.make_fake_destination_queue()
+
+        # Create a local user and a room
+        self.register_user("u1", "you the one")
+        u1_token = self.login("u1", "you the one")
+        room_id = self.helper.create_room_as("u1", tok=u1_token)
+        self.get_success(
+            event_injection.inject_member_event(self.hs, room_id, "@user:host2", "join")
+        )
+
+        # Send whilst host2 is up, so this is where catch-up will resume from later on
+        (already_sent_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        # Trigger federation sender
+        self.reactor.advance(0)
+
+        # Put host2 down, to prevent the federation sender from succeeding in sending the
+        # next events out (and to trigger catch-up mode).
+        self.is_online = False
+        self._assert_up_to_date_as_of(already_sent_id)
+
+        sticky_id_1 = self._send_sticky(room_id, "sticky 1", u1_token)
+        sticky_id_2 = self._send_sticky(room_id, "sticky 2", u1_token)
+        # Send an event to be the room's forward extremity
+        # This will make catch-up skip over the 2 sticky events so we can use those 2
+        # to test sticky event backlog catch-up
+        self.helper.send_messages(room_id, 1, tok=u1_token)
+        # Trigger federation sender
+        self.reactor.advance(0)
+
+        # Do a 'regular' catch-up transaction.
+        # This is also what records the sticky event backlog
+        self.get_success(per_dest_queue._catch_up_transmission_loop())
+        self.assertEqual(
+            self._backlog_rows(),
+            [("host2", room_id, self._sticky_stream_id_for(sticky_id_1))],
+        )
+
+        # Build a transaction. Since the main queue has nothing to send,
+        # this is a sticky event backlog transaction.
+        transaction = self.run_transaction(per_dest_queue)
+        assert transaction is not None
+        self.assertEqual(
+            [pdu.event_id for pdu in transaction.pdus], [sticky_id_1, sticky_id_2]
+        )
+        self.assertEqual(transaction.edus, [])
+
+        # The position should have moved to just past the last one.
+        self.assertEqual(
+            self._backlog_rows(),
+            [("host2", room_id, self._sticky_stream_id_for(sticky_id_2) + 1)],
+        )
+
+        # Try to build a transaction, but get None as neither the main queue
+        # nor the sticky event backlog should have anything to send
+        self.assertIsNone(self.run_transaction(per_dest_queue))
+        self.assertEqual(self._backlog_rows(), [])
+        self.assertFalse(per_dest_queue._sticky_event_backlog_tracker.is_backlogged)
+
+    def test_backlogged_sticky_events_are_drained_by_the_same_loop(self) -> None:
+        """
+        Tests that a sticky event backlog recorded by catch-up is drained by the same
+        transmission loop, rather than sitting there until unrelated traffic to the
+        destination happens to start a new one.
+        """
+        per_dest_queue, sent_pdus = self.make_fake_destination_queue()
+        # The queue starts up in 'sticky event backlogged' mode, but we want our test to cover
+        # the steady-state. So clear the backlogged flag and allow it to be set naturally.
+        per_dest_queue._sticky_event_backlog_tracker._backlogged = False
+
+        self.register_user("u1", "you the one")
+        u1_token = self.login("u1", "you the one")
+        room_id = self.helper.create_room_as("u1", tok=u1_token)
+        self.get_success(
+            event_injection.inject_member_event(self.hs, room_id, "@user:host2", "join")
+        )
+
+        # Send an event whilst host2 is up, so this is where catch-up will resume from.
+        (already_sent_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        self.reactor.advance(0)
+
+        # Put host2 down
+        self.is_online = False
+        self._assert_up_to_date_as_of(already_sent_id)
+
+        sticky_id = self._send_sticky(room_id, "backlogged sticky", u1_token)
+        # The room's latest event, so catch-up sends this one and skips over the sticky
+        # event, leaving it backlogged.
+        (latest_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        # Trigger the federation sender to fail to send the events and then
+        # to go into catch-up mode
+        self.reactor.advance(0)
+
+        # Trigger federation catch-up
+        per_dest_queue.attempt_new_transaction()
+        assert per_dest_queue.active_transmission_loop is not None
+        self.get_success(per_dest_queue.active_transmission_loop)
+
+        # Catch-up sent the room's latest event, then the backlog transaction sent the
+        # sticky event that catch-up had skipped.
+        self.assertEqual([pdu.event_id for pdu in sent_pdus], [latest_id, sticky_id])
+        self.assertEqual(self._backlog_rows(), [])
+        self.assertFalse(per_dest_queue._sticky_event_backlog_tracker.is_backlogged)
+
+    def test_backlogged_sticky_events_do_not_delay_pending_pdus(self) -> None:
+        """
+        Tests that the normal federation transmission queue gets the opportunity
+        to send main queue (normal) transactions in between sticky event backlog transactions.
+        """
+        per_dest_queue, _sent_pdus = self.make_fake_destination_queue()
+
+        self.register_user("u1", "you the one")
+        u1_token = self.login("u1", "you the one")
+        room_id = self.helper.create_room_as("u1", tok=u1_token)
+        self.get_success(
+            event_injection.inject_member_event(self.hs, room_id, "@user:host2", "join")
+        )
+
+        # Sent whilst host2 is up, so this is where catch-up will resume from.
+        (already_sent_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        # Let the federation sender act on the events above.
+        self.reactor.advance(0)
+        self.is_online = False
+        self._assert_up_to_date_as_of(already_sent_id)
+
+        # Stands in for a PDU still awaiting real-time delivery; queued by hand below.
+        (realtime_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        sticky_id = self._send_sticky(room_id, "backlogged sticky", u1_token)
+        # The room's latest event, so catch-up sends this one and skips over the
+        # sticky event, leaving it backlogged.
+        self.helper.send_messages(room_id, 1, tok=u1_token)
+        # Let the federation sender act on the events above.
+        self.reactor.advance(0)
+
+        # Catching up is what records the backlog.
+        self.get_success(per_dest_queue._catch_up_transmission_loop())
+        self.assertEqual(
+            self._backlog_rows(),
+            [("host2", room_id, self._sticky_stream_id_for(sticky_id))],
+        )
+
+        realtime_event = self.get_success(
+            self.hs.get_datastores().main.get_event(realtime_id)
+        )
+
+        # Append to `_pending_pdus` rather than calling `send_pdu`, because
+        # `send_pdu` will trigger `attempt_new_transaction()`,
+        # but we want to be in control here so we can inspect each transaction
+        # individually.
+        per_dest_queue._pending_pdus.append(realtime_event)
+
+        # Transaction 1 (normal) sends the real-time queued PDU...
+        transaction = self.run_transaction(per_dest_queue)
+        assert transaction is not None
+        self.assertEqual([pdu.event_id for pdu in transaction.pdus], [realtime_id])
+        # (...and it is removed from the queue once the transaction completes)
+        self.assertEqual(per_dest_queue._pending_pdus, [])
+
+        # Transaction 2 sends the sticky event backlog
+        transaction = self.run_transaction(per_dest_queue)
+        assert transaction is not None
+        self.assertEqual([pdu.event_id for pdu in transaction.pdus], [sticky_id])
+
+
+class FederationStickyEventBacklogDisabledTestCase(_FederationCatchUpTestCaseBase):
+    def test_no_backlog_transaction_when_msc4354_disabled(self) -> None:
+        """
+        Tests that when MSC4354 switched off, the sticky backlog is not serviced.
+        """
+        per_dest_queue, _sent_pdus = self.make_fake_destination_queue()
+
+        async def must_not_be_called(
+            destination: str, *, limit: int = 50
+        ) -> tuple[RoomID, StickyEventStreamPosition, list[str]] | None:
+            raise AssertionError(
+                "Consulted the sticky event backlog despite MSC4354 being disabled"
+            )
+
+        with mock.patch.object(
+            self.hs.get_datastores().main,
+            "get_backlogged_sticky_events_for_destination",
+            must_not_be_called,
+        ):
+            # Check twice to make sure it's not down to round-robin
+            self.assertIsNone(self.run_transaction(per_dest_queue))
+            self.assertIsNone(self.run_transaction(per_dest_queue))
