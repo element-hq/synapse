@@ -566,7 +566,8 @@ detail that Python code does not need to care about.
 
 `set_current_context` only ever runs on a Python thread, i.e. the reactor or one
 of its thread pools, where it does the `getrusage` CPU accounting. It is never
-called from a tokio worker thread.
+called from a tokio worker thread. Therefore, CPU accounting is not captured
+when executing purely Rust work.
 
 What Rust code *does* need to be aware of is that when spawning a future onto
 the tokio runtime, the current logcontext must be captured and carried along, so
