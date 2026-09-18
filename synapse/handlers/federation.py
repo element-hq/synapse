@@ -989,7 +989,16 @@ class FederationHandler:
                 # /_matrix/federation/v1/send_knock/{roomId}/{eventId}` endpoint:
                 # > Entries which are improperly signed or formatted SHOULD be removed by the
                 # > server prior to supplying them over the Client-Server API.
-                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.remove_invalid,
+                #
+                # FIXME(MSC4311): This should be
+                # `InvalidStrippedStateBehaviour.remove_invalid` but that means this
+                # never raises and we'd always assign empty `knock_room_state` for some
+                # server that's still using the legacy stripped-state format. After
+                # 2027-06-01 (to allow some time for the ecosystem to adapt and support
+                # MSC4311), update this to be
+                # `InvalidStrippedStateBehaviour.remove_invalid` alongside removing the
+                # whole `_minimal_parse_stripped_room_state` fallback.
+                invalid_stripped_state_behavior=InvalidStrippedStateBehaviour.reject_all,
             )
             # Replace with our sanitized `knock_room_state`
             event.unsigned["knock_room_state"] = [
@@ -998,31 +1007,7 @@ class FederationHandler:
             ]
         except CancelledError:
             raise
-        except Exception as exc:
-            # FIXME(MSC4311): Apply this validation for all room versions after
-            # 2027-06-01 (to allow some time for the ecosystem to adapt and support
-            # MSC4311), see https://github.com/element-hq/synapse/issues/19943
-            #
-            # The Matrix spec says that for "version 12+ rooms, servers SHOULD rather than
-            # MAY respond to such requests with 400 M_MISSING_PARAM". Given we have the
-            # lee-way to enforce this in all room versions, we might as well.
-            #
-            # For now, we'll only log in room versions 12+ where this SHOULD be the case
-            # already.
-            if event_format_version.msc4311_stripped_state:
-                # FIXME(MSC4311): Instead of logging, reject with 400 `M_MISSING_PARAM`
-                # after 2027-06-01. Given Synapse claimed to support room version 12 but
-                # didn't adhere to this behavior until 2026-07, we will only warn for
-                # now. Don't forget to unskip the
-                # `TestMSC4311RejectInvalidStrippedStateFederation` Complement tests as
-                # well.
-                logger.warning(
-                    "Continuing anyway but failed to validate `knock_room_state` on knock %s (room_version=%s): %s",
-                    event,
-                    event_format_version,
-                    exc,
-                )
-
+        except Exception:
             # FIXME(MSC4311): Remove this whole block after we always enforce the
             # validation above. The only reason this is here is because the validation
             # can fail for non-compliant servers but we should still use stripped state.
