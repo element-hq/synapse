@@ -458,10 +458,14 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
             self.store.update_profile_in_user_dir("@local:test", "Local", None)
         )
         self.get_success(
-            self.store.reconcile_federated_remote_users("a", [(BOBBY, "bobby", None)])
+            self.store.reconcile_federated_remote_users(
+                "a", [(BOBBY, "bobby", None)], start_token=None, end_token=None
+            )
         )
         self.get_success(
-            self.store.reconcile_federated_remote_users("b", [(BOB, "bob", None)])
+            self.store.reconcile_federated_remote_users(
+                "b", [(BOB, "bob", None)], start_token=None, end_token=None
+            )
         )
         expected_profiles = self.get_success(helper.get_profiles_in_user_directory())
         del expected_profiles[BOBBY]
@@ -494,7 +498,7 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
             with self.subTest(cleanup=cleanup):
                 self.get_success(
                     self.store.reconcile_federated_remote_users(
-                        "a", [(ALICE, "alice", None)]
+                        "a", [(ALICE, "alice", None)], start_token=None, end_token=None
                     )
                 )
 
@@ -504,7 +508,9 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
                     self.get_success(self.store.prune_federated_remote_users([]))
                 else:
                     self.get_success(
-                        self.store.reconcile_federated_remote_users("a", [])
+                        self.store.reconcile_federated_remote_users(
+                            "a", [], start_token=None, end_token=None
+                        )
                     )
 
                 self.assertEqual(
@@ -523,7 +529,7 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
                     [user["user_id"] for user in results["results"]], [ALICE]
                 )
 
-    def test_get_local_users_in_user_dir(self) -> None:
+    def test_get_local_users_in_user_dir_paginated(self) -> None:
         """Only registered local directory entries and their profiles are returned."""
         local_user = "@local:test"
         no_profile_user = "@no_profile:test"
@@ -546,11 +552,14 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
             self.store.update_profile_in_user_dir("@unregistered:test", None, None)
         )
 
-        result = self.get_success(self.store.get_local_users_in_user_dir())
+        result = self.get_success(
+            self.store.get_local_users_in_user_dir_paginated(
+                start_token=None, page_size=1000
+            )
+        )
 
-        self.assertFalse(result["limited"])
         self.assertCountEqual(
-            result["results"],
+            result,
             [
                 {
                     "user_id": local_user,
@@ -567,9 +576,14 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
 
     def test_get_local_users_in_user_dir_remote_only(self) -> None:
         """A directory containing only remote users has no local results."""
+        # FIXME: Test does not what it says
         self.assertEqual(
-            self.get_success(self.store.get_local_users_in_user_dir()),
-            {"limited": False, "results": []},
+            self.get_success(
+                self.store.get_local_users_in_user_dir_paginated(
+                    start_token=None, page_size=1000
+                )
+            ),
+            [],
         )
 
     def test_get_local_users_in_user_dir_unlisted_account(self) -> None:
@@ -577,8 +591,12 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.register_user("@unlisted:test"))
 
         self.assertEqual(
-            self.get_success(self.store.get_local_users_in_user_dir()),
-            {"limited": False, "results": []},
+            self.get_success(
+                self.store.get_local_users_in_user_dir_paginated(
+                    start_token=None, page_size=1000
+                )
+            ),
+            [],
         )
 
     def test_search_user_dir(self) -> None:

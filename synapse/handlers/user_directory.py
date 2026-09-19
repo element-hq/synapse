@@ -19,6 +19,7 @@
 #
 #
 
+import asyncio
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Sequence
@@ -42,7 +43,10 @@ from synapse.api.errors import (
     RequestSendFailed,
     SynapseError,
 )
-from synapse.federation.user_directory import UserDirectoryResponseModel
+from synapse.federation.user_directory import (
+    UserDirectoryEntryModel,
+    UserDirectoryResponseModel,
+)
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.http.client import is_unknown_endpoint
 from synapse.metrics import SERVER_NAME_LABEL
@@ -895,25 +899,64 @@ class UserDirectoryHandler(StateDeltasHandler):
             )
             return
 
-        total_reconciled = 0
+        async def sync_destination(destination: str) -> None:
+            async with asyncio.TaskGroup() as tg:
+                total_reconciled = 0
+                start_token = None  # Start with first page
+                while True:
+                    response = await self._federation_client.user_directory_fetch(
+                        destination,
+                        start_token,
+                        self._federated_user_directory_fetch_timeout,
+                    )
+                    end_token = response.next_token
 
+                    # Ensure loop progress.
+                    if start_token and end_token and end_token <= start_token:
+                        raise ValueError(
+                            "next_token from response references previous page"
+                        )
+
+                    # TODO: Deduplicate models and move validation to user_directory_fetch
+                    # results: list[UserDirectoryEntryModel] = response.results
+                    entries: list[RemoteUserDirectoryEntry] = (
+                        self._parse_remote_user_directory_results(response, destination)
+                    )
+
+                    # Update user dir with new data in the background.
+                    tg.create_task(
+                        self.reconcile_remote_users(
+                            destination,
+                            entries,
+                            start_token,
+                            end_token,
+                        )
+                    )
+                    total_reconciled += len(entries)
+
+                    # Exit loop if last page was reached.
+                    if not end_token:
+                        break
+
+                    start_token = end_token
+
+            logger.debug(
+                "Federated user directory sync reconciled %d remote users for destination `%s`",
+                total_reconciled,
+                destination,
+            )
+
+        # TODO: Make concurrent. Maybe use Semaphore?
         for destination in destinations:
             try:
-                response = await self._federation_client.user_directory_fetch(
-                    destination,
-                    self._federated_user_directory_fetch_timeout,
-                )
-                entries = self._parse_remote_user_directory_results(
-                    response, destination
-                )
-            except RequestSendFailed as e:
+                await sync_destination(destination)
+            except* RequestSendFailed as e:
                 logger.warning(
                     "Failed to fetch federated user directory [destination=%s]: %s",
                     destination,
                     e,
                 )
-                continue
-            except HttpResponseException as e:
+            except* HttpResponseException as e:
                 if e.code == HTTPStatus.NOT_FOUND or is_unknown_endpoint(e):
                     logger.info(
                         "Federated user directory is unsupported or disabled "
@@ -928,32 +971,25 @@ class UserDirectoryHandler(StateDeltasHandler):
                         e.code,
                         e,
                     )
-                continue
-            except ValidationError as e:
+            except* ValidationError as e:
                 logger.warning(
                     "Invalid federated user directory response [destination=%s]: %s",
                     destination,
                     e,
                 )
-                continue
-            except Exception:
+            except* Exception:
                 logger.exception(
                     "Unexpected error fetching or validating federated user "
                     "directory [destination=%s]",
                     destination,
                 )
-                continue
-
-            await self.reconcile_remote_users(destination, entries)
-            total_reconciled += len(entries)
-
-        logger.debug(
-            "Federated user directory sync reconciled %d remote users",
-            total_reconciled,
-        )
 
     async def reconcile_remote_users(
-        self, homeserver: str, users: Sequence[RemoteUserDirectoryEntry]
+        self,
+        homeserver: str,
+        users: Sequence[UserDirectoryEntryModel],
+        start_token: str | None,
+        end_token: str | None,
     ) -> None:
         """Reconcile the remote users made visible via federated search for a
         single remote homeserver.
@@ -967,6 +1003,7 @@ class UserDirectoryHandler(StateDeltasHandler):
             # Only the worker that owns the user directory should write to it.
             return
 
+        # TODO: Make sure these checks and conversions are necessary.
         profiles: list[tuple[str, str | None, str | None]] = []
         for entry in users:
             try:
@@ -992,4 +1029,6 @@ class UserDirectoryHandler(StateDeltasHandler):
 
             profiles.append((entry.user_id, entry.display_name, entry.avatar_url))
 
-        await self.store.reconcile_federated_remote_users(homeserver, profiles)
+        await self.store.reconcile_federated_remote_users(
+            homeserver, profiles, start_token, end_token
+        )

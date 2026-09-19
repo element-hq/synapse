@@ -939,7 +939,8 @@ class FederationUserDirectoryFetchServlet(BaseFederationServerServlet):
         content: Literal[None],
         query: dict[bytes, list[bytes]],
     ) -> tuple[int, JsonMapping]:
-        return await self.handler.on_user_directory_fetch_request(origin)
+        start_token = parse_string_from_args(query, "start_token")
+        return await self.handler.on_user_directory_fetch_request(origin, start_token)
 
 
 FEDERATION_SERVLET_CLASSES: tuple[type[BaseFederationServlet], ...] = (

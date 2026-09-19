@@ -859,6 +859,7 @@ class TransportLayerClient:
     async def user_directory_fetch(
         self,
         destination: str,
+        next_token: str | None,
         timeout: int,
     ) -> JsonDict:
         """
@@ -882,6 +883,7 @@ class TransportLayerClient:
         return await self.client.get_json(
             destination,
             path=path,
+            args={"next_token": next_token},
             # Ignore backoff because this fetch uses a small, dedicated timeout.
             ignore_backoff=True,
             timeout=timeout,

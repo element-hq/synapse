@@ -371,7 +371,9 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         # Call the federation client method
         result = self.get_success(
-            self.federation_client.user_directory_fetch("other.example.com", 2000)
+            self.federation_client.user_directory_fetch(
+                "other.example.com", next_token=None, timeout=2000
+            )
         )
 
         # Check that the result is correct
@@ -379,7 +381,7 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         # Check that user_directory_fetch was called with the correct arguments
         self.transport_layer.user_directory_fetch.assert_called_once_with(
-            "other.example.com", 2000
+            "other.example.com", next_token=None, timeout=2000
         )
 
     def test_user_directory_fetch_endpoint_not_found(self) -> None:
@@ -393,7 +395,9 @@ class FederationClientTest(FederatingHomeserverTestCase):
         )
 
         failure = self.get_failure(
-            self.federation_client.user_directory_fetch("other.example.com", 10),
+            self.federation_client.user_directory_fetch(
+                "other.example.com", next_token=None, timeout=10
+            ),
             HttpResponseException,
         )
 
@@ -407,7 +411,9 @@ class FederationClientTest(FederatingHomeserverTestCase):
         )
 
         failure = self.get_failure(
-            self.federation_client.user_directory_fetch("other.example.com", 10),
+            self.federation_client.user_directory_fetch(
+                "other.example.com", next_token=None, timeout=10
+            ),
             RequestSendFailed,
         )
 

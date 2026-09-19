@@ -36,3 +36,5 @@ class UserDirectoryResponseModel(ParseModel):
     """
 
     results: list[UserDirectoryEntryModel]
+    next_token: str | None
+    """Opaque token for keyset pagination. None if the last page is reached."""

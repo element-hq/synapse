@@ -1575,25 +1575,37 @@ class FederationServer(FederationBase):
             raise AuthError(code=403, msg="Server is banned from room")
 
     async def on_user_directory_fetch_request(
-        self, origin: str
+        self,
+        origin: str,
+        next_token: str | None,
     ) -> tuple[int, JsonMapping]:
         """Handle a user directory request from a remote server.
 
-        Returns every searchable local user, since the federation endpoint
-        always syncs the full local directory rather than matching a term. The
-        database query returns only registered local directory entries,
-        excluding cached remote users.
+        Returns a page of searchable local users from the user directory. Only
+        registered local directory entries are returned, excluding cached remote
+        users.
+
+        Pagination does not guarantee temporal consistency of the returned
+        results, i.e., each following page is from a newer snapshots of the user
+        directory. The returned pages are guaranteed to not contain duplicate
+        entries, though.
 
         Args:
             origin: The server that sent the request.
+            next_token: Opaque pagination token. None for the first page.
 
         Returns:
             A tuple of (response code, response json)
         """
-        results = await self.store.get_local_users_in_user_dir()
+        page_size = 1000
+        results = await self.store.get_local_users_in_user_dir_paginated(
+            next_token, page_size
+        )
+        has_next_page = len(results) >= page_size
+        next_token = results[-1]["user_id"] if has_next_page else None
 
         response = UserDirectoryResponseModel.model_validate(
-            {"results": results["results"]}
+            {"results": results, "next_token": next_token}
         )
         # Keep full-directory responses compact by omitting unset profile fields.
         return 200, response.model_dump(mode="json", exclude_none=True)
