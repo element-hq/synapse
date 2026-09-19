@@ -1109,7 +1109,7 @@ user_ips_max_age: 14d
 ---
 ### `request_token_inhibit_3pid_errors`
 
-*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `false`.
+*(boolean)* Inhibits the `/requestToken` endpoints from returning an error that might leak information about whether an e-mail address is in use or not on this homeserver. Note that for some endpoints the error situation is the e-mail already being used, and for others the error is entering the e-mail being unused. If this option is enabled, instead of returning an error, these endpoints will act as if no error happened and return a fake session ID (`sid`) to clients. Defaults to `true`.
 
 Example configuration:
 ```yaml
