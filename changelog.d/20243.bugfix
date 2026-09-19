@@ -1,0 +1,1 @@
+Default `request_token_inhibit_3pid_errors` to `true` to prevent `/requestToken` endpoints from revealing whether an email address is associated with an account. Contributed by @Manixhor.
