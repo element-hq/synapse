@@ -124,6 +124,11 @@ esac
 PYPKG=$(basename "$SNAKE")
 echo "synapse:pydepends=$PYPKG" >> debian/matrix-synapse-py3.substvars
 
+# Compiled Python files are generated when the package is installed. Do not ship
+# build-time bytecode caches or version-control metadata from vendored packages.
+find "$VIRTUALENV_DIR" -type f \( -name '*.py[co]' -o -name .gitignore \) -delete
+find "$VIRTUALENV_DIR" -depth -type d -name __pycache__ -delete
+
 
 # add a couple of triggers.  This is needed so that dh-virtualenv can rebuild
 # the venv when the system python changes (see
@@ -135,6 +140,6 @@ echo "synapse:pydepends=$PYPKG" >> debian/matrix-synapse-py3.substvars
 cat >>"debian/.debhelper/generated/matrix-synapse-py3/triggers" <<EOF
 # triggers for dh-virtualenv
 interest-noawait $SNAKE
-interest dh-virtualenv-interpreter-update
+interest-noawait dh-virtualenv-interpreter-update
 
 EOF
