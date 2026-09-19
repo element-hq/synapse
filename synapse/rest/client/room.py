@@ -1412,6 +1412,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                         event_id=event_id,
                         initial_redaction_event=event,
                         relation_types=with_relations,
+                        room_version=room_version,
                     )
 
             event_id = event.event_id
@@ -1505,7 +1506,7 @@ class RoomAliasListServlet(RestServlet):
     PATTERNS = [
         re.compile(
             r"^/_matrix/client/unstable/org\.matrix\.msc2432"
-            r"/rooms/(?P<room_id>[^/]*)/aliases"
+            r"/rooms/(?P<room_id>[^/]*)/aliases$"
         ),
     ] + list(client_patterns("/rooms/(?P<room_id>[^/]*)/aliases$", unstable=False))
     CATEGORY = "Client API requests"

@@ -291,6 +291,9 @@ information.
     # Unstable MSC4140 support
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events(/.*/restart)?$
 
+    # Stabilised Delegated Authentication support (`matrix_authentication_service.enabled: true`)
+    ^/_synapse/mas/
+
 Additionally, the following REST endpoints can be handled for GET requests:
 
     # Push rules requests
@@ -306,6 +309,9 @@ Additionally, the following REST endpoints can be handled for GET requests:
     # Admin API requests
     ^/_synapse/admin/v2/users/[^/]+$
 
+    # Unstable MSC4140 support
+    ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events/[^/]+$
+
 Pagination requests can also be handled, but all requests for a given
 room must be routed to the same instance. Additionally, care must be taken to
 ensure that the purge history admin API is not used while pagination requests
@@ -315,7 +321,7 @@ for the room are in flight:
 
 Additionally, the following endpoints should be included if Synapse is configured
 to use SSO (you only need to include the ones for whichever SSO provider you're
-using):
+using) and delegated authentication isn't enabled:
 
     # for all SSO providers
     ^/_matrix/client/(api/v1|r0|v3|unstable)/login/sso/redirect
@@ -572,10 +578,15 @@ configured as stream writer for the `device_lists` stream:
 ##### The `quarantined_media_changes` stream
 
 The `quarantined_media_changes` stream supports multiple writers. The following endpoints
-can be handled by any worker, but should be routed directly to one of the workers
-configured as stream writer for the `quarantined_media_changes` stream:
+must be routed directly to one of the workers configured as stream writer for the
+`quarantined_media_changes` stream (which must also be able to run the media
+repository, as these endpoints are only registered on media-capable workers):
 
     ^/_synapse/admin/v1/quarantine_media/.*$
+    ^/_synapse/admin/v1/room/.*/media/quarantine$
+    ^/_synapse/admin/v1/user/.*/media/quarantine$
+    ^/_synapse/admin/v1/media/quarantine/.*$
+    ^/_synapse/admin/v1/media/unquarantine/.*$
 
 #### Restrict outbound federation traffic to a specific set of workers
 

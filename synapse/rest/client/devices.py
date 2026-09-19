@@ -77,7 +77,7 @@ class DeleteDevicesRestServlet(RestServlet):
     key which lists the device_ids to delete. Requires user interactive auth.
     """
 
-    PATTERNS = client_patterns("/delete_devices")
+    PATTERNS = client_patterns("/delete_devices$")
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()

@@ -708,7 +708,7 @@ class SsoRedirectServlet(RestServlet):
 
 
 class CasTicketServlet(RestServlet):
-    PATTERNS = client_patterns("/login/cas/ticket", v1=True)
+    PATTERNS = client_patterns("/login/cas/ticket$", v1=True)
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()

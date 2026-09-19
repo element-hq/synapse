@@ -22,6 +22,7 @@
 from typing import Any
 
 import yaml
+from parameterized import parameterized
 
 from synapse.config._base import ConfigError, RootConfig
 from synapse.config.homeserver import HomeServerConfig
@@ -227,6 +228,29 @@ class ServerConfigTestCase(unittest.TestCase):
         for disallowed_value in (-1, 0.5):
             with self.assertRaises(ConfigError):
                 _read_config(generate_config(disallowed_value))
+
+    @parameterized.expand(
+        [
+            [
+                "single",
+                {
+                    "experimental_features": {
+                        "msc4140_max_delayed_events_per_user": 3,
+                    }
+                },
+            ],
+            # This has historically worked and this is being added as a regression test
+            ["none", {"experimental_features": None}],
+        ]
+    )
+    def test_experimental_features_parsing(
+        self, test_description: str, config_values: JsonDict
+    ) -> None:
+        """
+        Test the that `experimental_features` parses with these values
+        """
+
+        _read_config(config_values)
 
 
 def _read_config(config_values: JsonDict) -> None:

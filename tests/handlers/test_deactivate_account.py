@@ -21,7 +21,13 @@
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    JoinRules,
+    Membership,
+    ProfileFields,
+)
 from synapse.push.rulekinds import PRIORITY_CLASS_MAP
 from synapse.rest import admin
 from synapse.rest.client import account, login, room
@@ -515,8 +521,12 @@ class DeactivateAccountTestCase(HomeserverTestCase):
         # Setting a display name now works again.
         user = UserID.from_string(self.user)
         self.get_success(
-            self.hs.get_profile_handler().set_displayname(
-                user, create_requester(user), "Reactivated", by_admin=True
+            self.hs.get_profile_handler().set_field(
+                target_user=user,
+                requester=create_requester(user),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Reactivated",
+                by_admin=True,
             )
         )
         self.assertEqual(
@@ -530,8 +540,12 @@ class DeactivateAccountTestCase(HomeserverTestCase):
         """
         user = UserID.from_string(self.user)
         self.get_success(
-            self.hs.get_profile_handler().set_displayname(
-                user, create_requester(user), "Original", by_admin=True
+            self.hs.get_profile_handler().set_field(
+                target_user=user,
+                requester=create_requester(user),
+                field_name=ProfileFields.DISPLAYNAME,
+                new_value="Original",
+                by_admin=True,
             )
         )
 

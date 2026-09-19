@@ -442,6 +442,19 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_sticky_events)
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ProfilesExtension:
+            """The Profile Updates extension (MSC4262)
+
+            Attributes:
+                users: map (user_id -> [profile_updates])
+            """
+
+            users: Mapping[str, JsonMapping | None]
+
+            def __bool__(self) -> bool:
+                return bool(self.users)
+
         to_device: ToDeviceExtension | None = None
         e2ee: E2eeExtension | None = None
         account_data: AccountDataExtension | None = None
@@ -449,6 +462,7 @@ class SlidingSyncResult:
         typing: TypingExtension | None = None
         thread_subscriptions: ThreadSubscriptionsExtension | None = None
         sticky_events: StickyEventsExtension | None = None
+        profiles: ProfilesExtension | None = None
 
         def __bool__(self) -> bool:
             """Are there any updates that should be returned immediately to
@@ -461,6 +475,7 @@ class SlidingSyncResult:
                 or self.typing
                 or self.thread_subscriptions
                 or self.sticky_events
+                or self.profiles
             )
 
     next_pos: SlidingSyncStreamToken
@@ -919,6 +934,7 @@ class PerConnectionState:
         receipts: The status of each room for the receipts stream.
         room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
+        account_data: The status of each room for the account_data stream.
     """
 
     last_used_ts: int | None = None
@@ -951,7 +967,12 @@ class PerConnectionState:
         )
 
     def __len__(self) -> int:
-        return len(self.rooms) + len(self.receipts) + len(self.room_configs)
+        return (
+            len(self.account_data)
+            + len(self.rooms)
+            + len(self.receipts)
+            + len(self.room_configs)
+        )
 
 
 @attr.s(auto_attribs=True)
