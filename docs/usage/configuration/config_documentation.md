@@ -4641,6 +4641,20 @@ Example configuration:
 run_background_tasks_on: worker1
 ```
 ---
+### `task_scheduler`
+
+*(object)* Configuration for the task scheduler.
+
+This setting has the following sub-options:
+
+* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `5`.
+
+Example configuration:
+```yaml
+task_scheduler:
+  max_concurrent_tasks: 5
+```
+---
 ### `update_user_directory_from_worker`
 
 *(string|null)* The [worker](../../workers.md#updating-the-user-directory) that is used to update the user directory. If not provided this defaults to the main process.
