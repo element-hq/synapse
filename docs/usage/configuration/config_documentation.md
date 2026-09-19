@@ -4647,12 +4647,12 @@ run_background_tasks_on: worker1
 
 This setting has the following sub-options:
 
-* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `2`.
+* `max_concurrent_tasks` (integer): The maximum number of tasks that can run concurrently in the task scheduler. Setting this too high may swamp the database connection pool. Defaults to `5`.
 
 Example configuration:
 ```yaml
 task_scheduler:
-  max_concurrent_tasks: 2
+  max_concurrent_tasks: 5
 ```
 ---
 ### `update_user_directory_from_worker`

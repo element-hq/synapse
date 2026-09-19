@@ -25,7 +25,7 @@ class TaskSchedulerConfigTestCase(TestCase):
         config_dict = default_config(server_name="test")
         config = HomeServerConfig()
         config.parse_config_dict(config_dict, "", "")
-        self.assertEqual(config.task_scheduler.max_concurrent_tasks, 2)
+        self.assertEqual(config.task_scheduler.max_concurrent_tasks, 5)
 
     def test_custom_configuration(self) -> None:
         config_dict = default_config(server_name="test")

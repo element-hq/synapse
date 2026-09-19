@@ -18,7 +18,7 @@ from synapse.types import JsonDict
 
 from ._base import Config, ConfigError
 
-DEFAULT_MAX_CONCURRENT_TASKS = 2
+DEFAULT_MAX_CONCURRENT_TASKS = 5
 
 
 class TaskSchedulerConfig(Config):

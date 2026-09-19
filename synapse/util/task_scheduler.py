@@ -84,7 +84,7 @@ class TaskScheduler:
       scheduler.
 
     - Only a limited number of tasks can run at the same time (configured by
-      the `task_scheduler.max_concurrent_tasks` setting, defaulting to 2). If the
+      the `task_scheduler.max_concurrent_tasks` setting, defaulting to 5). If the
       pool is full, tasks may be delayed. Make sure your scheduled tasks can
       actually finish.
 
@@ -103,7 +103,7 @@ class TaskScheduler:
     # Time before a complete or failed task is deleted from the DB
     KEEP_TASKS_FOR_MS = 7 * 24 * 60 * 60 * 1000  # 1 week
     # Default maximum number of tasks that can run at the same time
-    DEFAULT_MAX_CONCURRENT_RUNNING_TASKS = 2
+    DEFAULT_MAX_CONCURRENT_RUNNING_TASKS = 5
     MAX_CONCURRENT_RUNNING_TASKS = DEFAULT_MAX_CONCURRENT_RUNNING_TASKS
     # Time from the last task update after which we will log a warning
     LAST_UPDATE_BEFORE_WARNING_MS = 24 * 60 * 60 * 1000  # 24hrs

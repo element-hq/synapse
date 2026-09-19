@@ -5796,9 +5796,9 @@ properties:
         description: >-
           The maximum number of tasks that can run concurrently in the task
           scheduler. Setting this too high may swamp the database connection pool.
-        default: 2
+        default: 5
     examples:
-      - max_concurrent_tasks: 2
+      - max_concurrent_tasks: 5
   update_user_directory_from_worker:
     type: ["string", "null"]
     description: >-
