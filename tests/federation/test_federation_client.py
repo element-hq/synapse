@@ -20,14 +20,16 @@
 #
 import urllib
 from unittest import mock
+from unittest.mock import AsyncMock
 
 import twisted.web.client
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import HttpResponseException, RequestSendFailed
 from synapse.events import EventBase
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.util.clock import Clock
 
@@ -41,7 +43,18 @@ class FederationClientTest(FederatingHomeserverTestCase):
         admin.register_servlets,
         room.register_servlets,
         login.register_servlets,
+        user_directory.register_servlets,
+        register.register_servlets,
     ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        """Create a homeserver with federation enabled and user directory enabled."""
+        config = self.default_config()
+        config["user_directory"] = {
+            "enabled": True,
+            "search_all_users": True,
+        }
+        return self.setup_test_homeserver(config=config)
 
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -59,6 +72,9 @@ class FederationClientTest(FederatingHomeserverTestCase):
 
         self.creator = f"@creator:{self.OTHER_SERVER_NAME}"
         self.room_version = self.hs.config.server.default_room_version
+        self.test_room_id = "!room_id"
+        self.federation_client = homeserver.get_federation_client()
+        self.transport_layer = self.federation_client.transport_layer
 
     def test_get_room_state(self) -> None:
         # mock up some events to use in the response.
@@ -336,3 +352,69 @@ class FederationClientTest(FederatingHomeserverTestCase):
         # This is 2 because it failed once from `self.OTHER_SERVER_NAME` and the
         # other from "yet.another.server"
         self.assertEqual(backfill_num_attempts, 2)
+
+    def test_user_directory_fetch(self) -> None:
+        """Test that the federation client fetches a remote user directory."""
+        # Mock the transport layer's user_directory_fetch method
+        mock_results = {
+            "results": [
+                {
+                    "user_id": "@user:other.example.com",
+                    "display_name": "Test User",
+                    "avatar_url": "mxc://example.com/avatar",
+                }
+            ],
+        }
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value=mock_results
+        )
+
+        # Call the federation client method
+        result = self.get_success(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", next_token=None, timeout=2000
+            )
+        )
+
+        # Check that the result is correct
+        self.assertEqual(result, mock_results)
+
+        # Check that user_directory_fetch was called with the correct arguments
+        self.transport_layer.user_directory_fetch.assert_called_once_with(
+            "other.example.com", next_token=None, timeout=2000
+        )
+
+    def test_user_directory_fetch_endpoint_not_found(self) -> None:
+        """The federation client propagates HTTP errors to its caller."""
+        # Mock the transport layer to raise a 404 error
+        error = HttpResponseException(
+            404, "Not Found", b'{"errcode": "M_UNRECOGNIZED"}'
+        )
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=error
+        )
+
+        failure = self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", next_token=None, timeout=10
+            ),
+            HttpResponseException,
+        )
+
+        self.assertIs(failure.value, error)
+
+    def test_user_directory_fetch_request_failure(self) -> None:
+        """The federation client propagates transport errors to its caller."""
+        error = RequestSendFailed(RuntimeError("connection failed"), can_retry=True)
+        self.transport_layer.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=error
+        )
+
+        failure = self.get_failure(
+            self.federation_client.user_directory_fetch(
+                "other.example.com", next_token=None, timeout=10
+            ),
+            RequestSendFailed,
+        )
+
+        self.assertIs(failure.value, error)

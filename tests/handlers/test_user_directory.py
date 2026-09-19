@@ -17,21 +17,28 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from http import HTTPStatus
 from typing import Any
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 from urllib.parse import quote
 
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import UserTypes
-from synapse.api.errors import SynapseError
+from synapse.api.errors import HttpResponseException, RequestSendFailed, SynapseError
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.appservice import ApplicationService
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import JsonDict, UserID, UserProfile, create_requester
+from synapse.types import (
+    JsonDict,
+    RemoteUserDirectoryEntry,
+    UserID,
+    UserProfile,
+    create_requester,
+)
 from synapse.util.clock import Clock
 
 from tests import unittest
@@ -1440,3 +1447,636 @@ class UserDirectoryRemoteProfileTestCase(unittest.HomeserverTestCase):
                     display_name="Sir Bruce Bruceson", avatar_url="mxc://remote/789"
                 ),
             )
+
+
+class FederatedUserDirectoryHandlerTestCase(unittest.HomeserverTestCase):
+    """Tests for syncing and ingesting federated user directory entries."""
+
+    servlets = [
+        login.register_servlets,
+        register.register_servlets,
+        user_directory.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        # Enable updating the user directory on this (main) process.
+        config["update_user_directory_from_worker"] = None
+        # Match production: these methods are only called by the federation
+        # sync while the experimental feature is enabled.
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+            "bwi_federated_user_dir_sync_interval": "1s",
+        }
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.handler = hs.get_user_directory_handler()
+        self.federation_client = hs.get_federation_client()
+        self.user_dir_helper = GetUserDirectoryTables(self.store)
+
+    @override_config(
+        {
+            "federation_domain_whitelist": [
+                "remote.example.com",
+                "second.example.com",
+            ]
+        }
+    )
+    def test_sync_uses_whitelist_destinations_and_upserts_remote_users(self) -> None:
+        # Neither whitelisted server has a destination record. This third server
+        # is known to the database but must not be queried.
+        self.get_success(
+            self.store.set_destination_retry_timings(
+                "database-only.example.com", None, 0, 0
+            )
+        )
+
+        async def fetch(destination: str, _timeout: int) -> JsonDict:
+            return {
+                "results": [
+                    {
+                        "user_id": f"@bob:{destination}",
+                        "display_name": "Bob Remote",
+                        "avatar_url": None,
+                    }
+                ],
+            }
+
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=fetch
+        )
+
+        self.get_success(self.handler._sync_federated_user_directory())
+
+        timeout = (
+            self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout
+        )
+        self.federation_client.user_directory_fetch.assert_has_awaits(
+            [call("remote.example.com", timeout), call("second.example.com", timeout)],
+            any_order=True,
+        )
+        self.assertEqual(self.federation_client.user_directory_fetch.await_count, 2)
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertEqual(
+            profiles,
+            {
+                f"@bob:{destination}": ProfileInfo(
+                    display_name="Bob Remote", avatar_url=None
+                )
+                for destination in ("remote.example.com", "second.example.com")
+            },
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {
+                ("@bob:remote.example.com", "remote.example.com"),
+                ("@bob:second.example.com", "second.example.com"),
+            },
+        )
+
+    @override_config({"federation_domain_whitelist": ["test"]})
+    def test_sync_skips_own_server(self) -> None:
+        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+
+        self.get_success(self.handler._sync_federated_user_directory())
+
+        self.federation_client.user_directory_fetch.assert_not_called()
+
+    def test_sync_empty_or_unset_whitelist_clears_imports(self) -> None:
+        whitelists: list[dict[str, bool] | None] = [None, {}]
+        for whitelist in whitelists:
+            with self.subTest(whitelist=whitelist):
+                self.hs.config.federation.federation_domain_whitelist = whitelist
+                self.get_success(
+                    self.store.reconcile_federated_remote_users(
+                        "remote.example.com", [("@bob:remote.example.com", "Bob", None)]
+                    )
+                )
+
+                self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+                self.get_success(self.handler._sync_federated_user_directory())
+
+                self.federation_client.user_directory_fetch.assert_not_called()
+                self.assertEqual(
+                    self.get_success(
+                        self.user_dir_helper.get_users_in_federated_search()
+                    ),
+                    set(),
+                )
+                self.assertEqual(
+                    self.get_success(
+                        self.user_dir_helper.get_profiles_in_user_directory()
+                    ),
+                    {},
+                )
+
+    def test_sync_does_not_prune_when_directory_updates_are_disabled(self) -> None:
+        user_id = "@bob:remote.example.com"
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "remote.example.com", [(user_id, "Bob", None)]
+            )
+        )
+        self.handler.update_user_directory = False
+
+        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+        self.get_success(self.handler._sync_federated_user_directory())
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {(user_id, "remote.example.com")},
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+            {user_id: ProfileInfo(display_name="Bob", avatar_url=None)},
+        )
+        self.federation_client.user_directory_fetch.assert_not_called()
+
+    def _run_sync_returning(self, results: list[dict]) -> None:
+        """Run a sync with the supplied remote results."""
+        self._run_sync_response({"results": results})
+
+    def _run_sync_response(self, response: JsonDict) -> None:
+        """Run a sync with the supplied remote response."""
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value=response
+        )
+        self.get_success(self.handler._sync_federated_user_directory())
+
+    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
+    def test_sync_clears_unset_profile_fields(self) -> None:
+        """Missing or null fields in a full snapshot clear cached profile values."""
+        destination = "remote.example.com"
+        user_id = "@bob:remote.example.com"
+        for description, profile in (
+            ("omitted", {}),
+            ("explicit null", {"display_name": None, "avatar_url": None}),
+        ):
+            with self.subTest(description):
+                self._run_sync_returning(
+                    [
+                        {
+                            "user_id": user_id,
+                            "display_name": "Bob",
+                            "avatar_url": "mxc://remote.example.com/avatar",
+                        }
+                    ]
+                )
+                profiles = self.get_success(
+                    self.user_dir_helper.get_profiles_in_user_directory()
+                )
+                self.assertEqual(
+                    profiles[user_id],
+                    ProfileInfo(
+                        display_name="Bob", avatar_url="mxc://remote.example.com/avatar"
+                    ),
+                )
+
+                self._run_sync_returning([{"user_id": user_id, **profile}])
+
+                profiles = self.get_success(
+                    self.user_dir_helper.get_profiles_in_user_directory()
+                )
+                self.assertEqual(
+                    profiles[user_id], ProfileInfo(display_name=None, avatar_url=None)
+                )
+                self.assertIn(
+                    (user_id, destination),
+                    self.get_success(
+                        self.user_dir_helper.get_users_in_federated_search()
+                    ),
+                )
+
+    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
+    def test_sync_prunes_users_absent_from_new_result(self) -> None:
+        self._run_sync_returning(
+            [
+                {"user_id": "@bob:remote.example.com", "display_name": "Bob"},
+                {"user_id": "@carol:remote.example.com", "display_name": "Carol"},
+            ]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {
+                ("@bob:remote.example.com", "remote.example.com"),
+                ("@carol:remote.example.com", "remote.example.com"),
+            },
+        )
+
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@bob:remote.example.com", profiles)
+        self.assertNotIn("@carol:remote.example.com", profiles)
+
+    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
+    def test_sync_empty_result_prunes(self) -> None:
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@bob:remote.example.com", "remote.example.com")},
+        )
+
+        # A successful empty result is authoritative.
+        self._run_sync_returning([])
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            set(),
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertNotIn("@bob:remote.example.com", profiles)
+
+    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
+    def test_sync_invalid_response_does_not_reconcile(self) -> None:
+        """Any malformed entry invalidates the destination's whole response."""
+        self._run_sync_returning(
+            [{"user_id": "@bob:remote.example.com", "display_name": "Bob"}]
+        )
+
+        malformed_responses: list[tuple[str, JsonDict]] = [
+            ("missing results", {}),
+            ("results is not a list", {"results": "invalid"}),
+            ("entry is not an object", {"results": ["invalid"]}),
+            ("missing user ID", {"results": [{"display_name": "Missing"}]}),
+            ("invalid user ID", {"results": [{"user_id": "invalid"}]}),
+            (
+                "user belongs to another server",
+                {"results": [{"user_id": "@mallory:elsewhere.example.com"}]},
+            ),
+            (
+                "invalid optional field",
+                {
+                    "results": [
+                        {
+                            "user_id": "@carol:remote.example.com",
+                            "display_name": 123,
+                        }
+                    ]
+                },
+            ),
+            (
+                "duplicate user ID",
+                {
+                    "results": [
+                        {"user_id": "@carol:remote.example.com"},
+                        {"user_id": "@carol:remote.example.com"},
+                    ]
+                },
+            ),
+            (
+                "valid and invalid entries",
+                {
+                    "results": [
+                        {"user_id": "@carol:remote.example.com"},
+                        {"user_id": "invalid"},
+                    ]
+                },
+            ),
+        ]
+
+        for description, response in malformed_responses:
+            with self.subTest(description):
+                self._run_sync_response(response)
+
+                self.assertEqual(
+                    self.get_success(
+                        self.user_dir_helper.get_users_in_federated_search()
+                    ),
+                    {("@bob:remote.example.com", "remote.example.com")},
+                )
+
+    def test_sync_failures_are_isolated_per_destination(self) -> None:
+        """A failed destination does not prune its users or stop the sync."""
+        failures: dict[str, Exception] = {
+            "connection.example.com": RequestSendFailed(
+                RuntimeError("connection failed"), can_retry=True
+            ),
+            "unsupported.example.com": HttpResponseException(
+                HTTPStatus.NOT_FOUND,
+                "Not Found",
+                b'{"errcode":"M_UNRECOGNIZED"}',
+            ),
+            "http-error.example.com": HttpResponseException(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                b'{"errcode":"M_UNKNOWN"}',
+            ),
+            "unexpected.example.com": RuntimeError("unexpected failure"),
+        }
+        valid_destination = "valid.example.com"
+
+        self.hs.config.federation.federation_domain_whitelist = dict.fromkeys(
+            [*failures, valid_destination], True
+        )
+
+        # Persisted imports from a removed server must be cleaned up even when
+        # other servers fail to respond.
+        removed_user = "@old:removed.example.com"
+        self.get_success(
+            self.store.reconcile_federated_remote_users(
+                "removed.example.com", [(removed_user, "Old", None)]
+            )
+        )
+
+        for destination in failures:
+            self.get_success(
+                self.handler.reconcile_remote_users(
+                    destination,
+                    [
+                        RemoteUserDirectoryEntry(
+                            user_id=f"@existing:{destination}",
+                            display_name="Existing",
+                            avatar_url=None,
+                        )
+                    ],
+                )
+            )
+
+        async def fetch(destination: str, _timeout: int) -> JsonDict:
+            error = failures.get(destination)
+            if error is not None:
+                raise error
+
+            return {"results": [{"user_id": f"@new:{destination}"}]}
+
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            side_effect=fetch
+        )
+
+        self.get_success(self.handler._sync_federated_user_directory())
+
+        expected_users = {
+            (f"@existing:{destination}", destination) for destination in failures
+        }
+        expected_users.add((f"@new:{valid_destination}", valid_destination))
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            expected_users,
+        )
+        self.assertNotIn(
+            removed_user,
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+        )
+        self.assertEqual(
+            self.federation_client.user_directory_fetch.call_count,
+            len(failures) + 1,
+        )
+
+    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
+    def test_sync_is_scheduled_on_background_worker(self) -> None:
+        self.federation_client.user_directory_fetch = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "results": [
+                    {"user_id": "@scheduled:remote.example.com"},
+                ]
+            }
+        )
+
+        self.reactor.advance(1.0)
+
+        self.federation_client.user_directory_fetch.assert_called_once_with(
+            "remote.example.com",
+            self.hs.config.experimental.bwi_federated_user_dir_federation_fetch_timeout,
+        )
+
+    def test_reconcile_remote_users_persists_profiles_and_visibility(self) -> None:
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@alice:remote.example.com",
+                        display_name="Alice Remote",
+                        avatar_url="mxc://remote.example.com/abc",
+                    )
+                ],
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertEqual(
+            profiles.get("@alice:remote.example.com"),
+            ProfileInfo(
+                display_name="Alice Remote",
+                avatar_url="mxc://remote.example.com/abc",
+            ),
+        )
+
+        federated_users = self.get_success(
+            self.user_dir_helper.get_users_in_federated_search()
+        )
+        self.assertIn(
+            (
+                "@alice:remote.example.com",
+                "remote.example.com",
+            ),
+            federated_users,
+        )
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_public_rooms()), set()
+        )
+
+    def test_reconcile_remote_users_ignores_local_users(self) -> None:
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@localuser:test",
+                        display_name="Local User",
+                        avatar_url=None,
+                    )
+                ],
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertNotIn("@localuser:test", profiles)
+
+    def test_reconcile_remote_users_ignores_users_from_other_servers(self) -> None:
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@alice:remote.example.com",
+                        display_name="Alice Remote",
+                        avatar_url=None,
+                    ),
+                    RemoteUserDirectoryEntry(
+                        user_id="@mallory:third-party.example.com",
+                        display_name="Mallory",
+                        avatar_url=None,
+                    ),
+                    RemoteUserDirectoryEntry(
+                        user_id="not-a-valid-user-id",
+                        display_name="Malformed",
+                        avatar_url=None,
+                    ),
+                ],
+            )
+        )
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn("@alice:remote.example.com", profiles)
+        self.assertNotIn("@mallory:third-party.example.com", profiles)
+        self.assertNotIn("not-a-valid-user-id", profiles)
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            {("@alice:remote.example.com", "remote.example.com")},
+        )
+
+    def test_search_users_returns_cached_remote_users(self) -> None:
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@carol:remote.example.com",
+                        display_name="Carol Remote",
+                        avatar_url=None,
+                    )
+                ],
+            )
+        )
+
+        results = self.get_success(
+            self.handler.search_users("@searcher:test", "carol", 10)
+        )
+
+        self.assertIn(
+            "@carol:remote.example.com",
+            {user["user_id"] for user in results["results"]},
+        )
+
+    def test_remote_user_survives_leaving_last_real_room(self) -> None:
+        user_id = "@dave:remote.example.com"
+        room_id = "!real-room:test"
+
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id=user_id,
+                        display_name="Dave Remote",
+                        avatar_url=None,
+                    )
+                ],
+            )
+        )
+        self.get_success(self.store.add_users_in_public_rooms(room_id, [user_id]))
+
+        self.get_success(self.handler._handle_remove_user(room_id, user_id))
+
+        profiles = self.get_success(
+            self.user_dir_helper.get_profiles_in_user_directory()
+        )
+        self.assertIn(user_id, profiles)
+        self.assertIn(
+            (user_id, "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+        self.assertNotIn(
+            (user_id, room_id),
+            self.get_success(self.user_dir_helper.get_users_in_public_rooms()),
+        )
+
+    def test_remove_from_user_directory_clears_federated_visibility(self) -> None:
+        user_id = "@erin:remote.example.com"
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id=user_id,
+                        display_name="Erin Remote",
+                        avatar_url=None,
+                    )
+                ],
+            )
+        )
+
+        self.get_success(self.store.remove_from_user_dir(user_id))
+
+        self.assertNotIn(
+            user_id,
+            self.get_success(self.user_dir_helper.get_profiles_in_user_directory()),
+        )
+        self.assertNotIn(
+            (user_id, "remote.example.com"),
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+        )
+
+    def test_delete_all_from_user_directory_clears_federated_visibility(self) -> None:
+        self.get_success(
+            self.handler.reconcile_remote_users(
+                "remote.example.com",
+                [
+                    RemoteUserDirectoryEntry(
+                        user_id="@frank:remote.example.com",
+                        display_name="Frank Remote",
+                        avatar_url=None,
+                    )
+                ],
+            )
+        )
+
+        self.get_success(self.store.delete_all_from_user_dir())
+
+        self.assertEqual(
+            self.get_success(self.user_dir_helper.get_users_in_federated_search()),
+            set(),
+        )
+
+
+class FederatedUserDirectoryNoBackgroundTasksTestCase(unittest.HomeserverTestCase):
+    """Tests that federated directory sync only runs on the background worker."""
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+        config["run_background_tasks_on"] = "other"
+        config["experimental_features"] = {
+            "bwi_federated_user_dir_enabled": True,
+            "bwi_federated_user_dir_sync_interval": "1s",
+        }
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.handler = hs.get_user_directory_handler()
+        self.federation_client = hs.get_federation_client()
+
+    @override_config({"federation_domain_whitelist": ["remote.example.com"]})
+    def test_sync_is_not_scheduled(self) -> None:
+        self.federation_client.user_directory_fetch = AsyncMock()  # type: ignore[method-assign]
+
+        self.reactor.advance(1.0)
+
+        self.federation_client.user_directory_fetch.assert_not_called()
