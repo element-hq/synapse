@@ -1313,9 +1313,15 @@ The following parameters should be set in the URL:
 ## Override ratelimiting for users
 
 This API allows to override or disable ratelimiting for a specific user.
-There are specific APIs to set, get and delete a ratelimit.
+There are specific APIs to set, get and delete a ratelimit override.
 
-### Get status of ratelimit
+An override only replaces the rate and burst count of the *message sending*
+ratelimiter (`rc_message` in the homeserver config); it does not override the
+limits of other ratelimiters (e.g. `rc_invites`, `rc_joins` or `rc_login`).
+The exception is disabling ratelimiting: an override with `messages_per_second`
+set to `0` disables **all** ratelimiting for the user.
+
+### Get status of ratelimit override
 
 The API is:
 
@@ -1343,18 +1349,19 @@ The following parameters should be set in the URL:
 
 The following fields are returned in the JSON response body:
 
-- `messages_per_second` - integer - The number of actions that can
-  be performed in a second. `0` mean that ratelimiting is disabled for this user.
-- `burst_count` - integer - How many actions that can be performed before
+- `messages_per_second` - integer - The number of messages that can
+  be sent in a second. `0` means that ratelimiting is disabled for this user.
+- `burst_count` - integer - How many messages that can be sent before
   being limited.
 
-If **no** custom ratelimit is set, an empty JSON dict is returned.
+If **no** ratelimit override is set, an empty JSON dict is returned and the
+global ratelimits from the homeserver config apply to the user.
 
 ```json
 {}
 ```
 
-### Set ratelimit
+### Set ratelimit override
 
 The API is:
 
@@ -1380,23 +1387,27 @@ The following parameters should be set in the URL:
 
 Body parameters:
 
-- `messages_per_second` - positive integer, optional. The number of actions that can
-  be performed in a second. Defaults to `0`.
-- `burst_count` - positive integer, optional. How many actions that can be performed
+- `messages_per_second` - positive integer, optional. The number of messages that can
+  be sent in a second. Defaults to `0`.
+- `burst_count` - positive integer, optional. How many messages that can be sent
   before being limited. Defaults to `0`.
 
-To disable users' ratelimit set both values to `0`.
+To disable ratelimiting for the user entirely set both values to `0`.
 
 **Response**
 
 The following fields are returned in the JSON response body:
 
-- `messages_per_second` - integer - The number of actions that can
-  be performed in a second.
-- `burst_count` - integer - How many actions that can be performed before
+- `messages_per_second` - integer - The number of messages that can
+  be sent in a second.
+- `burst_count` - integer - How many messages that can be sent before
   being limited.
 
-### Delete ratelimit
+### Delete ratelimit override
+
+Removes the ratelimit override for the user, so that the global ratelimits from
+the homeserver config apply to the user again. This does **not** disable
+ratelimiting for the user; to do that, set an override with both values `0`.
 
 The API is:
 
