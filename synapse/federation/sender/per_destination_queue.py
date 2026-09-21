@@ -78,6 +78,12 @@ CATCHUP_RETRY_INTERVAL = 60 * 60 * 1000
 # they are bounded in size.
 MAX_PRESENCE_STATES_PER_EDU = 50
 
+MAX_PDUS_PER_TRANSACTION = 50
+"""
+How many PDUs we want to send in a transaction. We use the spec limit of 50 here.
+https://spec.matrix.org/v1.19/server-server-api/#put_matrixfederationv1sendtxnid
+"""
+
 
 @attr.s(slots=True, auto_attribs=True, frozen=True)
 class _StickyEventsTransactionInfo:
@@ -1011,7 +1017,7 @@ class PerDestinationQueue:
 
         # Now we look for any PDUs to send, by getting up to 50 PDUs from the
         # queue
-        pdus = self._pending_pdus[:50]
+        pdus = self._pending_pdus[:MAX_PDUS_PER_TRANSACTION]
 
         if not pdus and not pending_edus:
             # There is nothing to send. There's also nothing to record upon
@@ -1137,9 +1143,9 @@ class StickyEventBacklogTracker:
         if not self._backlogged:
             return None
 
-        # Select a room and get up to 50 backlogged sticky events
+        # Select a room and get up to 50 backlogged sticky events (to fill a transaction)
         backlog = await self._store.get_backlogged_sticky_events_for_destination(
-            self._destination, limit=50
+            self._destination, limit=MAX_PDUS_PER_TRANSACTION
         )
 
         if backlog is None:
