@@ -588,7 +588,7 @@ class FederationEventHandler:
             # The state DAG must not include rejected events
             raise SynapseError(
                 502,
-                "Unable to join because the remote server passed back a state  DAG that includes rejected events (invalid)",
+                "Unable to join because the remote server passed back a state DAG that includes rejected events (invalid)",
             )
 
         # and now persist the join event itself.
