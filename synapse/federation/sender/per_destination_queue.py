@@ -138,9 +138,10 @@ class _PreparedTransaction:
     When the transaction completes, this should be stored as our position in the events stream.
     """
 
-    pdu_count_from_main_queue: int
+    main_queue: bool
     """
-    The number of PDUs that were sent from the main queue.
+    True if and only if these events were from the 'main' queue
+    (not the sticky event backlog).
     """
 
     sticky_events: _StickyEventsTransactionInfo | None
@@ -1030,7 +1031,7 @@ class PerDestinationQueue:
             to_device_message_stream_id=device_stream_id_upon_completion,
             device_list_stream_id=device_list_id_upon_completion,
             last_stream_ordering=last_stream_ordering,
-            pdu_count_from_main_queue=len(pdus),
+            main_queue=True,
             # This is not part of the sticky events backlog flow,
             # so don't advance that
             sticky_events=None,
@@ -1044,10 +1045,8 @@ class PerDestinationQueue:
         through the various streams we have now got.
         """
         # Successfully sent transactions, so we remove pending PDUs from the queue
-        if transaction.pdu_count_from_main_queue:
-            self._pending_pdus = self._pending_pdus[
-                transaction.pdu_count_from_main_queue :
-            ]
+        if transaction.main_queue:
+            self._pending_pdus = self._pending_pdus[len(transaction.pdus) :]
 
         # Succeeded to send the transaction so we record where we have sent up
         # to in the various streams
@@ -1183,7 +1182,7 @@ class StickyEventBacklogTracker:
             to_device_message_stream_id=None,
             last_stream_ordering=None,
             # These events are not from the main queue, so don't advance the main queue
-            pdu_count_from_main_queue=0,
+            main_queue=False,
             # Upon completion, advance in the sticky backlog stream
             sticky_events=_StickyEventsTransactionInfo(
                 room_id=room_id,
