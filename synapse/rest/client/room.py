@@ -569,6 +569,8 @@ class RoomDelayedEventRestServlet(TransactionRestServlet):
         room_id: str,
         event_type: str,
     ) -> tuple[int, JsonDict]:
+        self.delayed_events_handler.assert_enabled()
+
         request_body = parse_and_validate_json_object_from_request(
             request, self.DelayedEventBodyModel
         )
