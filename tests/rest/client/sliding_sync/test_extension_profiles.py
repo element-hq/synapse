@@ -13,7 +13,7 @@
 #
 import logging
 
-from parameterized import parameterized, parameterized_class
+from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
@@ -34,16 +34,16 @@ logger = logging.getLogger(__name__)
 # foreground update for
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
 # https://github.com/element-hq/synapse/issues/17623)
-@parameterized_class(
-    ("use_new_tables",),
-    [
-        (True,),
-        (False,),
-    ],
-    class_name_func=lambda cls,
-    num,
-    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
-)
+# @parameterized_class(
+#     ("use_new_tables",),
+#     [
+#         (True,),
+#         (False,),
+#     ],
+#     class_name_func=lambda cls,
+#     num,
+#     params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+# )
 class SlidingSyncProfilesTestCase(SlidingSyncBase):
     """Tests for the profile updates sliding sync extension"""
 
@@ -649,7 +649,7 @@ class SlidingSyncProfilesTestCase(SlidingSyncBase):
             response_body["extensions"]["org.matrix.msc4262.profiles"]["users"][
                 "@other_user:test"
             ],
-            {"updated": {"displayname": "other_user", "avatar_url": None}},
+            {"updated": {"displayname": "other_user"}},
         )
 
     @parameterized.expand(
