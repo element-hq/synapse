@@ -1150,7 +1150,7 @@ class StickyEventBacklogTracker:
 
         if backlog is None:
             logger.info(
-                "Completed federation sticky event backlog for destination %r",
+                "Caught up on federation sticky event backlog for destination %r",
                 self._destination,
             )
             self._backlogged = False
@@ -1159,7 +1159,7 @@ class StickyEventBacklogTracker:
         room_id, sticky_event_stream_position, event_ids = backlog
 
         logger.debug(
-            "Selected %d backlogged sticky events to send to destination %r in room %r up to %r",
+            "Selected %d backlogged sticky events to send to destination %r in room %r (up to stream position %r)",
             len(event_ids),
             self._destination,
             room_id,
@@ -1172,13 +1172,20 @@ class StickyEventBacklogTracker:
         # Filter the sticky events
         sticky_events = await filter_events_for_server(
             self._storage_controllers,
-            self._destination,
-            self._own_server_name,
-            sticky_events,
-            # Omit filtered events
+            target_server_name=self._destination,
+            local_server_name=self._own_server_name,
+            events=sticky_events,
+            # Omit filtered events instead of redacting them
+            # (As if the remote isn't allowed to see them, there's no point sending them there.
+            # Not to mention sending a redacted copy would mean the remote sees the event without
+            # any stickiness, as the `msc4354_sticky` field is affected by redaction.)
             redact=False,
             # Sticky events sent by erased users no longer need to be sent
             # as part of catch-up
+            #
+            # > When a sticky event was sent by a [user who has been erased](https://spec.matrix.org/v1.19/client-server-api/#post_matrixclientv3accountdeactivate),
+            # > servers SHOULD NOT send it to other homeservers as part of catch-up.
+            # > — https://github.com/matrix-org/matrix-spec-proposals/blob/4ad14b0cd3b09205dcba59e45cbf1cab1e75edf7/proposals/4354-sticky-events.md#L230-L231
             filter_out_erased_senders=True,
             # These are all local events, so no need to do any extra work
             # only relevant to remote events
