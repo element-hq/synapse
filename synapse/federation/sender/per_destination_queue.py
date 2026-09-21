@@ -587,8 +587,7 @@ class PerDestinationQueue:
                 )
             )
 
-        _tmp_last_successful_stream_ordering = self._last_successful_stream_ordering
-        if _tmp_last_successful_stream_ordering is None:
+        if self._last_successful_stream_ordering is None:
             # if it's still None, then this means we don't have the information
             # in our database ­ we haven't successfully sent a PDU to this server
             # (at least since the introduction of the feature tracking
@@ -597,15 +596,11 @@ class PerDestinationQueue:
             # needs catching up — so catching up is futile; let's stop.
             self._catching_up = False
             return
-        # (We just proved above that this is not None)
-        assert self._last_successful_stream_ordering is not None
-
-        last_successful_stream_ordering: int = _tmp_last_successful_stream_ordering
 
         # get at most 50 catchup room/PDUs
         while self._transmission_loop_enabled:
             event_ids = await self._store.get_catch_up_room_event_ids(
-                self._destination, last_successful_stream_ordering
+                self._destination, self._last_successful_stream_ordering
             )
 
             if not event_ids:
@@ -615,7 +610,8 @@ class PerDestinationQueue:
 
                 if (
                     self._catchup_last_skipped != 0
-                    and self._catchup_last_skipped > last_successful_stream_ordering
+                    and self._catchup_last_skipped
+                    > self._last_successful_stream_ordering
                 ):
                     # another event has been skipped because we were in catch-up mode
                     # As an exception to this case: we can hit this branch if the
@@ -701,7 +697,7 @@ class PerDestinationQueue:
                         # offline
                         if (
                             p.internal_metadata.stream_ordering
-                            < last_successful_stream_ordering
+                            < self._last_successful_stream_ordering
                         ):
                             continue
 
@@ -765,11 +761,11 @@ class PerDestinationQueue:
                 # from the *original* PDU, rather than the PDU(s) we actually
                 # send. This is because we use it to mark our position in the
                 # queue of missed PDUs to process.
-                last_successful_stream_ordering = pdu.internal_metadata.stream_ordering
-
-                self._last_successful_stream_ordering = last_successful_stream_ordering
+                self._last_successful_stream_ordering = (
+                    pdu.internal_metadata.stream_ordering
+                )
                 await self._store.set_destination_last_successful_stream_ordering(
-                    self._destination, last_successful_stream_ordering
+                    self._destination, self._last_successful_stream_ordering
                 )
 
     def _get_receipt_edus(self, limit: int) -> Iterable[Edu]:
