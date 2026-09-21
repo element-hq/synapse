@@ -1768,9 +1768,14 @@ class FederationEventHandler:
         #
         # This is just an optimisation, so it doesn't need to be watertight - the event
         # persister does another round of deduplication.
+        has_rejected_events = False
         seen_remotes = await self._store.have_seen_events(room_id, event_map.keys())
-        for s in seen_remotes:
-            event_map.pop(s, None)
+        if seen_remotes:
+            for s in seen_remotes:
+                event_map.pop(s, None)
+            rejected_event_ids = self._store.get_rejected_events(seen_remotes)
+            if rejected_event_ids:
+                has_rejected_events = True
 
         # XXX: it might be possible to kick this process off in parallel with fetching
         # the events.
@@ -1875,10 +1880,12 @@ class FederationEventHandler:
             if (i + 1) % 1000 == 0:
                 await self._clock.sleep(Duration(seconds=0))
 
-        has_rejected_events = any(
-            context.rejected is not None
-            for _, context in events_and_contexts_to_persist
-        )
+        if not has_rejected_events:
+            # Check if any of the persisted events were rejected
+            has_rejected_events = any(
+                context.rejected is not None
+                for _, context in events_and_contexts_to_persist
+            )
 
         # Also persist the new event in batches for similar reasons as above.
         for batch in batch_iter(events_and_contexts_to_persist, 1000):
@@ -2120,6 +2127,7 @@ class FederationEventHandler:
         if known_prev_state_maps:
             if len(known_prev_state_maps) == 1:
                 # There's only 1 state map so we don't need to do state resolution at all.
+                # resolve_state_groups should not be called for a single state group as per its docstring
                 state_ids = list(known_prev_state_maps.values())[0]
             else:
                 res = await self._state_resolution_handler.resolve_state_groups(
