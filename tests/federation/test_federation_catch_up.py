@@ -665,7 +665,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         )
         return sorted(rows)
 
-    def _assert_up_to_date_as_of(self, event_id: str) -> None:
+    def _assert_remote_host_was_last_sent_event_id(self, event_id: str) -> None:
         """
         Sanity-checks that `host2` was last successfully sent `event_id`, i.e. that
         catch-up will resume from there.
@@ -725,7 +725,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # Put host2 down, to prevent the federation sender from succeeding in sending the
         # next events out (and to trigger catch-up mode).
         self.is_online = False
-        self._assert_up_to_date_as_of(event_id_2)
+        self._assert_remote_host_was_last_sent_event_id(event_id_2)
 
         # This sticky event will fall in the gap that the first catch-up transaction
         # skips over, so it must end up backlogged.
@@ -794,7 +794,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # Put host2 down, to prevent the federation sender from succeeding in sending the
         # next events out (and to trigger catch-up mode).
         self.is_online = False
-        self._assert_up_to_date_as_of(already_sent_id)
+        self._assert_remote_host_was_last_sent_event_id(already_sent_id)
 
         sticky_id_1 = self._send_sticky(room_id, "sticky 1", u1_token)
         sticky_id_2 = self._send_sticky(room_id, "sticky 2", u1_token)
@@ -860,7 +860,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
 
         # Put host2 down
         self.is_online = False
-        self._assert_up_to_date_as_of(already_sent_id)
+        self._assert_remote_host_was_last_sent_event_id(already_sent_id)
 
         sticky_id = self._send_sticky(room_id, "backlogged sticky", u1_token)
         # The room's latest event, so catch-up sends this one and skips over the sticky
@@ -902,7 +902,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # Let the federation sender act on the events above.
         self.reactor.advance(0)
         self.is_online = False
-        self._assert_up_to_date_as_of(already_sent_id)
+        self._assert_remote_host_was_last_sent_event_id(already_sent_id)
 
         # Stands in for a PDU still awaiting real-time delivery; queued by hand below.
         (realtime_id,) = self.helper.send_messages(room_id, num_events=1, tok=u1_token)
