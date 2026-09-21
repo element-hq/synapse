@@ -20,7 +20,6 @@
 #
 
 import logging
-from typing import Set
 
 from synapse.storage._base import SQLBaseStore
 
@@ -37,7 +36,7 @@ class RejectionsStore(SQLBaseStore):
             desc="get_rejection_reason",
         )
 
-    async def get_rejected_events(self, event_ids: Set[str]) -> Set[str]:
+    async def get_rejected_events(self, event_ids: set[str]) -> set[str]:
         """Filter the provided event IDs to only return rejected events."""
         rows = await self.db_pool.simple_select_many_batch(
             table="rejections",
