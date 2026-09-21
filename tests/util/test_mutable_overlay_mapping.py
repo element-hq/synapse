@@ -12,7 +12,6 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-import random
 import unittest
 
 from synapse.util import MutableOverlayMapping
