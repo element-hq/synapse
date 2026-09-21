@@ -711,14 +711,14 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         #
         #         stream_ordering ------------------------------->
         # room 1    •                  •
-        #        (message)        sticky_id_5
+        #      event_id_1        sticky_id_5
         # room 2      •          •
         #        event_id_2  event_id_4
         # room 3        •                  •
         #           sticky_id_3        event_id_6
 
-        self.helper.send_messages(room_1, 1, tok=u1_token)
-        (event_id_2,) = self.helper.send_messages(room_2, 1, tok=u1_token)
+        (_event_id_1,) = self.helper.send_messages(room_1, num_events=1, tok=u1_token)
+        (event_id_2,) = self.helper.send_messages(room_2, num_events=1, tok=u1_token)
         # Let the federation sender act on the events above.
         self.reactor.advance(0)
 
@@ -730,11 +730,11 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # This sticky event will fall in the gap that the first catch-up transaction
         # skips over, so it must end up backlogged.
         sticky_id_3 = self._send_sticky(room_3, "sticky in the gap", u1_token)
-        (event_id_4,) = self.helper.send_messages(room_2, 1, tok=u1_token)
+        (event_id_4,) = self.helper.send_messages(room_2, num_events=1, tok=u1_token)
         # This one is itself a forward extremity, so it will get sent as catch-up and
         # must _not_ be backlogged.
         sticky_id_5 = self._send_sticky(room_1, "sticky extremity", u1_token)
-        (event_id_6,) = self.helper.send_messages(room_3, 1, tok=u1_token)
+        (event_id_6,) = self.helper.send_messages(room_3, num_events=1, tok=u1_token)
         # Advance for the federation sender to trigger on those newly-sent events
         self.reactor.advance(0)
 
@@ -785,7 +785,9 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         )
 
         # Send whilst host2 is up, so this is where catch-up will resume from later on
-        (already_sent_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        (already_sent_id,) = self.helper.send_messages(
+            room_id, num_events=1, tok=u1_token
+        )
         # Trigger federation sender
         self.reactor.advance(0)
 
@@ -799,7 +801,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # Send an event to be the room's forward extremity
         # This will make catch-up skip over the 2 sticky events so we can use those 2
         # to test sticky event backlog catch-up
-        self.helper.send_messages(room_id, 1, tok=u1_token)
+        self.helper.send_messages(room_id, num_events=1, tok=u1_token)
         # Trigger federation sender
         self.reactor.advance(0)
 
@@ -851,7 +853,9 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         )
 
         # Send an event whilst host2 is up, so this is where catch-up will resume from.
-        (already_sent_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        (already_sent_id,) = self.helper.send_messages(
+            room_id, num_events=1, tok=u1_token
+        )
         self.reactor.advance(0)
 
         # Put host2 down
@@ -861,7 +865,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         sticky_id = self._send_sticky(room_id, "backlogged sticky", u1_token)
         # The room's latest event, so catch-up sends this one and skips over the sticky
         # event, leaving it backlogged.
-        (latest_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        (latest_id,) = self.helper.send_messages(room_id, num_events=1, tok=u1_token)
         # Trigger the federation sender to fail to send the events and then
         # to go into catch-up mode
         self.reactor.advance(0)
@@ -892,18 +896,20 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         )
 
         # Sent whilst host2 is up, so this is where catch-up will resume from.
-        (already_sent_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        (already_sent_id,) = self.helper.send_messages(
+            room_id, num_events=1, tok=u1_token
+        )
         # Let the federation sender act on the events above.
         self.reactor.advance(0)
         self.is_online = False
         self._assert_up_to_date_as_of(already_sent_id)
 
         # Stands in for a PDU still awaiting real-time delivery; queued by hand below.
-        (realtime_id,) = self.helper.send_messages(room_id, 1, tok=u1_token)
+        (realtime_id,) = self.helper.send_messages(room_id, num_events=1, tok=u1_token)
         sticky_id = self._send_sticky(room_id, "backlogged sticky", u1_token)
         # The room's latest event, so catch-up sends this one and skips over the
         # sticky event, leaving it backlogged.
-        self.helper.send_messages(room_id, 1, tok=u1_token)
+        self.helper.send_messages(room_id, num_events=1, tok=u1_token)
         # Let the federation sender act on the events above.
         self.reactor.advance(0)
 
