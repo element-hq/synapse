@@ -26,7 +26,8 @@ use pyo3::{
 use tokio::sync::oneshot;
 
 use crate::logging::context::with_logcontext;
-use crate::tokio_runtime::runtime;
+use crate::reactor::Reactor;
+use crate::runtime::RustRuntime;
 
 create_exception!(
     synapse.synapse_rust.http_client,
@@ -81,7 +82,7 @@ fn logging_context_module(py: Python<'_>) -> PyResult<&Bound<'_, PyAny>> {
 /// but the work itself is wasted.
 pub fn create_deferred<'py, F, O>(
     py: Python<'py>,
-    reactor: &Bound<'py, PyAny>,
+    runtime: &RustRuntime,
     fut: F,
 ) -> PyResult<Bound<'py, PyAny>>
 where
@@ -98,12 +99,12 @@ where
     // current when the caller invoked us. See `crate::logging::context`.
     let logcontext = crate::logging::context::LogContextHandle::capture(py);
 
-    let rt = runtime(reactor)?;
-    let handle = rt.handle()?;
+    let handle = runtime.tokio_handle()?;
     let task = handle.spawn(logcontext.scope(fut));
 
-    // Unbind the reactor so that we can pass it to the task
-    let reactor = reactor.clone().unbind();
+    // Keep the runtime state (and, through it, the reactor) alive while the
+    // task is in flight.
+    let runtime = runtime.clone();
     handle.spawn(async move {
         let res = task.await;
 
@@ -117,19 +118,18 @@ where
                 },
             };
 
-            // Re-bind the reactor
-            let reactor = reactor.bind(py);
-
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
             match res {
                 Ok(obj) => {
-                    reactor
-                        .call_method("callFromThread", (deferred_callback, obj), None)
+                    runtime
+                        .reactor()
+                        .call_from_thread(py, (deferred_callback, obj))
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }
                 Err(err) => {
-                    reactor
-                        .call_method("callFromThread", (deferred_errback, err), None)
+                    runtime
+                        .reactor()
+                        .call_from_thread(py, (deferred_errback, err))
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }
             }
@@ -150,7 +150,7 @@ where
 /// the Twisted reactor and runs to completion regardless of whether the returned Rust
 /// future is ever polled; awaiting it only observes the result.
 pub(crate) async fn run_python_awaitable<F>(
-    reactor: Py<PyAny>,
+    reactor: Reactor,
     make_awaitable: F,
 ) -> PyResult<Py<PyAny>>
 where
@@ -265,9 +265,7 @@ where
             },
         )?;
 
-        reactor
-            .bind(py)
-            .call_method1(intern!(py, "callFromThread"), (starter,))?;
+        reactor.call_from_thread(py, (starter,))?;
 
         Ok(())
     })?;
