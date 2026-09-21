@@ -1108,6 +1108,11 @@ class StickyEventBacklogTracker:
         self._store = hs.get_datastores().main
 
         self._msc4354_enabled = msc4354_enabled
+        """
+        MSC4354 Sticky Events
+
+        Specifically in this class, enables catch-up of the backlogged to-be-sent sticky events.
+        """
 
     @property
     def is_backlogged(self) -> bool:
