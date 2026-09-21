@@ -316,6 +316,9 @@ class EventContentFields:
     M_TOPIC: Final = "m.topic"
     M_TEXT: Final = "m.text"
 
+    # `m.room.join_rules` `join_rule` field
+    JOIN_RULE: Final = "join_rule"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""

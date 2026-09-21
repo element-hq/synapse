@@ -1,0 +1,1 @@
+Improve server concurrency by opening local media thumbnails asynchronously. Contributed by @guillemo12.

@@ -375,8 +375,9 @@ For example, for room version 1, `default_room_version` should be set to "1".
 
 _Changed in Synapse 1.76:_ the default version room version was increased from [9](https://spec.matrix.org/v1.5/rooms/v9/) to [10](https://spec.matrix.org/v1.5/rooms/v10/).
 _Changed in Synapse 1.157:_ the default version room version was increased from [10](https://spec.matrix.org/v1.12/rooms/v10/) to [11](https://spec.matrix.org/v1.12/rooms/v11/).
+_Changed in Synapse 1.162:_ the default room version was increased from [11](https://spec.matrix.org/v1.16/rooms/v11/) to [12](https://spec.matrix.org/v1.16/rooms/v12/)
 
-Defaults to `"11"`.
+Defaults to `"12"`.
 
 Example configuration:
 ```yaml
@@ -2113,6 +2114,27 @@ Default configuration:
 rc_user_directory:
   per_second: 0.016
   burst_count: 200.0
+```
+---
+### `rc_profile`
+
+*(object)* This option allows admins to ratelimit profile lookups by clients.
+
+Requests are limited per user when the request is authenticated, otherwise per client IP address.
+
+_Added in Synapse 1.162.0._
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_profile:
+  per_second: 1.0
+  burst_count: 500.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -4670,6 +4692,8 @@ _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
 _Changed in Synapse 1.116.0: Added password\_path_
 
+_Changed in Synapse 1.162.0: Added username_
+
 This setting has the following sub-options:
 
 * `enabled` (boolean): Whether to use Redis support. Defaults to `false`.
@@ -4679,6 +4703,8 @@ This setting has the following sub-options:
 * `port` (integer): Optional port to use to connect to Redis. Defaults to `6379`.
 
 * `path` (string): The full path to a local Unix socket file. **If this is used, `host` and `port` are ignored.** Defaults to `"/tmp/redis.sock"`.
+
+* `username` (string|null): Optional username if configured on the Redis instance (Redis 6+ ACL authentication). Requires `password` (or `password_path`) to also be set. Defaults to `null`.
 
 * `password` (string|null): Optional password if configured on the Redis instance. Defaults to `null`.
 
@@ -4702,6 +4728,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
+  username: <username>
   password_path: <path_to_the_password_file>
   dbid: <dbid>
 ```

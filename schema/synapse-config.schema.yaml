@@ -330,7 +330,11 @@ properties:
       _Changed in Synapse 1.157:_ the default version room version was increased
       from [10](https://spec.matrix.org/v1.12/rooms/v10/) to
       [11](https://spec.matrix.org/v1.12/rooms/v11/).
-    default: "11"
+
+      _Changed in Synapse 1.162:_ the default room version was increased from
+      [11](https://spec.matrix.org/v1.16/rooms/v11/) to
+      [12](https://spec.matrix.org/v1.16/rooms/v12/)
+    default: "12"
     examples:
       - "8"
   gc_thresholds:
@@ -2387,6 +2391,20 @@ properties:
     default:
       per_second: 0.016
       burst_count: 200.0
+  rc_profile:
+    $ref: "#/$defs/rc"
+    description: >-
+      This option allows admins to ratelimit profile lookups by clients.
+
+
+      Requests are limited per user when the request is authenticated,
+      otherwise per client IP address.
+
+
+      _Added in Synapse 1.162.0._
+    default:
+      per_second: 1.0
+      burst_count: 500.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -5823,6 +5841,9 @@ properties:
 
 
       _Changed in Synapse 1.116.0: Added password\_path_
+
+
+      _Changed in Synapse 1.162.0: Added username_
     properties:
       enabled:
         type: boolean
@@ -5842,6 +5863,13 @@ properties:
           The full path to a local Unix socket file. **If this is used, `host`
           and `port` are ignored.**
         default: /tmp/redis.sock
+      username:
+        type: ["string", "null"]
+        description: >-
+          Optional username if configured on the Redis instance (Redis 6+
+          ACL authentication). Requires `password` (or `password_path`) to
+          also be set.
+        default: null
       password:
         type: ["string", "null"]
         description: Optional password if configured on the Redis instance.
@@ -5885,6 +5913,7 @@ properties:
       - enabled: true
         host: localhost
         port: 6379
+        username: "<username>"
         password_path: "<path_to_the_password_file>"
         dbid: "<dbid>"
   worker_app:
