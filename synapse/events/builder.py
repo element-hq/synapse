@@ -157,7 +157,14 @@ class EventBuilder:
             assert self.room_version.msc4242_state_dags
         if self.room_version.msc4242_state_dags:
             assert prev_state_events is not None
-            if self.room_id:
+            calculated_auth_event_ids: list[str] = []
+            # We can't use internal_metadata.out_of_band_membership as it isn't set pre-build time,
+            # only the .outlier is.
+            if self.internal_metadata.outlier:
+                # An out-of-band membership (e.g. a locally generated invite rejection):
+                # we have no state at its `prev_state_events`, and it isn't auth checked.
+                pass
+            elif self.room_id:
                 state_ids = await self._state.compute_state_after_events(
                     self.room_id,
                     prev_state_events,
@@ -170,9 +177,6 @@ class EventBuilder:
                 # Therefore, we may not have state_ids from compute_state_after_events as the
                 # prev_state_events are unknown. If this happens, the caller provides the auth events
                 # to use instead.
-                calculated_auth_event_ids: list[
-                    str
-                ] = []  # assume it's the create event which has []
                 if len(state_ids) == 0 and len(prev_state_events) > 0:
                     # it's a batched event, so we should have been provided the auth_events
                     assert auth_event_ids and len(auth_event_ids) > 0
@@ -184,7 +188,6 @@ class EventBuilder:
             else:
                 # event is a state DAG event and is the create event (room_id is not provided),
                 # therefore there are no auth_events.
-                calculated_auth_event_ids = []
                 assert self.type == EventTypes.Create and self.state_key == ""
             self.internal_metadata.calculated_auth_event_ids = calculated_auth_event_ids
             auth_event_ids = calculated_auth_event_ids
@@ -300,7 +303,8 @@ class EventBuilder:
                 # class which automatically adds the create event when `.auth_event_ids()` is called
                 assert self.room_id is not None
                 create_event_id = "$" + self.room_id[1:]
-                auth_event_ids.remove(create_event_id)
+                if create_event_id in auth_event_ids:
+                    auth_event_ids.remove(create_event_id)
                 event_dict["auth_events"] = auth_event_ids
 
         if self.room_version.msc4242_state_dags:

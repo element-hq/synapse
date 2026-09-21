@@ -110,3 +110,15 @@ def all_supports_msc4242_state_dag(
     supports state DAGs (MSC4242)"""
 
     return all(event.room_version.msc4242_state_dags for event, _ in obj)
+
+
+def is_out_of_band_state_dag_event(event: EventBase) -> bool:
+    """Returns true if the given event is an out-of-band membership in a room that
+    supports state DAGs (MSC4242). We have no state for such events, so nothing derived
+    from state (state group, state DAG edges, auth events, chain cover) can be stored
+    until a copy with state arrives, see `PersistEventsStore._update_outliers_txn`."""
+
+    return (
+        event.room_version.msc4242_state_dags
+        and event.internal_metadata.is_out_of_band_membership()
+    )

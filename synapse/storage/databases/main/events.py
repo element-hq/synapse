@@ -55,7 +55,11 @@ from synapse.events import (
     is_creator,
     relation_from_event,
 )
-from synapse.events.py_protocol import MSC4242Event, supports_msc4242_state_dag
+from synapse.events.py_protocol import (
+    MSC4242Event,
+    is_out_of_band_state_dag_event,
+    supports_msc4242_state_dag,
+)
 from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
@@ -1169,7 +1173,7 @@ class PersistEventsStore:
 
         # _update_outliers_txn filters out any events which have already been
         # persisted, and returns the filtered list.
-        events_and_contexts = self._update_outliers_txn(
+        events_and_contexts, gained_state = self._update_outliers_txn(
             txn, events_and_contexts=events_and_contexts
         )
 
@@ -1194,11 +1198,22 @@ class PersistEventsStore:
         self._persist_transaction_ids_txn(txn, events_and_contexts)
 
         # Insert into event_to_state_groups.
-        self._store_event_state_mappings_txn(txn, events_and_contexts)
+        self._store_event_state_mappings_txn(txn, events_and_contexts + gained_state)
 
         self._persist_event_auth_chain_txn(
-            txn, [e for e, _ in events_and_contexts], new_event_links
+            txn,
+            [
+                e
+                for e, _ in events_and_contexts + gained_state
+                if not is_out_of_band_state_dag_event(e)
+            ],
+            new_event_links,
         )
+
+        for event, _ in gained_state:
+            assert supports_msc4242_state_dag(event)  # type-assert
+            if event_exists_in_state_dag(event):
+                self._store_state_dag_edges(txn, event)
 
         # _store_rejected_events_txn filters out any events which were
         # rejected, and returns the filtered list.
@@ -2753,7 +2768,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         events_and_contexts: list[EventPersistencePair],
-    ) -> list[EventPersistencePair]:
+    ) -> tuple[list[EventPersistencePair], list[EventPersistencePair]]:
         """Update any outliers with new event info.
 
         This turns outliers into ex-outliers (unless the new event was rejected), and
@@ -2764,7 +2779,9 @@ class PersistEventsStore:
             events_and_contexts: events we are persisting
 
         Returns:
-            new list, without events which are already in the events table.
+            new list, without events which are already in the events table, and the
+            events we had persisted as out-of-band memberships (MSC4242) which now
+            have state, so the caller can store what was missing.
 
         Raises:
             PartialStateConflictError: if attempting to persist a partial state event in
@@ -2791,6 +2808,7 @@ class PersistEventsStore:
         )
 
         to_remove = set()
+        gained_state: list[EventPersistencePair] = []
         for event, context in events_and_contexts:
             outlier_persisted = have_persisted.get(event.event_id)
             logger.debug(
@@ -2810,6 +2828,22 @@ class PersistEventsStore:
                 # If the incoming event is rejected then we don't care if the event
                 # was an outlier or not - what we have is at least as good.
                 continue
+
+            # Check before the de-outlier handling below stores any state.
+            if (
+                outlier_persisted
+                and supports_msc4242_state_dag(event)
+                and not event.internal_metadata.is_out_of_band_membership()
+                and self.db_pool.simple_select_one_onecol_txn(
+                    txn,
+                    table="event_to_state_groups",
+                    keyvalues={"event_id": event.event_id},
+                    retcol="state_group",
+                    allow_none=True,
+                )
+                is None
+            ):
+                gained_state.append((event, context))
 
             if not event.internal_metadata.is_outlier() and outlier_persisted:
                 # We received a copy of an event that we had already stored as
@@ -2860,7 +2894,9 @@ class PersistEventsStore:
                     # we deliver this down /sync.
                     self.store.insert_sticky_events_txn(txn, [event])
 
-        return [ec for ec in events_and_contexts if ec[0] not in to_remove]
+        return [
+            ec for ec in events_and_contexts if ec[0] not in to_remove
+        ], gained_state
 
     def _store_event_txn(
         self,
@@ -3062,7 +3098,11 @@ class PersistEventsStore:
 
             self._handle_event_relations(txn, event)
 
-            if supports_msc4242_state_dag(event) and event_exists_in_state_dag(event):
+            if (
+                supports_msc4242_state_dag(event)
+                and event_exists_in_state_dag(event)
+                and not is_out_of_band_state_dag_event(event)
+            ):
                 self._store_state_dag_edges(txn, event)
 
             # Store the labels for this event.
@@ -3697,10 +3737,10 @@ class PersistEventsStore:
         for event, context in events_and_contexts:
             # state dag rooms allow outliers to have state, as `/get_missing_events` state dag events are nominally
             # outliers (not present in the timeline) but do need state persisted so we can calculate
-            # what the auth_events are for the event.
-            if (
+            # what the auth_events are for the event. Out-of-band memberships have no state.
+            if event.internal_metadata.is_outlier() and (
                 not event.room_version.msc4242_state_dags
-                and event.internal_metadata.is_outlier()
+                or is_out_of_band_state_dag_event(event)
             ):
                 # double-check that we don't have any events that claim to be outliers
                 # *and* have partial state (which is meaningless: we should have no

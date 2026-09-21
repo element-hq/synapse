@@ -270,23 +270,22 @@ class FederationEventHandler:
                 ) = await self._store.get_local_current_membership_for_user_in_room(
                     pdu.state_key, pdu.room_id
                 )
-                if (
-                    membership == Membership.INVITE
-                    and membership_event_id
-                    and membership_event_id
-                    in pdu.auth_event_ids()  # The invite should be in the auth events of the rescission.
-                ):
+                if membership == Membership.INVITE and membership_event_id:
                     invite_event = await self._store.get_event(
                         membership_event_id, allow_none=True
                     )
 
                     # We cannot fully auth the rescission event, but we can
                     # check if the sender of the leave event is the same as the
-                    # invite.
+                    # invite, and that it references the invite it rescinds.
                     #
                     # Technically, a room admin could rescind the invite, but we
                     # have no way of knowing who is and isn't a room admin.
-                    if invite_event and pdu.sender == invite_event.sender:
+                    if (
+                        invite_event
+                        and pdu.sender == invite_event.sender
+                        and rescinds_invite(pdu, invite_event)
+                    ):
                         # Handle the rescission event
                         pdu.internal_metadata.outlier = True
                         pdu.internal_metadata.out_of_band_membership = True
@@ -2065,6 +2064,11 @@ class FederationEventHandler:
         # This is just an optimisation, so it doesn't need to be watertight - the event
         # persister does another round of deduplication.
         seen_remotes = await self._store.have_seen_events(room_id, event_map.keys())
+        if is_state_dag_room:
+            # Pretend we haven't seen events which lack state groups. Events which lack state groups
+            # in state DAG rooms are exclusively out-of-band memberships. This ensures we calculate
+            # state for out-of-band events we have previously persisted.
+            seen_remotes = await self._store.get_events_with_state_groups(seen_remotes)
         for s in seen_remotes:
             event_map.pop(s, None)
 
@@ -3180,6 +3184,25 @@ class FederationEventHandler:
                 len(ev.auth_event_ids()),
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many auth_events")
+
+
+def rescinds_invite(leave_event: EventBase, invite_event: EventBase) -> bool:
+    """Returns True if the given leave event references the given invite.
+
+    We are not in the room, so we cannot authorise the leave event: the most we can do is
+    check that it names the invite we are holding. Without this an old leave event could
+    be replayed by anyone to cancel a newer invite.
+    """
+    assert leave_event.membership == Membership.LEAVE
+    assert invite_event.membership == Membership.INVITE
+    if supports_msc4242_state_dag(leave_event):
+        # MSC4242 state DAG events don't list their auth events: they are calculated from
+        # the state DAG, which we cannot do as we are not in the room. Instead, a leave
+        # event which rescinds an invite must name the invite in its prev_state_events, see MSC4242.
+        return invite_event.event_id in leave_event.prev_state_events
+
+    # The invite should be in the auth events of the rescission.
+    return invite_event.event_id in leave_event.auth_event_ids()
 
 
 def is_state_dag_connected(state_dag: Collection[MSC4242Event]) -> bool:
