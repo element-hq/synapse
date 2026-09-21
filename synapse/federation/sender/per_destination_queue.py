@@ -148,6 +148,13 @@ class _PreparedTransaction:
     Information useful for transactions sending backlogged sticky events.
     """
 
+    def has_anything_to_send(self) -> bool:
+        """
+        Returns true if and only if this contains any
+        data to send to the remote homeserver.
+        """
+        return bool(self.pdus or self.edus)
+
 
 class PerDestinationQueue:
     """
@@ -451,11 +458,7 @@ class PerDestinationQueue:
                 transaction = None
                 transaction = await self._prepare_transaction()
 
-                if (
-                    transaction is not None
-                    and not transaction.pdus
-                    and not transaction.edus
-                ):
+                if transaction is not None and not transaction.has_anything_to_send():
                     # There is nothing to send, but preparing the transaction has
                     # made progress that needs recording: the backlogged sticky
                     # events we selected must have all gotten filtered out.
