@@ -751,6 +751,7 @@ class PerDestinationQueue:
                     new_last_successfully_sent_stream_ordering=pdu.internal_metadata.stream_ordering,
                     # These are the events we actually sent in this successful catch-up transaction
                     event_stream_orderings_sent_in_transaction={
+                        # unwrap: these events have been persisted so `stream_ordering` is not None
                         unwrap(pdu.internal_metadata.stream_ordering)
                         for pdu in room_catchup_pdus
                     },
