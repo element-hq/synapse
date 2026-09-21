@@ -25,7 +25,7 @@
 -- Due to sticky event expiration and event deletion, rows in this table are
 -- hints that there *may* be sticky events to send, but not a guarantee that
 -- there actually are.
-CREATE TABLE destination_room_sticky_events_backlog (
+CREATE TABLE destination_rooms_sticky_events_backlog (
     -- Server name of the remote homeserver.
     destination TEXT NOT NULL,
 
@@ -52,4 +52,4 @@ CREATE TABLE destination_room_sticky_events_backlog (
 
 -- Should have this index to make `room_id` foreign key constraint efficient,
 -- as well as for cleanup per room.
-CREATE INDEX destination_room_sticky_events_backlog_room_id ON destination_room_sticky_events_backlog (room_id);
+CREATE INDEX destination_rooms_sticky_events_backlog_room_id ON destination_rooms_sticky_events_backlog (room_id);

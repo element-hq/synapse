@@ -635,12 +635,12 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
 
     def _sticky_backlog_rows(self) -> set[tuple[str, str, int]]:
         """
-        All rows of the `destination_room_sticky_events_backlog` table,
+        All rows of the `destination_rooms_sticky_events_backlog` table,
         as a set: row order is arbitrary, as the query has no ORDER BY.
         """
         rows = self.get_success(
             self.hs.get_datastores().main.db_pool.simple_select_list(
-                table="destination_room_sticky_events_backlog",
+                table="destination_rooms_sticky_events_backlog",
                 keyvalues=None,
                 retcols=("destination", "room_id", "sticky_events_stream_position"),
             )
@@ -887,7 +887,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # starting from sticky_2 onwards.
         self.get_success(
             self.store.db_pool.simple_insert(
-                table="destination_room_sticky_events_backlog",
+                table="destination_rooms_sticky_events_backlog",
                 values={
                     "destination": "host2",
                     "room_id": room_id,
@@ -927,7 +927,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # starting from sticky_1 onwards.
         self.get_success(
             self.store.db_pool.simple_insert(
-                table="destination_room_sticky_events_backlog",
+                table="destination_rooms_sticky_events_backlog",
                 values={
                     "destination": "host2",
                     "room_id": room_id,
@@ -1004,7 +1004,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
 
         self.get_success(
             self.store.db_pool.simple_insert(
-                table="destination_room_sticky_events_backlog",
+                table="destination_rooms_sticky_events_backlog",
                 values={
                     "destination": "host2",
                     "room_id": room_id,
@@ -1048,7 +1048,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
 
         self.get_success(
             self.store.db_pool.simple_insert(
-                table="destination_room_sticky_events_backlog",
+                table="destination_rooms_sticky_events_backlog",
                 values={
                     "destination": "host2",
                     "room_id": room_id,
@@ -1070,7 +1070,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        # Also note that the `destination_room_sticky_events_backlog` has been cleared
+        # Also note that the `destination_rooms_sticky_events_backlog` has been cleared
         # so that we don't keep reconsidering this room that no longer has any
         # unexpired sticky events to be sent.
         self.assertEqual(self._sticky_backlog_rows(), set())
@@ -1088,7 +1088,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
 
         self.get_success(
             self.store.db_pool.simple_insert(
-                table="destination_room_sticky_events_backlog",
+                table="destination_rooms_sticky_events_backlog",
                 values={
                     "destination": "host2",
                     "room_id": room_id,

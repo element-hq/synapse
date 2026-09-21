@@ -769,7 +769,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         self, destination: str, *, limit: int = 50
     ) -> tuple[RoomID, StickyEventStreamPosition, list[str]] | None:
         """
-        From the `destination_room_sticky_events_backlog` table, if there are backlogged
+        From the `destination_rooms_sticky_events_backlog` table, if there are backlogged
         sticky events to send to the given destination, returns up to 50 IDs of sticky
         events from one room.
 
@@ -849,7 +849,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             txn.execute(
                 """
                 SELECT room_id, sticky_events_stream_position
-                FROM destination_room_sticky_events_backlog
+                FROM destination_rooms_sticky_events_backlog
                 WHERE destination = ?
                 LIMIT 1
                 """,
@@ -899,7 +899,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         def _clean_backlog_txn(txn: LoggingTransaction) -> None:
             """
-            Clean up `destination_room_sticky_events_backlog` rows that no longer apply,
+            Clean up `destination_rooms_sticky_events_backlog` rows that no longer apply,
             because there are no longer active sticky events in that range in that room.
 
             Invoked when we try to process a room and find that it has no sticky events
@@ -908,7 +908,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             txn.execute(
                 """
                 WITH to_clean_up AS (
-                    SELECT backlog.room_id FROM destination_room_sticky_events_backlog AS backlog
+                    SELECT backlog.room_id FROM destination_rooms_sticky_events_backlog AS backlog
                     -- This is an anti-join: we want to find backlog rows where no sticky events match
                     LEFT JOIN sticky_events AS se
                         ON se.room_id = backlog.room_id
@@ -918,7 +918,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                     WHERE se.event_id IS NULL
                         AND backlog.destination = ?
                 )
-                DELETE FROM destination_room_sticky_events_backlog
+                DELETE FROM destination_rooms_sticky_events_backlog
                 WHERE destination = ? AND room_id IN (SELECT room_id FROM to_clean_up)
                 """,
                 (user_is_local_like_pattern(self.hs), destination, destination),
@@ -938,7 +938,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         event_stream_orderings_sent_in_transaction: Collection[int],
     ) -> None:
         """
-        For the given `destination`, update the `destination_room_sticky_events_backlog`
+        For the given `destination`, update the `destination_rooms_sticky_events_backlog`
         table to potentially mark rooms as backlogged, following the successful
         transmission of PDUs in a catch-up (federation) transaction.
 
@@ -994,7 +994,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         position, there are 4 sticky events.
 
         These are the sticky events that this function tracks in the
-        `destination_room_sticky_events_backlog` table.
+        `destination_rooms_sticky_events_backlog` table.
         Without us doing this, no other mechanism would provide a way of knowing
         that those 4 sticky events hadn't yet been sent to the destination.
 
@@ -1028,7 +1028,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             # 5. Insert those positions into the backlog, unless the backlog already exists with a smaller position.
             txn.execute(
                 f"""
-                INSERT INTO destination_room_sticky_events_backlog AS backlog
+                INSERT INTO destination_rooms_sticky_events_backlog AS backlog
                 (destination, room_id, sticky_events_stream_position)
 
                     SELECT ?, dr.room_id, MIN(se.stream_id)
@@ -1089,7 +1089,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         await self.db_pool.simple_upsert(
             desc="mark_backlogged_sticky_events_sent",
-            table="destination_room_sticky_events_backlog",
+            table="destination_rooms_sticky_events_backlog",
             keyvalues={
                 "destination": destination,
                 "room_id": room_id.to_string(),

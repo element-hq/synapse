@@ -654,11 +654,11 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
 
     def _sticky_backlog_rows(self) -> list[tuple[str, str, int]]:
         """
-        All rows of the `destination_room_sticky_events_backlog` table.
+        All rows of the `destination_rooms_sticky_events_backlog` table.
         """
         rows = self.get_success(
             self.hs.get_datastores().main.db_pool.simple_select_list(
-                table="destination_room_sticky_events_backlog",
+                table="destination_rooms_sticky_events_backlog",
                 keyvalues=None,
                 retcols=("destination", "room_id", "sticky_events_stream_position"),
             )
