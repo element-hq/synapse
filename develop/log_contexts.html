@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-35a3dde6.js";
+            window.path_to_searchindex_js = "searchindex-321a234e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-64310643.js"></script>
@@ -200,9 +200,15 @@
                         <h1 id="log-contexts"><a class="header" href="#log-contexts">Log Contexts</a></h1>
 <p>To help track the processing of individual requests, synapse uses a
 ‘<code>log context</code>’ to track which request it is handling at any given
-moment. This is done via a thread-local variable; a <code>logging.Filter</code> is
-then used to fish the information back out of the thread-local variable
-and add it to each log record.</p>
+moment. The “current” log context is stored in the Rust extension
+(<code>synapse.synapse_rust.logcontext</code>), which resolves it from the current
+tokio task (if we are running inside one) and otherwise from the current OS
+thread; a <code>logging.Filter</code> is then used to fish the information back out and
+add it to each log record. Storing it in Rust means a single source of truth is
+visible from both Python (the reactor and its thread pool) and Rust (tokio
+tasks), so log records emitted from either — including from Rust code polled on
+a worker thread — are attributed to the right request. See
+<a href="#the-rust-side">the Rust side</a> below.</p>
 <p>Logcontexts are also used for CPU and database accounting, so that we
 can track which requests were responsible for high CPU use or database
 activity.</p>
@@ -642,6 +648,26 @@ chain are dropped. Dropping the the reference to an awaitable you’re
 supposed to be awaiting is bad practice, so this doesn’t
 actually happen too much. Unfortunately, when it does happen, it will
 lead to leaked logcontexts which are incredibly hard to track down.</p>
+<h2 id="the-rust-side"><a class="header" href="#the-rust-side">The Rust side</a></h2>
+<p>The “current” logcontext is stored in the Rust extension rather than in a
+Python thread-local, so that it is visible from both Python and Rust.
+<code>current_context()</code> and <code>set_current_context()</code> are imported from
+<code>synapse.logging.context</code> as usual — the Rust storage is an implementation
+detail that Python code does not need to care about.</p>
+<p><code>set_current_context</code> only ever runs on a Python thread, i.e. the reactor or one
+of its thread pools, where it does the <code>getrusage</code> CPU accounting. It is never
+called from a tokio worker thread. Therefore, CPU accounting is not captured
+when executing purely Rust work.</p>
+<p>What Rust code <em>does</em> need to be aware of is that when spawning a future onto
+the tokio runtime, the current logcontext must be captured and carried along, so
+that log records emitted while the future is polled (including any <code>log::</code>
+records from dependencies, and any Python invoked back from Rust) are attributed
+correctly. Don’t use a bare <code>tokio::spawn</code>. Instead use
+<code>LogContextHandle::capture(py)</code> plus <code>LogContextHandle::scope</code>, which capture
+the caller’s logcontext from the Python side and record it on the spawned task;
+this is what <code>create_deferred</code> does. <code>current_context()</code> returns the task’s
+captured context first, so <code>LoggingContextFilter</code> — and therefore <code>pyo3-log</code> —
+sees the right context on worker threads without any per-log-record work.</p>
 <h2 id="debugging-logcontext-issues"><a class="header" href="#debugging-logcontext-issues">Debugging logcontext issues</a></h2>
 <p>Debugging logcontext issues can be tricky as leaking or losing a logcontext will surface
 downstream and can point to an unrelated part of the codebase. It’s best to enable debug
@@ -652,6 +678,18 @@ backwards in the logs from the point where the issue is observed to find the roo
     # Unlike other loggers, this one needs to be explicitly configured to see debug logs.
     synapse.logging.context.debug:
         level: DEBUG
+</code></pre>
+<p>Note that some of these traces (<code>LoggingContext(...).__enter__</code>/<code>__exit__</code>) are
+emitted from Rust via <code>pyo3-log</code>, which caches logger levels for performance.
+Configuring the logger in the logging config (as above) works — the cache is
+flushed whenever the config is (re)loaded, including on <code>SIGHUP</code> — but enabling
+the logger <em>at runtime</em> (e.g. <code>setLevel(logging.DEBUG)</code> from the manhole) will
+not surface the Rust-emitted traces until you also flush the cache:</p>
+<pre><code class="language-python">import logging
+from synapse.synapse_rust import reset_logging_config
+
+logging.getLogger("synapse.logging.context.debug").setLevel(logging.DEBUG)
+reset_logging_config()
 </code></pre>
 
                     </main>
