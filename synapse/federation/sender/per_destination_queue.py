@@ -1139,7 +1139,7 @@ class StickyEventBacklogTracker:
 
         # Select a room and get up to 50 backlogged sticky events
         backlog = await self._store.get_backlogged_sticky_events_for_destination(
-            self._destination
+            self._destination, limit=50
         )
 
         if backlog is None:
