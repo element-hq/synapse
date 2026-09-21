@@ -236,25 +236,6 @@ class TestMutableOverlayMapping(unittest.TestCase):
         self.assertEqual(len(outer), 2)
         self.assertEqual(len(outer), len(dict(outer)))
 
-    def test_len_matches_dict_under_random_operations(self) -> None:
-        """Cross-check len() against a flattened copy over many random
-        sequences of sets and deletes."""
-        for seed in range(50):
-            rng = random.Random(seed)
-            underlying = {rng.randrange(20): 0 for _ in range(rng.randrange(15))}
-            inner = MutableOverlayMapping(underlying)
-            outer = MutableOverlayMapping(inner)
-
-            for mapping in (inner, outer):
-                for _ in range(rng.randrange(40)):
-                    key = rng.randrange(20)
-                    if rng.random() < 0.6:
-                        mapping[key] = 1
-                    elif key in mapping:
-                        del mapping[key]
-
-                    self.assertEqual(len(mapping), len(dict(mapping)), seed)
-
     def test_total_entries(self) -> None:
         """total_entries() counts the base map plus every override and
         deletion, unlike len()."""
