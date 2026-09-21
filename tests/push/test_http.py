@@ -424,10 +424,10 @@ class HTTPPusherTests(HomeserverTestCase):
         # check that this is low-priority
         self.assertEqual(self.push_attempts[1][2]["notification"]["prio"], "low")
 
-    def test_sends_high_priority_for_mention(self) -> None:
+    def test_sends_high_priority_for_user_mention(self) -> None:
         """
         The HTTP pusher will send pushes at high priority if they correspond
-        to a message mentioning the user.
+        to a message that intentionally mentions the user via `m.mentions`.
         """
         # Register the user who gets notified
         user_id = self.register_user("user", "pass")
@@ -471,13 +471,14 @@ class HTTPPusherTests(HomeserverTestCase):
             )
         )
 
-        # Send a message mentioning the user
+        # Send a message mentioning the user. As a client would, the body refers
+        # to the user as well, but it is `m.mentions` that makes it a mention.
         self.helper.send_event(
             room,
             "m.room.message",
             {
                 "msgtype": "m.text",
-                "body": "Oh, user, hello!",
+                "body": "Oh, @user, hello!",
                 EventContentFields.MENTIONS: {"user_ids": [user_id]},
             },
             tok=other_access_token,
