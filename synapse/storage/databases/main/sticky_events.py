@@ -1046,7 +1046,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                         AND se.event_stream_ordering < ?
 
                         -- Exclude sticky events that we in fact did just send (3)
-                        -- se.event_stream_ordering NOT IN $event_stream_orderings_sent_in_transaction
+                        -- se.event_stream_ordering NOT IN event_stream_orderings_sent_in_transaction
                         AND {not_event_stream_ordering_in_clause}
 
                     GROUP BY dr.room_id
