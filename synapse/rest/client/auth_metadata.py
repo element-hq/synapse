@@ -31,9 +31,10 @@ class AuthMetadataServlet(RestServlet):
     """
 
     PATTERNS = [
-        *client_patterns(
+        client_patterns(
             "/auth_metadata$",
             releases=("v1",),
+            unstable=False,
         ),
     ]
 
@@ -45,7 +46,7 @@ class AuthMetadataServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         # This endpoint is unauthenticated and the response only depends on
         # the metadata we get from Matrix Authentication Service. Internally,
-        # MasDelegatedAuth.issuer() is already caching the
+        # MasDelegatedAuth.auth_metadata() is already caching the
         # response in memory anyway. Ideally we would follow any Cache-Control directive
         # given by MAS, but this is fine for now.
         #

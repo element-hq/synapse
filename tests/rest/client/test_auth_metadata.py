@@ -20,20 +20,11 @@
 from http import HTTPStatus
 from typing import ClassVar
 
-from parameterized import parameterized_class
-
 from synapse.rest.client import auth_metadata
 
 from tests.unittest import HomeserverTestCase
 
 
-@parameterized_class(
-    ("endpoint",),
-    [
-        ("/_matrix/client/unstable/org.matrix.msc2965/auth_metadata",),
-        ("/_matrix/client/v1/auth_metadata",),
-    ],
-)
 class AuthMetadataTestCase(HomeserverTestCase):
     endpoint: ClassVar[str]
     servlets = [
@@ -42,5 +33,5 @@ class AuthMetadataTestCase(HomeserverTestCase):
 
     def test_returns_404_when_mas_disabled(self) -> None:
         # Make an unauthenticated request for the discovery info.
-        channel = self.make_request("GET", self.endpoint)
+        channel = self.make_request("GET", "/_matrix/client/v1/auth_metadata")
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
