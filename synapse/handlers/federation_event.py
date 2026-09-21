@@ -2143,6 +2143,19 @@ class FederationEventHandler:
                 # state DAG before we can compute the state for this `event`, but this function is
                 # called unilaterally WHEN we are processing events in the state DAG.
                 # To wait here would be circular, we'd deadlock.
+                # By this point, we expect to have already finished processing the
+                # events *causally prior* to `event` in the state DAG because this
+                # function is called unilaterally WHEN we are processing events in the
+                # state DAG all the way down the chain and the caller ensures we process
+                # events in topological order.
+                #
+                # If this assumption is ever violated, `compute_state_after_events` will
+                # yell loudly about missing state groups.
+                #
+                # In the context of partially stated rooms (faster remote room joins)
+                # this would be part of background step verifying the entire state DAG,
+                # so we know that we don't have the full state processed yet. To wait
+                # here would be circular, we'd deadlock.
                 await_full_state=False,
             )
 
