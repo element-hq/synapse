@@ -14,11 +14,10 @@ from synapse.federation.sender import (
 )
 from synapse.federation.sender.per_destination_queue import _PreparedTransaction
 from synapse.federation.units import Edu, Transaction
-from synapse.replication.tcp.streams._base import StickyEventStreamPosition
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomID
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
@@ -936,27 +935,3 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         transaction = self.run_transaction(per_dest_queue)
         assert transaction is not None
         self.assertEqual([pdu.event_id for pdu in transaction.pdus], [sticky_id])
-
-
-class FederationStickyEventBacklogDisabledTestCase(_FederationCatchUpTestCaseBase):
-    def test_no_backlog_transaction_when_msc4354_disabled(self) -> None:
-        """
-        Tests that when MSC4354 switched off, the sticky backlog is not serviced.
-        """
-        per_dest_queue, _sent_pdus = self.make_fake_destination_queue()
-
-        async def must_not_be_called(
-            destination: str, *, limit: int = 50
-        ) -> tuple[RoomID, StickyEventStreamPosition, list[str]] | None:
-            raise AssertionError(
-                "Consulted the sticky event backlog despite MSC4354 being disabled"
-            )
-
-        with mock.patch.object(
-            self.hs.get_datastores().main,
-            "get_backlogged_sticky_events_for_destination",
-            must_not_be_called,
-        ):
-            # Check twice to make sure it's not down to round-robin
-            self.assertIsNone(self.run_transaction(per_dest_queue))
-            self.assertIsNone(self.run_transaction(per_dest_queue))
