@@ -53,6 +53,7 @@ Tables which lack an index on `room_id` but have one on `event_id`
 purge_room_tables_with_room_id_column = (
     "current_state_events",
     "destination_rooms",
+    "destination_rooms_sticky_events_backlog",
     "event_backward_extremities",
     "event_forward_extremities",
     "event_push_actions",
@@ -75,6 +76,8 @@ purge_room_tables_with_room_id_column = (
     # so must be deleted first.
     "msc4242_state_dag_forward_extremities",
     "msc4242_state_dag_edges",
+    # Note: `sticky_events` has foreign key to `events` so must be deleted first.
+    "sticky_events",
     "events",
     "federation_inbound_events_staging",
     "receipts_graph",
