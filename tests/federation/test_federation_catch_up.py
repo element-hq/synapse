@@ -652,7 +652,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
             )
         )
 
-    def _backlog_rows(self) -> list[tuple[str, str, int]]:
+    def _sticky_backlog_rows(self) -> list[tuple[str, str, int]]:
         """
         All rows of the `destination_room_sticky_events_backlog` table.
         """
@@ -762,7 +762,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # - `sticky_id_5` got sent as a forward extremity, so room 1 is _not_
         #   backlogged.
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             [("host2", room_3, self._sticky_stream_id_for(sticky_id_3))],
         )
         self.assertTrue(
@@ -809,7 +809,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # This is also what records the sticky event backlog
         self.get_success(per_dest_queue._catch_up_transmission_loop())
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             [("host2", room_id, self._sticky_stream_id_for(sticky_id_1))],
         )
 
@@ -824,14 +824,14 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
 
         # The position should have moved to just past the last one.
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             [("host2", room_id, self._sticky_stream_id_for(sticky_id_2) + 1)],
         )
 
         # Try to build a transaction, but get None as neither the main queue
         # nor the sticky event backlog should have anything to send
         self.assertIsNone(self.run_transaction(per_dest_queue))
-        self.assertEqual(self._backlog_rows(), [])
+        self.assertEqual(self._sticky_backlog_rows(), [])
         self.assertFalse(per_dest_queue._sticky_event_backlog_tracker.is_backlogged)
 
     def test_backlogged_sticky_events_are_drained_by_the_same_loop(self) -> None:
@@ -878,7 +878,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # Catch-up sent the room's latest event, then the backlog transaction sent the
         # sticky event that catch-up had skipped.
         self.assertEqual([pdu.event_id for pdu in sent_pdus], [latest_id, sticky_id])
-        self.assertEqual(self._backlog_rows(), [])
+        self.assertEqual(self._sticky_backlog_rows(), [])
         self.assertFalse(per_dest_queue._sticky_event_backlog_tracker.is_backlogged)
 
     def test_backlogged_sticky_events_do_not_delay_pending_pdus(self) -> None:
@@ -916,7 +916,7 @@ class FederationStickyEventCatchUpTestCase(_FederationCatchUpTestCaseBase):
         # Catching up is what records the backlog.
         self.get_success(per_dest_queue._catch_up_transmission_loop())
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             [("host2", room_id, self._sticky_stream_id_for(sticky_id))],
         )
 

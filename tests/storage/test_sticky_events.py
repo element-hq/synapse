@@ -633,7 +633,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             )
         )
 
-    def _backlog_rows(self) -> set[tuple[str, str, int]]:
+    def _sticky_backlog_rows(self) -> set[tuple[str, str, int]]:
         """
         All rows of the `destination_room_sticky_events_backlog` table,
         as a set: row order is arbitrary, as the query has no ORDER BY.
@@ -712,7 +712,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             {
                 # In room1: we need to catch up from the first sticky event
                 ("host2", room1, self._sticky_stream_id_for(room1_sticky1)),
@@ -766,7 +766,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
 
         # There should be no backlog of unsent sticky events tracked,
         # because there were none in the gap.
-        self.assertEqual(self._backlog_rows(), set())
+        self.assertEqual(self._sticky_backlog_rows(), set())
 
     def test_mark_backlogged_after_catchup_keeps_earliest_position(self) -> None:
         """
@@ -807,7 +807,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
             )
         )
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             {("host2", room_id, self._sticky_stream_id_for(event2_sticky))},
         )
 
@@ -840,7 +840,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # We should find that the backlog still starts at `event2_sticky`,
         # because it's the earliest sticky event that needs catching up.
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             {("host2", room_id, self._sticky_stream_id_for(event2_sticky))},
         )
 
@@ -1073,7 +1073,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # Also note that the `destination_room_sticky_events_backlog` has been cleared
         # so that we don't keep reconsidering this room that no longer has any
         # unexpired sticky events to be sent.
-        self.assertEqual(self._backlog_rows(), set())
+        self.assertEqual(self._sticky_backlog_rows(), set())
 
     def test_mark_backlogged_sticky_events_sent_advances_position(self) -> None:
         """
@@ -1111,7 +1111,7 @@ class StickyEventsFederationBacklogTestCase(unittest.HomeserverTestCase):
         # The stored position is an *inclusive lower bound on what is left*, hence
         # exactly one past the highest event we sent.
         self.assertEqual(
-            self._backlog_rows(),
+            self._sticky_backlog_rows(),
             {("host2", room_id, self._sticky_stream_id_for(sticky_2) + 1)},
         )
 
