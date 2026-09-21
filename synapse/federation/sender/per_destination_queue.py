@@ -466,31 +466,28 @@ class PerDestinationQueue:
                 transaction = await self._prepare_transaction()
 
                 if transaction is not None and not transaction.has_anything_to_send():
-                    # There is nothing to send, but preparing the transaction has
-                    # made progress that needs recording: the backlogged sticky
-                    # events we selected must have all gotten filtered out.
+                    # We built a _PreparedTransaction but it has nothing to send!
+                    # This can happen when all the PDUs are filtered out by visibility checks.
+                    # Even though the transaction doesn't contain anything, for sticky event backlog transactions at least,
+                    # the mere act of preparing the transaction has made progress that should be recorded, so we
+                    # complete it here.
                     await self._complete_transaction(transaction)
-                    transaction = None
+
+                    # Now loop back to try to build another transaction.
+                    continue
 
                 if transaction is None:
                     logger.debug("TX [%s] Nothing to send", self._destination)
 
-                    # If we've gotten told about new things to send during
-                    # checking for things to send, we try looking again.
-                    # Otherwise new PDUs or EDUs might arrive in the meantime,
-                    # but not get sent because we currently have an
-                    # `_active_transmission_loop` running.
-                    #
-                    # We also keep going whilst there are backlogged sticky events
-                    # left to send, as returning here would leave the backlog
-                    # waiting for unrelated traffic to start a new transmission loop.
-                    if (
-                        self._new_data_to_send
-                        or self._sticky_event_backlog_tracker.is_backlogged
-                    ):
+                    if self._new_data_to_send:
+                        # If we've gotten told about new things to send during
+                        # checking for things to send, we try looking again.
+                        # Otherwise new PDUs or EDUs might arrive in the meantime,
+                        # but not get sent because we currently have an
+                        # `_active_transmission_loop` running.
                         continue
-                    else:
-                        return
+
+                    return
 
                 if transaction.pdus:
                     logger.debug(
