@@ -7,6 +7,8 @@ on:
       - book.toml
       - .github/workflows/docs-pr.yaml
       - scripts-dev/schema_versions.py
+      # If the docs' python dependencies change, rebuild the book and test links.
+      - pyproject.toml
 
 jobs:
   pages:
@@ -23,19 +25,21 @@ jobs:
         with:
           mdbook-version: '0.5.2'
 
-      - name: Setup python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # Building the book requires running the `scripts-dev/schema_versions.py`
+      # script first, which has some python dependencies.
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          python-version: "3.x"
-
-      - run: "pip install 'packaging>=20.0' 'GitPython>=3.1.20'"
+          install-project: "false"
+          groups: "docs"
+          poetry-version: "2.4.1"
 
       - name: Build the documentation
         # mdbook will only create an index.html if we're including docs/README.md in SUMMARY.md.
         # However, we're using docs/README.md for other purposes and need to pick a new page
         # as the default. Let's opt for the welcome page instead.
         run: |
-          mdbook build
+          poetry run mdbook build
           cp book/welcome_and_overview.html book/index.html
 
       - name: Upload Artifact
@@ -57,6 +61,15 @@ jobs:
         with:
           mdbook-version: '0.5.2'
 
+      # Building the book requires running the `scripts-dev/schema_versions.py`
+      # script first, which has some python dependencies.
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          install-project: "false"
+          groups: "docs"
+          poetry-version: "2.4.1"
+
       - name: Setup htmltest
         run: |
           wget https://github.com/wjdp/htmltest/releases/download/v0.17.0/htmltest_0.17.0_linux_amd64.tar.gz
@@ -66,7 +79,7 @@ jobs:
       - name: Test links with htmltest
         run: |
           # Build the book with `./` as the site URL (to make checks on 404.html possible)
-          MDBOOK_OUTPUT__HTML__SITE_URL="./" mdbook build
+          MDBOOK_OUTPUT__HTML__SITE_URL="./" poetry run mdbook build
 
           # Delete the contents of the print.html file, as it can raise false
           # positives during link checking.

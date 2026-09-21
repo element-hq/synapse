@@ -36,7 +36,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, JsonValue, UserID
+from synapse.types import JsonDict, Requester, UserID
 from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
@@ -57,6 +57,32 @@ def _read_propagate(hs: "HomeServer", request: SynapseRequest) -> bool:
     return propagate
 
 
+async def _auth_and_ratelimit_profile_lookup(
+    hs: "HomeServer", request: SynapseRequest
+) -> Requester | None:
+    """Authenticate a profile lookup request and apply the `rc_profile` rate
+    limit to it.
+
+    Authentication is optional unless `require_auth_for_profile_requests` is
+    set. The rate limit is applied per user if credentials were supplied, else
+    per client IP address.
+
+    Returns:
+        The requester if the request was authenticated, else None.
+    """
+    auth = hs.get_auth()
+    requester: Requester | None
+    if hs.config.server.require_auth_for_profile_requests:
+        requester = await auth.get_user_by_req(request)
+    else:
+        requester = await auth.get_optional_user_by_req(request, allow_guest=True)
+
+    await hs.get_profile_lookup_ratelimiter().ratelimit(
+        requester, key=None if requester else request.getClientAddress().host
+    )
+    return requester
+
+
 class ProfileRestServlet(RestServlet):
     PATTERNS = client_patterns("/profile/(?P<user_id>[^/]*)$", v1=True)
     CATEGORY = "Event sending requests"
@@ -70,11 +96,8 @@ class ProfileRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
-
-        if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
-            requester_user = requester.user
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
+        requester_user = requester.user if requester else None
 
         if not UserID.is_valid(user_id):
             raise SynapseError(
@@ -119,11 +142,8 @@ class ProfileFieldRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> tuple[int, JsonDict]:
-        requester_user = None
-
-        if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
-            requester_user = requester.user
+        requester = await _auth_and_ratelimit_profile_lookup(self.hs, request)
+        requester_user = requester.user if requester else None
 
         if not UserID.is_valid(user_id):
             raise SynapseError(
@@ -145,16 +165,27 @@ class ProfileFieldRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
+        ret: JsonDict = {}
         if field_name == ProfileFields.DISPLAYNAME:
-            field_value: (
-                JsonValue | dict[str, JsonValue]
-            ) = await self.profile_handler.get_displayname(user)
+            displayname = await self.profile_handler.get_displayname(user)
+            if displayname is not None:
+                ret[field_name] = displayname
         elif field_name == ProfileFields.AVATAR_URL:
-            field_value = await self.profile_handler.get_avatar_url(user)
+            avatar_url = await self.profile_handler.get_avatar_url(user)
+            if avatar_url is not None:
+                ret[field_name] = avatar_url
         else:
-            field_value = await self.profile_handler.get_profile_field(user, field_name)
+            # Custom fields deliberately behave differently from `displayname` and
+            # `avatar_url`: an unset custom field raises a 404 rather than returning
+            # `200 {}`. The spec allows both, see MSC4537:
+            # https://github.com/matrix-org/matrix-spec-proposals/pull/4537
+            # This is likely to change once the spec settles on either 404 or
+            # `200 {}` only, which would be a breaking change.
+            ret[field_name] = await self.profile_handler.get_profile_field(
+                user, field_name
+            )
 
-        return 200, {field_name: field_value}
+        return 200, ret
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
