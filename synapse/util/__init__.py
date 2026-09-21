@@ -159,7 +159,7 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
         #   |underlying| + |mutable| − |mutable ∩ underlying| − |underlying ∩ deletions|
         #
         # The intersections run at C speed and iterates over the smaller
-        # operand, so this is much cheaperthan a Python loop over every key..
+        # operand, so this is much cheaper than a Python loop over every key.
         underlying_keys = self._underlying_map.keys()
         return (
             len(self._underlying_map)
