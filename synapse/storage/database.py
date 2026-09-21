@@ -2766,6 +2766,10 @@ def user_is_local_like_pattern(hs: "HomeServer") -> str:
 
     The caller should bind this pattern to a parameter and use it in
     a `user_id LIKE ?` clause.
+
+    (This function purposefully requires a `HomeServer` object so
+    that it's not accidentally used with untrusted 'server names'
+    that might contain LIKE pattern metacharacters.)
     """
     # This is good enough as if you have silly characters in your own
     # hostname then that's your own fault.
