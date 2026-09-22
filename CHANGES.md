@@ -10,7 +10,7 @@
 ## Bugfixes
 
 - Fix flawed [MSC4311](https://github.com/matrix-org/matrix-spec-proposals/pull/4311) partial implementation introduced in Synapse v1.136.0 for invites/knocks: client-side API's like `/sync` use [stripped state events](https://spec.matrix.org/v1.18/client-server-api/#stripped-state) and we now send full PDUs on the federation-side. To allow some time for the ecosystem to adapt and support MSC4311, Synapse will only apply strict validation when receiving invites/knocks after 2027-06-01. ([\#19723](https://github.com/element-hq/synapse/issues/19723))
-- Allow the Third Party Rules `check_event_allowed()` callback to work with [MSC4291](https://github.com/matrix-org/matrix-spec-proposals/pull/4291) rooms. Contributed by @famedly. ([\#19768](https://github.com/element-hq/synapse/issues/19768))
+- Allow the third party rules callback `check_event_allowed()` to work with [MSC4291](https://github.com/matrix-org/matrix-spec-proposals/pull/4291) rooms. Contributed by @famedly. ([\#19768](https://github.com/element-hq/synapse/issues/19768))
 - Improve server concurrency by opening local media thumbnails asynchronously. Contributed by @guillemo12. ([\#20100](https://github.com/element-hq/synapse/issues/20100))
 - Drop incoming federation device list updates from non-compliant (grandfathered historical) user IDs, so that such user IDs are not forwarded to clients outside the context of an event, as per [the spec](https://spec.matrix.org/v1.14/appendices/#historical-user-ids). ([\#20115](https://github.com/element-hq/synapse/issues/20115))
 - Stop treating unset display names and avatar URLs as profile fields with a `null` value. ([\#20145](https://github.com/element-hq/synapse/issues/20145))
