@@ -399,6 +399,9 @@ class SyncKnockTestCase(KnockingStrippedStateEventHelperMixin):
         self.check_knock_room_state_against_room_state(
             room_state_events, self.expected_room_state
         )
+        # Ensure the events have been stripped
+        for event in room_state_events:
+            self.assertNotIn("signatures", event)
 
 
 class SyncCreateEventInPrejoinStateTestCase(unittest.HomeserverTestCase):
