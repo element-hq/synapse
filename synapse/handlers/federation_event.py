@@ -1773,7 +1773,7 @@ class FederationEventHandler:
         if seen_remotes:
             for s in seen_remotes:
                 event_map.pop(s, None)
-            rejected_event_ids = self._store.get_rejected_events(seen_remotes)
+            rejected_event_ids = await self._store.has_rejected_event_ids(seen_remotes)
             if rejected_event_ids:
                 has_rejected_events = True
 
