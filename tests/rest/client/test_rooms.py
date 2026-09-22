@@ -2823,6 +2823,32 @@ class RoomDelayedEventTestCase(RoomBase):
             channel.json_body,
         )
 
+    @parameterized.expand((-2000, 0))
+    @unittest.override_config({"max_event_delay_duration": None})
+    def test_delayed_event_unsupported_with_invalid_delay(
+        self,
+        invalid_delay: int,
+    ) -> None:
+        """Test that errors for delayed events being unsupported have precedence over errors for invalid delays."""
+        path, body = self.get_delayed_event_path_and_body(
+            self.room_id,
+            invalid_delay,
+            "m.room.message",
+            None,
+            {"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(
+            "PUT",
+            path.encode("ascii"),
+            body,
+        )
+        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
+        self.assertEqual(
+            Codes.FORBIDDEN,
+            channel.json_body.get("errcode"),
+            channel.json_body,
+        )
+
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_message_event(self) -> None:
         """Test sending a valid delayed message event."""
@@ -2923,32 +2949,6 @@ class RoomDelayedEventDedicatedEndpointTestCase(RoomDelayedEventTestCase):
         if txn_id is not None:
             path += f"/{txn_id}"
         return path, body
-
-    @parameterized.expand((-2000, 0))
-    @unittest.override_config({"max_event_delay_duration": None})
-    def test_delayed_event_unsupported_with_invalid_delay(
-        self,
-        invalid_delay: int,
-    ) -> None:
-        """Test that errors for delayed events being unsupported have precedence over errors for invalid delays."""
-        path, body = self.get_delayed_event_path_and_body(
-            self.room_id,
-            invalid_delay,
-            "m.room.message",
-            None,
-            {"body": "test", "msgtype": "m.text"},
-        )
-        channel = self.make_request(
-            "PUT",
-            path.encode("ascii"),
-            body,
-        )
-        self.assertEqual(HTTPStatus.FORBIDDEN, channel.code, channel.result)
-        self.assertEqual(
-            Codes.FORBIDDEN,
-            channel.json_body.get("errcode"),
-            channel.json_body,
-        )
 
     @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_delayed_event_with_content_at_top(self) -> None:

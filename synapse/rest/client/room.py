@@ -221,6 +221,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._event_serializer = hs.get_event_client_serializer()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self._msc4140_enabled = hs.config.server.msc4140_enabled
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
@@ -347,7 +348,7 @@ class RoomStateEventRestServlet(RestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_for_delayed_event_delay(request)
+        delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -420,6 +421,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._msc4140_enabled = hs.config.server.msc4140_enabled
         self._msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
@@ -445,7 +447,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if self._msc4354_enabled:
             sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
 
-        delay = _parse_request_for_delayed_event_delay(request)
+        delay = _parse_request_for_delayed_event_delay(request, self._msc4140_enabled)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -617,7 +619,9 @@ class RoomDelayedEventRestServlet(RoomDelayedEventRestServletBase):
         return 200, ret
 
 
-def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration | None:
+def _parse_request_for_delayed_event_delay(
+    request: SynapseRequest, msc4140_enabled: bool
+) -> Duration | None:
     """Parses from the request string the delay parameter for
         delayed event requests, and checks it for correctness.
 
@@ -630,10 +634,13 @@ def _parse_request_for_delayed_event_delay(request: SynapseRequest) -> Duration 
         SynapseError: if the delay parameter is present and invalid.
     """
     param_name = "org.matrix.msc4140.delay"
-    # Allow negatives here so that any non-positive value is rejected with the same error
+    # Allow negatives here to validate the delay only if delayed events are enabled,
+    # and so that any non-positive value is rejected with the same error
     delay_ms = parse_integer(request, param_name, negative=True)
     if delay_ms is None:
         return None
+    if not msc4140_enabled:
+        _raise_delayed_events_unsupported()
     if delay_ms <= 0:
         raise SynapseError(
             HTTPStatus.BAD_REQUEST,
