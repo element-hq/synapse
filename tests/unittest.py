@@ -1148,7 +1148,12 @@ class HomeserverTestCase(TestCase):
 
             raise AssertionError(
                 f"Multiple metrics found for '{metric}' with labels {labels}\n\n"
-                f"Specify extra labels to match the specific metric under test. The extra labels on the matching metrics are:\n"
+            raise AssertionError(
+                f"Multiple metrics found for '{metric}' with labels {labels}\n\n"
+                "`get_prometheus_metric_current_value(...)` expects you to be specific enough"
+                "with labels that only one metric matches. Either, the metrics changed and"
+                "that's wrong in and of itself or you need to update the test to be more"
+                "specific with the labels. The extra labels you can match with are:\n"
                 f"{differences_str}"
             )
         else:
