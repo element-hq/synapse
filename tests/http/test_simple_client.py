@@ -119,6 +119,7 @@ class SimpleHttpClientTests(HomeserverTestCase):
 
         conn = Mock()
         client = clients[0][2].buildProtocol(None)
+        assert client is not None
         client.makeConnection(conn)
 
         # Deferred is still without a result

@@ -170,17 +170,12 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up client side protocol
         client_address = IPv4Address("TCP", "127.0.0.1", 1234)
-        client_protocol = client_factory.buildProtocol(("127.0.0.1", 1234))
+        client_protocol = client_factory.buildProtocol(client_address)
+        assert client_protocol is not None
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        # The type ignore is here because mypy doesn't think the host/port tuple is of
-        # the correct type, even though it is the exact example given for
-        # `twisted.internet.interfaces.IAddress`.
-        # Mypy was happy with the type before we overrode `buildProtocol` in
-        # `SynapseSite`, probably because there was enough inheritance indirection before
-        # withe the argument not having a type associated with it.
-        channel = self.site.buildProtocol((host, port))  # type: ignore[arg-type]
+        channel = self.site.buildProtocol(server_address)
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
@@ -435,11 +430,12 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up client side protocol
         client_address = IPv4Address("TCP", "127.0.0.1", 1234)
-        client_protocol = client_factory.buildProtocol(("127.0.0.1", 1234))
+        client_protocol = client_factory.buildProtocol(client_address)
+        assert client_protocol is not None
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self._hs_to_site[hs].buildProtocol((host, port))  # type: ignore[arg-type]
+        channel = self._hs_to_site[hs].buildProtocol(server_address)
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(
@@ -470,6 +466,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
             client_address = IPv4Address("TCP", "127.0.0.1", 6379)
             client_protocol = client_factory.buildProtocol(client_address)
+            assert client_protocol is not None
 
             server_address = IPv4Address("TCP", host, port)
             server_protocol = self._redis_server.buildProtocol(server_address)
