@@ -1,0 +1,1 @@
+Bump `cryptography` from `46.0.7` to `50.0.1` to resolve `CVE-2026-69248`, `CVE-2026-69249` and `CVE-2026-69247`, none of which affected Synapse. Also bump `pyOpenSSL` from `26.0.0` to `26.4.0` and `Twisted` from `25.5.50` to `26.4.0` for compatibility with newer `cryptography` versions.
