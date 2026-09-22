@@ -404,7 +404,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
 
         self.synapse_outbound_redis_connection = outbound_redis_connection
 
-    def buildProtocol(self, addr: IAddress) -> RedisSubscriber:
+    def buildProtocol(self, addr: IAddress | None) -> RedisSubscriber:
         p = super().buildProtocol(addr)
         p = cast(RedisSubscriber, p)
 

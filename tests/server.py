@@ -715,7 +715,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self,
         host: str,
         port: int,
-        factory: ClientFactory,
+        factory: "ClientFactory[Any]",
         timeout: float = 30,
         bindAddress: tuple[str, int] | None = None,
     ) -> IConnector:

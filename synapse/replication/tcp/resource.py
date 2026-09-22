@@ -68,7 +68,7 @@ class ReplicationStreamProtocolFactory(ServerFactory):
         # listener config again or always starting a `ReplicationStreamer`.)
         hs.get_replication_streamer()
 
-    def buildProtocol(self, addr: IAddress) -> ServerReplicationStreamProtocol:
+    def buildProtocol(self, addr: IAddress | None) -> ServerReplicationStreamProtocol:
         return ServerReplicationStreamProtocol(
             self.hs, self.server_name, self.clock, self.command_handler
         )
