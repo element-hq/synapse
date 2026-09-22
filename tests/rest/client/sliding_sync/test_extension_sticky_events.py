@@ -519,15 +519,14 @@ class SlidingSyncStickyEventsExtensionTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user2_tok)
 
-        # The sticky event is fully visible in its own right,
-        # but AFAICT the timeline only includes events since we join the room
-        # (regardless of history visibility),
-        # so this comes down in the sticky extension
-        self._assert_sticky_events_response(response_body, {room_id: [sticky_event_id]})
-
-        # Instead the sticky event is in the timeline
         timeline_events = response_body["rooms"][room_id]["timeline"]
         timeline_event_ids = [e["event_id"] for e in timeline_events]
+
+        # The sticky event is recent enough to be included in timeline instead of in the sticky section.
+        self.assertIn(sticky_event_id, timeline_event_ids)
+        self._assert_sticky_events_response(response_body, {room_id: []})
+
+        # Sanity check: the regular (non-sticky) event is NOT history-visible.
         self.assertNotIn(
             regular_event_id,
             timeline_event_ids,

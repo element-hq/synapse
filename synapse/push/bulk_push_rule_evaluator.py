@@ -533,7 +533,7 @@ class BulkPushRuleEvaluator:
         # most users will have push disabled and so the set of users to check is
         # much smaller.
         uids_with_visibility = await filter_event_for_clients_with_state(
-            self.store, actions_by_user.keys(), event, context
+            self.store, self.clock, actions_by_user.keys(), event, context
         )
 
         for user_id in set(actions_by_user).difference(uids_with_visibility):

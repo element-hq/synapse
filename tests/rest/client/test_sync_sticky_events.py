@@ -528,27 +528,27 @@ class SyncStickyEventsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        # Get sticky events from the sync response
-        sticky_events = channel.json_body["rooms"]["join"][room_id]["msc4354_sticky"][
-            "events"
-        ]
-        sticky_event_ids = [event["event_id"] for event in sticky_events]
+        room_entry = channel.json_body["rooms"]["join"][room_id]
 
-        # The sticky event should be visible to user2
-        self.assertEqual(
-            [sticky_event_id],
-            sticky_event_ids,
+        # As it is recent enough, the sticky event goes down the timeline section.
+        timeline_events = room_entry["timeline"]["events"]
+        timeline_event_ids = [event["event_id"] for event in timeline_events]
+        self.assertIn(
+            sticky_event_id,
+            timeline_event_ids,
             f"Sticky event {sticky_event_id} should be visible despite history visibility",
         )
 
-        # Also check that the regular (non-sticky) event sent at the same time
-        # is NOT visible. This is to verify our test setup.
-        timeline_events = channel.json_body["rooms"]["join"][room_id]["timeline"][
-            "events"
-        ]
-        timeline_event_ids = [event["event_id"] for event in timeline_events]
+        # The sticky event was sent down the timeline,
+        # so it must not be duplicated in the sticky events section.
+        self.assertNotIn(
+            "msc4354_sticky",
+            room_entry,
+            f"Sticky event {sticky_event_id} was already sent down the timeline, so not expecting to see a sticky events section: {room_entry}",
+        )
 
-        # The regular message should NOT be visible (history visibility = joined)
+        # Also check that the regular (non-sticky) event sent at the same time
+        # is NOT visible (because history visibility is `joined`). This is to verify our test setup.
         self.assertNotIn(
             regular_event_id,
             timeline_event_ids,

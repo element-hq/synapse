@@ -1055,10 +1055,6 @@ class SlidingSyncExtensionHandler:
             self._storage_controllers,
             sync_config.user.to_string(),
             unfiltered_events,
-            # As per MSC4354:
-            # > History visibility checks MUST NOT be applied to sticky events.
-            # > Any joined user is authorised to see sticky events for the duration they remain sticky.
-            always_include_ids=frozenset(all_sticky_event_ids),
         )
         filtered_event_map = {ev.event.event_id: ev for ev in filtered_events}
 
