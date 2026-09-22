@@ -83,7 +83,11 @@ class ByteProducerTestCase(TestCase):
             self.assertNoLogs("synapse.logging.context", "WARNING"),
             self.assertNoLogs("synapse.logging.scopecontextmanager", "ERROR"),
         ):
-            # The data that we write to the request via the _ByteProducer.
+            # The data that we write to the request via the _ByteProducer. This
+            # is arbitrary and large to ensure multiple chunks are written. It
+            # needs to be big enough that _ByteProducer will not try and batch
+            # up the chunks internally (if it does then the assertion that we
+            # have multiple writes below will fail).
             buffer_to_write = b"x" * 6000
 
             # The initial write happens within the request log context and span
@@ -91,7 +95,8 @@ class ByteProducerTestCase(TestCase):
                 LoggingContext(name="request", server_name="test_server"),
                 start_active_span("servlet"),
             ):
-                # Break the buffer into chunks for writing.
+                # Break the buffer into chunks for writing. We use an arbitrary
+                # chunk size that ensures we have a few distinct writes.
                 iterable = chunk_seq(buffer_to_write, 2000)
 
                 # Start writing the data. The _ByteProducer will start writing
