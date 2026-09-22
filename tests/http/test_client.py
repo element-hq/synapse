@@ -24,9 +24,13 @@ from unittest.mock import Mock
 
 from netaddr import IPSet
 
+from OpenSSL import SSL
 from twisted.internet.defer import Deferred
 from twisted.internet.error import DNSLookupError
+from twisted.internet.interfaces import IOpenSSLClientConnectionCreator
+from twisted.internet.protocol import Factory, Protocol
 from twisted.internet.testing import AccumulatingProtocol
+from twisted.protocols.tls import TLSMemoryBIOFactory
 from twisted.python.failure import Failure
 from twisted.web.client import Agent, ResponseDone
 from twisted.web.iweb import UNKNOWN_LENGTH
@@ -36,6 +40,7 @@ from synapse.http.client import (
     BlocklistingAgentWrapper,
     BlocklistingReactorWrapper,
     BodyExceededMaxSize,
+    InsecureInterceptableContextFactory,
     MultipartResponse,
     _DiscardBodyWithMaxSizeProtocol,
     _MultipartParserProtocol,
@@ -45,6 +50,21 @@ from synapse.http.client import (
 
 from tests.server import FakeTransport, get_clock
 from tests.unittest import TestCase
+
+
+class InsecureInterceptableContextFactoryTests(TestCase):
+    def test_client_connection_creator(self) -> None:
+        """The insecure test policy provides connections without verification."""
+        policy = InsecureInterceptableContextFactory()
+        creator = policy.creatorForNetloc(b"example.com", 443)
+        self.assertTrue(IOpenSSLClientConnectionCreator.providedBy(creator))
+
+        factory = TLSMemoryBIOFactory(creator, True, Factory.forProtocol(Protocol))
+        protocol = factory.buildProtocol(None)
+        assert protocol is not None
+        connection = creator.clientConnectionForTLS(protocol)
+        self.assertIs(connection.get_context(), policy.getContext())
+        self.assertEqual(connection.get_context().get_verify_mode(), SSL.VERIFY_NONE)
 
 
 class ReadMultipartResponseTests(TestCase):
