@@ -88,7 +88,7 @@ from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
-from synapse.util.async_helpers import Linearizer
+from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.duration import Duration
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.visibility import filter_events_for_server
@@ -1319,8 +1319,17 @@ class FederationHandler:
                 assert_never(invalid_stripped_state_behaviour)
 
         already_counted_fail_metric = False
-        for raw_stripped_event in stripped_room_state:
+
+        async def _validate_raw_stripped_event(raw_stripped_event: Any) -> None:
+            nonlocal already_counted_fail_metric
+
             try:
+                # Scrutinize JSON values
+                if not isinstance(raw_stripped_event, dict):
+                    raise ValueError(
+                        "PDU from stripped state must be a JSON dictionary"
+                    )
+
                 # Validate PDU
                 try:
                     pdu = event_from_pdu_json(raw_stripped_event, room_version)
@@ -1374,9 +1383,18 @@ class FederationHandler:
                     invalid_stripped_state_behaviour
                     == InvalidStrippedStateBehaviour.remove_invalid
                 ):
-                    continue
+                    pass
                 else:
                     assert_never(invalid_stripped_state_behaviour)
+
+        # Check in parallel as this can take some time if we don't already have the
+        # server signatures.
+        await concurrently_execute(
+            _validate_raw_stripped_event,
+            stripped_room_state,
+            # Arbitrary concurrency
+            1000,
+        )
 
         return parsed_stripped_room_state
 
